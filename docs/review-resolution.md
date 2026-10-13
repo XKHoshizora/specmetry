@@ -1,7 +1,7 @@
 # Codex 审查意见处理记录
 
 > 状态：2026-10-14 · 对应设计版本 Draft v0.3
-> 原始审查：[reviews/codex-review-001.md](reviews/codex-review-001.md)（第一轮，§1 ~ §4）、[reviews/codex-review-002.md](reviews/codex-review-002.md)（冻结审查，§5）、[reviews/codex-review-003.md](reviews/codex-review-003.md)（最终设计审查，§6）、[reviews/codex-review-004.md](reviews/codex-review-004.md)（M0 代码审查，§7）、[reviews/codex-review-005.md](reviews/codex-review-005.md)（M0 第二次代码审查，§8）、[reviews/codex-review-006.md](reviews/codex-review-006.md)（M0 第三次代码审查，§9）、[reviews/codex-review-007.md](reviews/codex-review-007.md)（M0 最终定向复审，§10）、[reviews/codex-review-008.md](reviews/codex-review-008.md)（M0 代码审查 GO，§11）、[reviews/codex-review-009.md](reviews/codex-review-009.md)（M1 设计审查 GO，§14）、[reviews/codex-review-010.md](reviews/codex-review-010.md)（WP1.3 代码审查，§15）
+> 原始审查：[reviews/codex-review-001.md](reviews/codex-review-001.md)（第一轮，§1 ~ §4）、[reviews/codex-review-002.md](reviews/codex-review-002.md)（冻结审查，§5）、[reviews/codex-review-003.md](reviews/codex-review-003.md)（最终设计审查，§6）、[reviews/codex-review-004.md](reviews/codex-review-004.md)（M0 代码审查，§7）、[reviews/codex-review-005.md](reviews/codex-review-005.md)（M0 第二次代码审查，§8）、[reviews/codex-review-006.md](reviews/codex-review-006.md)（M0 第三次代码审查，§9）、[reviews/codex-review-007.md](reviews/codex-review-007.md)（M0 最终定向复审，§10）、[reviews/codex-review-008.md](reviews/codex-review-008.md)（M0 代码审查 GO，§11）、[reviews/codex-review-009.md](reviews/codex-review-009.md)（M1 设计审查 GO，§14）、[reviews/codex-review-010.md](reviews/codex-review-010.md)（WP1.3 代码审查，§15）、[reviews/codex-review-011.md](reviews/codex-review-011.md)（WP1.3 最终复审 GO，§16）
 > 处理原则：逐条分析，不默认全盘接受；只要会改变核心模型或交换协议，就在本轮设计清楚；只涉及实现细节的，安排在对应模块开工前关闭。不用"开发时再说"来掩盖当前的数据模型矛盾。
 
 **状态术语**（本文和 implementation-plan 统一使用）：
@@ -912,3 +912,16 @@ PR：<https://github.com/XKHoshizora/specmetry/pull/1>（`feat/m0-foundation` �
 **修复**：没有附加条件的规则改用 `MatchString`，有条件的规则仍然逐一检查每处匹配。检测结果和错误输出不变。新增测试：用一条匹配任意字符的追加规则扫描 4000 个字符，修复前每次调用分配 4017 次，修复后不超过限值。
 
 **接受的风险**沿用审查结论：检测是启发式的；写入集成在 WP1.5 起验证。
+
+## 16. WP1.3 最终复审（codex-review-011）与验收
+
+**审查结论**：**GO**，BLOCKER 为 0，没有新增 NON-BLOCKER。审查目标 `00eb479`。B1 关闭：环境变量引用只认四种完整写法，审查方在父提交上确认三个反例的回归测试失败、在目标提交上通过；N1 已合理解决。目标提交的三平台 CI 8/8 通过。
+
+**验收**：产品负责人于 2026-10-14 验收 WP1.3，PR #3 已合并（合并提交 `cee87b4`）。
+
+**WP1.3 的验收范围**：MVP-PRV-07 在模块层面已验证，包括 14 条规则及其样本、环境变量引用的边界、不回显命中文本的拒绝错误、追加规则、无效配置的退出码 6 和三个边界反例。
+
+**仍未完成、随后续工作包验证**：
+
+- MVP-PRV-07 的 CLI 写入层：写入被拒绝时退出码 2、不写入任何数据、输出和日志中没有命中的文本，并覆盖全部写入入口。这部分从 WP1.5 开始，随各写入命令验证。
+- MVP-BL-21、MVP-BL-02 在 WP1.5 验证，MVP-CLM-03 在 M2 验证。
