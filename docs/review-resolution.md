@@ -1,7 +1,7 @@
 # Codex 审查意见处理记录
 
 > 状态：2026-10-13 · 对应设计版本 Draft v0.3
-> 原始审查：[reviews/codex-review-001.md](reviews/codex-review-001.md)（第一轮，§1 ~ §4）、[reviews/codex-review-002.md](reviews/codex-review-002.md)（冻结审查，§5）、[reviews/codex-review-003.md](reviews/codex-review-003.md)（最终设计审查，§6）、[reviews/codex-review-004.md](reviews/codex-review-004.md)（M0 代码审查，§7）、[reviews/codex-review-005.md](reviews/codex-review-005.md)（M0 第二次代码审查，§8）、[reviews/codex-review-006.md](reviews/codex-review-006.md)（M0 第三次代码审查，§9）、[reviews/codex-review-007.md](reviews/codex-review-007.md)（M0 最终定向复审，§10）
+> 原始审查：[reviews/codex-review-001.md](reviews/codex-review-001.md)（第一轮，§1 ~ §4）、[reviews/codex-review-002.md](reviews/codex-review-002.md)（冻结审查，§5）、[reviews/codex-review-003.md](reviews/codex-review-003.md)（最终设计审查，§6）、[reviews/codex-review-004.md](reviews/codex-review-004.md)（M0 代码审查，§7）、[reviews/codex-review-005.md](reviews/codex-review-005.md)（M0 第二次代码审查，§8）、[reviews/codex-review-006.md](reviews/codex-review-006.md)（M0 第三次代码审查，§9）、[reviews/codex-review-007.md](reviews/codex-review-007.md)（M0 最终定向复审，§10）、[reviews/codex-review-008.md](reviews/codex-review-008.md)（M0 代码审查 GO，§11）
 > 处理原则：逐条分析，不默认全盘接受；只要会改变核心模型或交换协议，就在本轮设计清楚；只涉及实现细节的，安排在对应模块开工前关闭。不用"开发时再说"来掩盖当前的数据模型矛盾。
 
 **状态术语**（本文和 implementation-plan 统一使用）：
@@ -14,7 +14,7 @@
 | 实现状态 | 未开始 / 进行中 | — |
 | | **已验证** | 对应的验收项和 CX 反例已经在实现中通过 |
 
-**当前总体状态**（2026-10-13 更新）：codex-review-003 结论为 **GO**，BLOCKER 为 0。本文所有条目的设计状态均为**已冻结**（包括 codex-review-003 要求的两处同步修正，见 §6）；冻结后的修改必须走 implementation-plan §1 的变更流程。**没有任何条目处于"已验证"**：验证需要等到对应里程碑实现完成，并通过验收项和 CX 反例。M0 的四次代码审查（codex-review-004 ~ 007）均为 NO-GO，处理记录见 §7 ~ §10，等待最终定向复审。
+**当前总体状态**（2026-10-13 更新）：codex-review-003 结论为 **GO**，BLOCKER 为 0。本文所有条目的设计状态均为**已冻结**（包括 codex-review-003 要求的两处同步修正，见 §6）；冻结后的修改必须走 implementation-plan §1 的变更流程。**没有任何条目处于"已验证"**：验证需要等到对应里程碑实现完成，并通过验收项和 CX 反例。M0 的代码审查经过五轮（codex-review-004 ~ 008），第五轮（codex-review-008）结论为 **GO**，BLOCKER 为 0（§11）。代码审查 GO 不等于 M0 完整验收通过：三平台 CI 等平台验证见 implementation-plan 的 M0 状态。
 
 ## 1. 总览（codex-review-001）
 
@@ -716,3 +716,16 @@ codex-review-002 列出的 ACCEPTED RISK 全部接受，已经分别写在对应
 
 - MVP-PLT-01：GitHub Actions 三平台 CI 尚未运行。
 - macOS 上的全部测试；Linux race detector；Windows 真实双用户测试。
+
+## 11. M0 代码审查结论（codex-review-008）
+
+**审查结论**：**GO**，BLOCKER 为 0。审查提交 `d212524`。B2 正式关闭；B1、B3、B4 沿用此前的关闭结论。可以保留现有实现，不需要存储层重构。
+
+审查同时确认：
+
+- 第二轮的两项新测试证明的是"读取前保守拒绝"：`-shm` 为空时不进入读取，不能描述为"检测到了第二次删除和重建"。
+- **已接受的风险**：两个真实外部 SQLite 进程先后关闭、重建辅助文件且大小相同时，基于大小的比较不能记录这类外部活动（审查已复现）。此时读取的仍是已提交的真实版本，诊断自身没有创建或修改文件，最低二进制版本的拒绝仍然有效。当前实现不提供完整捕获外部活动历史的保证。
+- 稳定但 `-shm` 为空的有效数据库会保守报告版本未知；正常打开一次之后恢复。
+- N1 仍在 M2 的 `purge` 验收前处理。
+
+**代码审查 GO 不等于 M0 完整验收通过**。仍需完成：GitHub Actions 三平台 CI（MVP-PLT-01）、macOS 实际运行、Linux race detector；Windows 上因缺少符号链接权限而跳过的两项测试不能算作通过；Windows 真实双用户测试尚未执行。
