@@ -1,7 +1,7 @@
 # Codex 审查意见处理记录
 
 > 状态：2026-10-14 · 对应设计版本 Draft v0.3
-> 原始审查：[reviews/codex-review-001.md](reviews/codex-review-001.md)（第一轮，§1 ~ §4）、[reviews/codex-review-002.md](reviews/codex-review-002.md)（冻结审查，§5）、[reviews/codex-review-003.md](reviews/codex-review-003.md)（最终设计审查，§6）、[reviews/codex-review-004.md](reviews/codex-review-004.md)（M0 代码审查，§7）、[reviews/codex-review-005.md](reviews/codex-review-005.md)（M0 第二次代码审查，§8）、[reviews/codex-review-006.md](reviews/codex-review-006.md)（M0 第三次代码审查，§9）、[reviews/codex-review-007.md](reviews/codex-review-007.md)（M0 最终定向复审，§10）、[reviews/codex-review-008.md](reviews/codex-review-008.md)（M0 代码审查 GO，§11）
+> 原始审查：[reviews/codex-review-001.md](reviews/codex-review-001.md)（第一轮，§1 ~ §4）、[reviews/codex-review-002.md](reviews/codex-review-002.md)（冻结审查，§5）、[reviews/codex-review-003.md](reviews/codex-review-003.md)（最终设计审查，§6）、[reviews/codex-review-004.md](reviews/codex-review-004.md)（M0 代码审查，§7）、[reviews/codex-review-005.md](reviews/codex-review-005.md)（M0 第二次代码审查，§8）、[reviews/codex-review-006.md](reviews/codex-review-006.md)（M0 第三次代码审查，§9）、[reviews/codex-review-007.md](reviews/codex-review-007.md)（M0 最终定向复审，§10）、[reviews/codex-review-008.md](reviews/codex-review-008.md)（M0 代码审查 GO，§11）、[reviews/codex-review-009.md](reviews/codex-review-009.md)（M1 设计审查 GO，§14）、[reviews/codex-review-010.md](reviews/codex-review-010.md)（WP1.3 代码审查，§15）
 > 处理原则：逐条分析，不默认全盘接受；只要会改变核心模型或交换协议，就在本轮设计清楚；只涉及实现细节的，安排在对应模块开工前关闭。不用"开发时再说"来掩盖当前的数据模型矛盾。
 
 **状态术语**（本文和 implementation-plan 统一使用）：
@@ -870,3 +870,45 @@ PR：<https://github.com/XKHoshizora/specmetry/pull/1>（`feat/m0-foundation` �
 - PD-02（M2）。
 - TD-17（M2）、TD-24（M7）。
 - 其他 Agent 的环境变量与约束（M4 开工前）。
+
+## 14. M1 设计审查（codex-review-009）的处理
+
+**审查结论**：**GO**，BLOCKER 为 0。审查目标 `e834e83`（PR #2），基准 `65e1d0a`。PR #2 已合并（合并提交 `08eb951`）。产品负责人接受全部三项 NON-BLOCKER，并授权开始 M1 开发，从 WP1.3 开始。
+
+| # | 问题 | 处理 | 位置 |
+|---|---|---|---|
+| 1 | MVP-BL-26（片段累计总量上限）仍在 M1，而该上限只计算 `full` 模式保存的原文，M1 只有 `hash_only` | BL-26 移到 M2，前置条件写明 `excerpt_storage = full`；M1 继续验证单个片段的长度（BL-04）和原文不落盘（PRV-08）。V-P11 写明只计算已保存的原文；WP2.11 纳入这项上限 | acceptance-criteria MVP-BL-26；data-model V-P11；implementation-plan WP2.11 |
+| 2 | 部分输出 schema 缺少字段之间的语义约束（`proposal-receipt`、`question-list`、`proposal-show`、`status.v1` 中拒收决定的快照） | 记为实现相应输出时必须完成的验收任务：补充 schema 条件约束和反例；schema 无法表达的关系由输出一致性测试验证。不提前实现 | implementation-plan M1"输出契约的语义约束"；MVP-BL-14、BL-17、BL-28、ACC-07 |
+| 3 | 密钥检测的边界验收不够具体 | 纳入 WP1.3 的自动化测试：环境变量引用与真实密钥在同一字段；多个候选匹配中前一个豁免、后一个不豁免；追加规则编译失败时不回显含 canary 的 pattern。architecture §10.8 写明豁免只作用于对应的匹配，配置错误不回显 pattern 或配置原文 | MVP-PRV-07；architecture §10.8 |
+
+**已接受的风险**（审查列出，与已批准的边界一致）：例外验收可以计入 `ready`（PD-17）；密钥检测是启发式保护，短的纯字母密码、命令替换中的普通密码字面量可能漏报（TD-21）；通道识别不是身份认证（architecture §5.1）。
+
+审查原文中链接到本机路径的地方，入库时改为仓库内的相对链接，正文未作修改。
+
+## 15. WP1.3 代码审查（codex-review-010）的处理
+
+**审查结论**：NO-GO，1 项 BLOCKER、1 项 NON-BLOCKER。审查目标 `563fe8f`（PR #3）。审查未发现 M0 回归，错误输出没有回显敏感内容。
+
+### B1：`$(` 前缀豁免了整个密码捕获值
+
+**根因**：环境变量引用的判断包含一个分支，接受任何以 `$(` 开头的值。`url_credentials` 和 `generic_assignment` 把这个判断用在整个捕获的密码上，于是 `password=$(true)s3cr3tPass9`、`postgres://app:$(true)s3cr3tPass9@db/app`、`password=$(s3cr3tPass9` 都被放行。这超出了 TD-21 接受的"命令替换内部的普通密码可能漏报"的范围。
+
+**修复**（最小修改，不引入 shell 解析器）：
+
+- 环境变量引用只保留四种完整写法 `$NAME`、`${NAME}`、`%NAME%`、`$env:NAME`，被判断的值必须整体匹配，不再按前缀判断。命令替换和相邻的字面量照常扫描。
+- architecture §10.8 同步收窄；测试中把 `$(…)` 列为环境变量引用的旧预期已删除。
+
+**测试**（全部经过公开的 `New → JSON → Reject` 路径，先确认在修复前失败）：
+
+| 测试 | 修复前 | 修复后 |
+|---|---|---|
+| Codex 的三个反例 | 三个"应拒绝"的断言失败，拒绝结果为 nil；正向对照通过 | 全部拒绝，错误只含字段位置和规则编号，不含密码 |
+| 四种完整引用（赋值和 URL 密码两种位置） | 通过 | 通过，仍然豁免 |
+| `${NAME}` 后接明文密码 | 拒绝 | 拒绝 |
+| 环境变量引用与密钥在同一字段；多个候选匹配 | 拒绝 | 拒绝 |
+
+### N1：无条件规则收集全部匹配
+
+**修复**：没有附加条件的规则改用 `MatchString`，有条件的规则仍然逐一检查每处匹配。检测结果和错误输出不变。新增测试：用一条匹配任意字符的追加规则扫描 4000 个字符，修复前每次调用分配 4017 次，修复后不超过限值。
+
+**接受的风险**沿用审查结论：检测是启发式的；写入集成在 WP1.5 起验证。

@@ -163,6 +163,29 @@ func TestDoctorReportsInvalidConfigButNotLeftoverLockFile(t *testing.T) {
 	}
 }
 
+// codex-review-009: doctor reports an invalid extra secret rule without
+// printing its pattern (architecture §10.8).
+func TestDoctorReportsInvalidSecretRuleWithoutItsPattern(t *testing.T) {
+	home := testutil.TempHome(t)
+	if err := home.Ensure(); err != nil {
+		t.Fatal(err)
+	}
+	canary := testutil.NewCanary(t)
+	f, err := datadir.CreatePrivateFile(home.Join(datadir.ConfigFile), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = f.WriteString("[secrets]\nextra_rules = [ { id = \"custom_a\", pattern = \"(" + canary + "\" } ]\n")
+	_ = f.Close()
+	code, out, errOut := execute(t, "doctor")
+	if code != apperr.ExitEnvironment || !strings.Contains(out, "[fail] configuration") || !strings.Contains(out, "extra_rules[0]") {
+		t.Fatalf("exit %d\n%s", code, out)
+	}
+	if strings.Contains(out, canary) || strings.Contains(errOut, canary) {
+		t.Errorf("doctor printed the pattern:\n%s\n%s", out, errOut)
+	}
+}
+
 // codex-review-005 B2: when the version cannot be read without changing the
 // files, doctor says it is unknown — not a version, not "ok" — and changes
 // nothing.

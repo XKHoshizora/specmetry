@@ -25,7 +25,8 @@ export SPECMETRY_HOME="$(mktemp -d)/specmetry-home"
 | `internal/cli/` | cobra 命令。命令返回 `*apperr.Error`，由 `Execute` 统一映射为退出码并输出 |
 | `internal/apperr/` | 错误码、退出码、HTTP 状态码映射，以及 `error.v1` 信封（architecture §9.1） |
 | `internal/datadir/` | 数据目录解析（`SPECMETRY_HOME`）、私有权限（Unix `0700`/`0600`，Windows 受保护 DACL：当前用户 + SYSTEM）、权限检查 |
-| `internal/config/` | `config.toml` 读取（未知键视为错误） |
+| `internal/config/` | `config.toml` 读取（未知键视为错误；错误只给出行列位置，不回显文件内容）；`[secrets]` 追加规则 |
+| `internal/secrets/` | 密钥识别（architecture §10.8）：14 条内置规则、追加规则校验、按字段扫描（JSON Pointer）、不回显命中文本的拒绝错误。只能降低泄露风险，不能保证检测出所有秘密 |
 | `internal/store/sqlite/` | SQLite 存储基础：打开顺序、迁移框架、备份、墓碑、`seq`、只追加触发器、只读检查 |
 | `internal/contract/` | 用内嵌的 `schemas/` 做 JSON Schema 2020-12 校验 |
 | `internal/testutil/` | 测试基座（见 §6） |
