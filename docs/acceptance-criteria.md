@@ -83,10 +83,10 @@
 | MVP-BL-11 | 经过 3 个版本后 → `baseline history --json`（`baseline-history.v1`）列出每一条变更（包括修改前后的值、actor、通道、来源条目） | 集成 | FR-BL-06 | M1 |
 | MVP-BL-12 | `statement` 修改选 `material` 时 revision 加 1，选 `editorial` 时不变；修改 `verification`、检查命令、工作目录、shell 或 `inputs` 时，即使选择 `editorial`，revision 也一律加 1，并按 `material` 记录 | 集成 | FR-BL-07 | M1 |
 | MVP-BL-13 | 在 TTY 中执行 `propose --apply` → 生成 `origin = human_edit` 的提案并在同一事务中应用；Agent 通道提交 `origin = human_edit` → 退出码 3 | 集成 | FR-BL-08 | M1 |
-| MVP-BL-14 | 产生冲突的条目，审核时没有 `acknowledged_conflict` → 退出码 2；`proposal show --json`（`proposal-show.v1`）给出 `base`（提案读取的版本中的值）、`current`、`proposed` 三方的值；revision 不变的 `editorial` 修改造成的冲突同样给出 | 集成 | FR-BL-09 | M1 |
+| MVP-BL-14 | 产生冲突的条目，审核时没有 `acknowledged_conflict` → 退出码 2；`proposal show --json`（`proposal-show.v1`）给出 `base`（提案读取的版本中的值）、`current`、`proposed` 三方的值；revision 不变的 `editorial` 修改造成的冲突同样给出；实现该输出时补充 schema 条件约束与反例：`type` 与 `proposed`、`base`、`current` 的数据形态一致 | 集成 | FR-BL-09 | M1 |
 | MVP-BL-15 | 退役 REQ-003 后再新增 → 不复用 REQ-003；同一需求下的 AC 按 `AC-<n>-1`、`AC-<n>-2` 递增 | 集成 | TD-14 | M1 |
 | MVP-BL-16 | 退役有 2 个 AC 的需求 → 在同一版本中级联退役这 2 个 AC，并逐条记录 | 集成 | FR-BL-04 | M1 |
-| MVP-BL-17 | Agent 通道执行 `question answer` 或 `question dismiss` → 退出码 3，问题仍为 `open`；在 TTY 中回答或驳回 → 被记录，`question list --all --json`（`question-list.v1`）中显示回答者和通道 | 集成 | FR-BL-10 | M1 |
+| MVP-BL-17 | Agent 通道执行 `question answer` 或 `question dismiss` → 退出码 3，问题仍为 `open`；在 TTY 中回答或驳回 → 被记录，`question list --all --json`（`question-list.v1`）中显示回答者和通道；实现该输出时补充 schema 条件约束与反例：`answered` 的回答动作只能是 `answer`，`dismissed` 只能是 `dismiss` | 集成 | FR-BL-10 | M1 |
 | MVP-BL-18 | 需求以 `material` 方式更新，审核时不附带 AC 的后续处理 → 它的 AC 在 `status --json` 中的 `requirement_revision` 小于父需求的 revision，交付状态为 `needs_reverification`（`parent_revised`） | 集成 | FR-BL-11 | M2 |
 | MVP-BL-19 | 审核时附带 `criterion_followups`（`reaffirm` / `retire` / `defer` 各一个）→ 在同一版本中生效；`defer` 的 AC 保持不一致 | 集成 | FR-BL-11 | M1 |
 | MVP-BL-20 | Agent 提交 `reaffirm` 提案，人接受 → AC 的 `requirement_revision` 等于父需求的 revision，AC 自身的 revision 不变 | 集成 | FR-BL-11 | M1 |
@@ -95,9 +95,9 @@
 | MVP-BL-23 | `propose --apply` 中的 `update` 条目没有 `change_class` → 退出码 2；描述中含有代码围栏，或标题有多行 → 退出码 2 | 集成 | FR-BL-08、FR-PRV-02 | M1 |
 | MVP-BL-24 | **应用顺序**：同一提案中，以 `material` 方式修订 REQ-002，并 `reaffirm` AC-002-1，同时新增 AC-002-3 → 接受后，AC-002-1 和 AC-002-3 的 `requirement_revision` 都等于 REQ-002 的新 revision；同一次审核中被接受的 AC 更新，也会刷新 `requirement_revision`；全部条目都被拒绝时，不生成版本 | 集成 | FR-BL-04、FR-BL-11 | M1 |
 | MVP-BL-25 | 问题的 `about` 指向提案内的临时引用 → 该条目被接受后，问题关联到新编号；该条目被拒绝后，问题不再计为阻塞（M2） | 集成 | FR-BL-10 | M1 / M2 |
-| MVP-BL-26 | 对同一来源反复提交片段，总量超过上限（文本长度的 50% 或 20000 字符） → 退出码 2 | 集成 | FR-BL-02、FR-PRV-02 | M1 |
+| MVP-BL-26 | **前置**：项目的 `excerpt_storage = full`（WP2.11）。对同一来源反复提交片段，已保存原文的总量超过上限（文本长度的 50% 或 20000 字符）→ 退出码 2。M1 只有 `hash_only`，不计算累计总量；M1 验证的是单个片段超过 500 字符时退出码 2（BL-04），以及原文不落盘（PRV-08） | 集成 | FR-BL-02、FR-PRV-02 | M2 |
 | MVP-BL-27 | **审核必须选择修订类别**（PD-04 方案 A，V-R01）：接受 Agent 提案中的 `update` 条目（包括 `accepted_with_edits` 和冲突条目），但没有 `change_class` → 退出码 2，错误指向 `/items/<i>/change_class`，不写入，提案中建议的类别不会被采用；选择 `editorial` 但改动了强制字段 → 按 `material` 记录 | 集成 | FR-BL-07 | M1 |
-| MVP-BL-28 | `propose --json` 的输出符合 `proposal-receipt.v1`：每个条目有 `item_id` 和片段校验结果，代码引用有 `exists`；输出、错误信息和日志中都找不到片段原文（canary） | 集成 | FR-BL-01、FR-BL-02 | M1 |
+| MVP-BL-28 | `propose --json` 的输出符合 `proposal-receipt.v1`：每个条目有 `item_id` 和片段校验结果，代码引用有 `exists`；输出、错误信息和日志中都找不到片段原文（canary）；实现该输出时补充 schema 条件约束与反例：Agent 提案（`applied_version = null`）的条目只能是 `pending` 且 `assigned_key = null`，人工编辑的条目为 `accepted` | 集成 | FR-BL-01、FR-BL-02 | M1 |
 
 ### 2.4 交付目标与范围（TGT）
 
@@ -174,7 +174,7 @@
 | MVP-ACC-04 | 在 `V = none` 时执行 `normal` 验收 → 退出码 2（提示使用例外）；在 `V = fail` 时作出任何 `accepted` → 退出码 2 | 集成 | FR-ACC-03、06 | M2 |
 | MVP-ACC-05 | 例外验收没有理由 → 退出码 2；有理由时 → AC 为 `accepted`（`exception`），并带 `EXCEPTION_ACCEPTANCE` 警告；`status --json` 中该 AC 的 `decision` 显示 `mode = exception`、理由、快照和 `evidence_grade = none`，人类可读输出同样显示这四项。之后在 `S` 上记录合格的 `pass` → `snapshot_run` 显示这条执行，AC 仍为 `accepted`（`exception`），交付判定的证据等级不因此改变；记录 `fail` → `failing`（`regressed`）（PD-17） | 集成 | FR-ACC-05 | M2 |
 | MVP-ACC-06 | 手动 AC 在 `S` 上被验收 → `accepted`（`manual`） | 集成 | FR-ACC-04 | M2 |
-| MVP-ACC-07 | 拒收或豁免没有理由 → CLI 退出码 2（M2），API 返回 400（M5） | 集成 | FR-ACC-07 | M2 / M5 |
+| MVP-ACC-07 | 拒收或豁免没有理由 → CLI 退出码 2（M2），API 返回 400（M5）；实现 `status.v1` 时补充 schema 条件约束与反例：拒收决定的 `snapshot` 不能为 null（只有豁免可以没有快照） | 集成 | FR-ACC-07 | M2 / M5 |
 | MVP-ACC-08 | 自动化 AC 在 `S` 上 `V = pass` → 人依次在同一快照上作出接受、拒收、接受，每次都携带上一条决定的 ID 作为 `seen_decision_id`（第二次接受是人在重新读取后明确改判）→ 三条都保留，当前决定是 `seq` 最大的那一条，AC 为 `accepted` | 集成 | FR-ACC-08、FR-ACC-03 | M2 |
 | MVP-ACC-09 | 沿用：在 A 上 `normal` 验收 → 目标前进到 B。**单元**：在 B 上有一条合成的隔离级合格通过 → `accepted`（`carried_forward`），没有声明 `inputs` 时同样适用；如果是观测级合格通过 → `ready_for_review`（`observed_evidence`）。**集成（MVP）**：在 B 上执行 `check run` → `ready_for_review`（`observed_evidence`），没有人参与时**绝不**变为 `accepted`。隔离级的集成验证在 M7 进行。 | 单元 + 集成 | FR-ACC-09 | M2 |
 | MVP-ACC-10 | **风险确认**：观测级证据上的 `normal` 验收缺少 `observed_evidence` → 退出码 2（API 为 400）；多确认一项实际不存在的风险 → 退出码 2；`runs(S)` 结果不一致却没有确认 `inconsistent_results` → 退出码 2；例外验收没有确认 `no_automated_evidence` → 退出码 2。以上情况都不写入。 | 集成 | FR-ACC-03、FR-ACC-05 | M2 / M5 |
@@ -263,7 +263,7 @@
 | MVP-PRV-04 | 伪造时间，使事件超过 30 天 → 入库时被清除；其他事实不受影响 | 集成 | FR-PRV-04 | M3 |
 | MVP-PRV-05 | Unix 上，数据目录为 `0700`，文件为 `0600`；已有的数据目录或其中任何文件（包括数据库、WAL、SHM）权限过宽、属主不是当前用户、是符号链接，或（macOS）带有允许访问的 ACL 时，在写入任何数据之前拒绝（退出码 6），目录内容不变；从根目录到数据目录的任何一级目录属主不是当前用户或 root，或能被其他用户写入（不带 sticky 位，或带 sticky 位但下一级条目不属于当前用户或 root），在创建或写入任何内容之前拒绝（退出码 6）；用真实的跨 UID 替换攻击验证（Linux，测试需要 root 以切换用户） | 集成 | FR-PRV-06 | M0 |
 | MVP-PRV-06 | Windows 上，数据目录的 DACL 是受保护的，只授予 TD-22 规定的对象；已有目录或文件不满足（额外的授权对象、DACL 不受保护或不能被新文件继承、属主不符、联接或符号链接）时，在写入任何数据之前拒绝（退出码 6），目录内容不变；路径上的目录是联接或符号链接、属主不是当前用户 / SYSTEM / Administrators / TrustedInstaller，或允许其他用户 DELETE、FILE_DELETE_CHILD、WRITE_DAC、WRITE_OWNER 时，在创建或写入任何内容之前拒绝（退出码 6）；`doctor` 能发现被放宽的权限 | 集成 | FR-PRV-06 | M0 |
-| MVP-PRV-07 | [architecture.md §10.8](architecture.md#108-密钥识别规则集td-21) 的每条内置规则至少 2 个命中和 2 个不命中样本（运行时拼接，仓库中不保存形似密钥的字面量）；每个不命中样本不命中任何规则；环境变量引用不命中；命中时退出码 2，`error.details` 只给出 JSON Pointer 和 `secret_detected: <规则编号>`，输出和日志中找不到命中的文本；`config.toml` 追加的规则生效，无效的追加规则使配置加载失败（退出码 6） | 单元 + 集成 | FR-PRV-07 | M1 |
+| MVP-PRV-07 | [architecture.md §10.8](architecture.md#108-密钥识别规则集td-21) 的每条内置规则至少 2 个命中和 2 个不命中样本（运行时拼接，仓库中不保存形似密钥的字面量）；每个不命中样本不命中任何规则；环境变量引用不命中；命中时退出码 2，`error.details` 只给出 JSON Pointer 和 `secret_detected: <规则编号>`，输出和日志中找不到命中的文本；`config.toml` 追加的规则生效，无效的追加规则使配置加载失败（退出码 6）。边界反例（codex-review-009）：① 同一字段既有环境变量引用、又有一段可识别的密钥 → 拒绝；② 同一字段有多个候选匹配，前一个可以豁免、后一个不能 → 拒绝；③ 追加规则的 pattern 含有 canary 且编译失败 → 退出码 6，错误输出中找不到 canary。WP1.3 验证扫描模块与配置加载；CLI 写入被拒绝且不写入任何数据，在 WP1.5 起随各写入命令验证 | 单元 + 集成 | FR-PRV-07 | M1 |
 | MVP-PRV-08 | 新项目的 `excerpt_storage` 默认为 `hash_only`（PD-24）→ 提交含片段的提案后，`source_refs.excerpt` 为 NULL，`excerpt_sha256` 和校验结果照常写入，`proposal_items` 中也只有片段哈希；对数据目录做字节搜索，找不到片段原文 | 集成 | FR-PRV-08 | M1 |
 | MVP-PRV-09 | 对所有人类可读输出的 golden 文件做静态检查：`evidence_grade = observed` 时，不出现 snapshot-verified / snapshot verified / "快照已验证"等措辞；`evidence_grade = none` 时，不出现"已通过自动化验证" / verified by automated checks 等措辞，并说明没有自动化执行证据（CLI 在 M2 检查，Dashboard 在 M5 检查） | 单元 + UI | FR-PRV-09 | M2 / M5 |
 | MVP-PRV-10 | `project set excerpt-storage full`：非 TTY 或存在已知的 Agent 环境变量 → 退出码 3；在 TTY 中确认后生效，之后写入的引用保存原文，之前写入的不变；`source list --refs --json` 中分别为 `stored` 和 `not_stored` | 集成 | FR-PRV-08 | M2 |

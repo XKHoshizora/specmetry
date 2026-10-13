@@ -109,6 +109,8 @@ flowchart LR
 
 **建表约束**（codex-review-004 N1）：见 [data-model.md §1.1](data-model.md#11-建表约束m1-起)；由 schema 不变量测试强制。
 
+**输出契约的语义约束**（codex-review-009 NON-BLOCKER 2）：实现某个输出接口时，必须同时为该输出的 schema 补充字段之间的条件约束和对应反例；跨 ID、数据库状态等 schema 无法表达的关系，由输出一致性测试验证。这是相应工作包的验收任务，不提前实现。已知缺口：`proposal-receipt.v1`（WP1.5，MVP-BL-28）、`proposal-show.v1`（WP1.6，MVP-BL-14）、`question-list.v1`（WP1.7，MVP-BL-17）、`status.v1` 中拒收决定的快照（WP2.7，MVP-ACC-07）。
+
 **退出条件（P0）**：acceptance-criteria 中标注 M1 的全部 P0 项（包括 CH-01、CH-02，以及 SRC-08、TGT-10、WT-01 的 M1 部分），以及 CX-14、CX-17（CLI 部分）。标注为"M1 / M2"的项，在 M1 中只验证写入侧（退出码、写入的数据、`init --json` 的输出），推导侧（差距、交付状态）在 M2 中验证。
 **可选（P1）**：MVP-INIT-08、INIT-10、INV-05。
 
@@ -128,7 +130,7 @@ flowchart LR
 | WP2.8 | `purge` 与墓碑生效；（P1）`backup create`、`backup restore` |
 | WP2.10 | 数据库恢复命令 `specmetry db recover`（PD-23，见 §8.1）；**必须在 M4 自测开始前完成**。需求与验收项在 M2 开工前补齐，并先确认 §8.1 表中第 1 ~ 4 项的调整 |
 | WP2.9 | 夹具与 oracle：在 WP1.0 的基础上补齐 `fx-in-dev` 的失败测试和录制的 Claim，加上 `fx-scale` 和 oracle；完整的 CX 测试套件 |
-| WP2.11 | 片段原文的保存与擦除：`project set excerpt-storage`（仅限人）、`full` 模式；`source remove --erase-excerpts` 之后的整理（`wal_checkpoint(TRUNCATE)` 与 `VACUUM`，读取 checkpoint 的结果，与 `purge` 共用整理步骤和 `.compaction-pending`）。**依赖 N1 的修复**，与 WP2.8 一起完成 |
+| WP2.11 | 片段原文的保存与擦除：`project set excerpt-storage`（仅限人）、`full` 模式；`source remove --erase-excerpts` 之后的整理（`wal_checkpoint(TRUNCATE)` 与 `VACUUM`，读取 checkpoint 的结果，与 `purge` 共用整理步骤和 `.compaction-pending`）；已保存原文的累计总量上限（V-P11，MVP-BL-26）。**依赖 N1 的修复**，与 WP2.8 一起完成 |
 
 **退出条件（P0）**：标注 M2 的全部 P0 项（包括 M1 / M2 项的推导侧；INIT-07、INIT-09、BL-18、WT-02 ~ 05、INV-01 ~ 04、CLM、EV（含 EV-12、EV-13）、ACC（ACC-03 除外，含 ACC-10、ACC-11）、ST（ST-06 除外）、PRV-03、PLT-05、COL-12），以及 **CX-01 ~ CX-22、CX-24 的检查部分、CX-25 ~ CX-28 的 MVP 部分**（CX-08 的 UI 部分和 CX-23 除外）。
 SRC-08、TGT-10 的 M2 部分，以及 PRV-10，也在本里程碑验收。

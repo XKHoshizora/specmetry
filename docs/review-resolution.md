@@ -1,7 +1,7 @@
 # Codex 审查意见处理记录
 
 > 状态：2026-10-14 · 对应设计版本 Draft v0.3
-> 原始审查：[reviews/codex-review-001.md](reviews/codex-review-001.md)（第一轮，§1 ~ §4）、[reviews/codex-review-002.md](reviews/codex-review-002.md)（冻结审查，§5）、[reviews/codex-review-003.md](reviews/codex-review-003.md)（最终设计审查，§6）、[reviews/codex-review-004.md](reviews/codex-review-004.md)（M0 代码审查，§7）、[reviews/codex-review-005.md](reviews/codex-review-005.md)（M0 第二次代码审查，§8）、[reviews/codex-review-006.md](reviews/codex-review-006.md)（M0 第三次代码审查，§9）、[reviews/codex-review-007.md](reviews/codex-review-007.md)（M0 最终定向复审，§10）、[reviews/codex-review-008.md](reviews/codex-review-008.md)（M0 代码审查 GO，§11）
+> 原始审查：[reviews/codex-review-001.md](reviews/codex-review-001.md)（第一轮，§1 ~ §4）、[reviews/codex-review-002.md](reviews/codex-review-002.md)（冻结审查，§5）、[reviews/codex-review-003.md](reviews/codex-review-003.md)（最终设计审查，§6）、[reviews/codex-review-004.md](reviews/codex-review-004.md)（M0 代码审查，§7）、[reviews/codex-review-005.md](reviews/codex-review-005.md)（M0 第二次代码审查，§8）、[reviews/codex-review-006.md](reviews/codex-review-006.md)（M0 第三次代码审查，§9）、[reviews/codex-review-007.md](reviews/codex-review-007.md)（M0 最终定向复审，§10）、[reviews/codex-review-008.md](reviews/codex-review-008.md)（M0 代码审查 GO，§11）、[reviews/codex-review-009.md](reviews/codex-review-009.md)（M1 设计审查 GO，§14）
 > 处理原则：逐条分析，不默认全盘接受；只要会改变核心模型或交换协议，就在本轮设计清楚；只涉及实现细节的，安排在对应模块开工前关闭。不用"开发时再说"来掩盖当前的数据模型矛盾。
 
 **状态术语**（本文和 implementation-plan 统一使用）：
@@ -870,3 +870,17 @@ PR：<https://github.com/XKHoshizora/specmetry/pull/1>（`feat/m0-foundation` �
 - PD-02（M2）。
 - TD-17（M2）、TD-24（M7）。
 - 其他 Agent 的环境变量与约束（M4 开工前）。
+
+## 14. M1 设计审查（codex-review-009）的处理
+
+**审查结论**：**GO**，BLOCKER 为 0。审查目标 `e834e83`（PR #2），基准 `65e1d0a`。PR #2 已合并（合并提交 `08eb951`）。产品负责人接受全部三项 NON-BLOCKER，并授权开始 M1 开发，从 WP1.3 开始。
+
+| # | 问题 | 处理 | 位置 |
+|---|---|---|---|
+| 1 | MVP-BL-26（片段累计总量上限）仍在 M1，而该上限只计算 `full` 模式保存的原文，M1 只有 `hash_only` | BL-26 移到 M2，前置条件写明 `excerpt_storage = full`；M1 继续验证单个片段的长度（BL-04）和原文不落盘（PRV-08）。V-P11 写明只计算已保存的原文；WP2.11 纳入这项上限 | acceptance-criteria MVP-BL-26；data-model V-P11；implementation-plan WP2.11 |
+| 2 | 部分输出 schema 缺少字段之间的语义约束（`proposal-receipt`、`question-list`、`proposal-show`、`status.v1` 中拒收决定的快照） | 记为实现相应输出时必须完成的验收任务：补充 schema 条件约束和反例；schema 无法表达的关系由输出一致性测试验证。不提前实现 | implementation-plan M1"输出契约的语义约束"；MVP-BL-14、BL-17、BL-28、ACC-07 |
+| 3 | 密钥检测的边界验收不够具体 | 纳入 WP1.3 的自动化测试：环境变量引用与真实密钥在同一字段；多个候选匹配中前一个豁免、后一个不豁免；追加规则编译失败时不回显含 canary 的 pattern。architecture §10.8 写明豁免只作用于对应的匹配，配置错误不回显 pattern 或配置原文 | MVP-PRV-07；architecture §10.8 |
+
+**已接受的风险**（审查列出，与已批准的边界一致）：例外验收可以计入 `ready`（PD-17）；密钥检测是启发式保护，短的纯字母密码、命令替换中的普通密码字面量可能漏报（TD-21）；通道识别不是身份认证（architecture §5.1）。
+
+审查原文中链接到本机路径的地方，入库时改为仓库内的相对链接，正文未作修改。

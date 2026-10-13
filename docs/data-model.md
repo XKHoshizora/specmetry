@@ -946,7 +946,7 @@ M0 的 CI 会校验这两者（WP0.4）。凡是需要数据库状态才能判�
 | V-P07 | 片段校验结果：`verified` / `not_found` / `source_missing` / `not_checkable` | 标记 |
 | V-P08 | `inferred_from_code` 条目至少有 1 个 `code_refs`；路径是否存在 | 缺少引用时拒绝；路径不存在时标记 |
 | V-P09 | `origin = human_edit` 时，每个 `update` 条目都必须带 `change_class`；强制 `material` 的字段一律按 `material` 处理 | 拒绝 |
-| V-P11 | 加上本次提交的片段之后，每个来源的片段总量不超过 §4.5 的上限 | 拒绝 |
+| V-P11 | 加上本次提交的片段之后，每个来源已保存原文的片段总量不超过 §4.5 的上限（只计算 `full` 模式下保存的原文，M2） | 拒绝 |
 | V-S01 | `source add`：只接受白名单中的文件类型（§4.3），除非人在 `human_cli` 中使用 `--allow-any-type` | 拒绝 |
 | V-C01 | 严格符合 schema；`kind = manual` 只允许来自 `human_cli`（否则退出码 3） | 拒绝 |
 | V-C02 | `base_version` 和每个 `target_revision` 都是当前值 | 过期 |
