@@ -520,7 +520,7 @@ PD-20 允许本地保存来源片段，但这**不等于**允许自动持久化�
 
 版本未知时：`doctor` 报告警告"version unknown"及原因，不报告版本，也不报告正常；打开数据库时拒绝（退出码 6），因为无法确认兼容性。
 
-**已知的可用性限制**：被其他程序以普通方式关闭过的数据库（`-wal`、`-shm` 被删除），或只剩 `-wal` 没有 `-shm` 的数据库，目前任何版本的 specmetry 都会拒绝打开。specmetry 自己关闭的数据库不会进入这些状态（保留 WAL 文件，§11.2）。如何恢复这类数据库，需要产品负责人决定（见 [review-resolution.md §8](review-resolution.md#8-m0-第二次代码审查codex-review-005的处理)）。
+**已知的可用性限制**：被其他程序以普通方式关闭过的数据库（`-wal`、`-shm` 被删除），或只剩 `-wal` 没有 `-shm` 的数据库，目前任何版本的 specmetry 都会拒绝打开。specmetry 自己关闭的数据库不会进入这些状态（保留 WAL 文件，§11.2）。产品负责人已决定（PD-23）：提供独立的显式恢复命令 `specmetry db recover`，普通打开和 `doctor` 保持严格；恢复必须由用户明确授权，实际检查 schema 版本、`min_binary_version` 和数据库一致性，恢复前先有一致性备份，不直接删除 `-wal` / `-shm`。尚未实现，排期与依赖见 [implementation-plan.md §8](implementation-plan.md#8-已决策待排期的功能)。
 
 > 第二轮修复（codex-review-004 之后）曾自行解析 WAL、在内存中重建页面并通过只读 VFS 读取。该方案读取时不持有 SQLite 的锁，被 codex-review-005 证明会返回回滚日志模式下尚未提交的数据，已删除。
 
