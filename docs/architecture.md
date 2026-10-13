@@ -121,10 +121,10 @@ PreToolUse 拦截规则（第二道防线，第一道是通道识别）。它适
 
 1. 用 `;`、`&&`、`||`、`|` 和换行，把命令拆成若干段。heredoc 的正文（从 `<<` 标记行之后，到结束定界符）是数据，不参与匹配。
 2. 对每一段按 shell 的引号规则切分出参数，找出 basename 为 `specmetry` 或 `specmetry.exe` 的那个参数。
-3. 它之后第一个不以 `-` 开头的参数是子命令；对 `scope`、`target`、`source`、`question`、`backup` 这几个命令组，再取下一个非选项参数作为二级子命令。
+3. 它之后第一个不以 `-` 开头的参数是子命令；对 `scope`、`target`、`source`、`question`、`backup`、`project` 这几个命令组，再取下一个非选项参数作为二级子命令。
 4. 命中以下任一情况就拒绝：
    - 子命令为 `accept`、`reject`、`waive`、`review`、`purge`、`setup`；
-   - 二级子命令为 `scope confirm`、`target set`、`source ack`、`source remove`、`question answer`、`question dismiss`、`backup restore`；
+   - 二级子命令为 `scope confirm`、`target set`、`source ack`、`source remove`、`question answer`、`question dismiss`、`backup restore`、`project set`；
    - 子命令为 `propose`，且参数中有 `--apply`。
 5. 如果参数是 `bash -c` / `sh -c` / `pwsh -Command` 的字符串，就对这个字符串递归执行一次上述规则。
 
@@ -136,6 +136,36 @@ PreToolUse 拦截规则（第二道防线，第一道是通道识别）。它适
 - 命令参数看不出、要读输入内容才知道的操作，例如 JSON 中的 `claim` `kind = manual`。
 
 `specmetry dashboard` 不在拦截之列：令牌只通过浏览器 URL 的 fragment 传递，不打印到输出（§10.4）。
+
+### 5.1 CLI 通道识别规则与已知边界（M1 实现）
+
+**规则**（每次执行命令时判断一次）：
+
+1. 同时满足以下两项时为 `human_cli`，否则为 `agent_cli`：
+   - stdin 和 stdout 都是终端（Windows 上是控制台）；stderr 不参与判断；
+   - 没有设置任何已知的 Agent 环境变量。只检查变量是否存在且非空，**从不读取或保存它的值**（环境变量的值属于 C0，§10.1）。
+2. 人类专属操作在 `human_cli` 中还要通过交互式确认：在终端中显示操作摘要和前置条件，要求输入确认内容（例如对象编号或项目名）。确认只从终端读取，**不提供** `--yes` 之类的跳过参数。在 `agent_cli` 中执行人类专属操作，返回退出码 3，不写入任何数据。
+3. `--json` 和 `--file -` 不改变通道。只读命令在任何通道中都可以执行。
+
+**已知的 Agent 环境变量**（内置清单，只随版本增加，不提供配置项）：
+
+| 变量 | Agent | 核实情况 |
+|---|---|---|
+| `CLAUDECODE` | Claude Code | 已核实（2026-10-14：Claude Code 桌面版执行命令的子进程中存在） |
+| `CLAUDE_CODE_ENTRYPOINT` | Claude Code | 已核实（同上） |
+
+其他 Agent 的变量在核实之后才加入（M4 开工前，见 [implementation-plan.md §3](implementation-plan.md#3-设计细化截止点)"其他 Agent 的约束"）。在此之前，对这些 Agent 只能依靠 TTY 判断、Skill 禁令和审计记录。
+
+**已知边界**（如实声明；通道识别不是身份认证）：
+
+| 情形 | 识别结果 | 说明 |
+|---|---|---|
+| Agent 通过伪终端执行命令，并清除了上述环境变量 | 可能被识别为 `human_cli` | 交互式确认、Skill 禁令、PreToolUse 拦截和审计记录只是补充措施，仍然不能证明操作者是人 |
+| 在 Agent 会话里打开的终端（继承了 Agent 环境变量） | `agent_cli`，人类专属操作返回退出码 3 | 偏向安全的一侧；换一个独立的终端执行即可 |
+| 人通过管道或重定向执行（如 `specmetry review \| tee log`），或在 CI 中执行 | `agent_cli` | 偏向安全的一侧 |
+| Windows 上不提供控制台的终端（如不经 winpty 的 mintty） | `agent_cli` | 请使用 Windows Terminal、PowerShell 或 cmd |
+| IDE 的内置终端 | 一般为 `human_cli` | IDE 中 Agent 的工具调用通常不是终端 |
+| `ssh -t` 远程会话 | `human_cli` | 不带 `-t` 时不是终端，为 `agent_cli` |
 
 ## 6. 关键流程
 
@@ -168,6 +198,35 @@ sequenceDiagram
     Ag->>CLI: specmetry gaps --json
     Ag-->>Dev: 交付状态、盘点覆盖率、差距
 ```
+
+### 6.1.1 阶段识别与候选来源发现（M1 实现）
+
+两者都**只读取路径和文件大小，不读取文件内容**；结果是确定的：同一组文件，结果相同。这是启发式判断，只决定 Skill 走哪条初始化路径（[prd.md §4.1.1](prd.md#411-初始化流程)），不参与交付推导；判断不准时，人用 `--stage` 覆盖。
+
+**扫描范围**：主 worktree。git 项目使用 `git ls-files --cached --others --exclude-standard`（已跟踪的文件，加上没有被忽略的未跟踪文件）；非 git 项目遍历目录。两者都排除：名称以 `.` 开头的目录（包括 `.git`、`.specmetry`）、`node_modules`、`vendor`、`third_party`、`dist`、`build`、`out`、`target`、`venv`、`__pycache__`；不跟随符号链接。
+
+**候选来源**（`init.v1` 的 `candidate_sources`）：
+
+1. 文件类型与来源登记的白名单相同（[data-model.md §4.3](data-model.md#43-sources-与-source_acks)）；排除空文件和超过 20 MiB 的文件。
+2. 排除不属于需求的常见文件（不区分大小写）：`CHANGELOG*`、`LICENSE*`、`COPYING*`、`NOTICE*`、`CODE_OF_CONDUCT*`、`SECURITY*`、`CONTRIBUTING*`。
+3. 按以下顺序排列，同一级内按路径排序：
+   1. 文件名或所在目录名含有需求类关键词：英文按完整单词匹配 `brief`、`requirement(s)`、`req`、`spec(s)`、`prd`、`srs`、`scope`、`proposal`；中文按子串匹配 `需求`、`规格`、`要求`、`说明书`；
+   2. 位于 `docs/`、`doc/`、`requirements/`、`spec/`、`specs/`、`design/` 之下；
+   3. 根目录的 `README*`；
+   4. 其他。
+4. 最多返回 200 个，按上述顺序截断。
+5. 候选来源**从不自动登记**；人确认之后，由 Agent 执行 `source add`。
+
+**阶段识别**（`stage_detected`；用 `--stage` 覆盖后，`stage` 与 `stage_detected` 不同）：
+
+- **代码文件**：扩展名属于常见源代码类型（`.go`、`.js`、`.jsx`、`.ts`、`.tsx`、`.mjs`、`.cjs`、`.py`、`.rb`、`.java`、`.kt`、`.scala`、`.rs`、`.c`、`.h`、`.cc`、`.cpp`、`.hpp`、`.cs`、`.swift`、`.m`、`.php`、`.dart`、`.lua`、`.ex`、`.exs`、`.erl`、`.hs`、`.clj`、`.vue`、`.svelte`、`.sql`、`.sh`、`.ps1`）的文件，或者项目清单文件（`go.mod`、`package.json`、`pyproject.toml`、`setup.py`、`requirements.txt`、`Cargo.toml`、`pom.xml`、`build.gradle`、`build.gradle.kts`、`*.csproj`、`*.sln`、`Gemfile`、`composer.json`、`mix.exs`、`pubspec.yaml`、`Package.swift`、`CMakeLists.txt`）。
+- **实质文档**：候选来源中，除根目录 `README*` 之外、不小于 512 字节的文件。
+
+| 条件（自上而下，命中即停） | 阶段 |
+|---|---|
+| 没有代码文件 | `docs_only` |
+| 有代码文件，并且至少有 1 份实质文档 | `in_development` |
+| 有代码文件，但没有实质文档（例如只有 README） | `incomplete_docs` |
 
 ### 6.2 Hook 采集与入库
 
@@ -301,6 +360,7 @@ Agent 侧的安装位置（TD-03）：
 - 面向 Agent 的命令都支持 `--json`，输出符合 `schemas/`。
 - 输入通过 `--file <path|->` 传入。
 - 写命令在 JSON 中携带读取版本（[data-model.md §7.1](data-model.md#71-写入前置条件)）。
+- M1 的结果与读取模型输出：`source-add.v1`、`proposal-receipt.v1`、`source-list.v1`、`proposal-list.v1`、`proposal-show.v1`、`baseline-show.v1`、`baseline-history.v1`、`question-list.v1`、`target-scope.v1`（[data-model.md §8](data-model.md#8-交换格式)）。人类专属的写命令在 MVP 中只输出人类可读文本；出错时带 `--json` 仍输出 `error.v1`。
 
 | 退出码 | 含义 |
 |---|---|
@@ -374,7 +434,7 @@ Agent 侧的安装位置（TD-03）：
 1. **Hook**：只写入 [`spool-event.v1`](../schemas/spool-event.v1.schema.json) 允许的字段。白名单中没有任何自由文本字段，所以不需要做脱敏。PreToolUse 拦截时，命令文本只在内存中匹配，不落盘。
 2. **检查执行**：输出只实时转发给调用者（带 `--json` 时转发到 stderr，stdout 只有 JSON），不保存；只保存 [data-model.md §4.11](data-model.md#411-check_runs) 中列出的字段。
 3. **检查命令**：属于 C1 基准数据，经人确认。命令中**不得**包含密钥字面量（命中密钥规则即拒绝写入）。需要秘密值时，引用环境变量名。
-4. **自由文本**（提案文本、问题、Claim 摘要、理由、回答、备注）：写入前做密钥扫描，命中即**拒绝写入**并提示改写；不做替换（替换会改变语义）。所有自由文本都不能包含代码围栏（由 schema 强制）。
+4. **自由文本与其他字符串**（提案文本、问题、Claim 摘要、理由、回答、备注，以及路径、检查命令和来源片段）：写入前按 §10.8 的规则集扫描写入输入中的**每个字符串值**，命中即**拒绝写入**并提示改写；不做替换（替换会改变语义）。来源片段无论 `excerpt_storage` 取何值都要扫描。所有自由文本都不能包含代码围栏（由 schema 强制）。
 5. **来源**：只能登记文档类文件（[data-model.md §4.3](data-model.md#43-sources-与-source_acks)）；每个来源的片段总量有上限（§4.5），防止逐段保存来源全文。
 6. **提交**：只保存 SHA、提交时间和关联关系；标题和正文在内存中匹配编号后即丢弃。
 7. **程序日志**：只记录错误码、ID 和计数，不记录 C0 / C1 内容。
@@ -431,14 +491,89 @@ PD-20 允许本地保存来源片段，但这**不等于**允许自动持久化�
 - 程序日志不记录 C1 内容；
 - 没有任何网络出口（§10.5）。
 
-**用户控制**（M1 实现）：
+**用户控制**（M1 实现 `hash_only`、查看和移除来源；`full` 模式和擦除后的整理在 M2 实现，依赖 §11.4 中 N1 的修复）：
 
 | 控制 | 作用 |
 |---|---|
-| 片段保存模式（项目设置 `excerpt_storage`） | `full`（默认，按 PD-20 保存片段原文）或 `hash_only`（只在内存中校验片段，数据库中只保存 `locator`、片段的 sha256 和校验结果，不保存原文）。切换只影响之后写入的引用。 |
-| 移除来源时擦除片段（`source remove --erase-excerpts`，仅限人） | 把该来源所有引用的片段原文置空，只保留 `locator`、片段哈希和校验结果；在维护模式下执行（§11.4 中只追加约束的受控例外），并记录擦除的 `seq`。 |
-| 查看 | `status --json` 和 Dashboard 列出每个来源及其引用；人可以随时查看保存了哪些片段。 |
+| 片段保存模式（项目设置 `excerpt_storage`，PD-24） | `hash_only`（**默认**）：只在内存中校验片段，数据库中只保存 `locator`、片段的 sha256 和校验结果；提案中保存的引用、输出、错误信息和日志都不包含原文（[data-model.md §4.5](data-model.md#45-source_refs-与-code_refs)）。`full`：按 PD-20 保存片段原文，只能由人用 `specmetry project set excerpt-storage full` 开启（Agent 通道返回退出码 3），开启前显示提示并要求确认；M2 起可用。切换只影响之后写入的引用。 |
+| 移除来源时擦除片段（`source remove --erase-excerpts`，仅限人） | 把该来源所有引用的片段原文置空，只保留 `locator`、片段哈希和校验结果；在维护模式下执行（§11.4 中只追加约束的受控例外），并记录擦除的 `seq`。 擦除之后执行 `wal_checkpoint(TRUNCATE)` 和 `VACUUM`，与 `purge` 共用整理步骤和 `.compaction-pending` 标记（§11.4）。只有在 `full` 模式下写入过的引用才有原文可擦除，因此字节级的擦除验证与 `full` 模式一起在 M2 进行。 |
+| 查看 | `source list --refs --json`（`source-list.v1`，M1）和 Dashboard（M5）列出每个来源的全部引用，以及每条引用是否保存了原文（`excerpt_state`）；人可以随时查看保存了哪些片段。 |
 | 删除整个项目 | `purge`（§11.4）。 |
+
+### 10.8 密钥识别规则集（TD-21）
+
+**扫描范围**：所有写入类输入（提案、审核、Claim、验收决定、范围确认、来源确认、问题回答）中的**每个字符串值**，以及会被保存的命令行参数（例如 `init --name`、`-m` 理由）。包括路径、检查命令和来源片段；片段无论 `excerpt_storage` 取何值都要扫描。扫描只在内存中进行，在写事务开始之前完成。
+
+**命中时**：
+
+- 整次写入被拒绝（退出码 2，`invalid_input`），不写入任何数据。
+- `error.details` 对每个命中的字段给出 JSON Pointer（命令行参数写成 `--<参数名>`）和 `problem = "secret_detected: <规则编号>"`；每个字段只报告按下表顺序第一条命中的规则。
+- 错误输出和程序日志**绝不**包含命中的文本或它的上下文。
+- 提示用户改写：检查命令改为引用环境变量名；其他文本删去或改写密钥部分。不提供绕过开关，也不做替换（§10.2）。
+
+**不视为密钥的环境变量引用**：`$NAME`、`${NAME}`、`%NAME%`、`$env:NAME`，以及以 `$(` 开头的命令替换。
+
+**内置规则**（Go `regexp` 语法；"条件"是正则匹配之后的附加判断）：
+
+| 编号 | 检测对象 | 正则 | 条件 |
+|---|---|---|---|
+| `private_key` | 私钥块的开头 | `-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----` | — |
+| `aws_access_key_id` | AWS 访问密钥 ID | `\b(?:AKIA\|ASIA\|ABIA\|ACCA)[A-Z0-9]{16}\b` | — |
+| `github_token` | GitHub 令牌 | `\b(?:(?:ghp\|gho\|ghu\|ghs\|ghr)_[A-Za-z0-9]{36,255}\|github_pat_[A-Za-z0-9_]{22,255})\b` | — |
+| `gitlab_token` | GitLab 个人令牌 | `\bglpat-[A-Za-z0-9_-]{20,}` | — |
+| `slack_token` | Slack 令牌 | `\bxox[abposr]-[0-9A-Za-z-]{10,}` | — |
+| `stripe_secret_key` | Stripe 密钥（含测试密钥） | `\b(?:sk\|rk)_(?:live\|test)_[0-9A-Za-z]{16,}` | — |
+| `google_api_key` | Google API 密钥 | `\bAIza[0-9A-Za-z_-]{35}` | — |
+| `anthropic_api_key` | Anthropic API 密钥 | `\bsk-ant-(?:api\|admin)[0-9]{2}-[A-Za-z0-9_-]{20,}` | — |
+| `openai_api_key` | OpenAI API 密钥 | `\bsk-(?:proj-\|svcacct-\|admin-)?[A-Za-z0-9_-]{20,}` | — |
+| `npm_token` | npm 令牌 | `\bnpm_[A-Za-z0-9]{36}\b` | — |
+| `jwt` | JSON Web Token | `\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}` | — |
+| `url_credentials` | URL 中的用户名和密码 | `\b[A-Za-z][A-Za-z0-9+.-]{1,20}://[^\s/:@]{1,256}:([^\s/@]{1,256})@[^\s/]+` | 捕获的密码不是环境变量引用 |
+| `bearer_token` | Bearer 令牌 | `(?i)\bbearer\s+([A-Za-z0-9._~+/-]+=*)` | 捕获部分不少于 20 个字符，并且同时含有字母和数字 |
+| `generic_assignment` | 形如"密码 = 值"的赋值 | `(?i)(password\|passwd\|pwd\|secret\|api[_-]?key\|access[_-]?key\|auth[_-]?token\|access[_-]?token\|private[_-]?key)["']?\s*[:=]\s*["']?([^\s"',;]+)` | 值不是环境变量引用或占位符（`<…>`、`{{…}}`、全部由 `*`、`x`、`X` 或 `.` 组成）；长度不少于 8；并且同时含有字母和数字，或者长度不少于 20 |
+
+**样本**（MVP-PRV-07：每条规则至少 2 个命中、2 个不命中样本）。命中样本在测试代码中**运行时拼接**，仓库中不保存形似密钥的字面量，以免触发代码托管平台的密钥扫描，也避免干扰 canary 搜索。写法：`+` 表示拼接，`×n` 表示重复 n 次。
+
+| 编号 | 命中 | 不命中 |
+|---|---|---|
+| `private_key` | `-----BEGIN RSA PRIVATE KEY-----`；`-----BEGIN OPENSSH PRIVATE KEY-----` | `-----BEGIN PUBLIC KEY-----`；`-----BEGIN CERTIFICATE-----` |
+| `aws_access_key_id` | `"AKIA" + "Q7"×8`；`"ASIA" + "ZX12"×4` | `"AKIA" + "Q7"×7 + "Q"`（只有 15 位）；`"akia" + "q7"×8`（小写） |
+| `github_token` | `"ghp_" + "A1b2"×9`；`"github_pat_" + "11AB"×6` | `"ghp_" + "A1b2"×8`（32 位）；`"ghx_" + "A1b2"×9` |
+| `gitlab_token` | `"glpat-" + "Ab3-"×5`；`"glpat-" + "x"×20` | `"glpat-" + "x"×19`；`"gl-pat-" + "x"×20` |
+| `slack_token` | `"xoxb-" + "1234567890-abc"`；`"xoxp-" + "a1"×6` | `"xoxz-" + "a1"×6`；`"xoxb-short"` |
+| `stripe_secret_key` | `"sk_live_" + "4eC3"×4`；`"rk_test_" + "Zz9"×6` | `"pk_live_" + "4eC3"×4`（可公开的 publishable key）；`"sk_live_abc"` |
+| `google_api_key` | `"AIza" + "b"×35`；`"AIza" + "Xy-_"×8 + "Q9z"` | `"AIza" + "b"×34`；`"AIZA" + "b"×35` |
+| `anthropic_api_key` | `"sk-ant-api03-" + "Ab9_"×6`；`"sk-ant-admin01-" + "x"×20` | `"sk-ant-short"`；`"sk_ant_api03" + "x"×20` |
+| `openai_api_key` | `"sk-" + "A1b2"×12`；`"sk-proj-" + "Ab_9-"×5` | `"sk-short1"`；`"task-" + "a1"×10` |
+| `npm_token` | `"npm_" + "Ab12"×9`；`"npm_" + "z9"×18` | `"npm_" + "Ab12"×8`；`"npm-" + "Ab12"×9` |
+| `jwt` | `"eyJ" + "a"×10 + ".eyJ" + "b"×10 + "." + "c"×10`；`"eyJ" + "hb"×8 + ".eyJ" + "zd"×8 + "." + "S1"×8` | `"eyJ" + "a"×10 + ".eyJ" + "b"×10`（只有两段）；`"eyJ" + "a"×5 + ".eyJ" + "b"×10 + "." + "c"×10` |
+| `url_credentials` | `"postgres://app:" + "s3cr3tPass" + "@db.internal:5432/app"`；`"https://deploy:" + "x9"×6 + "@example.com/repo.git"` | `postgres://app:${DB_PASSWORD}@db.internal/app`；`https://example.com/path:with:colons` |
+| `bearer_token` | `"Authorization: Bearer " + "abc123"×4`；`"bearer " + "Z9y8"×6` | `Bearer $API_TOKEN`；`bearer token-based-authentication-flow` |
+| `generic_assignment` | `"DB_PASSWORD=" + "s3cr3t" + "Pass9"`；`"api_key: " + "a1B2"×5` | `password: $DB_PASSWORD`；`password=<your-password>` |
+
+测试还要断言：每个不命中样本不命中**任何**内置规则，而不只是对应的那一条。
+
+**用户追加规则**（只能追加，不能关闭或覆盖内置规则，也没有白名单）：
+
+```toml
+# $SPECMETRY_HOME/config.toml
+[secrets]
+extra_rules = [
+  { id = "custom_acme_token", pattern = "acme_[0-9a-f]{32}" },
+]
+```
+
+- `id` 必须匹配 `^custom_[a-z0-9_]{1,40}$`，不能重复；最多 50 条。
+- `pattern` 使用 Go `regexp` 语法，不超过 500 个字符，并且不能匹配空字符串。
+- 任何一条无效，配置加载失败（退出码 6），Specmetry 拒绝运行，而不是忽略这条规则。
+- 追加的规则只会让检查更严格。`config.toml` 位于受保护的数据目录中（§11.1）。
+
+**已知限制**（接受的风险）：
+
+- 漏报：清单外的格式、被拆开或编码过的密钥、非文本来源中的密钥。
+- 误报：由用户改写文本；不提供绕过开关。
+
+实现位于 `internal/secrets/`（§15）。
 
 ## 11. 本地数据生命周期
 
@@ -670,11 +805,11 @@ schemas/  skill/  web/  testdata/fixtures/  docs/
 
 | ID | 问题 | 建议默认 | 最晚决定于 |
 |---|---|---|---|
-| TD-01 | 基准的事实来源 | SQLite；导出延后到 MVP 之后 | M1 |
+| TD-01 | 基准的事实来源 | **原则批准（2026-10-14，产品负责人）**：SQLite；导出延后到 MVP 之后 | 原则批准 |
 | TD-02 | 数据目录与数据库粒度 | **已确认**：全局单库，`~/.specmetry`，可用 `SPECMETRY_HOME` 覆盖 | 已确认（2026-10-13） |
 | TD-03 | Skill 与 Hook 的安装范围 | 默认用户级，可选项目级 | M3 |
 | TD-04 | SQLite 驱动 | **已确认**：`modernc.org/sqlite`。spike（v1.60.1，Windows）验证了 WAL、`wal_checkpoint(TRUNCATE)`、`BEGIN IMMEDIATE` / `EXCLUSIVE`、触发器 `RAISE(ABORT)`、`VACUUM INTO`，以及两个连接各并发写 200 次时 `seq` 唯一且连续 | 已确认（2026-10-13） |
-| TD-05 | git 访问方式 | 调用 `git` CLI；Hook 中只读文件 | M1 |
+| TD-05 | git 访问方式 | **原则批准（2026-10-14，产品负责人）**：调用 `git` CLI；Hook 中只读文件 | 原则批准 |
 | TD-06 | Windows 上执行检查的 shell | 优先 `sh`（Git for Windows），找不到时用 `cmd /C`；AC 可以指定 `shell` | M2 |
 | TD-07 | API 契约与 TS 类型 | OpenAPI 引用 `schemas/` 作为请求体定义；生成 TS 类型 | M5 |
 | TD-08 | Dashboard 刷新 | SSE 通知，断线时退回轮询 | M5 |
@@ -683,14 +818,14 @@ schemas/  skill/  web/  testdata/fixtures/  docs/
 | ~~TD-11~~ | ~~证据新鲜度~~ | **已关闭**：由交付快照模型取代（AD-12） | — |
 | TD-12 | Claude Code Hook 事件名与字段的核实，以及兼容版本范围 | 以 §12.1 为初稿 | M3 开工前 |
 | TD-13 | 人类专属操作的防护强度 | 启发式通道识别 + 拦截 + 审计记录，并如实声明能力边界 | M2 |
-| TD-14 | 编号格式 | `GOAL-1`、`REQ-001`、`AC-001-1`、`Q-001` | M1 |
+| TD-14 | 编号格式 | **原则批准（2026-10-14，产品负责人）**：稳定的编号，永不复用：`GOAL-1`、`REQ-001`、`AC-001-1`、`Q-001` | 原则批准 |
 | TD-15 | 分发渠道 | Releases + 安装脚本 | M6 |
 | TD-16 | 迁移策略 | **已确认**：只前向迁移 + 迁移锁 + `VACUUM INTO` 备份 + `min_binary_version` | 已确认（2026-10-13） |
 | TD-17 | 提交关联规则 | trailer 优先；正文中的编号也匹配，可以关闭 | M2 |
-| TD-18 | 每个 AC 的检查数量 | 至多 1 个 | M1 |
+| TD-18 | 每个 AC 的检查数量 | **原则批准（2026-10-14，产品负责人）**：至多 1 个 | 原则批准 |
 | TD-19 | Dashboard 端口 | 固定默认端口，被占用时递增 | M5 |
 | TD-20 | 交换格式的版本策略 | `schema` 字段带主版本号；新增可选字段不升主版本；CLI 同时接受当前和上一个主版本 | M1 |
-| TD-21 | 密钥识别规则集与误报处理 | 内置一组常见规则，可在配置中追加；误报时由用户改写文本（不提供绕过开关） | M1 |
+| TD-21 | 密钥识别规则集与误报处理 | 内置规则、样本、追加方式和错误格式见 §10.8；误报时由用户改写文本（不提供绕过开关） | M1 开工前（已细化，**待确认**） |
 | TD-22 | Windows ACL 的具体授权对象 | **已确认**：当前用户 + SYSTEM，受保护的 DACL（关闭继承），子对象继承 | 已确认（2026-10-13） |
 | TD-23 | `check.inputs` 的对象 ID 粒度 | 文件取 blob ID，目录取 tree ID | M2 |
 | TD-24 | 隔离执行器的后端与验证方法：物化方式（`git worktree add --detach` 或 `git archive`）；各平台的只读强制机制（容器只读挂载、Linux 上的 bubblewrap / Landlock、macOS 沙箱、Windows 待评估）；执行前写入探测与执行后树比对的实现；子模块、LFS 和依赖缓存的处理 | 待定；约束：不能依赖文件权限位；无法验证时绝不标为隔离级；普通项目不强制安装 | 隔离执行器开工前（MVP 之后） |

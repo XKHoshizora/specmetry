@@ -1,0 +1,97 @@
+{
+  "schema": "specmetry.proposal-show/v1",
+  "baseline_version": 4,
+  "proposal": {
+    "id": "01J9Z3K5Q8R2T4V6W8X0Y2Z4A6",
+    "seq": 88,
+    "origin": "skill_goals",
+    "actor": "agent:claude_code",
+    "channel": "agent_cli",
+    "summary": "订单隔离需求的修订",
+    "base_version": 3
+  },
+  "items": [
+    {
+      "item_id": "01J9Z3K5Q8R2T4V6W8X0Y2Z4A7",
+      "item_index": 0,
+      "op": "update",
+      "type": "requirement",
+      "ref": null,
+      "target": "REQ-002",
+      "target_revision": 2,
+      "review_state": "conflict",
+      "proposed": {
+        "title": "用户只能查看和导出自己的订单"
+      },
+      "suggested_change_class": "material",
+      "origin": "extracted",
+      "confidence": "high",
+      "sources": [
+        {
+          "source_id": "01J9Z3K5Q8R2T4V6W8X0Y2Z4E0",
+          "path": "docs/client-brief.md",
+          "locator": "§3 第 2 段",
+          "verification": "verified",
+          "excerpt_sha256": "5d41402abc4b2a76b9719d911017c5925d41402abc4b2a76b9719d911017c592",
+          "excerpt": null
+        }
+      ],
+      "code_refs": [],
+      "conflict": {
+        "base_revision": 2,
+        "current_revision": 2,
+        "current_status": "active",
+        "base": {
+          "title": "用户只能查看自己的订单",
+          "priority": "must"
+        },
+        "current": {
+          "title": "用户只能查看自己名下的订单",
+          "priority": "must"
+        },
+        "proposed": {
+          "title": "用户只能查看和导出自己的订单"
+        }
+      },
+      "review": null
+    },
+    {
+      "item_id": "01J9Z3K5Q8R2T4V6W8X0Y2Z4A8",
+      "item_index": 1,
+      "op": "add",
+      "type": "criterion",
+      "ref": "c1",
+      "target": null,
+      "target_revision": null,
+      "review_state": "accepted",
+      "proposed": {
+        "requirement": "REQ-002",
+        "statement": "导出文件只包含当前用户的订单",
+        "verification": "manual"
+      },
+      "suggested_change_class": null,
+      "origin": "extracted",
+      "confidence": "medium",
+      "sources": [],
+      "code_refs": [],
+      "conflict": null,
+      "review": {
+        "decision": "accepted",
+        "change_class": null,
+        "final": null,
+        "by": "human:hoshi",
+        "channel": "dashboard",
+        "seq": 95,
+        "note": null
+      }
+    }
+  ],
+  "questions": [
+    {
+      "key": "Q-004",
+      "status": "open",
+      "blocking": false,
+      "about": "REQ-002"
+    }
+  ]
+}

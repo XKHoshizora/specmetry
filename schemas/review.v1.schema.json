@@ -41,7 +41,10 @@
           "description": "Edited values; validated against the same data definition as the proposal item.",
           "type": "object"
         },
-        "change_class": { "enum": ["material", "editorial"] },
+        "change_class": {
+          "description": "Required when an update item is accepted or accepted_with_edits, including items in conflict (rule V-R01): the reviewer must choose explicitly, otherwise invalid_input. Fields that force material always win (data-model §7.2). The class suggested in the proposal is never used in its place.",
+          "enum": ["material", "editorial"]
+        },
         "acknowledged_conflict": {
           "description": "Must be true when the item is in conflict state; confirms the reviewer saw the three-way comparison.",
           "type": "boolean"

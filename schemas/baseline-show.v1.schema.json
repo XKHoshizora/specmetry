@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/XKHoshizora/specmetry/schemas/baseline-show.v1.schema.json",
+  "title": "Specmetry baseline v1",
+  "description": "Output of `specmetry baseline show --json`: the confirmed baseline. Agents read it to obtain the base_version and target_revision values a proposal must carry. Retired entities only with --include-retired. Pending proposal items are not part of the baseline.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "as_of_seq", "baseline_version", "goals", "requirements"],
+  "properties": {
+    "schema": { "const": "specmetry.baseline-show/v1" },
+    "as_of_seq": { "type": "integer", "minimum": 0 },
+    "baseline_version": { "$ref": "common.v1.schema.json#/$defs/baselineVersion" },
+    "goals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["key", "revision", "status", "title", "description", "origin"],
+        "properties": {
+          "key": { "$ref": "common.v1.schema.json#/$defs/goalKey" },
+          "revision": { "$ref": "common.v1.schema.json#/$defs/revision" },
+          "status": { "$ref": "#/$defs/status" },
+          "title": { "$ref": "common.v1.schema.json#/$defs/title" },
+          "description": { "oneOf": [{ "$ref": "common.v1.schema.json#/$defs/longText" }, { "type": "null" }] },
+          "origin": { "$ref": "common.v1.schema.json#/$defs/itemOrigin" }
+        }
+      }
+    },
+    "requirements": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/requirement" }
+    }
+  },
+  "$defs": {
+    "status": { "enum": ["active", "retired"] },
+    "requirement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "revision", "status", "goal", "title", "description", "kind", "priority", "origin", "confidence", "criteria"],
+      "properties": {
+        "key": { "$ref": "common.v1.schema.json#/$defs/requirementKey" },
+        "revision": { "$ref": "common.v1.schema.json#/$defs/revision" },
+        "status": { "$ref": "#/$defs/status" },
+        "goal": { "oneOf": [{ "$ref": "common.v1.schema.json#/$defs/goalKey" }, { "type": "null" }] },
+        "title": { "$ref": "common.v1.schema.json#/$defs/title" },
+        "description": { "oneOf": [{ "$ref": "common.v1.schema.json#/$defs/longText" }, { "type": "null" }] },
+        "kind": { "enum": ["functional", "non_functional", "constraint"] },
+        "priority": { "enum": ["must", "should", "could", "wont"] },
+        "origin": { "$ref": "common.v1.schema.json#/$defs/itemOrigin" },
+        "confidence": { "oneOf": [{ "$ref": "common.v1.schema.json#/$defs/confidence" }, { "type": "null" }] },
+        "criteria": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/criterion" }
+        }
+      }
+    },
+    "criterion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key",
+        "revision",
+        "status",
+        "requirement_revision",
+        "statement",
+        "verification",
+        "check",
+        "check_config_hash",
+        "origin",
+        "confidence"
+      ],
+      "properties": {
+        "key": { "$ref": "common.v1.schema.json#/$defs/criterionKey" },
+        "revision": { "$ref": "common.v1.schema.json#/$defs/revision" },
+        "status": { "$ref": "#/$defs/status" },
+        "requirement_revision": {
+          "description": "Parent revision this criterion is confirmed to apply to; lower than the parent's revision means parent_revised.",
+          "$ref": "common.v1.schema.json#/$defs/revision"
+        },
+        "statement": { "$ref": "common.v1.schema.json#/$defs/plainText1000" },
+        "verification": { "enum": ["automated", "manual"] },
+        "check": { "oneOf": [{ "$ref": "common.v1.schema.json#/$defs/checkSpec" }, { "type": "null" }] },
+        "check_config_hash": { "oneOf": [{ "$ref": "common.v1.schema.json#/$defs/sha256" }, { "type": "null" }] },
+        "origin": { "$ref": "common.v1.schema.json#/$defs/itemOrigin" },
+        "confidence": { "oneOf": [{ "$ref": "common.v1.schema.json#/$defs/confidence" }, { "type": "null" }] }
+      },
+      "if": { "properties": { "check": { "type": "object" } } },
+      "then": { "properties": { "verification": { "const": "automated" }, "check_config_hash": { "type": "string" } } },
+      "else": { "properties": { "check_config_hash": { "const": null } } }
+    }
+  }
+}

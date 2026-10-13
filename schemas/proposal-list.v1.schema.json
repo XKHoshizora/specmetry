@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/XKHoshizora/specmetry/schemas/proposal-list.v1.schema.json",
+  "title": "Specmetry proposal list v1",
+  "description": "Output of `specmetry proposal list --json`. Newest first (by seq). With --pending, only proposals that still have pending or conflict items.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "baseline_version", "proposals"],
+  "properties": {
+    "schema": { "const": "specmetry.proposal-list/v1" },
+    "baseline_version": { "$ref": "common.v1.schema.json#/$defs/baselineVersion" },
+    "proposals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "seq", "origin", "actor", "channel", "summary", "base_version", "counts"],
+        "properties": {
+          "id": { "$ref": "common.v1.schema.json#/$defs/ulid" },
+          "seq": { "$ref": "common.v1.schema.json#/$defs/seq" },
+          "origin": { "enum": ["skill_init", "skill_goals", "skill_audit", "skill_sync", "cli", "human_edit"] },
+          "actor": { "$ref": "#/$defs/actor" },
+          "channel": { "$ref": "#/$defs/channel" },
+          "summary": { "$ref": "common.v1.schema.json#/$defs/shortSummary" },
+          "base_version": { "$ref": "common.v1.schema.json#/$defs/baselineVersion" },
+          "counts": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["pending", "conflict", "accepted", "accepted_with_edits", "rejected"],
+            "properties": {
+              "pending": { "type": "integer", "minimum": 0 },
+              "conflict": { "type": "integer", "minimum": 0 },
+              "accepted": { "type": "integer", "minimum": 0 },
+              "accepted_with_edits": { "type": "integer", "minimum": 0 },
+              "rejected": { "type": "integer", "minimum": 0 }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "actor": {
+      "description": "agent:<agent>, human:<display name> or system (data-model §1).",
+      "type": "string",
+      "pattern": "^(agent:[a-z][a-z0-9_]{0,31}|human:[^\\r\\n]{1,100}|system)$"
+    },
+    "channel": { "enum": ["agent_cli", "human_cli", "dashboard", "hook", "system"] }
+  }
+}

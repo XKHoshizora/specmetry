@@ -111,7 +111,7 @@
       "enum": ["observed", "snapshot_isolated"]
     },
     "deliveryEvidenceGrade": {
-      "description": "Weakest grade among the runs supporting accepted automated criteria in scope: snapshot_isolated only if every such acceptance is backed by an isolated run on the snapshot; observed if any relies on observed evidence; none if no accepted automated criterion is backed by a run (manual, exception or waived only). Must be shown wherever delivery status is shown; observed must never be described as snapshot-verified.",
+      "description": "Weakest grade among the runs supporting accepted automated criteria in scope: snapshot_isolated only if every such acceptance is backed by an isolated run on the snapshot; observed if any relies on observed evidence; none if no accepted automated criterion is backed by a run (manual, exception or waived only). Must be shown wherever delivery status is shown; observed must never be described as snapshot-verified, and none must never be described as verified by automated checks.",
       "enum": ["snapshot_isolated", "observed", "none"]
     },
     "acknowledgedRisk": {

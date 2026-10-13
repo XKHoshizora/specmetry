@@ -1,0 +1,33 @@
+{
+  "schema": "specmetry.question-list/v1",
+  "questions": [
+    {
+      "key": "Q-001",
+      "text": "订单导出是否属于首期交付？",
+      "context": null,
+      "status": "open",
+      "blocking": true,
+      "about": "REQ-002",
+      "proposal_id": "01J9Z3K5Q8R2T4V6W8X0Y2Z4A5",
+      "created_seq": 20,
+      "answer": null
+    },
+    {
+      "key": "Q-002",
+      "text": "管理员是否可以查看所有订单？",
+      "context": "客户需求说明 §3 只提到普通用户",
+      "status": "answered",
+      "blocking": false,
+      "about": null,
+      "proposal_id": "01J9Z3K5Q8R2T4V6W8X0Y2Z4A5",
+      "created_seq": 20,
+      "answer": {
+        "action": "answer",
+        "text": "可以，但需要单独的审计日志",
+        "by": "human:hoshi",
+        "channel": "dashboard",
+        "seq": 45
+      }
+    }
+  ]
+}

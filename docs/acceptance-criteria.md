@@ -1,6 +1,6 @@
 # Specmetry MVP 验收标准
 
-> 状态：Draft v0.3 · 2026-10-13（依据 [codex-review-001](reviews/codex-review-001.md) 与 [codex-review-002](reviews/codex-review-002.md) 修订）
+> 状态：Draft v0.3 · 2026-10-14（依据 [codex-review-001](reviews/codex-review-001.md) 与 [codex-review-002](reviews/codex-review-002.md) 修订；M1 开工准备的修订见 [review-resolution.md §13](review-resolution.md#13-m1-开工准备产品决策与设计收尾2026-10-14)）
 > 每一项都对应 [prd.md](prd.md) 中的需求，并标注了所属里程碑。里程碑的退出条件是：该里程碑的全部 P0 项和 CX 项通过。§4 的反例项专门验证"设计本身不会给出错误的交付结论"。从 M4 起，本文作为 Specmetry 自身的基准导入。
 
 ## 1. 约定
@@ -33,6 +33,8 @@
 | 录制的 Agent 输出 | 每个项目夹具都有 `proposal.json`、`claims-audit.json`、`claims-sync.json`。夹具的事实序列是确定的，所以其中的版本号和修订号也是固定的。 |
 | 期望结果（oracle） | `expected-status.json`（必须符合 `status.v1`）、`expected-gaps.json`、`expected-requirements.json` |
 
+夹具是普通文件加构造脚本：测试在临时目录中用夹具仓库构造器（WP0.5）建立 git 仓库、分支和 worktree，仓库中不提交嵌套的 `.git`。M1 需要 `fx-docs-only`（含录制的 `proposal.json`；另含 `README.md`、`CHANGELOG.md`、`node_modules/x/README.md` 和空的 `docs/empty.md`，用于候选来源的排除规则）、`fx-in-dev` 的文件与分支脚本、`fx-incomplete`（implementation-plan WP1.0）。`fx-in-dev` 的失败测试和录制的 Claim、其余夹具和 oracle，按各自的里程碑补齐（WP2.9 等）。
+
 ## 2. 常规验收项
 
 ### 2.1 项目初始化（INIT）
@@ -41,8 +43,8 @@
 |---|---|---|---|---|
 | MVP-INIT-01 | 未初始化的 git 仓库 → `init --name demo --json` → 退出码 0；生成 marker，`project_id` 是合法的 ULID；`init_progress = initialized` | 集成 | FR-INIT-01 | M1 |
 | MVP-INIT-02 | 已初始化 → 再次执行 `init` → `project_id` 不变，仍然只有 1 个项目 | 集成 | FR-INIT-01 | M1 |
-| MVP-INIT-03 | 三个项目夹具 → `init --json` → `stage` 依次为 `docs_only`、`in_development`、`incomplete_docs`；`--stage` 可以覆盖 | 集成 | FR-INIT-02 | M1 |
-| MVP-INIT-04 | `fx-docs-only` → `init --json` → 候选来源中有 `docs/client-brief.md`；`source list` 为空 | 集成 | FR-INIT-03 | M1 |
+| MVP-INIT-03 | 三个项目夹具 → `init --json` → `stage_detected` 依次为 `docs_only`、`in_development`、`incomplete_docs`（规则见 [architecture.md §6.1.1](architecture.md#611-阶段识别与候选来源发现m1-实现)）；`--stage` 覆盖后 `stage` 改变，`stage_detected` 保持识别结果；识别过程不读取文件内容（在文件中埋入 canary，数据目录中找不到） | 集成 | FR-INIT-02 | M1 |
+| MVP-INIT-04 | `fx-docs-only` → `init --json` → 候选来源中有 `docs/client-brief.md`，并排在 `README.md` 之前；`CHANGELOG.md`、`node_modules/x/README.md` 和空文件 `docs/empty.md` 不在其中；`source list --json`（`source-list.v1`）的 `sources` 为空 | 集成 | FR-INIT-03 | M1 |
 | MVP-INIT-05 | 在伪终端中执行 `setup` → 先展示改动：拒绝时，文件逐字节不变；接受时写入；再次执行不产生重复条目；`setup --uninstall` 后语义上恢复原样 | 集成 | FR-INIT-04 | M3 |
 | MVP-INIT-06 | 非 TTY 环境执行 `setup` → 退出码 3，不修改任何文件 | 集成 | FR-INIT-04 | M3 |
 | MVP-INIT-07 | 按流程推进 → 每一步之后 `init_progress` 都符合 [data-model.md §6.12](data-model.md#612-初始化进度)；没有基准版本时执行 `init --skip-inventory`，进度不会越过 `baseline_proposed` 之前的步骤 | 集成 | FR-INIT-05 | M2 |
@@ -56,13 +58,13 @@
 | ID | 前置 → 操作 → 期望 | 验证 | 需求 | 里程碑 |
 |---|---|---|---|---|
 | MVP-SRC-01 | 登记一个仓库内的文件，和一个仓库外、路径含空格和中文的文件 → 都记录了路径、类型、`acked_sha256` 和大小 | 集成 | FR-SRC-01 | M1 |
-| MVP-SRC-02 | 修改已登记的来源 → `source list` 显示 `changed`；删除文件 → 显示 `missing` | 集成 | FR-SRC-02 | M1 |
+| MVP-SRC-02 | 修改已登记的来源 → `source list --json`（`source-list.v1`）显示 `changed`，`current_sha256` 为新哈希；删除文件 → 显示 `missing`，`current_sha256 = null` | 集成 | FR-SRC-02 | M1 |
 | MVP-SRC-03 | 非 TTY 执行 `source ack` → 退出码 3；在 TTY 中执行，但 `observed_sha256` 与磁盘不一致 → 退出码 5；一致时 → 写入 `source_acks`（包括理由），`acked_sha256` 更新，来源集合哈希改变 | 集成 | FR-SRC-03 | M1 |
 | MVP-SRC-04 | 非 TTY 执行 `source remove` → 退出码 3；在 TTY 中执行 → 写入 `removed_seq`，已有引用显示为 `source_removed`，来源集合哈希改变 | 集成 | FR-SRC-04 | M1 |
 | MVP-SRC-05 | `source add` 一个不存在的路径 → 退出码 2，不写入 | 集成 | FR-SRC-01 | M1 |
 | MVP-SRC-06 | 同一组来源，以不同顺序登记 → 来源集合哈希相同 | 单元 | FR-SRC-05 | M1 |
 | MVP-SRC-07 | `source add internal/auth/login.go`（非文档类型）→ 退出码 2；在 TTY 中加上 `--allow-any-type` → 成功；修改已登记的来源后，Agent 再次 `source add` 同一路径 → 什么都不做，`acked_sha256` 不变，`SOURCE_CHANGED` 仍然存在。审查确认 Specmetry 只为引用校验读取文本，不解析文档语义。 | 集成 + 审查 | FR-SRC-01、FR-SRC-06 | M1 |
-| MVP-SRC-08 | 在 TTY 中执行 `source remove --erase-excerpts` → 该来源所有引用的 `excerpt` 变为 NULL，`excerpt_sha256` 和 `locator` 保留，`excerpt_erased_seq` 已写入；对数据库文件和 WAL 做字节搜索，找不到原片段（执行 `VACUUM` 之后）；非 TTY 执行 → 退出码 3 | 集成 | FR-SRC-07 | M1 |
+| MVP-SRC-08 | **M1**（`hash_only` 项目）：在 TTY 中执行 `source remove --erase-excerpts` → 来源被移除，引用的 `locator` 和 `excerpt_sha256` 保留，`excerpt` 仍为 NULL，`source list --include-removed --refs --json` 中为 `excerpt_state = not_stored`；非 TTY 执行 → 退出码 3，不写入。**M2**（`full` 模式与 N1 修复之后）：该来源所有已保存的片段变为 NULL，`excerpt_erased_seq` 已写入，`excerpt_state = erased`；整理完成后，对数据库文件和 WAL 做字节搜索，找不到原片段；整理被其他连接的读事务阻塞时，保留 `.compaction-pending` 并报告"整理未完成"，之后的打开会完成整理 | 集成 | FR-SRC-07 | M1 / M2 |
 
 ### 2.3 基准（BL）
 
@@ -78,13 +80,13 @@
 | MVP-BL-08 | 编辑后接受 → 同时保存提议的值和最终值；基准使用最终值 | 集成 | FR-BL-04 | M1 |
 | MVP-BL-09 | 非 TTY 执行 `review` → 退出码 3 | 集成 | FR-BL-04 | M1 |
 | MVP-BL-10 | 审核提交的 `seen_base_version` 已过期 → 退出码 5，不产生版本 | 集成 | FR-BL-04 | M1 |
-| MVP-BL-11 | 经过 3 个版本后 → `baseline history --json` 列出每一条变更（包括修改前后的值、actor、通道、来源条目） | 集成 | FR-BL-06 | M1 |
-| MVP-BL-12 | `statement` 修改选 `material` 时 revision 加 1，选 `editorial` 时不变；修改检查命令、工作目录、shell 或 `inputs` 时，revision 一律加 1 | 集成 | FR-BL-07 | M1 |
+| MVP-BL-11 | 经过 3 个版本后 → `baseline history --json`（`baseline-history.v1`）列出每一条变更（包括修改前后的值、actor、通道、来源条目） | 集成 | FR-BL-06 | M1 |
+| MVP-BL-12 | `statement` 修改选 `material` 时 revision 加 1，选 `editorial` 时不变；修改 `verification`、检查命令、工作目录、shell 或 `inputs` 时，即使选择 `editorial`，revision 也一律加 1，并按 `material` 记录 | 集成 | FR-BL-07 | M1 |
 | MVP-BL-13 | 在 TTY 中执行 `propose --apply` → 生成 `origin = human_edit` 的提案并在同一事务中应用；Agent 通道提交 `origin = human_edit` → 退出码 3 | 集成 | FR-BL-08 | M1 |
-| MVP-BL-14 | 产生冲突的条目，审核时没有 `acknowledged_conflict` → 退出码 2；`proposal show --json` 给出三方的值 | 集成 | FR-BL-09 | M1 |
+| MVP-BL-14 | 产生冲突的条目，审核时没有 `acknowledged_conflict` → 退出码 2；`proposal show --json`（`proposal-show.v1`）给出 `base`（提案读取的版本中的值）、`current`、`proposed` 三方的值；revision 不变的 `editorial` 修改造成的冲突同样给出 | 集成 | FR-BL-09 | M1 |
 | MVP-BL-15 | 退役 REQ-003 后再新增 → 不复用 REQ-003；同一需求下的 AC 按 `AC-<n>-1`、`AC-<n>-2` 递增 | 集成 | TD-14 | M1 |
 | MVP-BL-16 | 退役有 2 个 AC 的需求 → 在同一版本中级联退役这 2 个 AC，并逐条记录 | 集成 | FR-BL-04 | M1 |
-| MVP-BL-17 | Agent 通道执行 `question answer` → 退出码 3；在 TTY 中回答 → 被记录 | 集成 | FR-BL-10 | M1 |
+| MVP-BL-17 | Agent 通道执行 `question answer` 或 `question dismiss` → 退出码 3，问题仍为 `open`；在 TTY 中回答或驳回 → 被记录，`question list --all --json`（`question-list.v1`）中显示回答者和通道 | 集成 | FR-BL-10 | M1 |
 | MVP-BL-18 | 需求以 `material` 方式更新，审核时不附带 AC 的后续处理 → 它的 AC 在 `status --json` 中的 `requirement_revision` 小于父需求的 revision，交付状态为 `needs_reverification`（`parent_revised`） | 集成 | FR-BL-11 | M2 |
 | MVP-BL-19 | 审核时附带 `criterion_followups`（`reaffirm` / `retire` / `defer` 各一个）→ 在同一版本中生效；`defer` 的 AC 保持不一致 | 集成 | FR-BL-11 | M1 |
 | MVP-BL-20 | Agent 提交 `reaffirm` 提案，人接受 → AC 的 `requirement_revision` 等于父需求的 revision，AC 自身的 revision 不变 | 集成 | FR-BL-11 | M1 |
@@ -94,6 +96,8 @@
 | MVP-BL-24 | **应用顺序**：同一提案中，以 `material` 方式修订 REQ-002，并 `reaffirm` AC-002-1，同时新增 AC-002-3 → 接受后，AC-002-1 和 AC-002-3 的 `requirement_revision` 都等于 REQ-002 的新 revision；同一次审核中被接受的 AC 更新，也会刷新 `requirement_revision`；全部条目都被拒绝时，不生成版本 | 集成 | FR-BL-04、FR-BL-11 | M1 |
 | MVP-BL-25 | 问题的 `about` 指向提案内的临时引用 → 该条目被接受后，问题关联到新编号；该条目被拒绝后，问题不再计为阻塞（M2） | 集成 | FR-BL-10 | M1 / M2 |
 | MVP-BL-26 | 对同一来源反复提交片段，总量超过上限（文本长度的 50% 或 20000 字符） → 退出码 2 | 集成 | FR-BL-02、FR-PRV-02 | M1 |
+| MVP-BL-27 | **审核必须选择修订类别**（PD-04 方案 A，V-R01）：接受 Agent 提案中的 `update` 条目（包括 `accepted_with_edits` 和冲突条目），但没有 `change_class` → 退出码 2，错误指向 `/items/<i>/change_class`，不写入，提案中建议的类别不会被采用；选择 `editorial` 但改动了强制字段 → 按 `material` 记录 | 集成 | FR-BL-07 | M1 |
+| MVP-BL-28 | `propose --json` 的输出符合 `proposal-receipt.v1`：每个条目有 `item_id` 和片段校验结果，代码引用有 `exists`；输出、错误信息和日志中都找不到片段原文（canary） | 集成 | FR-BL-01、FR-BL-02 | M1 |
 
 ### 2.4 交付目标与范围（TGT）
 
@@ -108,12 +112,13 @@
 | MVP-TGT-07 | **首次审核时一次性确认范围**：审核中接受 3 个新增需求，附带的范围用这 3 个条目的 `item_id` 表示 → 新版本与范围确认在同一事务中写入，`item_id` 被解析为新编号，范围绑定新版本号；范围引用了一个被拒绝的条目，或者范围无效 → 整次审核提交失败 | 集成 | FR-TGT-06 | M1 |
 | MVP-TGT-08 | 交互式 `scope confirm` 默认选中全部 `must` 需求，可以修改 | 集成 | FR-TGT-07 | M1 |
 | MVP-TGT-09 | 范围确认之后，审核生成了新版本但没有附带范围 → `status --json` 中 `scope.stale = true`，出现阻塞差距 `SCOPE_STALE`；人确认一个新来源后，同样出现 `SCOPE_STALE` | 集成 | FR-TGT-05 | M2 |
+| MVP-TGT-10 | **范围确认时确认已有豁免**（PD-21，V-T01）：`scope show --json`（`target-scope.v1`）列出每条有效豁免及其 AC、需求和理由；确认（独立提交，或附带在审核中，以审核完成后的状态为准）时 `acknowledged_waivers` 少一项或多一项 → 退出码 5，`error.current` 中给出当前的有效豁免，不写入；一致时写入。M1 验证没有豁免时的写入侧与输出；M2 用真实的豁免验证，并验证 AC 实质修订后，该豁免不再出现在有效集合中 | 集成 | FR-TGT-04 | M1 / M2 |
 
 ### 2.5 Worktree（WT）
 
 | ID | 前置 → 操作 → 期望 | 验证 | 需求 | 里程碑 |
 |---|---|---|---|---|
-| MVP-WT-01 | `git worktree add` 新建 worktree，在其中执行 `status` → 自动登记，项目相同，`worktree_id` 不同 | 集成 | FR-WT-01 | M1 |
+| MVP-WT-01 | `git worktree add` 新建 worktree，在其中执行 `init --json`（M1）→ `created = false`，`project.id` 与主 worktree 相同，数据库中新登记了这个 worktree（`worktree_id` 不同）；在其中执行 `status --json`（M2）→ `workspace.worktree_id` 与主 worktree 不同，项目相同 | 集成 | FR-WT-01 | M1 / M2 |
 | MVP-WT-02 | AC 的检查为 `test -f only-on-feature.txt`，该文件只存在于 `feature/x` 分支。在 feature worktree 中执行 `check run` → `pass`，`worktree_id` 为 feature worktree；在主 worktree 中执行 → `fail` | 集成 | FR-WT-03 | M2 |
 | MVP-WT-03 | 每条 Claim 批次、检查执行、会话和事件都有 `worktree_id` 和完整的代码上下文 | 集成 | FR-WT-02 | M2 / M3 |
 | MVP-WT-04 | 在 `feature/x` 上提交带 trailer 的提交 → 被发现，且只发现一次；在 `feature/x` 上执行 `reset` 并提交新提交 → 该 ref 被重新扫描，不产生重复 | 集成 | FR-WT-04 | M2 |
@@ -164,9 +169,9 @@
 |---|---|---|---|---|
 | MVP-ACC-01 | AC 在 `S` 上为 `ready_for_review`（观测级证据），还没有任何决定 → 在 TTY 中执行 `accept`（`normal`，`seen_decision_id = null`，确认 `observed_evidence`）→ 写入的决定包含 `snapshot`、`evidence_id`、`evidence_grade = observed`、`check_config_hash`、`inputs_json` 和风险确认；AC 变为 `accepted`（原因码 `direct`，带 `observed_evidence` 标记）。在 M5 中通过 API 再验证一次。 | 集成 | FR-ACC-01、03 | M2 / M5 |
 | MVP-ACC-02 | 非 TTY 执行 `accept` → 退出码 3；在 TTY 中执行，但存在已知的 Agent 环境变量 → 退出码 3 | 集成 | FR-ACC-02 | M2 |
-| MVP-ACC-03 | **必须拒绝**（Bash 和 PowerShell 两种 payload）：`specmetry accept AC-001-1`、`cd app && specmetry waive AC-002-1 -m x`、`specmetry scope confirm`、`specmetry source ack docs/a.md`、`specmetry propose --apply --file x.json`、`bash -c "specmetry review"` → 输出拒绝决定，并记录 `guard_denied`。**必须放行**：`specmetry status --json`、`specmetry dashboard --page review`、`echo "specmetry accept"`、正文中含有 accept / review / setup 字样的 `specmetry propose --file - <<EOF … EOF`、`specmetry claim --file -` | 单元 + 集成 | FR-ACC-02 | M3 |
+| MVP-ACC-03 | **必须拒绝**（Bash 和 PowerShell 两种 payload）：`specmetry accept AC-001-1`、`cd app && specmetry waive AC-002-1 -m x`、`specmetry scope confirm`、`specmetry source ack docs/a.md`、`specmetry propose --apply --file x.json`、`specmetry question answer Q-001`、`specmetry question dismiss Q-002`、`specmetry project set excerpt-storage full`、`bash -c "specmetry review"` → 输出拒绝决定，并记录 `guard_denied`。**必须放行**：`specmetry status --json`、`specmetry dashboard --page review`、`echo "specmetry accept"`、正文中含有 accept / review / setup 字样的 `specmetry propose --file - <<EOF … EOF`、`specmetry claim --file -` | 单元 + 集成 | FR-ACC-02 | M3 |
 | MVP-ACC-04 | 在 `V = none` 时执行 `normal` 验收 → 退出码 2（提示使用例外）；在 `V = fail` 时作出任何 `accepted` → 退出码 2 | 集成 | FR-ACC-03、06 | M2 |
-| MVP-ACC-05 | 例外验收没有理由 → 退出码 2；有理由时 → AC 为 `accepted`（`exception`），并带 `EXCEPTION_ACCEPTANCE` 警告 | 集成 | FR-ACC-05 | M2 |
+| MVP-ACC-05 | 例外验收没有理由 → 退出码 2；有理由时 → AC 为 `accepted`（`exception`），并带 `EXCEPTION_ACCEPTANCE` 警告；`status --json` 中该 AC 的 `decision` 显示 `mode = exception`、理由、快照和 `evidence_grade = none`，人类可读输出同样显示这四项（PD-17） | 集成 | FR-ACC-05 | M2 |
 | MVP-ACC-06 | 手动 AC 在 `S` 上被验收 → `accepted`（`manual`） | 集成 | FR-ACC-04 | M2 |
 | MVP-ACC-07 | 拒收或豁免没有理由 → CLI 退出码 2（M2），API 返回 400（M5） | 集成 | FR-ACC-07 | M2 / M5 |
 | MVP-ACC-08 | 自动化 AC 在 `S` 上 `V = pass` → 人依次在同一快照上作出接受、拒收、接受，每次都携带上一条决定的 ID 作为 `seen_decision_id`（第二次接受是人在重新读取后明确改判）→ 三条都保留，当前决定是 `seq` 最大的那一条，AC 为 `accepted` | 集成 | FR-ACC-08、FR-ACC-03 | M2 |
@@ -257,9 +262,10 @@
 | MVP-PRV-04 | 伪造时间，使事件超过 30 天 → 入库时被清除；其他事实不受影响 | 集成 | FR-PRV-04 | M3 |
 | MVP-PRV-05 | Unix 上，数据目录为 `0700`，文件为 `0600`；已有的数据目录或其中任何文件（包括数据库、WAL、SHM）权限过宽、属主不是当前用户、是符号链接，或（macOS）带有允许访问的 ACL 时，在写入任何数据之前拒绝（退出码 6），目录内容不变；从根目录到数据目录的任何一级目录属主不是当前用户或 root，或能被其他用户写入（不带 sticky 位，或带 sticky 位但下一级条目不属于当前用户或 root），在创建或写入任何内容之前拒绝（退出码 6）；用真实的跨 UID 替换攻击验证（Linux，测试需要 root 以切换用户） | 集成 | FR-PRV-06 | M0 |
 | MVP-PRV-06 | Windows 上，数据目录的 DACL 是受保护的，只授予 TD-22 规定的对象；已有目录或文件不满足（额外的授权对象、DACL 不受保护或不能被新文件继承、属主不符、联接或符号链接）时，在写入任何数据之前拒绝（退出码 6），目录内容不变；路径上的目录是联接或符号链接、属主不是当前用户 / SYSTEM / Administrators / TrustedInstaller，或允许其他用户 DELETE、FILE_DELETE_CHILD、WRITE_DAC、WRITE_OWNER 时，在创建或写入任何内容之前拒绝（退出码 6）；`doctor` 能发现被放宽的权限 | 集成 | FR-PRV-06 | M0 |
-| MVP-PRV-07 | 每条内置密钥规则至少有 2 个应命中和 2 个不应命中的样本 | 单元 | FR-PRV-07 | M1 |
-| MVP-PRV-08 | 项目设置 `excerpt_storage = hash_only` → 提交含片段的提案后，`source_refs.excerpt` 为 NULL，`excerpt_sha256` 和校验结果照常写入；对数据目录做字节搜索，找不到片段原文 | 集成 | FR-PRV-08 | M1 |
-| MVP-PRV-09 | 对所有人类可读输出的 golden 文件做静态检查：`evidence_grade = observed` 时，不出现 snapshot-verified / snapshot verified / "快照已验证"等措辞（CLI 在 M2 检查，Dashboard 在 M5 检查） | 单元 + UI | FR-PRV-09 | M2 / M5 |
+| MVP-PRV-07 | [architecture.md §10.8](architecture.md#108-密钥识别规则集td-21) 的每条内置规则至少 2 个命中和 2 个不命中样本（运行时拼接，仓库中不保存形似密钥的字面量）；每个不命中样本不命中任何规则；环境变量引用不命中；命中时退出码 2，`error.details` 只给出 JSON Pointer 和 `secret_detected: <规则编号>`，输出和日志中找不到命中的文本；`config.toml` 追加的规则生效，无效的追加规则使配置加载失败（退出码 6） | 单元 + 集成 | FR-PRV-07 | M1 |
+| MVP-PRV-08 | 新项目的 `excerpt_storage` 默认为 `hash_only`（PD-24）→ 提交含片段的提案后，`source_refs.excerpt` 为 NULL，`excerpt_sha256` 和校验结果照常写入，`proposal_items` 中也只有片段哈希；对数据目录做字节搜索，找不到片段原文 | 集成 | FR-PRV-08 | M1 |
+| MVP-PRV-09 | 对所有人类可读输出的 golden 文件做静态检查：`evidence_grade = observed` 时，不出现 snapshot-verified / snapshot verified / "快照已验证"等措辞；`evidence_grade = none` 时，不出现"已通过自动化验证" / verified by automated checks 等措辞，并说明没有自动化执行证据（CLI 在 M2 检查，Dashboard 在 M5 检查） | 单元 + UI | FR-PRV-09 | M2 / M5 |
+| MVP-PRV-10 | `project set excerpt-storage full`：非 TTY 或存在已知的 Agent 环境变量 → 退出码 3；在 TTY 中确认后生效，之后写入的引用保存原文，之前写入的不变；`source list --refs --json` 中分别为 `stored` 和 `not_stored` | 集成 | FR-PRV-08 | M2 |
 | MVP-STO-01 | 两个进程同时触发迁移 → 一个执行，另一个等待或返回退出码 6；迁移前的备份可以打开，内容一致；锁由操作系统持有，持有锁的进程崩溃后不会阻塞其他进程 | 集成 | FR-STO-01 | M0 |
 | MVP-STO-02 | 旧程序打开更新版本的 schema（包括恢复的 `VACUUM INTO` 备份、崩溃遗留的 WAL），或不满足 `min_binary_version`（包括无法解析的值）→ 退出码 6。Specmetry 不修改 schema、业务数据、事实、`seq` 或任何已提交数据，不改写或删除已有的数据库、WAL、SHM 文件，不执行 checkpoint，不绕过版本检查；无法确定版本时一律拒绝，不判为兼容。Specmetry 自身**只允许两种文件副作用**（产品负责人批准，2026-10-13）：① 数据目录中还没有协调文件时，创建空的、权限符合 architecture §11.1、拒绝后不被持有的 `.migrate.lock`；② 仅当另一个 SQLite 进程在版本检查期间并发关闭数据库、删除了 `-wal` / `-shm` 时，原生只读连接新建的空 `-wal` / `-shm`，权限符合同一要求。外部进程自己造成的文件变化不算 Specmetry 的副作用；这两项例外不扩大为一般性的文件修改许可，也不放宽版本保护或数据完整性约束。没有外部竞争操作、且协调文件已存在时，拒绝不改变任何文件。已打开的连接在其他进程升级 schema 或提高 `min_binary_version` 之后写入 → 退出码 6，写入回调不执行，事实和 `seq` 不变；打开过程与另一进程的升级并发时，升级等待打开完成，或旧程序在上述限度内拒绝，不允许在恢复或合并新数据库之后才拒绝；旧进程此后关闭最后一个连接时，升级后的数据库保持完整 | 集成 | FR-STO-02 | M0 |
 | MVP-STO-03 | 合成一个会在中途失败的迁移 → 整体回滚，数据库不变 | 集成 | FR-STO-01 | M0 |
@@ -278,11 +284,18 @@
 | MVP-PLT-04 | `doctor --json` 报告：版本、数据库路径、schema 版本、权限、Hook 与 Skill、spool 积压 | 集成 | NFR-09 | M3 |
 | MVP-PLT-05 | `data-model.md` 与迁移脚本产生的实际 schema 一致 | 审查 | NFR-07 | M2 |
 
+### 2.16 通道识别（CH）
+
+| ID | 前置 → 操作 → 期望 | 验证 | 需求 | 里程碑 |
+|---|---|---|---|---|
+| MVP-CH-01 | 在伪终端中执行人类专属命令（`review`、`source ack`、`scope confirm`），同时设置 `CLAUDECODE` 或 `CLAUDE_CODE_ENTRYPOINT`（值为 canary）→ 退出码 3，不写入；不设置时进入交互式确认，拒绝确认则不写入；数据目录、输出和日志中都找不到这个 canary | 集成 | FR-BL-04、FR-SRC-03、FR-TGT-04 | M1 |
+| MVP-CH-02 | stdin 是终端但 stdout 被重定向，或者 stdin 不是终端 → `agent_cli`，人类专属命令返回退出码 3；加上 `--json` 不改变识别结果；只读命令在任何通道中都可以执行 | 集成 | FR-BL-04、FR-SRC-03 | M1 |
+
 ## 3. 关键不变量
 
 每个 E2E 结束时都会自动断言以下性质：
 
-1. 不存在任何由 Agent 通道写入的 `decisions`、`scope_confirmations`、`source_acks` 或 `baseline_versions`。
+1. 不存在任何由 Agent 通道写入的 `decisions`、`scope_confirmations`、`source_acks` 或 `baseline_versions`；不存在由 Agent 通道回答或驳回的问题，也不存在由 Agent 通道修改的片段保存模式。
 2. 对每个 `ready` 的判定，由一个**独立实现的检查器**（测试代码，不复用推导引擎）重新核对：
    - `S` 不为 NULL；
    - 范围没有过期、不为空，也不是全部豁免；
@@ -346,7 +359,7 @@
 | E2E-4 | 日常循环与 worktree | 重放 Hook → 在 feature worktree 中 sync 并执行检查 → `main` 快进合并 → 在主 worktree 中执行检查 | 合并之前，feature 上的结果不影响交付；合并后，同一 SHA 上的合格执行生效 |
 | E2E-5 | 需求变更 | 来源变化（`SOURCE_CHANGED`）→ 人确认来源（来源集合改变，出现 `SCOPE_STALE`）→ Agent 提交需求的 `material` 修订 → 审核时对一个 AC 选择 `defer`，并重新确认范围（出现 `PARENT_REVISED`，`SCOPE_STALE` 消除）→ 人工编辑修订该 AC（`PARENT_REVISED` 消除） | 各差距按上述顺序出现和消除 |
 | E2E-6 | 交付 | 解决全部差距 → 逐条验收（确认观测级风险）→ `ready`（`evidence_grade = observed`）→ 目标前进到新提交 → `needs_reverification` → 执行 `check run --all` → 自动化 AC 为 `ready_for_review`（`observed_evidence`，MVP 中不沿用），手动 AC 为 `needs_reverification` → 人重新验收 → `ready` | 每一步的状态都与 oracle 一致；`ready` 的判定可以用同样的 `as_of_seq` 复现；任何输出都没有"快照已验证"的说法 |
-| E2E-7 | 人类专属操作被阻止 | 重放拦截 payload；在非 TTY 中执行 `accept`、`review`、`scope confirm`、`source ack`、`target set` | 都被拒绝；没有新增决定、版本、范围确认或来源确认；有 `guard_denied` 事件 |
+| E2E-7 | 人类专属操作被阻止 | 重放拦截 payload；在非 TTY 中执行 `accept`、`review`、`scope confirm`、`source ack`、`target set`、`question answer`、`question dismiss` | 都被拒绝；没有新增决定、版本、范围确认或来源确认；有 `guard_denied` 事件 |
 | E2E-8 | 删除与恢复 | 见 CX-11，并加上 C0 canary | 不复活；没有残留 |
 
 ## 6. 需求追溯
@@ -355,8 +368,8 @@
 |---|---|
 | FR-INIT | INIT-01 ~ 11、PRV-01（FR-INIT-07） |
 | FR-SRC | SRC-01 ~ 08、CX-17 |
-| FR-BL | BL-01 ~ 26、CX-07、CX-14 |
-| FR-TGT | TGT-01 ~ 09、CX-05、CX-06、CX-18（FR-TGT-05）、CX-22（FR-TGT-03）、INIT-09（FR-TGT-03） |
+| FR-BL | BL-01 ~ 28、CX-07、CX-14 |
+| FR-TGT | TGT-01 ~ 10、CX-05、CX-06、CX-18（FR-TGT-05）、CX-22（FR-TGT-03）、INIT-09（FR-TGT-03） |
 | FR-WT | WT-01 ~ 05、COL-10、CX-03、CX-04 |
 | FR-INV | INV-01 ~ 06、CX-10 |
 | FR-CLM | CLM-01 ~ 05、CX-12、CX-13 |
@@ -365,8 +378,9 @@
 | FR-ST | ST-01 ~ 14、CLM-01（FR-ST-07）、CX-09、CX-12（FR-ST-07）、CX-22 |
 | FR-COL | COL-01 ~ 15 |
 | FR-UI | UI-01 ~ 16、CX-08 的 UI 部分（FR-UI-13）、CX-23 |
-| FR-PRV、FR-STO | PRV-01 ~ 09、STO-01 ~ 07、EV-05、EV-11、BL-23、BL-26、CX-11（FR-STO-03）、CX-24 |
+| FR-PRV、FR-STO | PRV-01 ~ 10、STO-01 ~ 07、EV-05、EV-11、BL-23、BL-26、CX-11（FR-STO-03）、CX-24 |
 | FR-SK | SK-01 ~ 08 |
+| 通道识别（architecture §5.1） | CH-01 ~ 02、ACC-02、ACC-03、E2E-7 |
 | NFR | ST-08、UI-04、COL-01、PLT-01 ~ 05、PRV-01、STO-07 |
 
 P2 项（FR-EV-07、FR-EV-09、FR-ST-10、FR-ST-11、FR-COL-06、FR-UI-07、FR-UI-08）不在 MVP 中，没有对应的验收项；FR-EV-09（隔离执行器）的验收在 M7 中追加到 CX-26 ~ CX-28 和 MVP-ACC-09。

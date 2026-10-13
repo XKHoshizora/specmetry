@@ -29,6 +29,16 @@ var prefixes = map[string]string{
 	"check-run":       "check-run.v1",
 	"gaps":            "gaps.v1",
 	"question-answer": "question-answer.v1",
+	// Read models and Agent-facing results added for M1.
+	"source-list":      "source-list.v1",
+	"source-add":       "source-add.v1",
+	"proposal-receipt": "proposal-receipt.v1",
+	"proposal-list":    "proposal-list.v1",
+	"proposal-show":    "proposal-show.v1",
+	"baseline-show":    "baseline-show.v1",
+	"baseline-history": "baseline-history.v1",
+	"question-list":    "question-list.v1",
+	"target-scope":     "target-scope.v1",
 }
 
 func validator(t *testing.T) *Validator {
@@ -44,8 +54,10 @@ func validator(t *testing.T) *Validator {
 func TestAllSchemasCompile(t *testing.T) {
 	v := validator(t)
 	want := []string{
-		"check-run.v1", "claims.v1", "common.v1", "decision.v1", "error.v1", "gaps.v1", "init.v1",
-		"proposal.v1", "question-answer.v1", "review.v1", "scope.v1", "source-ack.v1", "spool-event.v1", "status.v1",
+		"baseline-history.v1", "baseline-show.v1", "check-run.v1", "claims.v1", "common.v1", "decision.v1",
+		"error.v1", "gaps.v1", "init.v1", "proposal-list.v1", "proposal-receipt.v1", "proposal-show.v1",
+		"proposal.v1", "question-answer.v1", "question-list.v1", "review.v1", "scope.v1", "source-ack.v1",
+		"source-add.v1", "source-list.v1", "spool-event.v1", "status.v1", "target-scope.v1",
 	}
 	if got := strings.Join(v.Names(), ","); got != strings.Join(want, ",") {
 		t.Fatalf("compiled schemas = %s", got)

@@ -1,0 +1,89 @@
+{
+  "schema": "specmetry.baseline-history/v1",
+  "baseline_version": 2,
+  "versions": [
+    {
+      "number": 1,
+      "seq": 40,
+      "summary": "初始基准",
+      "actor": "human:hoshi",
+      "channel": "dashboard",
+      "proposal_id": "01J9Z3K5Q8R2T4V6W8X0Y2Z4A5",
+      "changes": [
+        {
+          "entity_type": "requirement",
+          "key": "REQ-002",
+          "op": "add",
+          "change_class": null,
+          "before": null,
+          "after": {
+            "revision": 1,
+            "status": "active",
+            "values": {
+              "title": "用户只能查看自己的订单",
+              "kind": "functional",
+              "priority": "must"
+            }
+          },
+          "proposal_item_id": "01J9Z3K5Q8R2T4V6W8X0Y2Z4A2"
+        }
+      ]
+    },
+    {
+      "number": 2,
+      "seq": 61,
+      "summary": null,
+      "actor": "human:hoshi",
+      "channel": "human_cli",
+      "proposal_id": "01J9Z3K5Q8R2T4V6W8X0Y2Z4A6",
+      "changes": [
+        {
+          "entity_type": "requirement",
+          "key": "REQ-002",
+          "op": "update",
+          "change_class": "material",
+          "before": {
+            "revision": 1,
+            "status": "active",
+            "values": {
+              "title": "用户只能查看自己的订单"
+            }
+          },
+          "after": {
+            "revision": 2,
+            "status": "active",
+            "values": {
+              "title": "用户只能查看自己名下的订单"
+            }
+          },
+          "proposal_item_id": "01J9Z3K5Q8R2T4V6W8X0Y2Z4A7"
+        },
+        {
+          "entity_type": "criterion",
+          "key": "AC-002-3",
+          "op": "retire",
+          "change_class": null,
+          "before": {
+            "revision": 1,
+            "status": "active",
+            "requirement_revision": 1,
+            "values": {
+              "statement": "列表接口返回全部订单",
+              "verification": "manual"
+            }
+          },
+          "after": {
+            "revision": 1,
+            "status": "retired",
+            "requirement_revision": 1,
+            "values": {
+              "statement": "列表接口返回全部订单",
+              "verification": "manual"
+            }
+          },
+          "proposal_item_id": null
+        }
+      ]
+    }
+  ]
+}

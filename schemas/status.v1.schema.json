@@ -282,6 +282,10 @@
           "description": "Latest decision (by seq) for the current revision, or null. Must be sent back as seen_decision_id when deciding.",
           "oneOf": [{ "$ref": "common.v1.schema.json#/$defs/ulid" }, { "type": "null" }]
         },
+        "decision": {
+          "description": "Summary of the decision named by current_decision_id; present exactly when current_decision_id is not null (PD-17).",
+          "$ref": "#/$defs/decisionSummary"
+        },
         "flags": {
           "type": "array",
           "uniqueItems": true,
@@ -306,7 +310,51 @@
           "description": "Latest run in the current worktree at its current HEAD (qualifying or not). Informational.",
           "oneOf": [{ "$ref": "#/$defs/run" }, { "type": "null" }]
         }
-      }
+      },
+      "if": { "properties": { "current_decision_id": { "type": "string" } } },
+      "then": { "required": ["decision"] },
+      "else": { "not": { "required": ["decision"] } }
+    },
+    "decisionSummary": {
+      "description": "What a human decided, why, and on which snapshot. evidence_grade is the grade of the run the decision relied on; none means no automated run supports it (manual, exception, waived, or a rejection without a run) and must never be presented as automated verification.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "seq", "decision", "mode", "snapshot", "evidence_grade", "rationale"],
+      "properties": {
+        "id": { "$ref": "common.v1.schema.json#/$defs/ulid" },
+        "seq": { "$ref": "common.v1.schema.json#/$defs/seq" },
+        "decision": { "enum": ["accepted", "rejected", "waived"] },
+        "mode": { "enum": ["normal", "manual", "exception", null] },
+        "snapshot": {
+          "description": "The snapshot the decision was made on; null only for waivers, which do not depend on the code.",
+          "oneOf": [{ "$ref": "common.v1.schema.json#/$defs/commitSha" }, { "type": "null" }]
+        },
+        "evidence_grade": { "$ref": "common.v1.schema.json#/$defs/deliveryEvidenceGrade" },
+        "rationale": { "oneOf": [{ "$ref": "common.v1.schema.json#/$defs/rationale" }, { "type": "null" }] }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "decision": { "const": "accepted" } } },
+          "then": { "properties": { "mode": { "enum": ["normal", "manual", "exception"] }, "snapshot": { "type": "string" } } },
+          "else": { "properties": { "mode": { "const": null }, "rationale": { "type": "string" } } }
+        },
+        {
+          "if": { "properties": { "mode": { "const": "normal" } } },
+          "then": { "properties": { "evidence_grade": { "enum": ["observed", "snapshot_isolated"] } } }
+        },
+        {
+          "if": { "properties": { "mode": { "enum": ["manual", "exception"] } }, "required": ["mode"] },
+          "then": { "properties": { "evidence_grade": { "const": "none" } } }
+        },
+        {
+          "if": { "properties": { "mode": { "const": "exception" } }, "required": ["mode"] },
+          "then": { "properties": { "rationale": { "type": "string" } } }
+        },
+        {
+          "if": { "properties": { "decision": { "const": "waived" } } },
+          "then": { "properties": { "evidence_grade": { "const": "none" } } }
+        }
+      ]
     },
     "requirement": {
       "type": "object",

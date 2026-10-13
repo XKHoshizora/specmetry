@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/XKHoshizora/specmetry/schemas/source-add.v1.schema.json",
+  "title": "Specmetry source add result v1",
+  "description": "Output of `specmetry source add <path> --json` (Agent-facing). Registering an already registered, not removed path changes nothing and returns the existing source with created = false; its acked hash is never updated here (only a human `source ack` does that).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "created", "source", "source_set_hash"],
+  "properties": {
+    "schema": { "const": "specmetry.source-add/v1" },
+    "created": { "type": "boolean" },
+    "source": {
+      "allOf": [{ "$ref": "source-list.v1.schema.json#/$defs/source" }],
+      "properties": { "removed_seq": { "const": null } },
+      "not": { "required": ["refs"] }
+    },
+    "source_set_hash": {
+      "description": "Source-set hash after this call; it changes when created is true.",
+      "$ref": "common.v1.schema.json#/$defs/sha256"
+    }
+  }
+}

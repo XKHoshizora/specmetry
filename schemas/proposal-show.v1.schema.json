@@ -1,0 +1,185 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/XKHoshizora/specmetry/schemas/proposal-show.v1.schema.json",
+  "title": "Specmetry proposal detail v1",
+  "description": "Output of `specmetry proposal show <id> --json`: every item with its review state and, for items in conflict, the three-way comparison a reviewer must acknowledge (FR-BL-09). item_id is what review.v1 refers to. Excerpts appear only when stored (excerpt_storage = full).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "baseline_version", "proposal", "items", "questions"],
+  "properties": {
+    "schema": { "const": "specmetry.proposal-show/v1" },
+    "baseline_version": {
+      "description": "Current baseline version; send it back as seen_base_version when reviewing.",
+      "$ref": "common.v1.schema.json#/$defs/baselineVersion"
+    },
+    "proposal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "seq", "origin", "actor", "channel", "summary", "base_version"],
+      "properties": {
+        "id": { "$ref": "common.v1.schema.json#/$defs/ulid" },
+        "seq": { "$ref": "common.v1.schema.json#/$defs/seq" },
+        "origin": { "enum": ["skill_init", "skill_goals", "skill_audit", "skill_sync", "cli", "human_edit"] },
+        "actor": { "$ref": "proposal-list.v1.schema.json#/$defs/actor" },
+        "channel": { "$ref": "proposal-list.v1.schema.json#/$defs/channel" },
+        "summary": { "$ref": "common.v1.schema.json#/$defs/shortSummary" },
+        "base_version": { "$ref": "common.v1.schema.json#/$defs/baselineVersion" }
+      }
+    },
+    "items": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/item" }
+    },
+    "questions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["key", "status", "blocking", "about"],
+        "properties": {
+          "key": { "$ref": "common.v1.schema.json#/$defs/questionKey" },
+          "status": { "enum": ["open", "answered", "dismissed"] },
+          "blocking": { "type": "boolean" },
+          "about": { "type": ["string", "null"], "maxLength": 64 }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "values": {
+      "description": "Entity field values in the proposal data shape (keys instead of local refs once resolved).",
+      "anyOf": [
+        { "$ref": "proposal.v1.schema.json#/$defs/goalData" },
+        { "$ref": "proposal.v1.schema.json#/$defs/requirementData" },
+        { "$ref": "proposal.v1.schema.json#/$defs/criterionData" }
+      ]
+    },
+    "item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "item_id",
+        "item_index",
+        "op",
+        "type",
+        "ref",
+        "target",
+        "target_revision",
+        "review_state",
+        "proposed",
+        "suggested_change_class",
+        "sources",
+        "code_refs",
+        "conflict",
+        "review"
+      ],
+      "properties": {
+        "item_id": { "$ref": "common.v1.schema.json#/$defs/ulid" },
+        "item_index": { "type": "integer", "minimum": 0 },
+        "op": { "enum": ["add", "update", "retire", "reaffirm"] },
+        "type": { "enum": ["goal", "requirement", "criterion"] },
+        "ref": { "oneOf": [{ "$ref": "common.v1.schema.json#/$defs/localRef" }, { "type": "null" }] },
+        "target": { "type": ["string", "null"], "maxLength": 32 },
+        "target_revision": { "oneOf": [{ "$ref": "common.v1.schema.json#/$defs/revision" }, { "type": "null" }] },
+        "review_state": { "enum": ["pending", "conflict", "accepted", "accepted_with_edits", "rejected"] },
+        "proposed": {
+          "description": "The proposed data; null for retire and reaffirm.",
+          "oneOf": [{ "$ref": "#/$defs/values" }, { "type": "null" }]
+        },
+        "suggested_change_class": {
+          "description": "The proposer's suggestion for update items. Only a suggestion: the reviewer must choose (V-R01).",
+          "enum": ["material", "editorial", null]
+        },
+        "origin": { "$ref": "common.v1.schema.json#/$defs/itemOrigin" },
+        "confidence": { "$ref": "common.v1.schema.json#/$defs/confidence" },
+        "rationale": { "$ref": "common.v1.schema.json#/$defs/rationale" },
+        "sources": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["source_id", "path", "locator", "verification", "excerpt_sha256", "excerpt"],
+            "properties": {
+              "source_id": { "$ref": "common.v1.schema.json#/$defs/ulid" },
+              "path": { "type": "string", "minLength": 1, "maxLength": 4096 },
+              "locator": { "type": ["string", "null"], "maxLength": 100 },
+              "verification": { "$ref": "source-list.v1.schema.json#/$defs/verification" },
+              "excerpt_sha256": { "$ref": "common.v1.schema.json#/$defs/sha256" },
+              "excerpt": {
+                "description": "null unless the excerpt is stored.",
+                "type": ["string", "null"],
+                "maxLength": 500
+              }
+            }
+          }
+        },
+        "code_refs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "lines", "exists"],
+            "properties": {
+              "path": { "$ref": "common.v1.schema.json#/$defs/relPath" },
+              "lines": { "oneOf": [{ "$ref": "common.v1.schema.json#/$defs/lineRange" }, { "type": "null" }] },
+              "exists": { "type": "boolean" }
+            }
+          }
+        },
+        "conflict": {
+          "description": "Present (non-null) exactly when review_state is conflict: the target changed after the proposal's base_version.",
+          "oneOf": [{ "$ref": "#/$defs/threeWay" }, { "type": "null" }]
+        },
+        "review": {
+          "description": "null until reviewed; written once.",
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["decision", "change_class", "final", "by", "channel", "seq", "note"],
+              "properties": {
+                "decision": { "enum": ["accepted", "accepted_with_edits", "rejected"] },
+                "change_class": { "enum": ["material", "editorial", null] },
+                "final": {
+                  "description": "The values applied (accepted_with_edits: the reviewer's edits).",
+                  "oneOf": [{ "$ref": "#/$defs/values" }, { "type": "null" }]
+                },
+                "by": { "$ref": "proposal-list.v1.schema.json#/$defs/actor" },
+                "channel": { "enum": ["human_cli", "dashboard"] },
+                "seq": { "$ref": "common.v1.schema.json#/$defs/seq" },
+                "note": { "oneOf": [{ "$ref": "common.v1.schema.json#/$defs/plainText1000" }, { "type": "null" }] }
+              }
+            }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "review_state": { "const": "conflict" } } },
+          "then": { "properties": { "conflict": { "type": "object" } } },
+          "else": { "properties": { "conflict": { "const": null } } }
+        },
+        {
+          "if": { "properties": { "review_state": { "enum": ["pending", "conflict"] } } },
+          "then": { "properties": { "review": { "const": null } } },
+          "else": { "properties": { "review": { "type": "object" } } }
+        }
+      ]
+    },
+    "threeWay": {
+      "description": "base: the target's values in the proposal's base_version (what the proposer read; base_revision equals target_revision); current: its values now, which may differ even at the same revision after an editorial change; proposed: the item's data. The reviewer must acknowledge this comparison (acknowledged_conflict) before deciding.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["base_revision", "current_revision", "base", "current", "proposed"],
+      "properties": {
+        "base_revision": { "$ref": "common.v1.schema.json#/$defs/revision" },
+        "current_revision": { "$ref": "common.v1.schema.json#/$defs/revision" },
+        "current_status": { "enum": ["active", "retired"] },
+        "base": { "$ref": "#/$defs/values" },
+        "current": { "$ref": "#/$defs/values" },
+        "proposed": { "oneOf": [{ "$ref": "#/$defs/values" }, { "type": "null" }] }
+      }
+    }
+  }
+}

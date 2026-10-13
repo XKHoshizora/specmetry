@@ -12,6 +12,7 @@
     {
       "item_id": "01J9Z3K5Q8R2T4V6W8X0Y2Z4A8",
       "decision": "accepted_with_edits",
+      "change_class": "material",
       "final_data": { "statement": "用户 A 请求用户 B 的订单时返回 404，且不泄露订单是否存在" }
     },
     {
@@ -33,6 +34,7 @@
     "target_id": "01J9Z3K5Q8R2T4V6W8X0Y2Z4B0",
     "source_set_hash": "3b5d9f0c1e2a4b6c8d0e1f2a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e",
     "requirements": ["REQ-001", "REQ-002", "01J9Z3K5Q8R2T4V6W8X0Y2Z4AB"],
-    "attestations": { "complete_scope": true, "pending_items_excluded": 0 }
+    "attestations": { "complete_scope": true, "pending_items_excluded": 0 },
+    "acknowledged_waivers": ["01J9Z3K5Q8R2T4V6W8X0Y2Z4G1"]
   }
 }

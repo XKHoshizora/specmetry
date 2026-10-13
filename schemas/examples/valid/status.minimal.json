@@ -94,6 +94,15 @@
             "observed_evidence"
           ],
           "current_decision_id": "01J9Z3K5Q8R2T4V6W8X0Y2Z4F2",
+          "decision": {
+            "id": "01J9Z3K5Q8R2T4V6W8X0Y2Z4F2",
+            "seq": 408,
+            "decision": "accepted",
+            "mode": "normal",
+            "snapshot": "8f3c2a1b9d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a",
+            "evidence_grade": "observed",
+            "rationale": null
+          },
           "snapshot_run": {
             "evidence_id": "01J9Z3K5Q8R2T4V6W8X0Y2Z4D2",
             "seq": 401,

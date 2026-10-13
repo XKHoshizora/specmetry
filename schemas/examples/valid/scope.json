@@ -9,5 +9,6 @@
     "pending_items_excluded": 7,
     "missing_goals_reviewed": true
   },
+  "acknowledged_waivers": [],
   "note": "首期交付：登录、订单隔离、订单列表"
 }

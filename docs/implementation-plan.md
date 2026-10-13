@@ -1,6 +1,6 @@
 # Specmetry MVP 实施计划
 
-> 状态：Draft v0.3 · 2026-10-13（含 codex-review-002 的处理）
+> 状态：Draft v0.3 · 2026-10-14（含 codex-review-002 的处理；M1 开工准备见 [review-resolution.md §13](review-resolution.md#13-m1-开工准备产品决策与设计收尾2026-10-14)）
 > 依据：[mvp.md](mvp.md)（范围）、[data-model.md](data-model.md)（模型与推导）、[`schemas/`](../schemas/)（契约）、[acceptance-criteria.md](acceptance-criteria.md)（验收）、[review-resolution.md](review-resolution.md)（审查处理）。
 > 本计划只排顺序、依赖和退出条件，不估工期。
 
@@ -19,7 +19,7 @@
 |---|---|---|---|
 | G0 技术决策 | 确认 TD-02（数据目录）、TD-04（SQLite 驱动；需要先做一个 spike，验证 `VACUUM INTO` 和 WAL 检查点）、TD-10（CLI 框架）、TD-16（迁移策略）、TD-22（Windows ACL 授权对象） | M0 | **已满足**（2026-10-13；spike 通过；TD-22 选择当前用户 + SYSTEM） |
 | G1 隐私契约 | 确认 PD-20（C1 允许的内容） | M0 中的存储部分 | **已满足**（2026-10-13；附加的采集策略与用户控制见 architecture §10.7） |
-| G2 交付模型 | 确认 PD-16（沿用，仅限隔离级证据）、PD-17（例外验收）、PD-19（交付目标形态）、PD-21（范围粒度）；确认 PD-03、PD-04、PD-12 的建议默认 | M1（因为它们会冻结 `decision`、`scope` 和 `proposal` 的契约） | **未满足**，M1 开工前需要确认 |
+| G2 交付模型 | 确认 PD-16（沿用，仅限隔离级证据）、PD-17（例外验收）、PD-19（交付目标形态）、PD-21（范围粒度）；确认 PD-03、PD-04、PD-12 的建议默认；同时确认截止在 M1 的 PD-07、PD-13、PD-14、PD-24，以及技术决策 TD-01、TD-05、TD-14、TD-18、TD-20、TD-21 | M1（冻结 `proposal`、`review`、`scope` 的契约和 M1 读取模型；`decision` 契约在 G2b 冻结，这里只确认它的语义前提 PD-03、PD-16、PD-17） | **部分满足**（2026-10-14）：PD-03、PD-04（方案 A）、PD-07、PD-12、PD-13、PD-14、PD-16、PD-19 已确认；PD-17、PD-21 有条件批准，补充设计待最终确认；PD-24 待确认；TD-01、TD-05、TD-14、TD-18 原则批准；TD-20、TD-21 待确认 |
 | G2b 证据等级 | 确认 PD-22（MVP 只提供观测级证据，交付判定标为观测级，人验收时确认风险）；codex 对 B1、B2 的复审通过 | M2（Check Runner 与人工决定的契约在此冻结） | **已满足**（PD-22 已确认；codex-review-003 结论为 GO） |
 | G3 许可证 | PD-10 | 接受外部贡献之前（不阻塞内部编码） | 未满足 |
 
@@ -31,8 +31,8 @@
 |---|---|---|---|
 | Windows ACL | 授权对象（当前用户；是否加入 SYSTEM）、实现方式、`doctor` 的检测方法 | M0 开工前 | 审查 #12、TD-22 |
 | SQLite 驱动 spike | 验证 `VACUUM INTO`、`wal_checkpoint(TRUNCATE)`、`BEGIN EXCLUSIVE`、触发器 | M0 开工前 | TD-04 |
-| 密钥规则集 | 内置规则清单、正反样本、配置扩展方式 | M1 开工前 | TD-21 |
-| 人类读取模型的 schema | `proposal show`（含三方对比和 `item_id`）、`baseline show/history`、`source list` 的 `--json` 输出 | M1 开工前 | 第二轮自检 #5 |
+| 密钥规则集 | 内置规则清单、正反样本、配置扩展方式 | M1 开工前 | TD-21；**已细化**：architecture §10.8，待确认 |
+| 人类读取模型的 schema | `proposal show`（含三方对比和 `item_id`）、`baseline show/history`、`source list` 的 `--json` 输出 | M1 开工前 | 第二轮自检 #5；**已补齐**（连同 M1 的其他读取模型和 Agent 结果输出，data-model §8），待确认 |
 | `doctor --json` 的 schema | 版本、路径、权限、Hook 与 Skill、spool、兼容版本 | M3 开工前 | 第二轮自检 #5 |
 | 隔离执行器的后端 | TD-24：物化方式、只读强制机制、写入探测、执行后比对、子模块和 LFS | M7 开工前（MVP 之后） | codex-002 B1 |
 | Windows 上执行检查的 shell | 默认 shell 的探测顺序；`shell` 字段的取值映射 | M2 开工前 | TD-06 |
@@ -95,18 +95,19 @@ flowchart LR
 
 | 工作包 | 内容 |
 |---|---|
-| WP1.1 | 项目与 worktree 的解析和登记（git 公共目录）、marker、`init`（输出 `init.v1`，包括 `init_progress` 和 `baseline_version`）、阶段检测、候选来源、默认交付目标 |
-| WP1.2 | 通道识别：TTY、已知的 Agent 环境变量、交互式确认组件 |
-| WP1.3 | 密钥规则与自由文本校验（拒绝写入） |
-| WP1.4 | 来源：`add` / `list` / `remove`（含 `--erase-excerpts`）/ `ack`，哈希，来源集合哈希，变化检测；项目设置 `excerpt_storage`（architecture §10.7） |
-| WP1.5 | 提案：schema 校验、版本前置条件、引用片段校验、代码引用、编号分配（AC 按需求的作用域分配） |
-| WP1.6 | 审核：逐条决定、冲突检测与三方对比、版本与变更记录、级联、父需求修订与 AC 后续处理、`reaffirm`、`propose --apply` |
-| WP1.7 | 待澄清问题（只能由人回答） |
-| WP1.8 | `target set`、`scope confirm`（独立提交，或附带在审核中）、声明校验 |
+| WP1.0 | M1 夹具：`fx-docs-only`（含录制的 `proposal.json`）、`fx-in-dev` 的文件与分支脚本、`fx-incomplete`（acceptance-criteria §1.1；原属 WP2.9，提前到 M1，因为 INIT-03、INIT-04、BL-01 需要它们） |
+| WP1.1 | 项目与 worktree 的解析和登记（git 公共目录）、marker、`init`（输出 `init.v1`，包括 `init_progress` 和 `baseline_version`）、阶段识别与候选来源（architecture §6.1.1）、默认交付目标 |
+| WP1.2 | 通道识别：TTY、已知的 Agent 环境变量、交互式确认组件（architecture §5.1） |
+| WP1.3 | 密钥规则与字符串扫描（拒绝写入；architecture §10.8）；`config.toml` 的 `[secrets]` 追加规则 |
+| WP1.4 | 来源：`add` / `list` / `remove`（含 `--erase-excerpts`，M1 只有 `hash_only` 引用）/ `ack`，哈希，来源集合哈希，变化检测；`excerpt_storage` 默认 `hash_only`（PD-24）；输出 `source-add.v1`、`source-list.v1`。`full` 模式和擦除后的整理在 WP2.11 |
+| WP1.5 | 提案：schema 校验、版本前置条件、引用片段校验、代码引用、编号分配（AC 按需求的作用域分配）；输出 `proposal-receipt.v1` |
+| WP1.6 | 审核：逐条决定（接受 `update` 条目必须选择 `change_class`，V-R01）、冲突检测与三方对比、版本与变更记录、级联、父需求修订与 AC 后续处理、`reaffirm`、`propose --apply`；输出 `proposal-list.v1`、`proposal-show.v1`、`baseline-show.v1`、`baseline-history.v1` |
+| WP1.7 | 待澄清问题（只能由人回答或驳回）；输出 `question-list.v1` |
+| WP1.8 | `target set`、`scope confirm`（独立提交，或附带在审核中）、声明校验、已有豁免的确认（V-T01）；输出 `target-scope.v1` |
 
 **建表约束**（codex-review-004 N1）：见 [data-model.md §1.1](data-model.md#11-建表约束m1-起)；由 schema 不变量测试强制。
 
-**退出条件（P0）**：acceptance-criteria 中标注 M1 的全部 P0 项，以及 CX-14、CX-17（CLI 部分）。标注为"M1 / M2"的项，在 M1 中只验证写入侧（退出码、写入的数据、`init --json` 的输出），推导侧（差距、交付状态）在 M2 中验证。
+**退出条件（P0）**：acceptance-criteria 中标注 M1 的全部 P0 项（包括 CH-01、CH-02，以及 SRC-08、TGT-10、WT-01 的 M1 部分），以及 CX-14、CX-17（CLI 部分）。标注为"M1 / M2"的项，在 M1 中只验证写入侧（退出码、写入的数据、`init --json` 的输出），推导侧（差距、交付状态）在 M2 中验证。
 **可选（P1）**：MVP-INIT-08、INIT-10、INV-05。
 
 ### M2 事实、检查执行与交付推导
@@ -124,9 +125,11 @@ flowchart LR
 | WP2.7 | `status --json`（`status.v1`）、`gaps`、人类可读输出、`--diff-since <seq>` |
 | WP2.8 | `purge` 与墓碑生效；（P1）`backup create`、`backup restore` |
 | WP2.10 | 数据库恢复命令 `specmetry db recover`（PD-23，见 §8.1）；**必须在 M4 自测开始前完成**。需求与验收项在 M2 开工前补齐，并先确认 §8.1 表中第 1 ~ 4 项的调整 |
-| WP2.9 | 夹具与 oracle：`fx-docs-only`、`fx-in-dev`（含 feature 分支和 worktree 脚本）、`fx-incomplete`、`fx-scale`；完整的 CX 测试套件 |
+| WP2.9 | 夹具与 oracle：在 WP1.0 的基础上补齐 `fx-in-dev` 的失败测试和录制的 Claim，加上 `fx-scale` 和 oracle；完整的 CX 测试套件 |
+| WP2.11 | 片段原文的保存与擦除：`project set excerpt-storage`（仅限人）、`full` 模式；`source remove --erase-excerpts` 之后的整理（`wal_checkpoint(TRUNCATE)` 与 `VACUUM`，读取 checkpoint 的结果，与 `purge` 共用整理步骤和 `.compaction-pending`）。**依赖 N1 的修复**，与 WP2.8 一起完成 |
 
 **退出条件（P0）**：标注 M2 的全部 P0 项（包括 M1 / M2 项的推导侧；INIT-07、INIT-09、BL-18、WT-02 ~ 05、INV-01 ~ 04、CLM、EV（含 EV-12、EV-13）、ACC（ACC-03 除外，含 ACC-10、ACC-11）、ST（ST-06 除外）、PRV-03、PLT-05、COL-12），以及 **CX-01 ~ CX-22、CX-24 的检查部分、CX-25 ~ CX-28 的 MVP 部分**（CX-08 的 UI 部分和 CX-23 除外）。
+SRC-08、TGT-10 的 M2 部分，以及 PRV-10，也在本里程碑验收。
 **可选（P1）**：INV-06、STO-05。
 **PD-23**：`db recover`（WP2.10）在 M2 完成；它的验收项补齐后加入本里程碑的退出条件。
 **里程碑评审**：M2 结束时，用 CX 结果和 E2E-1、E2E-2 的 CLI 版本做一次设计复核，确认推导规则在真实夹具上没有产生意外结论，然后再进入 M4 和 M5。
