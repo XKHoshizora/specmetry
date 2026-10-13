@@ -55,8 +55,9 @@ func TestLaterCandidateIsCheckedAfterAnExemptOne(t *testing.T) {
 	}
 }
 
-// Only a value that is entirely an environment reference is exempt
-// (architecture §10.8).
+// Only a value that is entirely one of the four environment reference forms
+// is exempt (architecture §10.8). A command substitution is not one of
+// them (codex-review-010 B1; see regression_test.go).
 func TestEnvironmentReferenceForms(t *testing.T) {
 	s := scanner(t)
 	for _, v := range []string{
@@ -64,7 +65,6 @@ func TestEnvironmentReferenceForms(t *testing.T) {
 		"password=${DB_PASSWORD}",
 		"password=%DB_PASSWORD%",
 		"password=$env:DB_PASSWORD",
-		"password=$(vault read -field=password secret/db)",
 		"postgres://app:%DB_PASSWORD%@db/app",
 	} {
 		if got, ok := s.Match(v); ok {

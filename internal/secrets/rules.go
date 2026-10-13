@@ -56,9 +56,11 @@ var builtin = []rule{
 	},
 }
 
-// envReference matches a value that is entirely an environment variable
-// reference: $NAME, ${NAME}, %NAME%, $env:NAME, or a $( command substitution.
-var envReference = regexp.MustCompile(`^(?:\$[A-Za-z_][A-Za-z0-9_]*|\$\{[A-Za-z_][A-Za-z0-9_]*\}|%[A-Za-z_][A-Za-z0-9_]*%|\$(?i:env):[A-Za-z_][A-Za-z0-9_]*|\$\(.*)$`)
+// envReference matches a value that is entirely one environment variable
+// reference: $NAME, ${NAME}, %NAME% or $env:NAME. A command substitution
+// such as $(...) is not a reference: it and any literal next to it are
+// scanned like other text (codex-review-010 B1).
+var envReference = regexp.MustCompile(`^(?:\$[A-Za-z_][A-Za-z0-9_]*|\$\{[A-Za-z_][A-Za-z0-9_]*\}|%[A-Za-z_][A-Za-z0-9_]*%|\$(?i:env):[A-Za-z_][A-Za-z0-9_]*)$`)
 
 func isEnvReference(v string) bool { return envReference.MatchString(v) }
 
@@ -74,12 +76,16 @@ func isPlaceholder(v string) bool {
 func hasLetter(v string) bool { return strings.IndexFunc(v, unicode.IsLetter) >= 0 }
 func hasDigit(v string) bool  { return strings.IndexFunc(v, unicode.IsDigit) >= 0 }
 
-// hit reports whether r has a hit in v. The condition is applied to each
-// match on its own, so an exempt match (an environment reference, a
-// placeholder) never hides a later one in the same text.
+// hit reports whether r has a hit in v. A rule without a condition hits on
+// any match. Otherwise the condition is applied to each match on its own,
+// so an exempt match (an environment reference, a placeholder) never hides
+// a later one in the same text.
 func (r rule) hit(v string) bool {
+	if r.accept == nil {
+		return r.re.MatchString(v)
+	}
 	for _, g := range r.re.FindAllStringSubmatch(v, -1) {
-		if r.accept == nil || r.accept(g) {
+		if r.accept(g) {
 			return true
 		}
 	}
