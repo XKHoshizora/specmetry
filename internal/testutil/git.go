@@ -23,7 +23,13 @@ func NewGitRepo(t testing.TB) *GitRepo {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git is not installed")
 	}
-	root := t.TempDir()
+	// git prints canonical paths. Resolve the temp directory the same way
+	// (macOS: /var -> /private/var; Windows runners: 8.3 short names such
+	// as RUNNER~1) so Dir compares equal to git's output.
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	gitHome := filepath.Join(root, "git-home")
 	if err := os.MkdirAll(gitHome, 0o700); err != nil {
 		t.Fatal(err)
