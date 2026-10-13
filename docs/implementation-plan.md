@@ -87,7 +87,7 @@ flowchart LR
 
 **退出条件（P0）**：MVP-PLT-01、MVP-PRV-05、MVP-PRV-06、MVP-STO-01 ~ 04、MVP-STO-06、MVP-STO-07（后两项由 codex-review-004 增补）。
 **交付物**：可以运行的 `specmetry version`、`specmetry doctor`；空库的迁移 v1；CI 通过。
-**状态（2026-10-14）**：已实现。代码审查经过五轮（codex-review-004 ~ 008），最终结论 **GO**，BLOCKER 为 0（[review-resolution.md §11](review-resolution.md#11-m0-代码审查结论codex-review-008)）。**M0 完整验收尚未通过**：待 GitHub Actions 三平台 CI（MVP-PLT-01）、macOS 实际运行与 Linux race detector 的结果。本地已验证：Windows 原生；Linux 通过 WSL 运行交叉编译的测试，跨用户测试以 root 运行。N1 部分修复，最晚在 M2 的 `purge` 验收前完成。
+**状态（2026-10-14）**：**已验收**（产品负责人，2026-10-14）。代码审查经过五轮（codex-review-004 ~ 008），最终结论 GO，BLOCKER 为 0；GitHub Actions 第二轮 CI 8/8 通过，Windows、Linux（race detector，以 root 运行的跨用户测试）、macOS（含 ACL 检测）均在实际平台上运行；九项退出条件全部满足。记录见 [review-resolution.md §12](review-resolution.md#12-m0-验收github-actions-ci-与产品负责人决定)。**后续事项（不属于 M0 退出条件，尚未完成）**：Windows 真实双用户验证未执行；N1 部分修复，最晚在 M2 的 `purge` 验收前完成；`specmetry db recover`（PD-23）在 M2（WP2.10）实现，最晚在 M4 自测前完成。
 
 ### M1 基准、来源、交付目标与范围
 
@@ -200,7 +200,7 @@ flowchart LR
 
 ## 6. 审查问题的关闭计划
 
-| 审查问题 | 设计状态（codex-review-003 GO 后全部冻结） | 实现验证（里程碑；目前均未开始） | 验证依据 |
+| 审查问题 | 设计状态（codex-review-003 GO 后全部冻结） | 实现验证（里程碑；M0 部分已验证，其余未开始） | 验证依据 |
 |---|---|---|---|
 | #1 隐私 | 本轮 | M2（检查）、M3（Hook）、M6（综合） | EV-05、EV-11、COL-05、PRV-02 |
 | #2 交付代码绑定 | 主体：v0.2；剩余部分见 B1 | M2 | CX-01、CX-02、CX-19 ~ 22 |
@@ -208,14 +208,14 @@ flowchart LR
 | #3 worktree | 本轮 | M1（登记）、M2（执行与扫描） | WT-*、CX-03、CX-04 |
 | #4 交付范围 | 本轮 | M1（确认）、M2（推导） | TGT-*、CX-05、CX-06、CX-18 |
 | #5 父需求依赖 | 本轮 | M1（后续处理）、M2（推导） | BL-18 ~ 20、CX-07 |
-| #6 前置条件与 `seq` | 主体：v0.2；剩余部分见 B2 | M0（`seq`）、M1（写入侧）、M2（Claim、决定、检查） | STO-04、BL-03、BL-10、CX-08、CX-09、CX-13 ~ 15 |
+| #6 前置条件与 `seq` | 主体：v0.2；剩余部分见 B2 | M0（`seq`，已验证）、M1（写入侧）、M2（Claim、决定、检查） | STO-04、BL-03、BL-10、CX-08、CX-09、CX-13 ~ 15 |
 | codex-002 B2 旧页面覆盖拒收 | 已冻结（codex-review-003 GO；`seen_decision_id`） | M2（CLI）、M5（API 与界面） | ACC-11、CX-08 (e)(f) |
 | #7 检查语义 | 本轮 | M2 | ACC-04 ~ 06、CX-19 ~ 21 |
 | #8 来源确认 | 本轮 | M1 | SRC-03、SRC-04、CX-17 |
 | #9 盘点 | 本轮 | M2（模型）、M4（Skill） | INV-*、CX-10、SK-06 |
 | #10 Hook | 模型：本轮；细节：M3 开工前 | M3 | COL-*、ACC-03 |
 | #11 跨 Agent | 措辞：本轮；核实：M4 开工前 | M3、M4、M5 | SK-03、UI-14、CX-23 |
-| #12 数据生命周期 | 模型：本轮；ACL：M0 开工前；恢复：M2 开工前 | M0、M2 | PRV-03、05、06、STO-*、CX-11 |
+| #12 数据生命周期 | 模型：本轮；ACL：M0 开工前；恢复：M2 开工前 | M0（已验证：PRV-05、PRV-06、STO-01 ~ 04、STO-06、STO-07）、M2 | PRV-03、05、06、STO-*、CX-11 |
 | 中-1 引用归属 | 本轮 | M1 | BL-04、BL-22 |
 | 中-2 退出条件 | 本轮 | — | 本计划的结构 |
 | 中-3 离线边界 | 本轮 | M6 | PRV-01 |

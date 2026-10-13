@@ -9,6 +9,19 @@
 web/node_modules/
 web/dist/
 
+# Local databases. Specmetry's data directory (specmetry.db and its -wal,
+# -shm and -journal files, backups, lock and marker files) lives outside
+# the checkout by default; these rules catch one that SPECMETRY_HOME points
+# inside it, and any other SQLite file.
+*.db
+*.db-*
+*.sqlite*
+.migrate.lock
+.compaction-pending
+# Test fixtures under testdata/ are tracked on purpose, even when they are
+# database files.
+!**/testdata/**
+
 # Editors and OS
 .idea/
 .vscode/

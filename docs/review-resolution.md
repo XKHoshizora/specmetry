@@ -1,6 +1,6 @@
 # Codex 审查意见处理记录
 
-> 状态：2026-10-13 · 对应设计版本 Draft v0.3
+> 状态：2026-10-14 · 对应设计版本 Draft v0.3
 > 原始审查：[reviews/codex-review-001.md](reviews/codex-review-001.md)（第一轮，§1 ~ §4）、[reviews/codex-review-002.md](reviews/codex-review-002.md)（冻结审查，§5）、[reviews/codex-review-003.md](reviews/codex-review-003.md)（最终设计审查，§6）、[reviews/codex-review-004.md](reviews/codex-review-004.md)（M0 代码审查，§7）、[reviews/codex-review-005.md](reviews/codex-review-005.md)（M0 第二次代码审查，§8）、[reviews/codex-review-006.md](reviews/codex-review-006.md)（M0 第三次代码审查，§9）、[reviews/codex-review-007.md](reviews/codex-review-007.md)（M0 最终定向复审，§10）、[reviews/codex-review-008.md](reviews/codex-review-008.md)（M0 代码审查 GO，§11）
 > 处理原则：逐条分析，不默认全盘接受；只要会改变核心模型或交换协议，就在本轮设计清楚；只涉及实现细节的，安排在对应模块开工前关闭。不用"开发时再说"来掩盖当前的数据模型矛盾。
 
@@ -14,7 +14,7 @@
 | 实现状态 | 未开始 / 进行中 | — |
 | | **已验证** | 对应的验收项和 CX 反例已经在实现中通过 |
 
-**当前总体状态**（2026-10-13 更新）：codex-review-003 结论为 **GO**，BLOCKER 为 0。本文所有条目的设计状态均为**已冻结**（包括 codex-review-003 要求的两处同步修正，见 §6）；冻结后的修改必须走 implementation-plan §1 的变更流程。**没有任何条目处于"已验证"**：验证需要等到对应里程碑实现完成，并通过验收项和 CX 反例。M0 的代码审查经过五轮（codex-review-004 ~ 008），第五轮（codex-review-008）结论为 **GO**，BLOCKER 为 0（§11）。代码审查 GO 不等于 M0 完整验收通过：三平台 CI 等平台验证见 implementation-plan 的 M0 状态。
+**当前总体状态**（2026-10-14 更新）：codex-review-003 结论为 **GO**，BLOCKER 为 0。本文所有条目的设计状态均为**已冻结**（包括 codex-review-003 要求的两处同步修正，见 §6）；冻结后的修改必须走 implementation-plan §1 的变更流程。**没有任何条目整体处于"已验证"**：验证需要等到对应里程碑实现完成，并通过验收项和 CX 反例；目前只有 #6、#12 中属于 M0 的验收项已验证（§12）。M0 的代码审查经过五轮（codex-review-004 ~ 008），第五轮（codex-review-008）结论为 **GO**，BLOCKER 为 0（§11）；GitHub Actions 三平台 CI 通过后，产品负责人于 2026-10-14 正式验收 M0（§12）。
 
 ## 1. 总览（codex-review-001）
 
@@ -25,13 +25,13 @@
 | 3 | worktree 上下文没有隔离 | **采纳** | 已冻结 | 未开始；M1、M2 | WT-01 ~ 05、CX-03、CX-04 |
 | 4 | 部分确认或空范围也可能 `ready` | **采纳** | 已冻结 | 未开始；M1、M2 | TGT-01 ~ 09、CX-05、CX-06、CX-18 |
 | 5 | 需求语义变化可以绕过 AC 失效 | **采纳** | 已冻结 | 未开始；M1、M2 | BL-18 ~ 20、CX-07 |
-| 6 | 缺少读取版本前置条件；时间戳排序有歧义 | **采纳**（范围扩大到所有关键写入） | v0.2 解决主体；**剩余缺口 B2 已在 v0.3 解决**，待冻结复审 | 未开始；M0、M1、M2、M5 | STO-04、BL-03、BL-10、TGT-05、ACC-11、CX-08、CX-09、CX-13 ~ 15 |
+| 6 | 缺少读取版本前置条件；时间戳排序有歧义 | **采纳**（范围扩大到所有关键写入） | v0.2 解决主体；**剩余缺口 B2 已在 v0.3 解决**，待冻结复审 | M0 部分已验证（STO-04，§12）；M1、M2、M5 未开始 | STO-04、BL-03、BL-10、TGT-05、ACC-11、CX-08、CX-09、CX-13 ~ 15 |
 | 7 | 检查成功的含义与验收前置条件不明确 | **部分采纳** | 已冻结 | 未开始；M2 | ACC-04 ~ 06、ACC-09、ACC-10、CX-19 ~ 21 |
 | 8 | Agent 可以自行消除来源告警 | **采纳** | 已冻结 | 未开始；M1 | SRC-03、SRC-04、CX-17 |
 | 9 | "盘点完成"的定义过弱 | **采纳**（不作为交付前置条件） | 已冻结 | 未开始；M2、M4 | INV-01 ~ 04、CX-10、COL-11、SK-06 |
 | 10 | Hook 规格与运行时有缺口 | **采纳**（事件细节在 M3 前核实） | 模型已解决；细节在 M3 开工前确定 | 未开始；M3 | COL-01 ~ 15、ACC-03 |
 | 11 | 跨 Agent 兼容性 | **部分采纳** | 措辞与矩阵结构已解决；其他 Agent 的核实在 M4 开工前完成 | 未开始；M3、M4、M5 | SK-03、UI-14、CX-23、COL-15 |
-| 12 | 本地数据生命周期没有闭合 | **采纳**（不承诺物理擦除） | 模型已解决；ACL 细节在 M0 开工前、恢复命令在 M2 开工前确定 | 未开始；M0、M2 | PRV-03、PRV-05、PRV-06、STO-01 ~ 05、CX-11 |
+| 12 | 本地数据生命周期没有闭合 | **采纳**（不承诺物理擦除） | 模型已解决；ACL 细节在 M0 开工前、恢复命令在 M2 开工前确定 | M0 部分已验证（PRV-05、PRV-06、STO-01 ~ 04，§12）；M2 未开始 | PRV-03、PRV-05、PRV-06、STO-01 ~ 05、CX-11 |
 | 中-1 | 引用的历史归属 | **采纳** | 已冻结 | 未开始；M1、M5 | BL-04、BL-22、UI-06 |
 | 中-2 | 可选项与里程碑退出条件矛盾 | **采纳** | 已冻结 | — | 结构调整 |
 | 中-3 | 离线承诺没有区分边界 | **采纳** | 已冻结 | 未开始；M6 | PRV-01 |
@@ -729,3 +729,57 @@ codex-review-002 列出的 ACCEPTED RISK 全部接受，已经分别写在对应
 - N1 仍在 M2 的 `purge` 验收前处理。
 
 **代码审查 GO 不等于 M0 完整验收通过**。仍需完成：GitHub Actions 三平台 CI（MVP-PLT-01）、macOS 实际运行、Linux race detector；Windows 上因缺少符号链接权限而跳过的两项测试不能算作通过；Windows 真实双用户测试尚未执行。
+
+## 12. M0 验收（GitHub Actions CI 与产品负责人决定）
+
+**结论**：产品负责人于 2026-10-14 正式验收 M0。依据：codex-review-008 结论为 GO（§11）；GitHub Actions 第二轮 CI 8/8 通过；Windows、Linux、macOS 都在实际平台上运行测试，没有用交叉编译代替；M0 的九项退出条件（MVP-PLT-01、PRV-05、PRV-06、STO-01 ~ 04、STO-06、STO-07）全部满足。
+
+### CI 运行记录
+
+PR：<https://github.com/XKHoshizora/specmetry/pull/1>（`feat/m0-foundation` → `master`）。
+
+| 轮次 | 提交 | 结果 | 说明 |
+|---|---|---|---|
+| [run 38425973237](https://github.com/XKHoshizora/specmetry/actions/runs/38425973237) | `f730ec3` | 6/8 | macOS、Windows 的 Go 测试在 `TestGitRepoCommitsAndWorktrees` 失败；其余各包（包括存储、权限、ACL）通过 |
+| [run 38427328911](https://github.com/XKHoshizora/specmetry/actions/runs/38427328911) | `85ce2ea`（CI 测试的是 PR 合并提交 `acd42a4`，代码与 `85ce2ea` 相同） | **8/8** | — |
+
+**第一轮失败的原因与修复**：失败在测试辅助代码，与存储层和业务代码无关。`NewGitRepo` 直接使用 `t.TempDir()`：它在 macOS 上是 `/var/...`（指向 `/private/var` 的符号链接），在 Windows runner 上含 8.3 短名（`RUNNER~1`）；git 输出规范路径，两者比较不相等。修复前在本地复现了两种情形（Windows 使用短名 TEMP，Linux 使用经过符号链接的 TMPDIR），修复后通过。
+
+- `8ce753a`：`NewGitRepo` 用 `filepath.EvalSymlinks` 解析临时目录。只改测试辅助代码。
+- `85ce2ea`：CI 的 Go 测试加 `-v`，日志列出每项测试，能看出各平台跳过了哪些测试。
+
+这两个提交在 codex-review-008 的审查范围（截至 `d212524`）之外，都不改动生产代码。
+
+### 各平台的实际执行情况（第二轮）
+
+| 平台 | 执行与结果 | 跳过 |
+|---|---|---|
+| Linux（ubuntu-latest，linux/amd64） | 开启 race detector：95 项顶层测试通过；另一步以 `sudo` 运行 4 项真实跨用户测试，全部通过 | 主步骤中的 4 项跨用户测试（不是 root 时按设计跳过，在 `sudo` 步骤中运行） |
+| Windows（windows-latest，windows/amd64） | 96 项通过，包括 DACL、上级目录、联接测试和两项符号链接测试 | 0 |
+| macOS（macos-latest，darwin/arm64） | 96 项通过，包括 `TestDarwinCheckReportsACL` 和 Unix 权限、上级目录测试 | 0 |
+
+三个平台共有的 88 项测试都实际运行；平台之间只差平台专属测试。其余任务全部通过：三平台带前端构建、`go test ./web/` 和冒烟测试（`version` 报告 schema v1、内嵌前端；`doctor` 之后数据目录没有被创建）；前端的格式、lint、类型检查、测试、构建；`go mod tidy`、`go vet`、Markdown 链接检查、golangci-lint v2.14.0。
+
+§11 提到的"Windows 上因缺少符号链接权限而跳过的两项测试"：CI 的 Windows runner 有创建符号链接的权限，这两项在第二轮中实际运行并通过。
+
+### 退出条件
+
+| 验收项 | 结果 | 主要证据 |
+|---|---|---|
+| MVP-PLT-01 | 通过 | 第二轮 8/8 |
+| MVP-PRV-05 | 通过 | Linux、macOS 的权限与上级目录测试；macOS ACL 检测；Linux 以 root 运行的真实跨 UID 攻击测试 |
+| MVP-PRV-06 | 通过 | Windows 的 DACL、上级目录、联接、符号链接测试 |
+| MVP-STO-01 ~ 04 | 通过 | 三平台；Linux 开启 race detector |
+| MVP-STO-06 | 通过 | 三平台 |
+| MVP-STO-07 | 通过 | 三平台，包括 codex-review-007 的两项回归测试 |
+
+据此，§1 中 #6、#12 属于 M0 的验收项为**已验证**；这两项中属于其他里程碑的部分仍未开始。
+
+### 证据的边界与后续事项（尚未完成，不属于 M0 退出条件）
+
+- **Windows 真实双用户验证**：未执行，不标为已验证。MVP-PRV-06 没有要求跨用户攻击测试（真实跨 UID 测试只在 MVP-PRV-05 中要求在 Linux 上做）；Windows 上的测试由当前用户给其他账户授权来构造场景。
+- **race detector**：只在 Linux 上运行。CI 日志不打印展开后的命令，依据是 CI 配置（Linux 上加 `-race`）和耗时（存储包在 Linux 上 38 秒，其他平台 7 ~ 10 秒）；日志中没有数据竞争报告。
+- **macOS**：只覆盖 arm64，没有 Intel；没有跨用户测试（只在 Linux 上做）。
+- **N1**：部分修复，最晚在 M2 的 `purge` 验收前完成。
+- **PD-23 `specmetry db recover`**：未实现，在 M2（WP2.10）实现，最晚在 M4 自测前完成。在此之前，无法确认版本的数据库只能拒绝（退出码 6），`doctor` 报告版本未知。
+- §11 中已接受的风险，以及方案 A 的文件副作用边界，保持不变。
