@@ -7,11 +7,13 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/XKHoshizora/specmetry/internal/testutil/testdir"
 )
 
 // MVP-PRV-05: on Unix the data directory is 0700 and its files are 0600.
 func TestUnixModes(t *testing.T) {
-	d := Dir{Path: filepath.Join(t.TempDir(), "home")}
+	d := Dir{Path: filepath.Join(testdir.New(t), "home")}
 	if err := d.Ensure(); err != nil {
 		t.Fatal(err)
 	}
@@ -37,7 +39,7 @@ func TestUnixModes(t *testing.T) {
 }
 
 func TestUnixCheckReportsLoosenedPermissions(t *testing.T) {
-	d := Dir{Path: filepath.Join(t.TempDir(), "home")}
+	d := Dir{Path: filepath.Join(testdir.New(t), "home")}
 	if err := d.Ensure(); err != nil {
 		t.Fatal(err)
 	}
@@ -79,11 +81,11 @@ func loosen(t *testing.T, path string) {
 
 // codex-review-004 B1: a data directory that is a symbolic link is refused.
 func TestUnixCheckRefusesSymlinkedRoot(t *testing.T) {
-	target := Dir{Path: filepath.Join(t.TempDir(), "real")}
+	target := Dir{Path: filepath.Join(testdir.New(t), "real")}
 	if err := target.Ensure(); err != nil {
 		t.Fatal(err)
 	}
-	link := filepath.Join(t.TempDir(), "link")
+	link := filepath.Join(testdir.New(t), "link")
 	if err := os.Symlink(target.Path, link); err != nil {
 		t.Fatal(err)
 	}

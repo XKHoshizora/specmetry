@@ -63,6 +63,10 @@ func allowedSIDs() (user, system *windows.SID, err error) {
 
 const systemNote = " and SYSTEM"
 
+// fileDeleteChild lets a holder delete or rename any entry of a directory,
+// whatever that entry's own DACL says (winnt.h FILE_DELETE_CHILD).
+const fileDeleteChild windows.ACCESS_MASK = 0x40
+
 // checkPermissions requires, for the data directory and everything in it:
 //   - allow entries only for the current user and SYSTEM (deny entries only
 //     restrict access and are accepted);

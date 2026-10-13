@@ -34,7 +34,9 @@ type check struct {
 
 // newDoctorCmd is the M0 doctor framework: read-only checks of the local
 // environment. It never creates, migrates, recovers or modifies anything:
-// the database is read from a snapshot that leaves its files untouched. Hook,
+// the database version is read through a read-only SQLite connection only in
+// file states where that changes nothing, and is otherwise reported as
+// unknown (sqlite.Inspect). Hook,
 // Skill and spool checks join in M3; `doctor --json` needs a schema first
 // (implementation-plan §3).
 func newDoctorCmd() *cobra.Command {
@@ -122,7 +124,7 @@ func databaseChecks(cmd *cobra.Command, dir datadir.Dir) []check {
 	case !in.Exists:
 		out = append(out, check{statusInfo, "database", "not created yet"})
 	case in.Limitation != "":
-		out = append(out, check{statusWarn, "database", "cannot be inspected without modifying it: " + in.Limitation})
+		out = append(out, check{statusWarn, "database", "version unknown: " + in.Limitation})
 	case in.SchemaVersion > in.SupportedVersion:
 		out = append(out, check{statusFail, "database", fmt.Sprintf("schema v%d is newer than this binary supports (v%d); upgrade specmetry", in.SchemaVersion, in.SupportedVersion)})
 	case compat != nil:
@@ -132,8 +134,8 @@ func databaseChecks(cmd *cobra.Command, dir datadir.Dir) []check {
 	default:
 		out = append(out, check{statusOK, "database", fmt.Sprintf("schema v%d", in.SchemaVersion)})
 	}
-	if in.MigrationLocked {
-		out = append(out, check{statusFail, "migration lock", dir.Join(datadir.MigrateLockFile) + " exists; delete it if no specmetry process is running"})
+	if in.Locked {
+		out = append(out, check{statusInfo, "database lock", "another specmetry process is opening or migrating the database right now"})
 	}
 	return out
 }

@@ -77,6 +77,15 @@ func (d Dir) Exists() (bool, error) {
 // anything is written. Every writer calls Ensure first; doctor's Check
 // reports the same problems but is not a substitute for it.
 func (d Dir) Ensure() error {
+	// The path must not be replaceable by other users, before anything is
+	// created on it either.
+	problems, err := checkAncestors(d.Path)
+	if err != nil {
+		return apperr.Wrap(apperr.Environment, err, "cannot check the directories on the path to the data directory")
+	}
+	if len(problems) > 0 {
+		return refusal(d, problems)
+	}
 	ok, err := d.Exists()
 	if err != nil {
 		return err
@@ -92,13 +101,17 @@ func (d Dir) Ensure() error {
 			return apperr.Wrap(apperr.Environment, err, "cannot restrict data directory permissions")
 		}
 	}
-	problems, err := Check(d)
+	problems, err = Check(d)
 	if err != nil {
 		return apperr.Wrap(apperr.Environment, err, "cannot check the permissions of the data directory")
 	}
 	if len(problems) == 0 {
 		return nil
 	}
+	return refusal(d, problems)
+}
+
+func refusal(d Dir, problems []string) error {
 	details := make([]apperr.Detail, len(problems))
 	for i, p := range problems {
 		details[i] = apperr.Detail{Problem: p}
@@ -139,23 +152,30 @@ func CreatePrivateFile(path string, exclusive bool) (*os.File, error) {
 	return f, nil
 }
 
-// Check returns human-readable permission problems for the data directory
-// and everything inside it. An empty result means the directory is only
-// accessible to the current user (and SYSTEM on Windows). Check only reads.
+// Check returns human-readable permission problems for the data directory,
+// everything inside it, and the directories on the path to it. An empty
+// result means the data directory is only accessible to the current user
+// (and SYSTEM on Windows) and that no other user can replace it or anything
+// on its path. Check only reads.
 //
 // Links are problems wherever they appear, the data directory itself
 // included: a link inside it could send writes to a location that is not
 // private, and following one would check something other than what SQLite
 // writes to.
 func Check(d Dir) ([]string, error) {
+	problems, err := checkAncestors(d.Path)
+	if err != nil {
+		return nil, err
+	}
 	fi, err := os.Lstat(d.Path)
 	if err != nil {
 		return nil, err
 	}
 	if isLink(fi.Mode()) {
-		return []string{d.Path + ": " + linkProblem}, nil
+		return append(problems, d.Path+": "+linkProblem), nil
 	}
-	return checkPermissions(d.Path)
+	own, err := checkPermissions(d.Path)
+	return append(problems, own...), err
 }
 
 const linkProblem = "is a symbolic link or junction; Specmetry does not follow links in its data directory (set " +

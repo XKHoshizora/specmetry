@@ -10,13 +10,14 @@ import (
 	"testing"
 
 	"github.com/XKHoshizora/specmetry/internal/datadir"
+	"github.com/XKHoshizora/specmetry/internal/testutil/testdir"
 )
 
 // TempHome points SPECMETRY_HOME at a fresh, not yet created directory
 // inside the test's temp dir and returns it.
 func TempHome(t testing.TB) datadir.Dir {
 	t.Helper()
-	p := filepath.Join(t.TempDir(), "specmetry-home")
+	p := filepath.Join(testdir.New(t), "specmetry-home")
 	t.Setenv(datadir.EnvHome, p)
 	return datadir.Dir{Path: p, FromEnv: true}
 }

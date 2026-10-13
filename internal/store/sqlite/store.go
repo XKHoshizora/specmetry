@@ -8,6 +8,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -16,7 +17,7 @@ import (
 	"time"
 
 	"golang.org/x/mod/semver"
-	_ "modernc.org/sqlite" // registers the "sqlite" driver
+	sqlitedrv "modernc.org/sqlite" // also registers the "sqlite" driver
 
 	"github.com/XKHoshizora/specmetry/internal/apperr"
 	"github.com/XKHoshizora/specmetry/internal/buildinfo"
@@ -30,7 +31,8 @@ type Options struct {
 	Migrations []Migration
 	// BinaryVersion overrides buildinfo.Version (tests only).
 	BinaryVersion string
-	// LockTimeout bounds the wait for another process's migration.
+	// LockTimeout bounds the wait for the open lock, which another process
+	// holds while it opens or migrates the database.
 	LockTimeout time.Duration
 	// KeepBackups is the number of pre-migration backups to keep.
 	KeepBackups int
@@ -59,13 +61,15 @@ type OpenResult struct {
 
 // Open opens (creating if necessary) the database in dir and brings it to
 // the latest schema. Order (architecture.md §11.1, §11.2):
-//  1. data directory: create it private, or verify that the existing one and
-//     everything in it is private — before anything is written;
-//  2. version guard, decided from a read-only snapshot of the files, before
-//     any connection that could change them (codex-review-004 B3);
-//  3. apply tombstones;
-//  4. if migration is needed: migration lock, VACUUM INTO backup, then all
-//     pending migrations in one BEGIN EXCLUSIVE transaction.
+//  1. data directory: create it private, or verify that the existing one,
+//     everything in it and the directories on its path are safe — before
+//     anything is written;
+//  2. take the open lock, held until Open returns;
+//  3. version guard, decided by a read-only connection that changes no file,
+//     before any connection that could;
+//  4. apply tombstones;
+//  5. if migration is needed: VACUUM INTO backup, then all pending
+//     migrations in one BEGIN EXCLUSIVE transaction.
 func Open(ctx context.Context, dir datadir.Dir, opts Options) (*DB, OpenResult, error) {
 	var res OpenResult
 	migs := opts.Migrations
@@ -95,20 +99,34 @@ func Open(ctx context.Context, dir datadir.Dir, opts Options) (*DB, OpenResult, 
 	if err := dir.Ensure(); err != nil {
 		return nil, res, err
 	}
+	// From here until the database is open and migrated, no other process
+	// can migrate it: the compatibility decision cannot go stale before the
+	// read-write connection exists (codex-review-005 B3).
+	lock, err := acquireOpenLock(ctx, dir.Join(datadir.MigrateLockFile), opts.LockTimeout)
+	if err != nil {
+		return nil, res, err
+	}
+	defer lock.release()
+
 	dbPath := dir.Join(datadir.DatabaseFile)
-	snap, err := readSnapshotMeta(ctx, dbPath)
+	// Decided by a read-only SQLite connection that changes no file, so a
+	// database this binary must not open is refused untouched (MVP-STO-02).
+	ro, err := readMetaReadOnly(ctx, dbPath, false)
 	if err != nil {
 		var u *uninspectableError
 		if errors.As(err, &u) {
 			return nil, res, apperr.Newf(apperr.Environment,
-				"cannot check whether this specmetry binary may open the database without modifying it: %s", u.reason)
+				"cannot confirm that this specmetry binary may open the database without modifying it: %s", u.reason)
 		}
 		return nil, res, apperr.Wrap(apperr.Environment, err, "cannot read the database version")
 	}
-	if snap.exists {
-		if err := guardVersion(snap.version, target, snap.minBin, binVersion); err != nil {
+	if ro.exists {
+		if err := guardVersion(ro.version, target, ro.minBin, binVersion); err != nil {
 			return nil, res, err
 		}
+	}
+	if openHook != nil {
+		openHook()
 	}
 	// Validate tombstones before anything is written, so that a bad file
 	// leaves the data directory untouched.
@@ -119,10 +137,11 @@ func Open(ctx context.Context, dir datadir.Dir, opts Options) (*DB, OpenResult, 
 	if err := precreate(dbPath); err != nil {
 		return nil, res, apperr.Wrap(apperr.Environment, err, "cannot create the database file")
 	}
-	sdb, err := sql.Open("sqlite", dsn(dbPath))
+	connector, err := sqlitedrv.NewConnector(dsn(dbPath))
 	if err != nil {
 		return nil, res, apperr.Wrap(apperr.Environment, err, "cannot open the database")
 	}
+	sdb := sql.OpenDB(persistentWAL{connector})
 	// A single connection serializes all writes from this process
 	// (architecture.md §13); SQLite locking serializes across processes.
 	sdb.SetMaxOpenConns(1)
@@ -135,8 +154,11 @@ func Open(ctx context.Context, dir datadir.Dir, opts Options) (*DB, OpenResult, 
 	if err := checkConnection(ctx, sdb); err != nil {
 		return fail(err)
 	}
-	// Checked again on the real connection: another process may have
-	// migrated the database since the snapshot was read.
+	if err := checkPersistentWAL(ctx, sdb); err != nil {
+		return fail(err)
+	}
+	// Under the lock this sees what the read-only check saw; it is repeated
+	// on the connection that will write.
 	current, minBin, err := readMeta(ctx, sdb)
 	if err != nil {
 		return fail(apperr.Wrap(apperr.Environment, err, "cannot read the database version"))
@@ -146,23 +168,6 @@ func Open(ctx context.Context, dir datadir.Dir, opts Options) (*DB, OpenResult, 
 	}
 	if res.TombstoneRowsGone, err = applyTombstones(ctx, sdb, dir, tombstones); err != nil {
 		return fail(apperr.Wrap(apperr.Environment, err, "cannot apply tombstones"))
-	}
-	res.FromVersion, res.ToVersion = current, current
-	if current == target {
-		return db, res, nil
-	}
-
-	lock, err := acquireMigrateLock(ctx, dir.Join(datadir.MigrateLockFile), opts.LockTimeout)
-	if err != nil {
-		return fail(err)
-	}
-	defer lock.release()
-	// Another process may have migrated while we waited for the lock.
-	if current, minBin, err = readMeta(ctx, sdb); err != nil {
-		return fail(apperr.Wrap(apperr.Environment, err, "cannot read the database version"))
-	}
-	if err := guardVersion(current, target, minBin, binVersion); err != nil {
-		return fail(err)
 	}
 	res.FromVersion, res.ToVersion = current, current
 	if current == target {
@@ -179,6 +184,35 @@ func Open(ctx context.Context, dir datadir.Dir, opts Options) (*DB, OpenResult, 
 	res.ToVersion = target
 	return db, res, nil
 }
+
+// persistentWAL sets SQLITE_FCNTL_PERSIST_WAL on every connection the pool
+// opens: when the last connection closes, SQLite checkpoints the WAL and
+// truncates it (journal_size_limit 0) but keeps the -wal and -shm files. A
+// closed specmetry database therefore stays in a state that a read-only
+// connection can read without creating files (readonly.go).
+type persistentWAL struct{ driver.Connector }
+
+func (c persistentWAL) Connect(ctx context.Context) (driver.Conn, error) {
+	conn, err := c.Connector.Connect(ctx)
+	if err != nil {
+		return nil, err
+	}
+	fc, ok := conn.(sqlitedrv.FileControl)
+	if !ok {
+		_ = conn.Close()
+		return nil, errors.New("the SQLite driver does not support file control")
+	}
+	if _, err := fc.FileControlPersistWAL("main", 1); err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+	return conn, nil
+}
+
+// openHook, if set, runs right after Open decided that the database is
+// compatible and before it opens a read-write connection (tests use it to
+// let another process act in between).
+var openHook func()
 
 // guardVersion refuses databases written by a newer binary (TD-16). A
 // minimum binary version that cannot be compared is refused too: the
@@ -219,6 +253,30 @@ func checkConnection(ctx context.Context, q queryer) error {
 			"the database connection has recursive_triggers off, so append-only tables would not be protected against REPLACE; refusing to write")
 	}
 	return nil
+}
+
+// checkPersistentWAL verifies that the pool's connections keep the WAL
+// files on close (persistentWAL).
+func checkPersistentWAL(ctx context.Context, sdb *sql.DB) error {
+	conn, err := sdb.Conn(ctx)
+	if err != nil {
+		return apperr.Wrap(apperr.Environment, err, "cannot open the database")
+	}
+	defer func() { _ = conn.Close() }()
+	return conn.Raw(func(dc any) error {
+		fc, ok := dc.(sqlitedrv.FileControl)
+		if !ok {
+			return apperr.New(apperr.Internal, "the SQLite driver does not support file control")
+		}
+		mode, err := fc.FileControlPersistWAL("main", -1)
+		if err != nil {
+			return apperr.Wrap(apperr.Environment, err, "cannot read the database connection settings")
+		}
+		if mode != 1 {
+			return apperr.New(apperr.Internal, "the database connection does not keep its WAL files on close")
+		}
+		return nil
+	})
 }
 
 func migrate(ctx context.Context, sdb *sql.DB, migs []Migration, current int) error {
@@ -290,6 +348,9 @@ func dsn(path string) string {
 		// REPLACE conflict resolution fires delete triggers only with
 		// recursive_triggers on (https://sqlite.org/lang_conflict.html).
 		"&_pragma=recursive_triggers(1)" +
+		// With persistentWAL, truncate the WAL to zero bytes when the last
+		// connection checkpoints it on close, so no old page images stay in it.
+		"&_pragma=journal_size_limit(0)" +
 		// BeginTx issues BEGIN IMMEDIATE: the write lock is taken before any
 		// read, so read-compare-write sequences cannot act on a stale
 		// snapshot (codex-review-003; data-model.md §7.1).

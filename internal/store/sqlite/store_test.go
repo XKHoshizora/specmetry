@@ -17,16 +17,20 @@ import (
 	"github.com/XKHoshizora/specmetry/internal/apperr"
 	"github.com/XKHoshizora/specmetry/internal/datadir"
 	"github.com/XKHoshizora/specmetry/internal/testutil"
+	"github.com/XKHoshizora/specmetry/internal/testutil/testdir"
 )
 
 func TestMain(m *testing.M) {
 	testutil.DispatchHelper(map[string]func() int{
-		"seqwriter":    seqWriterHelper,
-		"migrator":     migratorHelper,
-		"crashwriter":  crashWriterHelper,
-		"livewriter":   liveWriterHelper,
-		"spillcrash":   spillCrashHelper,
-		"restartcrash": restartCrashHelper,
+		"seqwriter":   seqWriterHelper,
+		"migrator":    migratorHelper,
+		"crashwriter": crashWriterHelper,
+		"livewriter":  liveWriterHelper,
+		"victimopen":  victimOpenHelper,
+		"attacker":    attackerHelper,
+		"uncommitted": uncommittedWriterHelper,
+		"upgrader":    upgraderHelper,
+		"lockholder":  lockHolderHelper,
 	})
 	os.Exit(m.Run())
 }
@@ -176,7 +180,7 @@ func TestOpenCreatesEmptySchemaV1(t *testing.T) {
 
 // Paths with spaces and CJK characters must work (NFR-10).
 func TestOpenPathWithSpacesAndCJK(t *testing.T) {
-	dir := datadir.Dir{Path: filepath.Join(t.TempDir(), "my data", "规格 数据")}
+	dir := datadir.Dir{Path: filepath.Join(testdir.New(t), "my data", "规格 数据")}
 	db, _ := open(t, dir, Options{})
 	if _, err := os.Stat(db.Path()); err != nil {
 		t.Fatal(err)
@@ -331,25 +335,94 @@ func migratorHelper() int {
 	return 0
 }
 
-// MVP-STO-01: while another process holds the migration lock, a process that
-// needs to migrate waits and then fails with an environment error (exit 6).
-func TestMigrationLockTimeout(t *testing.T) {
+// lockHolderHelper takes the open lock and keeps it until $LOCK_STOP exists,
+// or exits while holding it if $LOCK_CRASH is set.
+func lockHolderHelper() int {
+	dir, err := datadir.Resolve()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	if err := dir.Ensure(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	if _, err := acquireOpenLock(context.Background(), dir.Join(datadir.MigrateLockFile), time.Second); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	if os.Getenv("LOCK_CRASH") != "" {
+		os.Exit(0) // the operating system releases the lock
+	}
+	if err := os.WriteFile(os.Getenv("LOCK_READY"), nil, 0o600); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	for {
+		if _, err := os.Stat(os.Getenv("LOCK_STOP")); err == nil {
+			return 0
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// MVP-STO-01: while another process holds the open lock (it is opening or
+// migrating the database), a process that wants to open the database waits
+// and then fails with an environment error (exit 6), touching nothing.
+func TestOpenLockTimeout(t *testing.T) {
 	dir := testutil.TempHome(t)
 	db, _ := open(t, dir, Options{})
 	_ = db.Close()
-	if err := os.WriteFile(dir.Join(datadir.MigrateLockFile), []byte("pid=1\n"), 0o600); err != nil {
+	ready := filepath.Join(testdir.New(t), "ready")
+	stop := filepath.Join(testdir.New(t), "stop")
+	holder := testutil.HelperCommand(t, "lockholder", "LOCK_READY="+ready, "LOCK_STOP="+stop)
+	holder.Stderr = os.Stderr
+	if err := holder.Start(); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = os.WriteFile(stop, nil, 0o600); _ = holder.Wait() })
+	for {
+		if _, err := os.Stat(ready); err == nil {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if in, err := Inspect(ctx, dir); err != nil || !in.Locked {
+		t.Fatalf("Inspect = %+v, %v; want the lock reported as held", in, err)
+	}
 	migs := append(embedded(t), factsMigration(t))
+	before := testutil.SnapshotTree(t, dir.Path)
 	_, _, err := Open(ctx, dir, Options{Migrations: migs, LockTimeout: 200 * time.Millisecond})
-	if apperr.ExitCode(err) != apperr.ExitEnvironment || !strings.Contains(err.Error(), datadir.MigrateLockFile) {
+	if apperr.ExitCode(err) != apperr.ExitEnvironment || !strings.Contains(err.Error(), "another specmetry process") {
 		t.Fatalf("err = %v", err)
 	}
-	_ = os.Remove(dir.Join(datadir.MigrateLockFile))
+	testutil.AssertTreeUnchanged(t, dir.Path, before)
+
+	_ = os.WriteFile(stop, nil, 0o600)
+	if err := holder.Wait(); err != nil {
+		t.Fatal(err)
+	}
 	db, _ = open(t, dir, Options{Migrations: migs})
 	if v, _ := db.SchemaVersion(ctx); v != 2 {
-		t.Fatalf("schema v%d after lock released", v)
+		t.Fatalf("schema v%d after the lock was released", v)
 	}
+}
+
+// A process that dies while holding the lock does not leave it held, and a
+// lock file left behind blocks nobody.
+func TestCrashedLockHolderDoesNotBlock(t *testing.T) {
+	dir := testutil.TempHome(t)
+	if out, err := testutil.HelperCommand(t, "lockholder", "LOCK_CRASH=1").CombinedOutput(); err != nil {
+		t.Fatalf("lock holder: %v\n%s", err, out)
+	}
+	if _, err := os.Stat(dir.Join(datadir.MigrateLockFile)); err != nil {
+		t.Fatalf("lock file: %v", err)
+	}
+	if in, err := Inspect(ctx, dir); err != nil || in.Locked {
+		t.Fatalf("Inspect = %+v, %v; want the lock free", in, err)
+	}
+	db, _ := open(t, dir, Options{LockTimeout: 200 * time.Millisecond})
+	_ = db.Close()
 }
 
 // MVP-STO-02: an older binary refuses a newer schema with exit 6 and writes
@@ -395,8 +468,8 @@ INSERT INTO table_that_does_not_exist VALUES (1);`}
 	if n := countRows(t, db, `SELECT count(*) FROM sqlite_master WHERE name = 'half_done'`); n != 0 {
 		t.Fatal("partial migration was not rolled back")
 	}
-	if _, err := os.Stat(dir.Join(datadir.MigrateLockFile)); !errors.Is(err, os.ErrNotExist) {
-		t.Fatal("migration lock left behind after a failed migration")
+	if held, err := lockHeld(dir.Join(datadir.MigrateLockFile)); err != nil || held {
+		t.Fatalf("open lock still held after a failed migration (%v)", err)
 	}
 }
 

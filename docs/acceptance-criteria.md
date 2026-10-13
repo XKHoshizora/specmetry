@@ -255,18 +255,18 @@
 | MVP-PRV-02 | **C0 canary 综合测试**：在检查输出、Hook 的命令文本和工具输出、环境变量的值、文件内容、提示词和 transcript、提交标题中埋入 canary，跑完全部 E2E → 数据库、WAL、spool、日志、备份中都找不到 | E2E | FR-PRV-02 | M6 |
 | MVP-PRV-03 | 有项目 A 和 B → 在 TTY 中对 A 执行 `purge` → A 的所有行被删除；数据库文件和 WAL 中找不到 A 的 canary；B 不受影响；默认删除旧备份；`tombstones.json` 中有 A；非 TTY 执行 → 退出码 3 | 集成 | FR-PRV-03、FR-STO-03 | M2 |
 | MVP-PRV-04 | 伪造时间，使事件超过 30 天 → 入库时被清除；其他事实不受影响 | 集成 | FR-PRV-04 | M3 |
-| MVP-PRV-05 | Unix 上，数据目录为 `0700`，文件为 `0600`；已有的数据目录或其中任何文件（包括数据库、WAL、SHM）权限过宽、属主不是当前用户、是符号链接，或（macOS）带有允许访问的 ACL 时，在写入任何数据之前拒绝（退出码 6），目录内容不变 | 集成 | FR-PRV-06 | M0 |
-| MVP-PRV-06 | Windows 上，数据目录的 DACL 是受保护的，只授予 TD-22 规定的对象；已有目录或文件不满足（额外的授权对象、DACL 不受保护或不能被新文件继承、属主不符、联接或符号链接）时，在写入任何数据之前拒绝（退出码 6），目录内容不变；`doctor` 能发现被放宽的权限 | 集成 | FR-PRV-06 | M0 |
+| MVP-PRV-05 | Unix 上，数据目录为 `0700`，文件为 `0600`；已有的数据目录或其中任何文件（包括数据库、WAL、SHM）权限过宽、属主不是当前用户、是符号链接，或（macOS）带有允许访问的 ACL 时，在写入任何数据之前拒绝（退出码 6），目录内容不变；从根目录到数据目录的任何一级目录属主不是当前用户或 root，或能被其他用户写入（不带 sticky 位，或带 sticky 位但下一级条目不属于当前用户或 root），在创建或写入任何内容之前拒绝（退出码 6）；用真实的跨 UID 替换攻击验证（Linux，测试需要 root 以切换用户） | 集成 | FR-PRV-06 | M0 |
+| MVP-PRV-06 | Windows 上，数据目录的 DACL 是受保护的，只授予 TD-22 规定的对象；已有目录或文件不满足（额外的授权对象、DACL 不受保护或不能被新文件继承、属主不符、联接或符号链接）时，在写入任何数据之前拒绝（退出码 6），目录内容不变；路径上的目录是联接或符号链接、属主不是当前用户 / SYSTEM / Administrators / TrustedInstaller，或允许其他用户 DELETE、FILE_DELETE_CHILD、WRITE_DAC、WRITE_OWNER 时，在创建或写入任何内容之前拒绝（退出码 6）；`doctor` 能发现被放宽的权限 | 集成 | FR-PRV-06 | M0 |
 | MVP-PRV-07 | 每条内置密钥规则至少有 2 个应命中和 2 个不应命中的样本 | 单元 | FR-PRV-07 | M1 |
 | MVP-PRV-08 | 项目设置 `excerpt_storage = hash_only` → 提交含片段的提案后，`source_refs.excerpt` 为 NULL，`excerpt_sha256` 和校验结果照常写入；对数据目录做字节搜索，找不到片段原文 | 集成 | FR-PRV-08 | M1 |
 | MVP-PRV-09 | 对所有人类可读输出的 golden 文件做静态检查：`evidence_grade = observed` 时，不出现 snapshot-verified / snapshot verified / "快照已验证"等措辞（CLI 在 M2 检查，Dashboard 在 M5 检查） | 单元 + UI | FR-PRV-09 | M2 / M5 |
-| MVP-STO-01 | 两个进程同时触发迁移 → 一个执行，另一个等待或返回退出码 6；迁移前的备份可以打开，内容一致 | 集成 | FR-STO-01 | M0 |
-| MVP-STO-02 | 旧程序打开更新版本的 schema（包括恢复的 `VACUUM INTO` 备份、崩溃遗留的 WAL），或不满足 `min_binary_version`（包括无法解析的值）→ 退出码 6，数据库、WAL、SHM 和目录项都不变；已打开的连接在其他进程升级 schema 或提高 `min_binary_version` 之后写入 → 退出码 6，写入回调不执行，事实和 `seq` 不变 | 集成 | FR-STO-02 | M0 |
+| MVP-STO-01 | 两个进程同时触发迁移 → 一个执行，另一个等待或返回退出码 6；迁移前的备份可以打开，内容一致；锁由操作系统持有，持有锁的进程崩溃后不会阻塞其他进程 | 集成 | FR-STO-01 | M0 |
+| MVP-STO-02 | 旧程序打开更新版本的 schema（包括恢复的 `VACUUM INTO` 备份、崩溃遗留的 WAL），或不满足 `min_binary_version`（包括无法解析的值）→ 退出码 6，数据库、WAL、SHM 和目录项都不变；已打开的连接在其他进程升级 schema 或提高 `min_binary_version` 之后写入 → 退出码 6，写入回调不执行，事实和 `seq` 不变；打开过程与另一进程的升级并发时，升级等待打开完成，或旧程序拒绝且文件不变，不允许在恢复或合并新数据库之后才拒绝；旧进程此后关闭最后一个连接时，升级后的数据库保持完整 | 集成 | FR-STO-02 | M0 |
 | MVP-STO-03 | 合成一个会在中途失败的迁移 → 整体回滚，数据库不变 | 集成 | FR-STO-01 | M0 |
 | MVP-STO-04 | 多个进程并发写入 → `seq` 严格递增、没有重复 | 集成 | FR-STO-05 | M0 |
 | MVP-STO-05 | `[P1]` `backup create` 和 `backup restore`；恢复后墓碑生效 | 集成 | FR-STO-04 | M2 |
 | MVP-STO-06 | 对带只追加触发器的表执行 UPDATE、DELETE、`INSERT OR REPLACE` / `REPLACE INTO`（主键冲突、UNIQUE 冲突）、建表时声明的 `ON CONFLICT REPLACE`、UPSERT → 全部被中止，原记录完整保留；连接池新建的每个连接都开启 `recursive_triggers`，缺失时写事务拒绝执行；生产代码和迁移中不出现 REPLACE 冲突处理（静态检查） | 集成 | FR-STO-05 | M0 |
-| MVP-STO-07 | `doctor` 和打开数据库前的版本检查都只读：崩溃遗留 WAL 与 SHM、只有 WAL、干净关闭、另一进程正在写入、恢复的备份等状态下，检查前后数据库、WAL、SHM 的内容和目录项完全一致，读到的状态与 SQLite 自身恢复的结果相同；无法在不修改文件的情况下读取时（遗留的回滚日志、数据库持续变化），报告限制，不做恢复或 checkpoint | 集成 | FR-STO-02、NFR-09 | M0 |
+| MVP-STO-07 | `doctor` 和打开数据库前的版本检查都只读，并且只报告已提交的数据：用 SQLite 只读连接读取，只在实测确认不修改文件的状态下进行（`-wal` 与 `-shm` 都存在；没有辅助文件的回滚日志模式数据库）；其他状态（缺少 `-wal` 与 `-shm`、只有其一、存在回滚日志、另一程序持有写锁、读取期间文件变化）报告版本未知，不报告版本或正常，也不做恢复或 checkpoint；进行中的事务（WAL 模式或回滚日志模式）未提交的数据永不被报告；检查前后数据库、WAL、SHM 的内容和目录项完全一致 | 集成 | FR-STO-02、NFR-09 | M0 |
 
 ### 2.15 平台（PLT）
 

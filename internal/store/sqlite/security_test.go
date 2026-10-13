@@ -14,6 +14,7 @@ import (
 	"github.com/XKHoshizora/specmetry/internal/apperr"
 	"github.com/XKHoshizora/specmetry/internal/datadir"
 	"github.com/XKHoshizora/specmetry/internal/testutil"
+	"github.com/XKHoshizora/specmetry/internal/testutil/testdir"
 )
 
 // crashWriterHelper opens the database with the facts table, writes facts and
@@ -107,8 +108,8 @@ func crashWithWAL(t *testing.T, env ...string) {
 // startLiveWriter runs liveWriterHelper until the test ends.
 func startLiveWriter(t *testing.T) {
 	t.Helper()
-	ready := filepath.Join(t.TempDir(), "ready")
-	stop := filepath.Join(t.TempDir(), "stop")
+	ready := filepath.Join(testdir.New(t), "ready")
+	stop := filepath.Join(testdir.New(t), "stop")
 	cmd := testutil.HelperCommand(t, "livewriter", "LIVE_READY="+ready, "LIVE_STOP="+stop)
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
@@ -199,7 +200,7 @@ func TestOpenRefusesSymlinkedDatabase(t *testing.T) {
 	if err := dir.Ensure(); err != nil {
 		t.Fatal(err)
 	}
-	elsewhere := filepath.Join(t.TempDir(), "elsewhere.db")
+	elsewhere := filepath.Join(testdir.New(t), "elsewhere.db")
 	if err := os.WriteFile(elsewhere, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}

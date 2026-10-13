@@ -3,8 +3,6 @@ package sqlite
 import (
 	"context"
 	"errors"
-	"io/fs"
-	"os"
 
 	"github.com/XKHoshizora/specmetry/internal/datadir"
 )
@@ -15,24 +13,30 @@ type Inspection struct {
 	SchemaVersion    int
 	MinBinaryVersion string
 	SupportedVersion int
-	MigrationLocked  bool
+	// Locked reports that another process is opening or migrating the
+	// database right now.
+	Locked bool
 	// Limitation explains why the database could not be read without
-	// modifying it (for example, a rollback journal that would have to be
-	// played back first); the version fields are then unknown.
+	// changing it, or not consistently; the version fields are then unknown
+	// and must not be reported.
 	Limitation string
 }
 
-// Inspect reports the database state without creating, migrating, recovering
-// or writing anything: the database, its WAL and -shm, and the directory are
-// left exactly as they were (codex-review-004 B2; see snapshot.go).
+// Inspect reports the database state without creating, migrating,
+// recovering, checkpointing or writing anything: the database, its -wal and
+// -shm and the directory are left as they were (codex-review-004 B2,
+// codex-review-005 B2; see readonly.go). The version is reported only when a
+// read-only SQLite connection could read it in a file state where it changes
+// nothing, and no database file changed in size or appeared or disappeared
+// meanwhile; otherwise Limitation says why it is unknown.
 func Inspect(ctx context.Context, dir datadir.Dir) (Inspection, error) {
 	in := Inspection{SupportedVersion: SchemaVersion()}
-	if _, err := os.Lstat(dir.Join(datadir.MigrateLockFile)); err == nil {
-		in.MigrationLocked = true
-	} else if !errors.Is(err, fs.ErrNotExist) {
+	locked, err := lockHeld(dir.Join(datadir.MigrateLockFile))
+	if err != nil {
 		return in, err
 	}
-	m, err := readSnapshotMeta(ctx, dir.Join(datadir.DatabaseFile))
+	in.Locked = locked
+	m, err := readMetaReadOnly(ctx, dir.Join(datadir.DatabaseFile), true)
 	var u *uninspectableError
 	if errors.As(err, &u) {
 		in.Exists, in.Limitation = true, u.reason
@@ -46,7 +50,8 @@ func Inspect(ctx context.Context, dir datadir.Dir) (Inspection, error) {
 }
 
 // Compatibility applies Open's version guard for a binary of the given
-// version: nil means such a binary may open the database.
+// version: nil means such a binary may open the database. It says nothing
+// when the version is unknown (Limitation).
 func (in Inspection) Compatibility(binVersion string) error {
 	if !in.Exists || in.Limitation != "" {
 		return nil

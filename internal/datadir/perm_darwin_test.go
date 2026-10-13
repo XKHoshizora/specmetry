@@ -7,12 +7,14 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/XKHoshizora/specmetry/internal/testutil/testdir"
 )
 
 // codex-review-004 B1: on macOS an extended ACL can grant access that the
 // mode bits do not show; it is reported.
 func TestDarwinCheckReportsACL(t *testing.T) {
-	d := Dir{Path: filepath.Join(t.TempDir(), "home")}
+	d := Dir{Path: filepath.Join(testdir.New(t), "home")}
 	if err := d.Ensure(); err != nil {
 		t.Fatal(err)
 	}

@@ -11,12 +11,14 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+
+	"github.com/XKHoshizora/specmetry/internal/testutil/testdir"
 )
 
 // MVP-PRV-06: the data directory has a protected DACL granting access only to
 // the current user and SYSTEM (TD-22), and files inherit it.
 func TestWindowsDACL(t *testing.T) {
-	d := Dir{Path: filepath.Join(t.TempDir(), "home")}
+	d := Dir{Path: filepath.Join(testdir.New(t), "home")}
 	if err := d.Ensure(); err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +106,7 @@ func loosen(t *testing.T, path string) {
 
 // MVP-PRV-06: doctor (via Check) detects a loosened DACL.
 func TestWindowsCheckReportsLoosenedDACL(t *testing.T) {
-	d := Dir{Path: filepath.Join(t.TempDir(), "home")}
+	d := Dir{Path: filepath.Join(testdir.New(t), "home")}
 	if err := d.Ensure(); err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +133,7 @@ func TestWindowsCheckReportsLoosenedDACL(t *testing.T) {
 // would give new files (the WAL, the -shm) the creator's default DACL
 // instead of the private one.
 func TestWindowsCheckRequiresInheritableProtection(t *testing.T) {
-	d := Dir{Path: filepath.Join(t.TempDir(), "home")}
+	d := Dir{Path: filepath.Join(testdir.New(t), "home")}
 	if err := d.Ensure(); err != nil {
 		t.Fatal(err)
 	}
@@ -165,11 +167,11 @@ func TestWindowsCheckRequiresInheritableProtection(t *testing.T) {
 
 // codex-review-004 B1: a data directory that is a junction is refused.
 func TestWindowsCheckRefusesJunctionRoot(t *testing.T) {
-	target := Dir{Path: filepath.Join(t.TempDir(), "real")}
+	target := Dir{Path: filepath.Join(testdir.New(t), "real")}
 	if err := target.Ensure(); err != nil {
 		t.Fatal(err)
 	}
-	link := filepath.Join(t.TempDir(), "link")
+	link := filepath.Join(testdir.New(t), "link")
 	if out, err := exec.Command("cmd", "/c", "mklink", "/J", link, target.Path).CombinedOutput(); err != nil {
 		t.Fatalf("mklink: %v\n%s", err, out)
 	}
@@ -212,11 +214,11 @@ func allowedACESIDs(t *testing.T, path string) []*windows.SID {
 // codex-review-004 B1: a junction inside the data directory is reported
 // (junctions need no privilege, unlike symbolic links).
 func TestWindowsCheckReportsJunctionEntry(t *testing.T) {
-	d := Dir{Path: filepath.Join(t.TempDir(), "home")}
+	d := Dir{Path: filepath.Join(testdir.New(t), "home")}
 	if err := d.Ensure(); err != nil {
 		t.Fatal(err)
 	}
-	elsewhere := t.TempDir()
+	elsewhere := testdir.New(t)
 	if out, err := exec.Command("cmd", "/c", "mklink", "/J", d.Join(BackupsDir), elsewhere).CombinedOutput(); err != nil {
 		t.Fatalf("mklink: %v\n%s", err, out)
 	}

@@ -101,24 +101,41 @@ func TestDoctorHealthyHomeLeavesDatabaseUntouched(t *testing.T) {
 	}
 }
 
-func TestDoctorReportsNewerSchema(t *testing.T) {
-	home := testutil.TempHome(t)
-	openStore(t, home)
+// editMeta changes the meta row as a newer binary would. The store stays
+// open meanwhile and closes last, so the database keeps its -wal and -shm
+// (a plain SQLite connection that closes last removes them, and doctor then
+// rightly reports the version as unknown).
+func editMeta(t *testing.T, home datadir.Dir, update string) {
+	t.Helper()
+	db, _, err := sqlite.Open(context.Background(), home, sqlite.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	raw, err := sql.Open("sqlite", home.Join(datadir.DatabaseFile))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := raw.Exec("UPDATE meta SET schema_version = 99 WHERE id = 1"); err != nil {
+	if _, err := raw.Exec(update); err != nil {
 		t.Fatal(err)
 	}
 	_ = raw.Close()
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDoctorReportsNewerSchema(t *testing.T) {
+	home := testutil.TempHome(t)
+	editMeta(t, home, "UPDATE meta SET schema_version = 99 WHERE id = 1")
 	code, out, _ := execute(t, "doctor")
 	if code != apperr.ExitEnvironment || !strings.Contains(out, "schema v99 is newer") {
 		t.Fatalf("exit %d\n%s", code, out)
 	}
 }
 
-func TestDoctorReportsInvalidConfigAndStaleLock(t *testing.T) {
+// The lock is an operating-system lock (codex-review-005 B3): a lock file
+// left by a crashed process is not held and not a problem.
+func TestDoctorReportsInvalidConfigButNotLeftoverLockFile(t *testing.T) {
 	home := testutil.TempHome(t)
 	if err := home.Ensure(); err != nil {
 		t.Fatal(err)
@@ -138,12 +155,34 @@ func TestDoctorReportsInvalidConfigAndStaleLock(t *testing.T) {
 	if code != apperr.ExitEnvironment {
 		t.Fatalf("exit %d\n%s", code, out)
 	}
-	if !strings.Contains(out, "[fail] configuration") || !strings.Contains(out, "[fail] migration lock") {
+	if !strings.Contains(out, "[fail] configuration") || strings.Contains(out, "lock") {
 		t.Errorf("output:\n%s", out)
 	}
-	if !strings.Contains(errOut, "doctor found 2 problem(s)") {
+	if !strings.Contains(errOut, "doctor found 1 problem(s)") {
 		t.Errorf("stderr %q", errOut)
 	}
+}
+
+// codex-review-005 B2: when the version cannot be read without changing the
+// files, doctor says it is unknown — not a version, not "ok" — and changes
+// nothing.
+func TestDoctorReportsUnknownVersionInsteadOfChangingFiles(t *testing.T) {
+	home := testutil.TempHome(t)
+	openStore(t, home)
+	raw, err := sql.Open("sqlite", home.Join(datadir.DatabaseFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.Exec("SELECT count(*) FROM meta"); err != nil {
+		t.Fatal(err)
+	}
+	_ = raw.Close() // a plain connection closing last removes -wal and -shm
+	before := testutil.SnapshotTree(t, home.Path)
+	code, out, errOut := execute(t, "doctor")
+	if code != apperr.ExitOK || !strings.Contains(out, "[warn] database        version unknown") || strings.Contains(out, "schema v") {
+		t.Fatalf("exit %d\n%s%s", code, out, errOut)
+	}
+	testutil.AssertTreeUnchanged(t, home.Path, before)
 }
 
 // MVP-PRV-05 / MVP-PRV-06: doctor reports a data directory whose
@@ -208,15 +247,7 @@ func TestDoctorLeavesCrashedDatabaseUntouched(t *testing.T) {
 // even when its schema version is supported.
 func TestDoctorReportsMinBinaryVersion(t *testing.T) {
 	home := testutil.TempHome(t)
-	openStore(t, home)
-	raw, err := sql.Open("sqlite", home.Join(datadir.DatabaseFile))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := raw.Exec("UPDATE meta SET min_binary_version = '9.9.9' WHERE id = 1"); err != nil {
-		t.Fatal(err)
-	}
-	_ = raw.Close()
+	editMeta(t, home, "UPDATE meta SET min_binary_version = '9.9.9' WHERE id = 1")
 	code, out, _ := execute(t, "doctor")
 	if code != apperr.ExitEnvironment || !strings.Contains(out, "9.9.9") {
 		t.Fatalf("exit %d\n%s", code, out)

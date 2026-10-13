@@ -31,6 +31,14 @@ jobs:
           race=""
           if [ "$RUNNER_OS" = "Linux" ]; then race="-race"; fi
           go test -tags nowebui -count=1 $race ./...
+      - name: Cross-user path tests (Linux, needs root)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          # The test runs as root only to start processes as two other users.
+          go test -c -tags nowebui -o "$RUNNER_TEMP/store.test" ./internal/store/sqlite
+          cd internal/store/sqlite
+          sudo "$RUNNER_TEMP/store.test" -test.run 'CrossUser' -test.count=1 -test.v
 
   go-lint:
     name: Go lint

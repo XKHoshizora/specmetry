@@ -2,9 +2,12 @@ package sqlite
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
+	"strings"
 	"testing"
 
+	"github.com/XKHoshizora/specmetry/internal/apperr"
 	"github.com/XKHoshizora/specmetry/internal/datadir"
 	"github.com/XKHoshizora/specmetry/internal/testutil"
 )
@@ -117,5 +120,44 @@ func TestEveryTableHasProjectID(t *testing.T) {
 		if n := countRows(t, db, `SELECT count(*) FROM pragma_table_info(?) WHERE name = 'project_id'`, table); n != 1 {
 			t.Errorf("table %s has no project_id column", table)
 		}
+	}
+}
+
+// codex-review-004 N1: tombstone compaction that was interrupted after the
+// rows were deleted is finished on the next open, although nothing is left
+// to delete by then.
+func TestTombstoneCompactionResumesAfterCrash(t *testing.T) {
+	dir := testutil.TempHome(t)
+	migs := append(embedded(t), factsMigration(t))
+	canary := testutil.NewCanary(t)
+	db, _ := open(t, dir, Options{Migrations: migs})
+	insertFact(t, db, purgedProject, canary)
+	insertFact(t, db, keptProject, "kept")
+	_ = db.Close()
+
+	writeTombstones(t, dir, purgedProject)
+	compactionHook = func() error { return errors.New("simulated crash before compaction") }
+	_, _, err := Open(ctx, dir, Options{Migrations: migs})
+	compactionHook = nil
+	if apperr.ExitCode(err) != apperr.ExitEnvironment || !strings.Contains(err.Error(), "simulated crash") {
+		t.Fatalf("err = %v", err)
+	}
+	if _, err := os.Stat(dir.Join(datadir.CompactionFile)); err != nil {
+		t.Fatalf("no compaction marker after the interrupted purge: %v", err)
+	}
+	if hits := testutil.FindInTree(t, dir.Path, canary); len(hits) == 0 {
+		t.Fatal("the simulated crash already removed the data; the test does not exercise recovery")
+	}
+
+	db, res := open(t, dir, Options{Migrations: migs})
+	_ = db.Close()
+	if res.TombstoneRowsGone != 0 {
+		t.Fatalf("rows were deleted again: %+v", res)
+	}
+	if hits := testutil.FindInTree(t, dir.Path, canary); len(hits) != 0 {
+		t.Fatalf("purged data still on disk after the resumed compaction: %v", hits)
+	}
+	if _, err := os.Stat(dir.Join(datadir.CompactionFile)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("compaction marker left behind: %v", err)
 	}
 }

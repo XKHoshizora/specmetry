@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 )
 
 // SnapshotTree records every entry under root: its type, permission bits,
@@ -85,4 +86,23 @@ func AssertTreeUnchanged(t testing.TB, root string, before map[string]string) {
 	if d := DiffSnapshots(before, SnapshotTree(t, root)); d != "" {
 		t.Fatalf("%s was modified:\n%s", root, d)
 	}
+}
+
+// SettledSnapshot is SnapshotTree taken once two snapshots in a row agree.
+// On Windows, NTFS may publish the modification time of another process's
+// earlier write only later; settling first keeps that from being mistaken
+// for a change made by the code under test.
+func SettledSnapshot(t testing.TB, root string) map[string]string {
+	t.Helper()
+	prev := SnapshotTree(t, root)
+	for i := 0; i < 50; i++ {
+		time.Sleep(100 * time.Millisecond)
+		cur := SnapshotTree(t, root)
+		if DiffSnapshots(prev, cur) == "" {
+			return cur
+		}
+		prev = cur
+	}
+	t.Fatalf("%s kept changing", root)
+	return nil
 }

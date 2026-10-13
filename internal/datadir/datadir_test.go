@@ -8,10 +8,11 @@ import (
 	"testing"
 
 	"github.com/XKHoshizora/specmetry/internal/apperr"
+	"github.com/XKHoshizora/specmetry/internal/testutil/testdir"
 )
 
 func TestResolveUsesEnvironment(t *testing.T) {
-	want := filepath.Join(t.TempDir(), "home with space", "数据")
+	want := filepath.Join(testdir.New(t), "home with space", "数据")
 	t.Setenv(EnvHome, want)
 	d, err := Resolve()
 	if err != nil {
@@ -38,7 +39,7 @@ func TestResolveDefaultsToHome(t *testing.T) {
 }
 
 func TestEnsureCreatesPrivateDirectory(t *testing.T) {
-	d := Dir{Path: filepath.Join(t.TempDir(), "nested", "家 dir")}
+	d := Dir{Path: filepath.Join(testdir.New(t), "nested", "家 dir")}
 	if ok, _ := d.Exists(); ok {
 		t.Fatal("directory should not exist yet")
 	}
@@ -69,7 +70,7 @@ func TestEnsureCreatesPrivateDirectory(t *testing.T) {
 }
 
 func TestExistsRejectsFile(t *testing.T) {
-	p := filepath.Join(t.TempDir(), "file")
+	p := filepath.Join(testdir.New(t), "file")
 	if err := os.WriteFile(p, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +82,7 @@ func TestExistsRejectsFile(t *testing.T) {
 // codex-review-004 B1: Ensure verifies an existing directory instead of
 // trusting it, and refuses one that is not private.
 func TestEnsureRefusesInsecureExistingDirectory(t *testing.T) {
-	d := Dir{Path: filepath.Join(t.TempDir(), "home")}
+	d := Dir{Path: filepath.Join(testdir.New(t), "home")}
 	if err := d.Ensure(); err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +99,7 @@ func TestEnsureRefusesInsecureExistingDirectory(t *testing.T) {
 // codex-review-004 B1: a file inside the data directory that is not private
 // makes Ensure refuse.
 func TestEnsureRefusesInsecureFile(t *testing.T) {
-	d := Dir{Path: filepath.Join(t.TempDir(), "home")}
+	d := Dir{Path: filepath.Join(testdir.New(t), "home")}
 	if err := d.Ensure(); err != nil {
 		t.Fatal(err)
 	}
@@ -115,11 +116,11 @@ func TestEnsureRefusesInsecureFile(t *testing.T) {
 
 // codex-review-004 B1: links inside the data directory are reported.
 func TestCheckReportsSymlinkEntry(t *testing.T) {
-	d := Dir{Path: filepath.Join(t.TempDir(), "home")}
+	d := Dir{Path: filepath.Join(testdir.New(t), "home")}
 	if err := d.Ensure(); err != nil {
 		t.Fatal(err)
 	}
-	target := filepath.Join(t.TempDir(), "elsewhere")
+	target := filepath.Join(testdir.New(t), "elsewhere")
 	if err := os.WriteFile(target, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
