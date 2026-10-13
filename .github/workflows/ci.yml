@@ -30,7 +30,8 @@ jobs:
         run: |
           race=""
           if [ "$RUNNER_OS" = "Linux" ]; then race="-race"; fi
-          go test -tags nowebui -count=1 $race ./...
+          # -v lists every test, so the log shows which ones each platform skipped.
+          go test -tags nowebui -count=1 -v $race ./...
       - name: Cross-user path tests (Linux, needs root)
         if: runner.os == 'Linux'
         shell: bash
