@@ -1,7 +1,7 @@
 # Codex 审查意见处理记录
 
 > 状态：2026-10-13 · 对应设计版本 Draft v0.3
-> 原始审查：[reviews/codex-review-001.md](reviews/codex-review-001.md)（第一轮，§1 ~ §4）、[reviews/codex-review-002.md](reviews/codex-review-002.md)（冻结审查，§5）、[reviews/codex-review-003.md](reviews/codex-review-003.md)（最终设计审查，§6）、[reviews/codex-review-004.md](reviews/codex-review-004.md)（M0 代码审查，§7）、[reviews/codex-review-005.md](reviews/codex-review-005.md)（M0 第二次代码审查，§8）、[reviews/codex-review-006.md](reviews/codex-review-006.md)（M0 第三次代码审查，§9）
+> 原始审查：[reviews/codex-review-001.md](reviews/codex-review-001.md)（第一轮，§1 ~ §4）、[reviews/codex-review-002.md](reviews/codex-review-002.md)（冻结审查，§5）、[reviews/codex-review-003.md](reviews/codex-review-003.md)（最终设计审查，§6）、[reviews/codex-review-004.md](reviews/codex-review-004.md)（M0 代码审查，§7）、[reviews/codex-review-005.md](reviews/codex-review-005.md)（M0 第二次代码审查，§8）、[reviews/codex-review-006.md](reviews/codex-review-006.md)（M0 第三次代码审查，§9）、[reviews/codex-review-007.md](reviews/codex-review-007.md)（M0 最终定向复审，§10）
 > 处理原则：逐条分析，不默认全盘接受；只要会改变核心模型或交换协议，就在本轮设计清楚；只涉及实现细节的，安排在对应模块开工前关闭。不用"开发时再说"来掩盖当前的数据模型矛盾。
 
 **状态术语**（本文和 implementation-plan 统一使用）：
@@ -14,7 +14,7 @@
 | 实现状态 | 未开始 / 进行中 | — |
 | | **已验证** | 对应的验收项和 CX 反例已经在实现中通过 |
 
-**当前总体状态**（2026-10-13 更新）：codex-review-003 结论为 **GO**，BLOCKER 为 0。本文所有条目的设计状态均为**已冻结**（包括 codex-review-003 要求的两处同步修正，见 §6）；冻结后的修改必须走 implementation-plan §1 的变更流程。**没有任何条目处于"已验证"**：验证需要等到对应里程碑实现完成，并通过验收项和 CX 反例。M0 的三次代码审查（codex-review-004、005、006）均为 NO-GO，处理记录见 §7、§8、§9，等待最终复核。
+**当前总体状态**（2026-10-13 更新）：codex-review-003 结论为 **GO**，BLOCKER 为 0。本文所有条目的设计状态均为**已冻结**（包括 codex-review-003 要求的两处同步修正，见 §6）；冻结后的修改必须走 implementation-plan §1 的变更流程。**没有任何条目处于"已验证"**：验证需要等到对应里程碑实现完成，并通过验收项和 CX 反例。M0 的四次代码审查（codex-review-004 ~ 007）均为 NO-GO，处理记录见 §7 ~ §10，等待最终定向复审。
 
 ## 1. 总览（codex-review-001）
 
@@ -663,6 +663,54 @@ codex-review-002 列出的 ACCEPTED RISK 全部接受，已经分别写在对应
 ### 修改的代码
 
 只有测试钩子和用户可见的说明，没有改动业务逻辑：`readonly.go` 的 `readOnlyHook`、`lock.go` 的 `lockWaitHook`（均在生产中为空），`doctor` 的命令帮助。
+
+### 尚未验证
+
+- MVP-PLT-01：GitHub Actions 三平台 CI 尚未运行。
+- macOS 上的全部测试；Linux race detector；Windows 真实双用户测试。
+
+## 10. M0 最终定向复审（codex-review-007）的处理
+
+**审查结论**：NO-GO，只剩一项 BLOCKER（B2）；B1、B3、B4 已关闭，本轮未改动。审查接受产品负责人批准的方案 A 及其文件副作用边界。验收契约（MVP-STO-02、MVP-STO-07）本轮**没有修改**。
+
+### B2：Windows 上连续外部关闭竞态时 `doctor` 漏报版本未知
+
+**根因**：`doctor` 读取前后只比较数据库文件的存在情况和大小。在 Windows 上，第一次外部关闭竞态之后，只读连接留下空的 `-wal` 和空的 `-shm`。第二次同样的竞态中，外部进程删除这两个文件，只读连接又以相同的文件名、相同的大小（都是 0）重建它们，前后比较看不出变化，于是 `doctor` 报告了版本（`[ok] database schema v1`），违反 MVP-STO-07 中"此时必须报告版本未知"。Linux 上只读连接不重建 `-shm`，第一次之后只剩 `-wal`，属于"只有其一"的状态，本来就报告未知，因此不会进入这一重复状态。
+
+**修复**（`internal/store/sqlite/readonly.go`，只影响 `doctor`）：`-shm` 为空时，`doctor` 不打开任何连接，直接报告版本未知。理由：
+
+- 只读连接在外部关闭之后重建的 `-shm` 总是空的。读取前 `-shm` 不为空时，重建会表现为大小变化，原有比较能发现；读取前 `-shm` 为空时，重建无法发现，所以不读取。
+- specmetry 自己的连接关闭后会留下 32 KB 的 `-shm`（持久 WAL），只有只读连接在竞态中才会留下空的 `-shm`。下一次正常打开会重建它，之后无竞争的 `doctor` 又能报告版本。
+- 在打开连接之前就返回，不产生任何文件副作用；不读取数据，不可能报告未提交的数据。
+- 打开前的版本检查不适用这条规则：审查已确认 Windows 上普通打开在这一状态下读到的是可靠的已提交版本，并在读写连接上再检查一次。因此不会引入新的不兼容版本接受问题，也不降低可用性。
+- 没有重新引入自行解析 WAL，没有新增 VFS。
+
+**测试**（真实 SQLite 子进程，判断文件状态之后同步完成外部关闭，不依赖固定等待；修复前在 Windows 上失败，修复后通过）：
+
+| 测试 | 修复前 | 修复后 |
+|---|---|---|
+| `TestInspectRepeatedExternalCloseReportsUnknown`（公开 `Inspect`） | 第 1 轮未知；第 2 轮报告 schema v2，失败 | 两轮都报告未知。第 1 轮确实发生竞态，并在 Windows 上自然留下空的 `-wal`、`-shm`（审查反例的前置状态）；第 2 轮在读取前因为 `-shm` 为空而报告未知，目录完全不变。每轮确认权限合规，schema、`min_binary_version`、`seq`、事实不变；之后正常打开（Windows）重建 `-shm`，无竞争的检查重新报告 schema v2 且不改变文件；Linux 上正常打开按 PD-23 状态拒绝 |
+| `TestDoctorRepeatedExternalCloseReportsUnknown`（公开 `doctor` 命令） | 第 2 轮输出 `[ok] database schema v1`，失败 | 两轮都输出 `[warn] database version unknown`，不出现版本；主数据库文件不变 |
+
+`doctor` 命令测试位于存储包的外部测试包中，通过 `export_test.go` 使用已有的测试钩子；生产代码没有为此新增导出。
+
+### NON-BLOCKER：兼容打开成功分支的断言
+
+已补齐：`TestOpenDuringExternalCloseOnlyAddsEmptyAuxiliaryFiles` 的成功分支现在断言打开后主数据库文件未变，schema、`min_binary_version`、`seq`、事实内容正确，权限检查通过，打开锁已释放，后续写入取得 seq 3。
+
+### N1
+
+保持部分修复，最晚在 M2 的 `purge` 验收前解决；本轮未改动。
+
+### 是否还有同类漏报
+
+在审查描述和本轮测试覆盖的场景中没有。理论上，如果在读取期间有**另一个**程序恰好以与读取前完全相同的大小重新建出这两个文件，基于大小的比较仍然看不出来；这需要多个外部进程交错操作。即使发生，读取仍在 SQLite 的锁内进行，报告的是已提交的版本，不会读到未提交的数据，也不会接受错误的版本。
+
+### 修改的文件
+
+- `internal/store/sqlite/readonly.go`：`doctor` 的空 `-shm` 规则；参数 `sameSizes` 更名为 `diagnostic`，注释说明两种模式的差异。
+- 测试：`externalclose_test.go`（两轮回归、成功分支断言）、`doctor_race_test.go`（新增）、`export_test.go`（新增，只在测试中编译）。
+- 文档：architecture §11.5、本节、implementation-plan 状态、development.md。
 
 ### 尚未验证
 

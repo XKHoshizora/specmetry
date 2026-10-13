@@ -87,7 +87,7 @@ flowchart LR
 
 **退出条件（P0）**：MVP-PLT-01、MVP-PRV-05、MVP-PRV-06、MVP-STO-01 ~ 04、MVP-STO-06、MVP-STO-07（后两项由 codex-review-004 增补）。
 **交付物**：可以运行的 `specmetry version`、`specmetry doctor`；空库的迁移 v1；CI 通过。
-**状态（2026-10-13）**：已实现。三次独立审查（codex-review-004、005、006）均为 NO-GO；B1、B4 已关闭。codex-review-006 的 R1、R2 以及复核中发现的打开前检查竞态，按产品负责人批准的 MVP-STO-02、MVP-STO-07 保证边界处理，记录见 [review-resolution.md §9](review-resolution.md#9-m0-第三次代码审查codex-review-006的处理)，**等待 Codex 最终复核**。本地已验证：Windows 原生；Linux 通过 WSL 运行交叉编译的测试，跨用户测试以 root 运行。未验证：MVP-PLT-01（GitHub Actions 三平台尚未运行；macOS 只在 CI 中验证，包括 ACL 检测）、Linux 上的 race detector。N1 部分修复，最晚在 M2 的 `purge` 验收前完成。
+**状态（2026-10-13）**：已实现。四次独立审查（codex-review-004 ~ 007）均为 NO-GO；B1、B3、B4 已关闭。codex-review-007 指出的最后一项 BLOCKER（B2：Windows 上连续外部关闭竞态时 `doctor` 漏报版本未知）已修复，记录见 [review-resolution.md §10](review-resolution.md#10-m0-最终定向复审codex-review-007的处理)，**等待 Codex 最终定向复审**。本地已验证：Windows 原生；Linux 通过 WSL 运行交叉编译的测试，跨用户测试以 root 运行。未验证：MVP-PLT-01（GitHub Actions 三平台尚未运行；macOS 只在 CI 中验证，包括 ACL 检测）、Linux 上的 race detector。N1 部分修复，最晚在 M2 的 `purge` 验收前完成。
 
 ### M1 基准、来源、交付目标与范围
 

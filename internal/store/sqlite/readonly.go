@@ -95,11 +95,22 @@ func statDatabaseFiles(dbPath string) (fileState, error) {
 // readMetaReadOnly reads the schema version and minimum binary version
 // without writing to the database (see the file comment for the one known
 // file side effect). A missing database reports exists=false. It
-// returns an *uninspectableError when that is not possible. With
-// sameSizes, a change in the size of any database file during the read is
-// also reported as uninspectable (doctor); otherwise only files appearing or
-// disappearing are (Open, where other processes may be writing).
-func readMetaReadOnly(ctx context.Context, dbPath string, sameSizes bool) (readOnlyMeta, error) {
+// returns an *uninspectableError when that is not possible.
+//
+// diagnostic selects doctor's stricter rules (MVP-STO-07), which only ever
+// turn a result into "unknown": a change in the size of any database file
+// during the read counts as a change, and an empty -shm is not read at all.
+// A read-only connection that recreates -shm after an outside close always
+// leaves it empty (codex-review-007 B2): with a non-empty -shm before the
+// read, the recreation shows as a size change; with an empty one, a second
+// race would recreate both files with the same names and sizes and go
+// unnoticed, so the version is reported as unknown without reading.
+// specmetry's own connections never leave an empty -shm (persistent WAL),
+// so the next normal open makes the database readable again. Open's check
+// (diagnostic false) only treats files appearing or disappearing as a
+// change, since other processes may be writing; its result stays committed
+// data either way and is checked again on the read-write connection.
+func readMetaReadOnly(ctx context.Context, dbPath string, diagnostic bool) (readOnlyMeta, error) {
 	before, err := statDatabaseFiles(dbPath)
 	if err != nil {
 		return readOnlyMeta{}, err
@@ -121,6 +132,8 @@ func readMetaReadOnly(ctx context.Context, dbPath string, sameSizes bool) (readO
 		return readOnlyMeta{}, err
 	}
 	switch {
+	case before.exists[walFile] && before.exists[shmFile] && diagnostic && before.sizes[shmFile] == 0:
+		return readOnlyMeta{}, &uninspectableError{"the database's -shm file is empty, as left when another program closed the database during an earlier check; the version cannot be confirmed until specmetry opens the database again"}
 	case before.exists[walFile] && before.exists[shmFile]:
 	case !before.exists[walFile] && !before.exists[shmFile] && !wal:
 	case !before.exists[walFile] && !before.exists[shmFile]:
@@ -137,7 +150,7 @@ func readMetaReadOnly(ctx context.Context, dbPath string, sameSizes bool) (readO
 	if err != nil {
 		return readOnlyMeta{}, err
 	}
-	if after.exists != before.exists || (sameSizes && after.sizes != before.sizes) {
+	if after.exists != before.exists || (diagnostic && after.sizes != before.sizes) {
 		return readOnlyMeta{}, &uninspectableError{"the database files changed while they were being read; run the command again"}
 	}
 	if readErr != nil {
