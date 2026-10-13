@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/XKHoshizora/specmetry/internal/apperr"
+	"github.com/XKHoshizora/specmetry/internal/buildinfo"
 	"github.com/XKHoshizora/specmetry/internal/config"
 	"github.com/XKHoshizora/specmetry/internal/datadir"
 	"github.com/XKHoshizora/specmetry/internal/store/sqlite"
@@ -20,6 +21,8 @@ type checkStatus string
 const (
 	statusOK   checkStatus = "ok"
 	statusInfo checkStatus = "info"
+	// statusWarn is something doctor could not verify; it does not fail.
+	statusWarn checkStatus = "warn"
 	statusFail checkStatus = "fail"
 )
 
@@ -30,8 +33,9 @@ type check struct {
 }
 
 // newDoctorCmd is the M0 doctor framework: read-only checks of the local
-// environment. It never creates, migrates or modifies anything. Hook, Skill
-// and spool checks join in M3; `doctor --json` needs a schema first
+// environment. It never creates, migrates, recovers or modifies anything:
+// the database is read from a snapshot that leaves its files untouched. Hook,
+// Skill and spool checks join in M3; `doctor --json` needs a schema first
 // (implementation-plan §3).
 func newDoctorCmd() *cobra.Command {
 	return &cobra.Command{
@@ -113,11 +117,16 @@ func databaseChecks(cmd *cobra.Command, dir datadir.Dir) []check {
 		return []check{{statusFail, "database", err.Error()}}
 	}
 	var out []check
+	compat := in.Compatibility(buildinfo.Version)
 	switch {
 	case !in.Exists:
 		out = append(out, check{statusInfo, "database", "not created yet"})
+	case in.Limitation != "":
+		out = append(out, check{statusWarn, "database", "cannot be inspected without modifying it: " + in.Limitation})
 	case in.SchemaVersion > in.SupportedVersion:
 		out = append(out, check{statusFail, "database", fmt.Sprintf("schema v%d is newer than this binary supports (v%d); upgrade specmetry", in.SchemaVersion, in.SupportedVersion)})
+	case compat != nil:
+		out = append(out, check{statusFail, "database", fmt.Sprintf("schema v%d, but %s", in.SchemaVersion, compat.Error())})
 	case in.SchemaVersion < in.SupportedVersion:
 		out = append(out, check{statusInfo, "database", fmt.Sprintf("schema v%d; will be migrated to v%d (with a backup) on next use", in.SchemaVersion, in.SupportedVersion)})
 	default:

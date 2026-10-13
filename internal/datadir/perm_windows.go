@@ -61,19 +61,49 @@ func allowedSIDs() (user, system *windows.SID, err error) {
 	return user, system, err
 }
 
+const systemNote = " and SYSTEM"
+
+// checkPermissions requires, for the data directory and everything in it:
+//   - allow entries only for the current user and SYSTEM (deny entries only
+//     restrict access and are accepted);
+//   - an owner that is the current user, SYSTEM or the Administrators group
+//     (an owner can always rewrite the DACL; administrators can take
+//     ownership of anything anyway, and elevated processes create files
+//     owned by that group);
+//   - on the data directory itself, a protected DACL, so that nothing is
+//     inherited from the parent;
+//   - on every directory, an inheritable entry for the current user, so that
+//     new files (the WAL, the -shm, backups) inherit the private DACL rather
+//     than getting the creating process's default DACL.
 func checkPermissions(root string) ([]string, error) {
 	user, system, err := allowedSIDs()
 	if err != nil {
 		return nil, err
 	}
+	admins, err := windows.CreateWellKnownSid(windows.WinBuiltinAdministratorsSid)
+	if err != nil {
+		return nil, err
+	}
 	var problems []string
-	err = filepath.WalkDir(root, func(p string, _ fs.DirEntry, err error) error {
+	err = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		sd, err := windows.GetNamedSecurityInfo(p, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
+		if problem := entryProblem(p, d); problem != "" {
+			problems = append(problems, problem)
+			return nil
+		}
+		sd, err := windows.GetNamedSecurityInfo(p, windows.SE_FILE_OBJECT,
+			windows.DACL_SECURITY_INFORMATION|windows.OWNER_SECURITY_INFORMATION)
 		if err != nil {
 			return err
+		}
+		owner, _, err := sd.Owner()
+		if err != nil {
+			return err
+		}
+		if owner == nil || (!owner.Equals(user) && !owner.Equals(system) && !owner.Equals(admins)) {
+			problems = append(problems, fmt.Sprintf("%s: owned by %s; want the current user", p, describeSID(owner)))
 		}
 		if p == root {
 			control, _, err := sd.Control()
@@ -92,6 +122,7 @@ func checkPermissions(root string) ([]string, error) {
 			problems = append(problems, p+": no DACL (everyone has full access)")
 			return nil
 		}
+		userInherits := false
 		for i := uint32(0); i < uint32(dacl.AceCount); i++ {
 			var ace *windows.ACCESS_ALLOWED_ACE
 			if err := windows.GetAce(dacl, i, &ace); err != nil {
@@ -103,12 +134,22 @@ func checkPermissions(root string) ([]string, error) {
 			case windows.ACCESS_ALLOWED_ACE_TYPE:
 				// The SID is stored inline, starting at SidStart.
 				sid := (*windows.SID)(unsafe.Pointer(&ace.SidStart)) //nolint:gosec // documented ACE layout
-				if !sid.Equals(user) && !sid.Equals(system) {
+				switch {
+				case sid.Equals(user):
+					const inherit = windows.OBJECT_INHERIT_ACE | windows.CONTAINER_INHERIT_ACE
+					if ace.Header.AceFlags&inherit == inherit {
+						userInherits = true
+					}
+				case sid.Equals(system):
+				default:
 					problems = append(problems, fmt.Sprintf("%s: grants access to %s; want only the current user and SYSTEM", p, describeSID(sid)))
 				}
 			default:
 				problems = append(problems, fmt.Sprintf("%s: unexpected ACE type %d", p, ace.Header.AceType))
 			}
+		}
+		if d.IsDir() && !userInherits {
+			problems = append(problems, p+": does not pass its permissions on to new files (no inheritable entry for the current user)")
 		}
 		return nil
 	})
@@ -116,6 +157,9 @@ func checkPermissions(root string) ([]string, error) {
 }
 
 func describeSID(sid *windows.SID) string {
+	if sid == nil {
+		return "nobody"
+	}
 	account, domain, _, err := sid.LookupAccount("")
 	if err != nil || account == "" {
 		return sid.String()

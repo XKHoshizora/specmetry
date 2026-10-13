@@ -4,6 +4,7 @@ package datadir
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -65,13 +66,11 @@ func TestWindowsDACL(t *testing.T) {
 	}
 }
 
-// MVP-PRV-06: doctor (via Check) detects a loosened DACL.
-func TestWindowsCheckReportsLoosenedDACL(t *testing.T) {
-	d := Dir{Path: filepath.Join(t.TempDir(), "home")}
-	if err := d.Ensure(); err != nil {
-		t.Fatal(err)
-	}
-	sd, err := windows.GetNamedSecurityInfo(d.Path, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
+// loosen grants Everyone read access to path and lets its DACL inherit from
+// the parent.
+func loosen(t *testing.T, path string) {
+	t.Helper()
+	sd, err := windows.GetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,9 +95,22 @@ func TestWindowsCheckReportsLoosenedDACL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := windows.SetNamedSecurityInfo(d.Path, windows.SE_FILE_OBJECT,
+	if err := windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT,
 		windows.DACL_SECURITY_INFORMATION|windows.UNPROTECTED_DACL_SECURITY_INFORMATION,
 		nil, nil, loose, nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// MVP-PRV-06: doctor (via Check) detects a loosened DACL.
+func TestWindowsCheckReportsLoosenedDACL(t *testing.T) {
+	d := Dir{Path: filepath.Join(t.TempDir(), "home")}
+	if err := d.Ensure(); err != nil {
+		t.Fatal(err)
+	}
+	loosen(t, d.Path)
+	everyone, err := windows.CreateWellKnownSid(windows.WinWorldSid)
+	if err != nil {
 		t.Fatal(err)
 	}
 	problems, err := Check(d)
@@ -113,6 +125,61 @@ func TestWindowsCheckReportsLoosenedDACL(t *testing.T) {
 		t.Fatalf("unprotected DACL not reported: %v", problems)
 	}
 	_ = os.RemoveAll(d.Path)
+}
+
+// codex-review-004 B1: a protected DACL whose entries are not inheritable
+// would give new files (the WAL, the -shm) the creator's default DACL
+// instead of the private one.
+func TestWindowsCheckRequiresInheritableProtection(t *testing.T) {
+	d := Dir{Path: filepath.Join(t.TempDir(), "home")}
+	if err := d.Ensure(); err != nil {
+		t.Fatal(err)
+	}
+	user, system, err := allowedSIDs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var entries []windows.EXPLICIT_ACCESS
+	for _, sid := range []*windows.SID{user, system} {
+		e := grant(sid, windows.TRUSTEE_IS_USER)
+		e.Inheritance = windows.NO_INHERITANCE
+		entries = append(entries, e)
+	}
+	acl, err := windows.ACLFromEntries(entries, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := windows.SetNamedSecurityInfo(d.Path, windows.SE_FILE_OBJECT,
+		windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION,
+		nil, nil, acl, nil); err != nil {
+		t.Fatal(err)
+	}
+	problems, err := Check(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.Join(problems, "\n"), "inherit") {
+		t.Fatalf("non-inheritable protection not reported: %v", problems)
+	}
+}
+
+// codex-review-004 B1: a data directory that is a junction is refused.
+func TestWindowsCheckRefusesJunctionRoot(t *testing.T) {
+	target := Dir{Path: filepath.Join(t.TempDir(), "real")}
+	if err := target.Ensure(); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(t.TempDir(), "link")
+	if out, err := exec.Command("cmd", "/c", "mklink", "/J", link, target.Path).CombinedOutput(); err != nil {
+		t.Fatalf("mklink: %v\n%s", err, out)
+	}
+	problems, err := Check(Dir{Path: link})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.Join(problems, "\n"), "symbolic link or junction") {
+		t.Fatalf("junction root not reported: %v", problems)
+	}
 }
 
 func allowedACESIDs(t *testing.T, path string) []*windows.SID {
@@ -140,4 +207,27 @@ func allowedACESIDs(t *testing.T, path string) []*windows.SID {
 		}
 	}
 	return out
+}
+
+// codex-review-004 B1: a junction inside the data directory is reported
+// (junctions need no privilege, unlike symbolic links).
+func TestWindowsCheckReportsJunctionEntry(t *testing.T) {
+	d := Dir{Path: filepath.Join(t.TempDir(), "home")}
+	if err := d.Ensure(); err != nil {
+		t.Fatal(err)
+	}
+	elsewhere := t.TempDir()
+	if out, err := exec.Command("cmd", "/c", "mklink", "/J", d.Join(BackupsDir), elsewhere).CombinedOutput(); err != nil {
+		t.Fatalf("mklink: %v\n%s", err, out)
+	}
+	problems, err := Check(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.Join(problems, "\n"), BackupsDir+": is a symbolic link or junction") {
+		t.Fatalf("junction entry not reported: %v", problems)
+	}
+	if err := d.Ensure(); err == nil {
+		t.Fatal("Ensure accepted a junction inside the data directory")
+	}
 }

@@ -150,7 +150,7 @@
 | MVP-EV-04 | 检查命令不存在 → `error` / `not_found` | 集成 | FR-EV-01 | M2 |
 | MVP-EV-05 | 检查输出中有 canary 字符串 → 不带 `--json` 时，调用者的 stdout 中能看到它；数据库、WAL、日志和备份中都找不到 | 集成 | FR-EV-01、FR-PRV-02 | M2 |
 | MVP-EV-06 | `check run` 没有接受临时命令的参数；对没有检查的 AC 执行 → 退出码 2 | 集成 | FR-EV-03 | M2 |
-| MVP-EV-07 | 直接对任一只追加表执行 UPDATE 或 DELETE → 被触发器中止 | 集成 | FR-EV-05、FR-STO-05 | M2 |
+| MVP-EV-07 | 直接对任一只追加表执行 UPDATE、DELETE、REPLACE（主键冲突与 UNIQUE 冲突）或 UPSERT → 被触发器中止，原记录不变 | 集成 | FR-EV-05、FR-STO-05 | M2 |
 | MVP-EV-08 | 工作区有未跟踪的文件时执行检查 → `tree_state_start = dirty`，`qualifying = false` | 集成 | FR-EV-04 | M2 |
 | MVP-EV-09 | 检查在执行过程中写入一个未被忽略的文件 → `error` / `context_changed`；检查在执行过程中执行 `git commit` → `context_changed` | 集成 | FR-EV-04 | M2 |
 | MVP-EV-10 | 声明了 `inputs` → 记录对象 ID；某个输入路径在 HEAD 上不存在 → `error` / `input_missing` | 集成 | FR-EV-01 | M2 |
@@ -255,16 +255,18 @@
 | MVP-PRV-02 | **C0 canary 综合测试**：在检查输出、Hook 的命令文本和工具输出、环境变量的值、文件内容、提示词和 transcript、提交标题中埋入 canary，跑完全部 E2E → 数据库、WAL、spool、日志、备份中都找不到 | E2E | FR-PRV-02 | M6 |
 | MVP-PRV-03 | 有项目 A 和 B → 在 TTY 中对 A 执行 `purge` → A 的所有行被删除；数据库文件和 WAL 中找不到 A 的 canary；B 不受影响；默认删除旧备份；`tombstones.json` 中有 A；非 TTY 执行 → 退出码 3 | 集成 | FR-PRV-03、FR-STO-03 | M2 |
 | MVP-PRV-04 | 伪造时间，使事件超过 30 天 → 入库时被清除；其他事实不受影响 | 集成 | FR-PRV-04 | M3 |
-| MVP-PRV-05 | Unix 上，数据目录为 `0700`，文件为 `0600` | 集成 | FR-PRV-06 | M0 |
-| MVP-PRV-06 | Windows 上，数据目录的 DACL 是受保护的，只授予 TD-22 规定的对象；`doctor` 能发现被放宽的权限 | 集成 | FR-PRV-06 | M0 |
+| MVP-PRV-05 | Unix 上，数据目录为 `0700`，文件为 `0600`；已有的数据目录或其中任何文件（包括数据库、WAL、SHM）权限过宽、属主不是当前用户、是符号链接，或（macOS）带有允许访问的 ACL 时，在写入任何数据之前拒绝（退出码 6），目录内容不变 | 集成 | FR-PRV-06 | M0 |
+| MVP-PRV-06 | Windows 上，数据目录的 DACL 是受保护的，只授予 TD-22 规定的对象；已有目录或文件不满足（额外的授权对象、DACL 不受保护或不能被新文件继承、属主不符、联接或符号链接）时，在写入任何数据之前拒绝（退出码 6），目录内容不变；`doctor` 能发现被放宽的权限 | 集成 | FR-PRV-06 | M0 |
 | MVP-PRV-07 | 每条内置密钥规则至少有 2 个应命中和 2 个不应命中的样本 | 单元 | FR-PRV-07 | M1 |
 | MVP-PRV-08 | 项目设置 `excerpt_storage = hash_only` → 提交含片段的提案后，`source_refs.excerpt` 为 NULL，`excerpt_sha256` 和校验结果照常写入；对数据目录做字节搜索，找不到片段原文 | 集成 | FR-PRV-08 | M1 |
 | MVP-PRV-09 | 对所有人类可读输出的 golden 文件做静态检查：`evidence_grade = observed` 时，不出现 snapshot-verified / snapshot verified / "快照已验证"等措辞（CLI 在 M2 检查，Dashboard 在 M5 检查） | 单元 + UI | FR-PRV-09 | M2 / M5 |
 | MVP-STO-01 | 两个进程同时触发迁移 → 一个执行，另一个等待或返回退出码 6；迁移前的备份可以打开，内容一致 | 集成 | FR-STO-01 | M0 |
-| MVP-STO-02 | 旧程序打开更新版本的 schema → 退出码 6，不做任何写入 | 集成 | FR-STO-02 | M0 |
+| MVP-STO-02 | 旧程序打开更新版本的 schema（包括恢复的 `VACUUM INTO` 备份、崩溃遗留的 WAL），或不满足 `min_binary_version`（包括无法解析的值）→ 退出码 6，数据库、WAL、SHM 和目录项都不变；已打开的连接在其他进程升级 schema 或提高 `min_binary_version` 之后写入 → 退出码 6，写入回调不执行，事实和 `seq` 不变 | 集成 | FR-STO-02 | M0 |
 | MVP-STO-03 | 合成一个会在中途失败的迁移 → 整体回滚，数据库不变 | 集成 | FR-STO-01 | M0 |
 | MVP-STO-04 | 多个进程并发写入 → `seq` 严格递增、没有重复 | 集成 | FR-STO-05 | M0 |
 | MVP-STO-05 | `[P1]` `backup create` 和 `backup restore`；恢复后墓碑生效 | 集成 | FR-STO-04 | M2 |
+| MVP-STO-06 | 对带只追加触发器的表执行 UPDATE、DELETE、`INSERT OR REPLACE` / `REPLACE INTO`（主键冲突、UNIQUE 冲突）、建表时声明的 `ON CONFLICT REPLACE`、UPSERT → 全部被中止，原记录完整保留；连接池新建的每个连接都开启 `recursive_triggers`，缺失时写事务拒绝执行；生产代码和迁移中不出现 REPLACE 冲突处理（静态检查） | 集成 | FR-STO-05 | M0 |
+| MVP-STO-07 | `doctor` 和打开数据库前的版本检查都只读：崩溃遗留 WAL 与 SHM、只有 WAL、干净关闭、另一进程正在写入、恢复的备份等状态下，检查前后数据库、WAL、SHM 的内容和目录项完全一致，读到的状态与 SQLite 自身恢复的结果相同；无法在不修改文件的情况下读取时（遗留的回滚日志、数据库持续变化），报告限制，不做恢复或 checkpoint | 集成 | FR-STO-02、NFR-09 | M0 |
 
 ### 2.15 平台（PLT）
 
@@ -363,8 +365,8 @@
 | FR-ST | ST-01 ~ 14、CLM-01（FR-ST-07）、CX-09、CX-12（FR-ST-07）、CX-22 |
 | FR-COL | COL-01 ~ 15 |
 | FR-UI | UI-01 ~ 16、CX-08 的 UI 部分（FR-UI-13）、CX-23 |
-| FR-PRV、FR-STO | PRV-01 ~ 09、STO-01 ~ 05、EV-05、EV-11、BL-23、BL-26、CX-11（FR-STO-03）、CX-24 |
+| FR-PRV、FR-STO | PRV-01 ~ 09、STO-01 ~ 07、EV-05、EV-11、BL-23、BL-26、CX-11（FR-STO-03）、CX-24 |
 | FR-SK | SK-01 ~ 08 |
-| NFR | ST-08、UI-04、COL-01、PLT-01 ~ 05、PRV-01 |
+| NFR | ST-08、UI-04、COL-01、PLT-01 ~ 05、PRV-01、STO-07 |
 
 P2 项（FR-EV-07、FR-EV-09、FR-ST-10、FR-ST-11、FR-COL-06、FR-UI-07、FR-UI-08）不在 MVP 中，没有对应的验收项；FR-EV-09（隔离执行器）的验收在 M7 中追加到 CX-26 ~ CX-28 和 MVP-ACC-09。

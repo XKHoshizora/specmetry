@@ -11,6 +11,9 @@ var identifier = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 
 // AppendOnlyTriggers returns DDL that makes table append-only: UPDATE and
 // DELETE abort unless the maintenance switch is on (data-model.md §1).
+// REPLACE conflict resolution and upserts are covered too: REPLACE deletes
+// the conflicting row, which fires the delete trigger because every
+// connection runs with recursive_triggers on (see dsn and checkConnection).
 // Migrations that create fact tables append this DDL.
 func AppendOnlyTriggers(table string) (string, error) {
 	if !identifier.MatchString(table) {

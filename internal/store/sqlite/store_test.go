@@ -2,7 +2,6 @@ package sqlite
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -22,8 +21,12 @@ import (
 
 func TestMain(m *testing.M) {
 	testutil.DispatchHelper(map[string]func() int{
-		"seqwriter": seqWriterHelper,
-		"migrator":  migratorHelper,
+		"seqwriter":    seqWriterHelper,
+		"migrator":     migratorHelper,
+		"crashwriter":  crashWriterHelper,
+		"livewriter":   liveWriterHelper,
+		"spillcrash":   spillCrashHelper,
+		"restartcrash": restartCrashHelper,
 	})
 	os.Exit(m.Run())
 }
@@ -122,15 +125,6 @@ func countRows(t *testing.T, db *DB, query string, args ...any) int {
 		t.Fatal(err)
 	}
 	return n
-}
-
-func fileHash(t *testing.T, path string) [32]byte {
-	t.Helper()
-	b, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return sha256.Sum256(b)
 }
 
 func backups(t *testing.T, dir datadir.Dir) []string {
@@ -364,19 +358,9 @@ func TestOlderBinaryRefusesNewerSchema(t *testing.T) {
 	dir := testutil.TempHome(t)
 	db, _ := open(t, dir, Options{Migrations: append(embedded(t), factsMigration(t))})
 	_ = db.Close()
-	dbPath := dir.Join(datadir.DatabaseFile)
-	before := fileHash(t, dbPath)
-
-	_, _, err := Open(ctx, dir, Options{Migrations: embedded(t)})
-	if apperr.ExitCode(err) != apperr.ExitEnvironment || !strings.Contains(err.Error(), "upgrade specmetry") {
-		t.Fatalf("err = %v", err)
-	}
-	if fileHash(t, dbPath) != before {
-		t.Fatal("database file changed after a refused open")
-	}
-	if len(backups(t, dir)) != 0 {
-		t.Fatal("a refused open must not write backups")
-	}
+	before := testutil.SnapshotTree(t, dir.Path)
+	openRefused(t, dir, Options{Migrations: embedded(t)}, "upgrade specmetry")
+	testutil.AssertTreeUnchanged(t, dir.Path, before)
 }
 
 func TestMinBinaryVersionGuard(t *testing.T) {
@@ -385,10 +369,9 @@ func TestMinBinaryVersionGuard(t *testing.T) {
 	migs := append(embedded(t), requires)
 	db, _ := open(t, dir, Options{Migrations: migs, BinaryVersion: "9.9.9"})
 	_ = db.Close()
-	_, _, err := Open(ctx, dir, Options{Migrations: migs, BinaryVersion: "0.1.0"})
-	if apperr.ExitCode(err) != apperr.ExitEnvironment || !strings.Contains(err.Error(), "9.9.9") {
-		t.Fatalf("err = %v", err)
-	}
+	before := testutil.SnapshotTree(t, dir.Path)
+	openRefused(t, dir, Options{Migrations: migs, BinaryVersion: "0.1.0"}, "9.9.9")
+	testutil.AssertTreeUnchanged(t, dir.Path, before)
 	db, _ = open(t, dir, Options{Migrations: migs, BinaryVersion: "10.0.0"})
 	_ = db.Close()
 }
@@ -607,16 +590,23 @@ func TestTombstonesAppliedBeforeMigrationBackup(t *testing.T) {
 	}
 }
 
+// codex-review-004 N2: reopen with the same migrations, so the error comes
+// from tombstone validation rather than from the version guard.
 func TestInvalidTombstonesFileIsAnError(t *testing.T) {
 	dir := testutil.TempHome(t)
-	db, _ := open(t, dir, Options{Migrations: append(embedded(t), factsMigration(t))})
+	migs := append(embedded(t), factsMigration(t))
+	db, _ := open(t, dir, Options{Migrations: migs})
+	insertFact(t, db, "01J9Z3K5Q8R2T4V6W8X0Y2Z4A6", "kept")
 	_ = db.Close()
-	if err := os.WriteFile(dir.Join(datadir.TombstonesFile), []byte(`[{"project_id":"not-a-ulid"}]`), 0o600); err != nil {
+	if err := os.WriteFile(dir.Join(datadir.TombstonesFile), []byte(`[{"project_id":"not-a-ulid","purged_at":1}]`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := Open(ctx, dir, Options{}); apperr.ExitCode(err) != apperr.ExitEnvironment {
+	before := testutil.SnapshotTree(t, dir.Path)
+	_, _, err := Open(ctx, dir, Options{Migrations: migs})
+	if apperr.ExitCode(err) != apperr.ExitEnvironment || !strings.Contains(err.Error(), `invalid project_id "not-a-ulid"`) {
 		t.Fatalf("err = %v", err)
 	}
+	testutil.AssertTreeUnchanged(t, dir.Path, before)
 }
 
 func TestMigrationsMustBeContiguous(t *testing.T) {

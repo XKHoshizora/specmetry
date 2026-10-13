@@ -84,9 +84,9 @@ flowchart LR
 | WP0.5 | 测试基座：临时 HOME、夹具仓库构造器（用脚本创建 git 仓库、分支、worktree）、golden 工具、伪终端辅助、canary 搜索工具 |
 | WP0.6 | 前端工程骨架（Vite + React + TS），通过 `go:embed` 内嵌，并提供跳过前端的构建标签 |
 
-**退出条件（P0）**：MVP-PLT-01、MVP-PRV-05、MVP-PRV-06、MVP-STO-01 ~ 04。
+**退出条件（P0）**：MVP-PLT-01、MVP-PRV-05、MVP-PRV-06、MVP-STO-01 ~ 04、MVP-STO-06、MVP-STO-07（后两项由 codex-review-004 增补）。
 **交付物**：可以运行的 `specmetry version`、`specmetry doctor`；空库的迁移 v1；CI 通过。
-**状态（2026-10-13）**：已实现。PRV-05、PRV-06、STO-01 ~ 04 已在本地验证（Windows 原生；Linux 通过 WSL 运行交叉编译的测试）；MVP-PLT-01 以 GitHub Actions 三平台首次运行的结果为准（macOS 只在 CI 中验证）。等待 Codex 独立审查后再进入 M1。
+**状态（2026-10-13）**：已实现。首次独立审查 codex-review-004 结论为 NO-GO（4 项阻塞、4 项非阻塞），已按 [review-resolution.md §7](review-resolution.md#7-m0-代码审查codex-review-004的处理) 修复，**等待 Codex 复审**。PRV-05、PRV-06、STO-01 ~ 04、STO-06、STO-07 已在本地验证（Windows 原生；Linux 通过 WSL 运行交叉编译的测试）。未验证：MVP-PLT-01（GitHub Actions 三平台尚未运行；macOS 只在 CI 中验证，包括 macOS ACL 检测）、Linux 上的 race detector。
 
 ### M1 基准、来源、交付目标与范围
 
@@ -102,6 +102,8 @@ flowchart LR
 | WP1.6 | 审核：逐条决定、冲突检测与三方对比、版本与变更记录、级联、父需求修订与 AC 后续处理、`reaffirm`、`propose --apply` |
 | WP1.7 | 待澄清问题（只能由人回答） |
 | WP1.8 | `target set`、`scope confirm`（独立提交，或附带在审核中）、声明校验 |
+
+**建表约束**（codex-review-004 N1）：见 [data-model.md §1.1](data-model.md#11-建表约束m1-起)；由 schema 不变量测试强制。
 
 **退出条件（P0）**：acceptance-criteria 中标注 M1 的全部 P0 项，以及 CX-14、CX-17（CLI 部分）。标注为"M1 / M2"的项，在 M1 中只验证写入侧（退出码、写入的数据、`init --json` 的输出），推导侧（差距、交付状态）在 M2 中验证。
 **可选（P1）**：MVP-INIT-08、INIT-10、INV-05。

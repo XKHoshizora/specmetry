@@ -60,3 +60,38 @@ func TestUnixCheckReportsLoosenedPermissions(t *testing.T) {
 		t.Fatalf("problems = %v", problems)
 	}
 }
+
+// loosen makes path readable by other users.
+func loosen(t *testing.T, path string) {
+	t.Helper()
+	fi, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mode := os.FileMode(0o644)
+	if fi.IsDir() {
+		mode = 0o755
+	}
+	if err := os.Chmod(path, mode); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// codex-review-004 B1: a data directory that is a symbolic link is refused.
+func TestUnixCheckRefusesSymlinkedRoot(t *testing.T) {
+	target := Dir{Path: filepath.Join(t.TempDir(), "real")}
+	if err := target.Ensure(); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(target.Path, link); err != nil {
+		t.Fatal(err)
+	}
+	problems, err := Check(Dir{Path: link})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.Join(problems, "\n"), "symbolic link") {
+		t.Fatalf("symlinked root not reported: %v", problems)
+	}
+}

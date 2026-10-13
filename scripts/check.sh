@@ -8,6 +8,11 @@ echo "== go mod tidy"
 go mod tidy -diff
 echo "== go vet"
 go vet -tags nowebui ./...
+echo "== Markdown links"
+if grep -rnE '\]\(([A-Za-z]:[/\]|/(Users|home)/)' --include='*.md' --exclude-dir=node_modules .; then
+  echo 'Markdown links must not point to local absolute paths'
+  exit 1
+fi
 echo "== golangci-lint"
 golangci-lint run ./...
 echo "== go test"

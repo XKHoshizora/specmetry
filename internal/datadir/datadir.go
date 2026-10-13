@@ -4,6 +4,7 @@ package datadir
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -21,6 +22,9 @@ const (
 	TombstonesFile  = "tombstones.json"
 	MigrateLockFile = ".migrate.lock"
 	BackupsDir      = "backups"
+	// CompactionFile marks a tombstone deletion whose file compaction
+	// (checkpoint and VACUUM) has not finished yet.
+	CompactionFile = ".compaction-pending"
 )
 
 // Dir is the resolved data directory.
@@ -49,39 +53,59 @@ func Resolve() (Dir, error) {
 // Join returns a path inside the data directory.
 func (d Dir) Join(name string) string { return filepath.Join(d.Path, name) }
 
-// Exists reports whether the data directory exists.
+// Exists reports whether the data directory exists. A link in its place
+// counts as existing, so that Check reports it instead of Ensure creating a
+// directory behind it.
 func (d Dir) Exists() (bool, error) {
-	fi, err := os.Stat(d.Path)
+	fi, err := os.Lstat(d.Path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return false, nil
 	}
 	if err != nil {
 		return false, apperr.Wrap(apperr.Environment, err, "cannot read the data directory")
 	}
-	if !fi.IsDir() {
+	if !fi.IsDir() && !isLink(fi.Mode()) {
 		return false, apperr.Newf(apperr.Environment, "data directory %s is not a directory", d.Path)
 	}
 	return true, nil
 }
 
-// Ensure creates the data directory with owner-only permissions if it does
-// not exist. An existing directory is left unchanged; Check reports any
-// permission problems with it.
+// Ensure makes the data directory ready to be written to (architecture.md
+// §11.1). A missing directory is created with owner-only permissions. An
+// existing one is not trusted: it and everything in it are checked, and if
+// any of it is not private to the current user Ensure refuses before
+// anything is written. Every writer calls Ensure first; doctor's Check
+// reports the same problems but is not a substitute for it.
 func (d Dir) Ensure() error {
 	ok, err := d.Exists()
-	if err != nil || ok {
+	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(d.Path), 0o700); err != nil {
-		return apperr.Wrap(apperr.Environment, err, "cannot create the parent of the data directory")
+	if !ok {
+		if err := os.MkdirAll(filepath.Dir(d.Path), 0o700); err != nil {
+			return apperr.Wrap(apperr.Environment, err, "cannot create the parent of the data directory")
+		}
+		if err := os.Mkdir(d.Path, 0o700); err != nil && !errors.Is(err, fs.ErrExist) {
+			return apperr.Wrap(apperr.Environment, err, "cannot create the data directory")
+		}
+		if err := secureDir(d.Path); err != nil {
+			return apperr.Wrap(apperr.Environment, err, "cannot restrict data directory permissions")
+		}
 	}
-	if err := os.Mkdir(d.Path, 0o700); err != nil && !errors.Is(err, fs.ErrExist) {
-		return apperr.Wrap(apperr.Environment, err, "cannot create the data directory")
+	problems, err := Check(d)
+	if err != nil {
+		return apperr.Wrap(apperr.Environment, err, "cannot check the permissions of the data directory")
 	}
-	if err := secureDir(d.Path); err != nil {
-		return apperr.Wrap(apperr.Environment, err, "cannot restrict data directory permissions")
+	if len(problems) == 0 {
+		return nil
 	}
-	return nil
+	details := make([]apperr.Detail, len(problems))
+	for i, p := range problems {
+		details[i] = apperr.Detail{Problem: p}
+	}
+	return apperr.Newf(apperr.Environment,
+		"the data directory %s is not private to the current user; refusing to write to it. Restrict it to the current user%s, or set %s to another location",
+		d.Path, systemNote, EnvHome).WithDetails(details...)
 }
 
 // EnsureSub creates a subdirectory of the data directory. It inherits the
@@ -117,7 +141,37 @@ func CreatePrivateFile(path string, exclusive bool) (*os.File, error) {
 
 // Check returns human-readable permission problems for the data directory
 // and everything inside it. An empty result means the directory is only
-// accessible to the current user (and SYSTEM on Windows).
+// accessible to the current user (and SYSTEM on Windows). Check only reads.
+//
+// Links are problems wherever they appear, the data directory itself
+// included: a link inside it could send writes to a location that is not
+// private, and following one would check something other than what SQLite
+// writes to.
 func Check(d Dir) ([]string, error) {
+	fi, err := os.Lstat(d.Path)
+	if err != nil {
+		return nil, err
+	}
+	if isLink(fi.Mode()) {
+		return []string{d.Path + ": " + linkProblem}, nil
+	}
 	return checkPermissions(d.Path)
+}
+
+const linkProblem = "is a symbolic link or junction; Specmetry does not follow links in its data directory (set " +
+	EnvHome + " to the real location)"
+
+func isLink(m fs.FileMode) bool { return m&(fs.ModeSymlink|fs.ModeIrregular) != 0 }
+
+// entryProblem reports an entry that is neither a regular file nor a
+// directory; "" means its permissions still need checking.
+func entryProblem(p string, d fs.DirEntry) string {
+	switch t := d.Type(); {
+	case isLink(t):
+		return p + ": " + linkProblem
+	case t.IsDir() || t.IsRegular():
+		return ""
+	default:
+		return fmt.Sprintf("%s: unexpected file type %v", p, t)
+	}
 }

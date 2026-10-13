@@ -1,7 +1,8 @@
 // Package sqlite is Specmetry's SQLite storage foundation: opening the
 // database with WAL and a single writer connection, the fixed open order
-// (version guard → tombstones → migration backup → migration), the global
-// fact sequence, and append-only enforcement (architecture.md §11, §13).
+// (permission check → version guard → tombstones → migration backup →
+// migration), the global fact sequence, and append-only enforcement
+// (architecture.md §11, §13).
 package sqlite
 
 import (
@@ -42,6 +43,10 @@ type DB struct {
 	sql  *sql.DB
 	dir  datadir.Dir
 	path string
+	// target and binVersion are the schema version and binary version this
+	// process was opened with; WriteTx re-checks them under the write lock.
+	target     int
+	binVersion string
 }
 
 // OpenResult reports what Open did.
@@ -53,10 +58,13 @@ type OpenResult struct {
 }
 
 // Open opens (creating if necessary) the database in dir and brings it to
-// the latest schema. Order (architecture.md §11.2):
-//  1. version guard — refuse databases newer than this binary;
-//  2. apply tombstones;
-//  3. if migration is needed: migration lock, VACUUM INTO backup, then all
+// the latest schema. Order (architecture.md §11.1, §11.2):
+//  1. data directory: create it private, or verify that the existing one and
+//     everything in it is private — before anything is written;
+//  2. version guard, decided from a read-only snapshot of the files, before
+//     any connection that could change them (codex-review-004 B3);
+//  3. apply tombstones;
+//  4. if migration is needed: migration lock, VACUUM INTO backup, then all
 //     pending migrations in one BEGIN EXCLUSIVE transaction.
 func Open(ctx context.Context, dir datadir.Dir, opts Options) (*DB, OpenResult, error) {
 	var res OpenResult
@@ -88,6 +96,26 @@ func Open(ctx context.Context, dir datadir.Dir, opts Options) (*DB, OpenResult, 
 		return nil, res, err
 	}
 	dbPath := dir.Join(datadir.DatabaseFile)
+	snap, err := readSnapshotMeta(ctx, dbPath)
+	if err != nil {
+		var u *uninspectableError
+		if errors.As(err, &u) {
+			return nil, res, apperr.Newf(apperr.Environment,
+				"cannot check whether this specmetry binary may open the database without modifying it: %s", u.reason)
+		}
+		return nil, res, apperr.Wrap(apperr.Environment, err, "cannot read the database version")
+	}
+	if snap.exists {
+		if err := guardVersion(snap.version, target, snap.minBin, binVersion); err != nil {
+			return nil, res, err
+		}
+	}
+	// Validate tombstones before anything is written, so that a bad file
+	// leaves the data directory untouched.
+	tombstones, err := readTombstones(dir.Join(datadir.TombstonesFile))
+	if err != nil {
+		return nil, res, apperr.Wrap(apperr.Environment, err, "cannot apply tombstones")
+	}
 	if err := precreate(dbPath); err != nil {
 		return nil, res, apperr.Wrap(apperr.Environment, err, "cannot create the database file")
 	}
@@ -98,12 +126,17 @@ func Open(ctx context.Context, dir datadir.Dir, opts Options) (*DB, OpenResult, 
 	// A single connection serializes all writes from this process
 	// (architecture.md §13); SQLite locking serializes across processes.
 	sdb.SetMaxOpenConns(1)
-	db := &DB{sql: sdb, dir: dir, path: dbPath}
+	db := &DB{sql: sdb, dir: dir, path: dbPath, target: target, binVersion: binVersion}
 	fail := func(err error) (*DB, OpenResult, error) {
 		_ = sdb.Close()
 		return nil, res, err
 	}
 
+	if err := checkConnection(ctx, sdb); err != nil {
+		return fail(err)
+	}
+	// Checked again on the real connection: another process may have
+	// migrated the database since the snapshot was read.
 	current, minBin, err := readMeta(ctx, sdb)
 	if err != nil {
 		return fail(apperr.Wrap(apperr.Environment, err, "cannot read the database version"))
@@ -111,7 +144,7 @@ func Open(ctx context.Context, dir datadir.Dir, opts Options) (*DB, OpenResult, 
 	if err := guardVersion(current, target, minBin, binVersion); err != nil {
 		return fail(err)
 	}
-	if res.TombstoneRowsGone, err = applyTombstones(ctx, sdb, dir.Join(datadir.TombstonesFile)); err != nil {
+	if res.TombstoneRowsGone, err = applyTombstones(ctx, sdb, dir, tombstones); err != nil {
 		return fail(apperr.Wrap(apperr.Environment, err, "cannot apply tombstones"))
 	}
 	res.FromVersion, res.ToVersion = current, current
@@ -147,16 +180,43 @@ func Open(ctx context.Context, dir datadir.Dir, opts Options) (*DB, OpenResult, 
 	return db, res, nil
 }
 
-// guardVersion refuses databases written by a newer binary (TD-16).
+// guardVersion refuses databases written by a newer binary (TD-16). A
+// minimum binary version that cannot be compared is refused too: the
+// database asks for something this binary cannot confirm.
 func guardVersion(current, target int, minBin, binVersion string) error {
 	if current > target {
 		return apperr.Newf(apperr.Environment,
 			"the database uses schema v%d but this specmetry binary only supports up to v%d; upgrade specmetry", current, target)
 	}
-	if minBin != "" && semver.IsValid("v"+minBin) && semver.IsValid("v"+binVersion) &&
-		semver.Compare("v"+binVersion, "v"+minBin) < 0 {
+	if minBin == "" {
+		return nil
+	}
+	if !semver.IsValid("v" + minBin) {
+		return apperr.Newf(apperr.Environment,
+			"the database requires specmetry version %q, which this binary cannot interpret; upgrade specmetry", minBin)
+	}
+	if !semver.IsValid("v" + binVersion) {
+		return apperr.Newf(apperr.Environment,
+			"the database requires specmetry %s or newer, but this binary's version %q cannot be compared with it", minBin, binVersion)
+	}
+	if semver.Compare("v"+binVersion, "v"+minBin) < 0 {
 		return apperr.Newf(apperr.Environment,
 			"the database requires specmetry %s or newer (this binary is %s); upgrade specmetry", minBin, binVersion)
+	}
+	return nil
+}
+
+// checkConnection verifies the per-connection settings that protect the
+// data: with recursive_triggers off, REPLACE conflict resolution deletes rows
+// without firing the append-only delete trigger (codex-review-004 B4).
+func checkConnection(ctx context.Context, q queryer) error {
+	var on int
+	if err := q.QueryRowContext(ctx, `PRAGMA recursive_triggers`).Scan(&on); err != nil {
+		return apperr.Wrap(apperr.Environment, err, "cannot read the database connection settings")
+	}
+	if on != 1 {
+		return apperr.New(apperr.Internal,
+			"the database connection has recursive_triggers off, so append-only tables would not be protected against REPLACE; refusing to write")
 	}
 	return nil
 }
@@ -173,6 +233,13 @@ func migrate(ctx context.Context, sdb *sql.DB, migs []Migration, current int) er
 	rollback := func(err error) error {
 		_, _ = conn.ExecContext(context.WithoutCancel(ctx), `ROLLBACK`)
 		return err
+	}
+	// The migration lock coordinates specmetry processes; this re-check
+	// under the exclusive lock also covers anything that does not use it.
+	if v, _, err := readMeta(ctx, conn); err != nil {
+		return rollback(err)
+	} else if v != current {
+		return rollback(fmt.Errorf("the database changed to schema v%d while waiting to migrate it", v))
 	}
 	for _, m := range migs[current:] {
 		if _, err := conn.ExecContext(ctx, m.SQL); err != nil {
@@ -211,11 +278,18 @@ func escapePath(path string) string {
 	return strings.NewReplacer("%", "%25", "?", "%3f", "#", "%23").Replace(filepath.ToSlash(path))
 }
 
+// dsn is used only after the version guard has passed: journal_mode(WAL)
+// rewrites the header of a rollback-journal database (such as a restored
+// VACUUM INTO backup). The driver applies every _pragma to each new
+// connection, so connections the pool opens later get them too.
 func dsn(path string) string {
 	return "file:" + escapePath(path) +
 		"?_pragma=busy_timeout(5000)" +
 		"&_pragma=journal_mode(WAL)" +
 		"&_pragma=foreign_keys(1)" +
+		// REPLACE conflict resolution fires delete triggers only with
+		// recursive_triggers on (https://sqlite.org/lang_conflict.html).
+		"&_pragma=recursive_triggers(1)" +
 		// BeginTx issues BEGIN IMMEDIATE: the write lock is taken before any
 		// read, so read-compare-write sequences cannot act on a stale
 		// snapshot (codex-review-003; data-model.md §7.1).
@@ -235,9 +309,34 @@ func (db *DB) SchemaVersion(ctx context.Context) (int, error) {
 }
 
 // WriteTx runs fn in a write transaction that holds the write lock from its
-// first statement (BEGIN IMMEDIATE). fn's error rolls the transaction back.
+// first statement (BEGIN IMMEDIATE). Before fn runs, and under that lock, it
+// re-checks that this binary may still write: another process may have
+// migrated the schema or raised min_binary_version since Open, or the
+// connection may have lost its append-only protection (codex-review-004 B3,
+// B4). If not, fn is not called and nothing is written. fn's error rolls the
+// transaction back.
 func (db *DB) WriteTx(ctx context.Context, fn func(tx *sql.Tx) error) error {
-	return withTx(ctx, db.sql, fn)
+	return withTx(ctx, db.sql, func(tx *sql.Tx) error {
+		if err := db.checkWritable(ctx, tx); err != nil {
+			return err
+		}
+		return fn(tx)
+	})
+}
+
+func (db *DB) checkWritable(ctx context.Context, tx *sql.Tx) error {
+	current, minBin, err := readMeta(ctx, tx)
+	if err != nil {
+		return apperr.Wrap(apperr.Environment, err, "cannot read the database version")
+	}
+	if err := guardVersion(current, db.target, minBin, db.binVersion); err != nil {
+		return err
+	}
+	if current != db.target {
+		return apperr.Newf(apperr.Environment,
+			"the database schema changed from v%d to v%d since it was opened; run the command again", db.target, current)
+	}
+	return checkConnection(ctx, tx)
 }
 
 func withTx(ctx context.Context, sdb *sql.DB, fn func(tx *sql.Tx) error) error {

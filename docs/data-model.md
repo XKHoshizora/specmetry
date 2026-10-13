@@ -14,7 +14,7 @@
 | actor | `agent:<agent>`（如 `agent:claude_code`）、`human:<显示名>`、`system` |
 | channel | `agent_cli`、`human_cli`、`dashboard`、`hook`、`system` |
 | 代码上下文 | 由三项组成：`worktree_id`、`head`（40 位提交 SHA；未知时为 NULL）、`tree_state`（`clean` / `dirty` / `unknown`）。`clean` 指 `git status --porcelain --untracked-files=all -- . ':(exclude).specmetry'` 输出为空：被 git 忽略的文件不计入；未跟踪文件计入；**Specmetry 自己的 `.specmetry/` 始终排除**，不管有没有写入 `.git/info/exclude`。项目级安装只写入已被 git 忽略的 `.claude/settings.local.json`（[architecture.md §10.6](architecture.md#106-对仓库的写入)），所以它也不会让工作区变脏。 |
-| project_id | 每张表都有，用于按项目删除和未来的同步 |
+| project_id | 每张保存项目数据的表都有，用于按项目删除和未来的同步（`projects` 以 `id` 作为项目 ID；`meta`、`maintenance` 是全库表）。见 §1.1 |
 | JSON 列 | 应用层按 schema 校验 |
 | 自由文本 | 写入前做密钥扫描，命中则**拒绝写入**（不做替换），见 [architecture.md §10](architecture.md#10-隐私与数据保留契约) |
 
@@ -22,8 +22,16 @@
 
 | 类别 | 表 | 规则 |
 |---|---|---|
-| **只追加（事实）** | `baseline_versions`、`baseline_changes`、`source_refs`、`code_refs`、`source_acks`、`scope_confirmations`、`scope_items`、`claim_batches`、`claims`、`check_runs`、`commits`、`commit_links`、`decisions`、`events` | 应用层禁止 UPDATE 和 DELETE，数据库触发器作为第二道防线。例外只有 `purge`，以及 `events` 的保留期清理。 |
+| **只追加（事实）** | `baseline_versions`、`baseline_changes`、`source_refs`、`code_refs`、`source_acks`、`scope_confirmations`、`scope_items`、`claim_batches`、`claims`、`check_runs`、`commits`、`commit_links`、`decisions`、`events` | 应用层禁止 UPDATE、DELETE 和 REPLACE 冲突处理（`INSERT OR REPLACE`、`REPLACE INTO`、`ON CONFLICT REPLACE`），数据库触发器作为第二道防线。REPLACE 通过删除旧行实现，只有开启 `recursive_triggers` 时才会触发删除触发器，所以每个连接都开启它，写事务执行前再确认一次。例外只有 `purge`，以及 `events` 的保留期清理。 |
 | **受控可变** | `projects`、`worktrees`、`delivery_targets`、`sources`、`goals`、`requirements`、`acceptance_criteria`、`proposals`、`proposal_items`、`questions`、`agent_sessions`、`git_scan_cursors`、`hook_drops`、`key_counters`、`meta` | 基准三表只能通过"应用基准变更"修改，每次修改记录 `updated_seq`；`proposal_items` 的审核字段、`questions` 的回答字段都只能写一次 |
+
+### 1.1 建表约束（M1 起）
+
+codex-review-004 N1 的结论。`purge` 和墓碑按项目删除数据，并且不依赖 schema 版本（[architecture.md §11.4](architecture.md#114-删除purge与墓碑)），所以建表必须满足：
+
+1. 每张保存项目数据的表都有 `project_id` 列，子表也不例外（例如 `scope_items`），不能只靠父表间接归属；项目登记表 `projects` 以 `id` 作为项目 ID，墓碑逻辑单独处理它。全库表只有 `meta` 和 `maintenance`。schema 不变量测试对所有迁移执行这条规则。
+2. 外键只引用同一项目的行。墓碑删除在事务内延迟外键检查（`defer_foreign_keys`），因此删除顺序与表名无关；跨项目的引用会让提交失败，而不是留下残缺数据。
+3. 建表语句不声明 `ON CONFLICT REPLACE`；只追加表在创建它的迁移中附加只追加触发器（§1）。
 
 ## 2. 概念模型
 
@@ -167,7 +175,7 @@ CLI 或 Hook 第一次在某个 worktree 中出现时，系统会自动登记它
 | note | TEXT NULL | |
 | actor, channel, confirmed_at | | |
 
-`scope_items`（只追加）：`confirmation_id`、`requirement_id`、`requirement_revision`（确认时的修订）。至少 1 行。
+`scope_items`（只追加）：`confirmation_id`、`project_id`、`requirement_id`、`requirement_revision`（确认时的修订）。至少 1 行。
 
 在审核中附带的范围确认（`review.v1` 的 `scope`）里，需求既可以写现有的编号，也可以写**同一次审核中被接受的"新增需求"提案条目的 `item_id`**。服务端在事务内把 `item_id` 解析为新分配的编号；如果该条目没有被接受，整次提交失败。这样，首次审核时就可以一次性确认范围。
 

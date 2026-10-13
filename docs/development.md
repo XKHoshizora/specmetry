@@ -85,11 +85,17 @@ go build -o dist/ ./cmd/specmetry
 ## 5. 存储与迁移
 
 - 数据库：`$SPECMETRY_HOME/specmetry.db`，WAL，`busy_timeout=5000`，单一写连接；写事务使用 `BEGIN IMMEDIATE`（`DB.WriteTx`）。
-- 打开顺序：确保目录 → 版本检查（`schema_version` 高于本程序支持的版本，或 `min_binary_version` 高于本程序版本 → 退出码 6，不写入）→ 应用墓碑 → 需要迁移时：获取 `.migrate.lock`、`VACUUM INTO` 备份（保留最近 3 份）、在一个 `BEGIN EXCLUSIVE` 事务中执行全部待执行迁移。
+- 打开顺序（architecture §11.1、§11.2）：
+  1. `datadir.Ensure`：不存在则私有地创建；已存在则检查目录和其中所有条目，不私有就在写入前拒绝（退出码 6）。**任何写入方都必须先调用它**；`doctor` 的检查不能代替。
+  2. 版本检查：从只读快照读取（见下），不兼容 → 退出码 6，文件不变；然后才建立读写连接。
+  3. 校验并应用墓碑。
+  4. 需要迁移时：获取 `.migrate.lock`、`VACUUM INTO` 备份（保留最近 3 份）、在一个 `BEGIN EXCLUSIVE` 事务中执行全部待执行迁移。
+- 写入只通过 `DB.WriteTx`：它在取得写锁后、执行回调前重新检查 `schema_version`、`min_binary_version` 和 `recursive_triggers`，不满足时不执行回调。
 - 新增迁移：在 `internal/store/sqlite/migrations/` 下添加 `NNNN_name.sql`，编号必须连续。迁移需要旧程序拒绝打开时，在迁移中显式设置 `meta.min_binary_version`。
-- 事实表只追加：建表后附加 `AppendOnlyTriggers(table)` 生成的触发器；只有墓碑清理等维护操作可以在 `Maintenance` 中绕过。
+- 建表约束（data-model §1.1）：保存项目数据的表都有 `project_id`（`projects` 用 `id`）；外键只引用同一项目的行；不在建表语句中声明 `ON CONFLICT REPLACE`。`TestEveryTableHasProjectID` 对全部迁移检查第一条。
+- 事实表只追加：建表后附加 `AppendOnlyTriggers(table)` 生成的触发器；只有墓碑清理等维护操作可以在 `Maintenance` 中绕过。**不要使用 REPLACE 冲突处理**（`INSERT OR REPLACE`、`REPLACE INTO`、`ON CONFLICT REPLACE`）：它通过删除旧行实现，`TestProductionSQLNeverUsesReplace` 会扫描生产代码和迁移。数据库层由触发器加上每个连接的 `recursive_triggers` 兜底。
 - 先后顺序只由 `seq` 决定：在写事务中调用 `NextSeq(ctx, tx)`。
-- `specmetry doctor` 通过 `sqlite.Inspect` 只读检查数据库，不创建、不迁移、不写入。
+- 只读检查（`sqlite.Inspect`，`doctor` 和打开前的版本检查都用它）：只读打开数据库和 WAL，在内存中应用已提交的 WAL 帧，经只读 VFS 查询，读后校验并在变化时重试；不创建、不恢复、不 checkpoint、不改动目录项。**不要**用 `query_only`、`mode=ro` 或 `immutable=1` 的 SQLite 连接做只读检查，原因见 architecture §11.5。
 
 ## 6. 测试
 
@@ -102,8 +108,12 @@ go build -o dist/ ./cmd/specmetry
   - `RunInPTY`：在伪终端中运行命令（Windows 使用 ConPTY），用于通道识别测试。
   - `NewCanary` / `FindInTree`：隐私测试中的 canary 搜索。
   - `DispatchHelper` / `HelperCommand`：在 `TestMain` 中注册辅助子进程，用于多进程并发测试。
-  - `LoosenPermissions`：放宽数据目录权限，用于检查 `doctor` 的报告。
-- 在 Windows 上验证 Linux 行为（可选）：用 `GOOS=linux go test -c -tags nowebui` 交叉编译测试二进制，在 WSL 中从对应的包目录运行。
+  - `LoosenPermissions`：放宽文件或目录的权限，用于检查拒绝写入和 `doctor` 的报告。
+  - `SnapshotTree` / `AssertTreeUnchanged`：记录目录下每个条目的类型、权限、大小、修改时间和内容哈希，用于断言"拒绝时没有任何改动""只读检查前后完全一致"。
+- 存储包的测试用辅助子进程模拟崩溃（写入后不关闭数据库直接退出），以留下未合并的 WAL；只读检查的结果与 SQLite 自身恢复同一份文件副本的结果比较。
+- 在 Windows 上验证 Linux 行为（可选）：用 `GOOS=linux go test -c -tags nowebui` 交叉编译测试二进制，在 WSL 中从对应的包目录运行，并把 `TMPDIR` 设为 Linux 文件系统上的目录（`/mnt/c` 不支持 Unix 权限位）。
+- 平台相关代码要对三个目标分别运行 lint：`GOOS=linux golangci-lint run ./...`、`GOOS=darwin ...`；CI 的 lint 任务运行在 Linux 上。
+- 在 Windows 上创建符号链接需要开发者模式或管理员权限，相关测试在没有权限时跳过（Linux 和 CI 的 Windows 运行器上会执行）；联接（junction）不需要权限，链接检测由它覆盖。
 
 ## 7. 契约
 

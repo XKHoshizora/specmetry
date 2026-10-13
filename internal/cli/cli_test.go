@@ -157,3 +157,68 @@ func TestDoctorReportsLoosenedPermissions(t *testing.T) {
 		t.Fatalf("exit %d\n%s", code, out)
 	}
 }
+
+func TestMain(m *testing.M) {
+	testutil.DispatchHelper(map[string]func() int{"crash": crashHelper})
+	os.Exit(m.Run())
+}
+
+// crashHelper writes to the database and exits without closing it, leaving
+// an unmerged WAL behind.
+func crashHelper() int {
+	dir, err := datadir.Resolve()
+	if err != nil {
+		return 1
+	}
+	db, _, err := sqlite.Open(context.Background(), dir, sqlite.Options{})
+	if err != nil {
+		return 1
+	}
+	for i := 0; i < 3; i++ {
+		if err := db.WriteTx(context.Background(), func(tx *sql.Tx) error {
+			_, err := sqlite.NextSeq(context.Background(), tx)
+			return err
+		}); err != nil {
+			return 1
+		}
+	}
+	os.Exit(0)
+	return 0
+}
+
+// codex-review-004 B2: doctor leaves a crashed database exactly as it found
+// it — database, WAL, -shm and directory entries.
+func TestDoctorLeavesCrashedDatabaseUntouched(t *testing.T) {
+	home := testutil.TempHome(t)
+	if out, err := testutil.HelperCommand(t, "crash").CombinedOutput(); err != nil {
+		t.Fatalf("crash helper: %v\n%s", err, out)
+	}
+	if _, err := os.Stat(home.Join(datadir.DatabaseFile) + "-wal"); err != nil {
+		t.Fatalf("no WAL left behind: %v", err)
+	}
+	before := testutil.SnapshotTree(t, home.Path)
+	code, out, errOut := execute(t, "doctor")
+	if code != apperr.ExitOK || !strings.Contains(out, "schema v1") {
+		t.Fatalf("exit %d\n%s%s", code, out, errOut)
+	}
+	testutil.AssertTreeUnchanged(t, home.Path, before)
+}
+
+// codex-review-004 N3: a database that requires a newer binary is reported
+// even when its schema version is supported.
+func TestDoctorReportsMinBinaryVersion(t *testing.T) {
+	home := testutil.TempHome(t)
+	openStore(t, home)
+	raw, err := sql.Open("sqlite", home.Join(datadir.DatabaseFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.Exec("UPDATE meta SET min_binary_version = '9.9.9' WHERE id = 1"); err != nil {
+		t.Fatal(err)
+	}
+	_ = raw.Close()
+	code, out, _ := execute(t, "doctor")
+	if code != apperr.ExitEnvironment || !strings.Contains(out, "9.9.9") {
+		t.Fatalf("exit %d\n%s", code, out)
+	}
+}

@@ -6,8 +6,9 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// LoosenPermissions grants Everyone read access to path and lets it inherit
-// from its parent, so tests can check that doctor reports it.
+// LoosenPermissions grants Everyone read access to path (a file or a
+// directory) and lets it inherit from its parent, so tests can check that
+// it is detected and refused.
 func LoosenPermissions(t testing.TB, path string) {
 	t.Helper()
 	sd, err := windows.GetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)

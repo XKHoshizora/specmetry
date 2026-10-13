@@ -1,7 +1,7 @@
 # Codex 审查意见处理记录
 
 > 状态：2026-10-13 · 对应设计版本 Draft v0.3
-> 原始审查：[reviews/codex-review-001.md](reviews/codex-review-001.md)（第一轮，§1 ~ §4）、[reviews/codex-review-002.md](reviews/codex-review-002.md)（冻结审查，§5）
+> 原始审查：[reviews/codex-review-001.md](reviews/codex-review-001.md)（第一轮，§1 ~ §4）、[reviews/codex-review-002.md](reviews/codex-review-002.md)（冻结审查，§5）、[reviews/codex-review-003.md](reviews/codex-review-003.md)（最终设计审查，§6）、[reviews/codex-review-004.md](reviews/codex-review-004.md)（M0 代码审查，§7）
 > 处理原则：逐条分析，不默认全盘接受；只要会改变核心模型或交换协议，就在本轮设计清楚；只涉及实现细节的，安排在对应模块开工前关闭。不用"开发时再说"来掩盖当前的数据模型矛盾。
 
 **状态术语**（本文和 implementation-plan 统一使用）：
@@ -14,7 +14,7 @@
 | 实现状态 | 未开始 / 进行中 | — |
 | | **已验证** | 对应的验收项和 CX 反例已经在实现中通过 |
 
-**当前总体状态**（2026-10-13 更新）：codex-review-003 结论为 **GO**，BLOCKER 为 0。本文所有条目的设计状态均为**已冻结**（包括 codex-review-003 要求的两处同步修正，见 §6）；冻结后的修改必须走 implementation-plan §1 的变更流程。**没有任何条目处于"已验证"**：验证需要等到对应里程碑实现完成，并通过验收项和 CX 反例。
+**当前总体状态**（2026-10-13 更新）：codex-review-003 结论为 **GO**，BLOCKER 为 0。本文所有条目的设计状态均为**已冻结**（包括 codex-review-003 要求的两处同步修正，见 §6）；冻结后的修改必须走 implementation-plan §1 的变更流程。**没有任何条目处于"已验证"**：验证需要等到对应里程碑实现完成，并通过验收项和 CX 反例。M0 的首次代码审查（codex-review-004）为 NO-GO，修复记录见 §7，等待复审。
 
 ## 1. 总览（codex-review-001）
 
@@ -481,3 +481,42 @@ codex-review-002 列出的 ACCEPTED RISK 全部接受，已经分别写在对应
 | TD-22 | 当前用户 + SYSTEM | architecture §11.1、§16 |
 
 按照要求，这些补充没有引发新的整体架构审查。
+
+## 7. M0 代码审查（codex-review-004）的处理
+
+**审查结论**：NO-GO，4 项 BLOCKER、4 项 NON-BLOCKER。审查针对提交 `ae195b9`、`23c4479`。
+
+**处理方式**：先把审查中的复现条件写成自动化测试，确认它们在原代码上失败，再做最小修改，然后运行 M0 的全部检查。没有修改冻结的产品目标，也没有删除或放宽任何验收约束；验收项只增不减（MVP-PRV-05、PRV-06、STO-02、EV-07 的描述加严，新增 MVP-STO-06、STO-07 并纳入 M0 退出条件）。
+
+**实现状态**：已修复，本地验证通过（Windows 原生；Linux 通过 WSL 运行交叉编译的测试），**待 Codex 复审**。macOS 只在 CI 中验证，CI 尚未运行。
+
+### 阻塞项
+
+| 编号 | 根因 | 修复 | 反例测试 |
+|---|---|---|---|
+| B1 已有目录或数据库权限不安全时仍然写入 | `Ensure` 对已存在的目录直接返回；Windows 上的文件保护依赖继承，没有任何写入前检查；`doctor` 只能事后发现 | `Ensure` 对已存在的目录做完整检查，不满足即在写入前拒绝（退出码 6）；检查范围是目录本身和其中所有条目。新增检查：符号链接与联接（含数据目录本身）、Windows 属主与可继承性、macOS 扩展 ACL（architecture §11.1） | `TestOpenRefusesInsecureExistingDirectory`、`...InsecureExistingDatabase`、`...InsecureLeftoverWAL`、`...SymlinkedDatabase`；datadir 包内对目录、文件、链接、联接、不可继承 DACL、macOS ACL 的测试。全部断言拒绝后数据目录逐字节不变 |
+| B2 `doctor` 隐式改写数据库 | `query_only` 只限制 SQL，不限制 SQLite 的恢复与 checkpoint；遗留的 WAL 被合并并删除 | 新的只读快照读取：只读打开文件，在内存中按 SQLite 规则应用已提交的 WAL 帧，经只读 VFS 查询，读后校验并重试；无法只读读取时报告限制（architecture §11.5）。实测了驱动在各种文件状态下的行为，并以表征测试 `TestSQLiteReadOnlyModesModifyFiles` 固定下来（SQLite 自身的只读模式在常见状态下都会改动文件） | `TestInspectLeaves...`（崩溃遗留 WAL 与 SHM、只有 WAL、干净关闭、另一进程正在写入、恢复的备份）、`TestDoctorLeavesCrashedDatabaseUntouched`；与 SQLite 自身恢复结果比较的 `TestSnapshotIgnores...`（损坏或截断的最后一帧、未提交的帧、WAL 重新开始后的旧帧）；`TestSnapshotRetriesWhenDatabaseChanges`、`TestSnapshotGivesUpOnContinuousChanges`、`TestHotJournalIsReportedNotRecovered` |
+| B3 版本保护晚于写入，也不保护已打开的连接 | 连接初始化先执行 `journal_mode(WAL)` 再检查版本；`WriteTx` 不重新检查 | 打开前用只读快照完成版本保护，通过后才建立读写连接（之后在真实连接上再检查一次）；`WriteTx` 在取得写锁后、执行回调前检查 `schema_version`、`min_binary_version` 和 `recursive_triggers`；迁移在排他事务内再确认一次版本；无法解析的 `min_binary_version` 一律拒绝 | `TestOlderBinaryLeavesRestoredNewerBackupUntouched`、`...CrashedNewerDatabaseUntouched`、`TestWriteTxRefusesAfterConcurrentSchemaUpgrade`、`...AfterMinBinaryVersionRaised`、`TestUnreadableMinBinaryVersionIsRefused`；断言回调未执行，事实、`seq` 和文件都不变 |
+| B4 `INSERT OR REPLACE` 绕过只追加约束 | REPLACE 通过删除旧行实现，只有开启 `recursive_triggers` 才触发删除触发器；驱动默认关闭 | 每个连接通过 DSN 开启 `recursive_triggers`（连接池新建的连接同样适用），打开和每次写事务都确认；生产代码和迁移禁止 REPLACE 冲突处理，由静态测试检查 | `TestAppendOnlyRejectsReplace`（主键冲突、UNIQUE 冲突、`REPLACE INTO`、UPSERT、`UPDATE OR REPLACE`）、`...DeclaredReplaceConflict`、`TestEveryPoolConnectionEnablesRecursiveTriggers`、`TestWriteTxRefusesConnectionWithoutRecursiveTriggers`、`TestProductionSQLNeverUsesReplace` |
+
+### 非阻塞项
+
+| 编号 | 处理 | 状态 |
+|---|---|---|
+| N1 墓碑清理的崩溃恢复与外键顺序 | 删除时延迟外键检查；`projects` 按 `id` 删除；整理前写入标记文件，崩溃后下次打开时完成整理（architecture §11.4）。M1 建表约束写入 data-model §1.1，并由 `TestEveryTableHasProjectID` 对全部迁移强制；同时为 `scope_items` 补上 `project_id` | 已修复；完整的 `purge` 命令仍在 M2 实现 |
+| N2 非法墓碑测试是假阳性 | 用相同的迁移集合重新打开，断言错误来自非法 `project_id`，且数据目录不变；墓碑文件改为在写入任何数据之前校验 | 已修复 |
+| N3 `doctor` 忽略 `min_binary_version` | `doctor` 复用打开数据库时的版本保护规则 | 已修复（`TestDoctorReportsMinBinaryVersion`） |
+| N4 公开文档包含本机绝对路径 | 外部审查原文中的链接目标改为仓库相对路径，文字内容不变；CI 和 `scripts/check.sh` 增加检查，Markdown 链接中不得出现本机绝对路径 | 已修复 |
+
+### 其他发现
+
+- **Linux 上的 lint 失败**：复核三平台时发现，`perm_unix.go` 对目录 `chmod 0700` 会被 gosec（G302）报告，而 CI 的 lint 任务运行在 Linux 上，M0 原提交的首次 CI 会因此失败。目录需要执行位，`0700` 是正确的；已加注说明并排除。现在对 Windows、Linux、macOS 三个目标分别运行 golangci-lint，结果均为 0。
+- **测试本身的有效性**：对 WAL 解析做了变异测试（关闭校验和、关闭盐值与校验和、应用未提交的帧、关闭读后校验），确认对应的测试会失败。只关闭盐值检查时测试仍通过，因为累积校验和已经能拒绝旧帧；盐值检查与 SQLite 保持一致，作为第二道检查保留。
+
+### 尚未验证
+
+- MVP-PLT-01：GitHub Actions 三平台 CI 尚未运行（需要推送）。
+- macOS：权限、ACL 检测（`TestDarwinCheckReportsACL`）和全部测试只在 CI 中运行；本地只做了交叉编译和 vet、lint。
+- Linux 上的 race detector：本机没有 C 编译器，只在 CI 中运行。
+- 只读检查不加锁；它保证不修改文件，读到的是某一时刻已提交的一致状态。另一个进程在检查期间持续写入时会重试，仍然失败则报告限制。
+- 残余竞态：只读快照通过版本检查之后、建立读写连接之前，如果另一个进程恰好把数据库升级到更新的版本，读写连接上的再次检查会拒绝打开；但如果这时本进程是最后一个连接，关闭连接时 SQLite 会把对方已提交的 WAL 帧 checkpoint 进数据库。逻辑内容不变，文件字节会变化。驱动的公开接口没有提供关闭时不做 checkpoint 的设置（`SQLITE_DBCONFIG_NO_CKPT_ON_CLOSE`），因此记录为已知边界。
