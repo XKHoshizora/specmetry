@@ -31,6 +31,7 @@ func TestMain(m *testing.M) {
 		"uncommitted": uncommittedWriterHelper,
 		"upgrader":    upgraderHelper,
 		"lockholder":  lockHolderHelper,
+		"plainclose":  plainCloseHelper,
 	})
 	os.Exit(m.Run())
 }

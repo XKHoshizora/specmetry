@@ -26,7 +26,7 @@ func acquireOpenLock(ctx context.Context, path string, timeout time.Duration) (*
 		return nil, apperr.Wrap(apperr.Environment, err, "cannot open the database lock "+path)
 	}
 	deadline := time.Now().Add(timeout)
-	for {
+	for waited := false; ; waited = true {
 		ok, err := tryLock(f, true)
 		if err != nil {
 			_ = f.Close()
@@ -34,6 +34,9 @@ func acquireOpenLock(ctx context.Context, path string, timeout time.Duration) (*
 		}
 		if ok {
 			return &openLock{f: f}, nil
+		}
+		if !waited && lockWaitHook != nil {
+			lockWaitHook()
 		}
 		if time.Now().After(deadline) {
 			_ = f.Close()
@@ -48,6 +51,10 @@ func acquireOpenLock(ctx context.Context, path string, timeout time.Duration) (*
 		}
 	}
 }
+
+// lockWaitHook, if set, runs once when acquireOpenLock first finds the lock
+// held by another process (tests use it to know a process is waiting).
+var lockWaitHook func()
 
 func (l *openLock) release() {
 	_ = unlock(l.f)

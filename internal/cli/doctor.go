@@ -32,18 +32,31 @@ type check struct {
 	detail string
 }
 
-// newDoctorCmd is the M0 doctor framework: read-only checks of the local
-// environment. It never creates, migrates, recovers or modifies anything:
-// the database version is read through a read-only SQLite connection only in
-// file states where that changes nothing, and is otherwise reported as
-// unknown (sqlite.Inspect). Hook,
-// Skill and spool checks join in M3; `doctor --json` needs a schema first
-// (implementation-plan §3).
+// newDoctorCmd is the M0 doctor framework: non-destructive checks of the
+// local environment (MVP-STO-07). It never writes SQL, migrates, recovers or
+// checkpoints, and never reports uncommitted data: the database version is
+// read through a read-only SQLite connection only in file states where that
+// changes nothing, and is otherwise reported as unknown (sqlite.Inspect). It
+// is not a forensic read-only tool: if another SQLite program closes the
+// database during the check, SQLite may create empty -wal/-shm files, and the
+// version is then reported as unknown. Hook, Skill and spool checks join in
+// M3; `doctor --json` needs a schema first (implementation-plan §3).
 func newDoctorCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "doctor",
-		Short: "Check the local Specmetry environment (read-only)",
-		Args:  cobra.NoArgs,
+		Short: "Check the local Specmetry environment (non-destructive)",
+		Long: `Check the local Specmetry environment (non-destructive): data directory,
+permissions, configuration, database version and git.
+
+doctor does not write to the database: it runs no SQL writes, migrations,
+recovery or checkpoints, and reports only committed data. When the database
+cannot be read consistently without changing it, the version is reported as
+unknown.
+
+It is not a forensic, strictly read-only tool. If another SQLite program
+closes the database while doctor is reading it, SQLite may create empty
+-wal/-shm files; doctor then reports the version as unknown.`,
+		Args: cobra.NoArgs,
 		RunE: run(func(cmd *cobra.Command, _ []string) error {
 			checks := runChecks(cmd)
 			failed := printChecks(cmd.OutOrStdout(), checks)

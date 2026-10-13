@@ -253,3 +253,18 @@ func TestDoctorReportsMinBinaryVersion(t *testing.T) {
 		t.Fatalf("exit %d\n%s", code, out)
 	}
 }
+
+// MVP-STO-07 (adjusted 2026-10-13): users are told that doctor is a
+// non-destructive check, not a forensic read-only guarantee.
+func TestDoctorHelpStatesItsGuarantees(t *testing.T) {
+	testutil.TempHome(t)
+	code, out, _ := execute(t, "doctor", "--help")
+	if code != apperr.ExitOK {
+		t.Fatalf("exit %d", code)
+	}
+	for _, want := range []string{"non-destructive", "does not write to the database", "reports only committed data", "not a forensic, strictly read-only tool", "version as unknown"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("doctor --help does not say %q:\n%s", want, out)
+		}
+	}
+}

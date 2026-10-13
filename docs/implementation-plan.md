@@ -38,6 +38,7 @@
 | Windows 上执行检查的 shell | 默认 shell 的探测顺序；`shell` 字段的取值映射 | M2 开工前 | TD-06 |
 | `inputs` 的对象 ID | 文件和目录的取值方式；子模块的处理 | M2 开工前 | TD-23 |
 | 备份恢复命令（P1） | `backup restore` 的锁、原子替换、恢复后的墓碑处理 | M2 开工前 | 审查 #12 |
+| 数据库恢复命令 | `db recover` 的备份方式、墓碑顺序、一致性检查、拒绝路径的文件副作用；§8.1 表中第 1 ~ 4 项的确认；补齐需求与验收项 | M2 开工前 | PD-23 |
 | Claude Code Hook 核实 | 事件名、输入字段、PreToolUse 拒绝协议、PowerShell 工具名；固定经过测试的版本范围；更新 architecture §12.1 | M3 开工前 | 审查 #10、TD-12 |
 | 其他 Agent 的约束 | Codex 等的沙箱可写路径、是否支持 Skill、受保护的 git 路径；更新兼容矩阵 | M4 开工前 | 审查 #11 |
 | Dashboard 技术细节 | OpenAPI 组织方式、SSE、UI 方案、端口 | M5 开工前 | TD-07、08、09、19 |
@@ -86,7 +87,7 @@ flowchart LR
 
 **退出条件（P0）**：MVP-PLT-01、MVP-PRV-05、MVP-PRV-06、MVP-STO-01 ~ 04、MVP-STO-06、MVP-STO-07（后两项由 codex-review-004 增补）。
 **交付物**：可以运行的 `specmetry version`、`specmetry doctor`；空库的迁移 v1；CI 通过。
-**状态（2026-10-13）**：已实现。codex-review-004 与 codex-review-005 两次独立审查均为 NO-GO，第三轮修复见 [review-resolution.md §8](review-resolution.md#8-m0-第二次代码审查codex-review-005的处理)，**等待 Codex 复审**。PRV-05、PRV-06、STO-01 ~ 04、STO-06、STO-07 已在本地验证（Windows 原生；Linux 通过 WSL 运行交叉编译的测试，跨用户测试以 root 运行）。未验证：MVP-PLT-01（GitHub Actions 三平台尚未运行；macOS 只在 CI 中验证，包括 ACL 检测）、Linux 上的 race detector。N1 部分修复，最晚在 M2 的 `purge` 验收前完成。
+**状态（2026-10-13）**：已实现。三次独立审查（codex-review-004、005、006）均为 NO-GO；B1、B4 已关闭。codex-review-006 的 R1、R2 按产品负责人调整后的 MVP-STO-02、MVP-STO-07 处理，记录见 [review-resolution.md §9](review-resolution.md#9-m0-第三次代码审查codex-review-006的处理)，**等待 Codex 最终复核**；其中打开前检查在外部 SQLite 关闭竞态下的辅助文件副作用尚待决定。本地已验证：Windows 原生；Linux 通过 WSL 运行交叉编译的测试，跨用户测试以 root 运行。未验证：MVP-PLT-01（GitHub Actions 三平台尚未运行；macOS 只在 CI 中验证，包括 ACL 检测）、Linux 上的 race detector。N1 部分修复，最晚在 M2 的 `purge` 验收前完成。
 
 ### M1 基准、来源、交付目标与范围
 
@@ -122,10 +123,12 @@ flowchart LR
 | WP2.6 | 决定：前置条件（含 `seen_decision_id`，在写事务中原子比较）、风险推导与确认（V-D01）、`normal` / `manual` / `exception`、交互式的 `accept` / `reject` / `waive`（收到退出码 5 后重新读取，不自动重试） |
 | WP2.7 | `status --json`（`status.v1`）、`gaps`、人类可读输出、`--diff-since <seq>` |
 | WP2.8 | `purge` 与墓碑生效；（P1）`backup create`、`backup restore` |
+| WP2.10 | 数据库恢复命令 `specmetry db recover`（PD-23，见 §8.1）；**必须在 M4 自测开始前完成**。需求与验收项在 M2 开工前补齐，并先确认 §8.1 表中第 1 ~ 4 项的调整 |
 | WP2.9 | 夹具与 oracle：`fx-docs-only`、`fx-in-dev`（含 feature 分支和 worktree 脚本）、`fx-incomplete`、`fx-scale`；完整的 CX 测试套件 |
 
 **退出条件（P0）**：标注 M2 的全部 P0 项（包括 M1 / M2 项的推导侧；INIT-07、INIT-09、BL-18、WT-02 ~ 05、INV-01 ~ 04、CLM、EV（含 EV-12、EV-13）、ACC（ACC-03 除外，含 ACC-10、ACC-11）、ST（ST-06 除外）、PRV-03、PLT-05、COL-12），以及 **CX-01 ~ CX-22、CX-24 的检查部分、CX-25 ~ CX-28 的 MVP 部分**（CX-08 的 UI 部分和 CX-23 除外）。
 **可选（P1）**：INV-06、STO-05。
+**PD-23**：`db recover`（WP2.10）在 M2 完成；它的验收项补齐后加入本里程碑的退出条件。
 **里程碑评审**：M2 结束时，用 CX 结果和 E2E-1、E2E-2 的 CLI 版本做一次设计复核，确认推导规则在真实夹具上没有产生意外结论，然后再进入 M4 和 M5。
 
 ### M3 Hook 采集与 setup
@@ -236,7 +239,8 @@ flowchart LR
 2. 恢复是独立命令 `specmetry db recover`，不放进 `doctor`；`doctor` 必须保持只读。
 3. 恢复必须由用户明确授权（仅限人，交互式确认），并实际检查 schema 版本、`min_binary_version` 和数据库一致性；不能仅凭用户声明"正在使用最新版本"就允许恢复。
 4. 恢复前必须已有一致性备份；不得直接删除 `-wal` / `-shm`；不得绕过版本兼容限制。
-5. 现在不开发。提交 `3e0b0bc` 的代码保持不变，先完成 Codex 对 B1 ~ B3 的复审。
+5. M0 不开发；提交 `3e0b0bc` 的代码保持不变，先完成 Codex 对 B1 ~ B3 的复审。
+6. **排期**（2026-10-13 确认）：在 M2 实现（WP2.10），必须在 M4 自测（dogfooding）开始前完成。
 
 **适用的数据库状态**（[architecture.md §11.5](architecture.md#115-只读检查) 中报告"版本未知"、普通打开会被拒绝的状态）：WAL 模式数据库缺少 `-wal` 与 `-shm`；只有其中一个；存在非空的 `-journal`。
 
@@ -252,7 +256,7 @@ flowchart LR
 | 数据库一致性检查 | 尚未设计（例如 `PRAGMA integrity_check`） | 必须在不改动原文件的前提下完成 |
 | N1 的剩余部分 | 最晚在 M2 的 `purge` 验收前解决 | 恢复同样要合并 WAL，不能在 checkpoint 返回 busy 时误报完成 |
 
-**排期评估**：现有验收项中没有与 `db recover` 直接矛盾的条目。无论放在 M1 还是首次公开发布前（M6），都需要**新增**需求与验收项，并调整下列已批准的内容。这些调整需要产品负责人确认，本轮没有改动任何已批准的验收条件：
+**排期评估**（排期已确认为 M2，评估保留作记录）：现有验收项中没有与 `db recover` 直接矛盾的条目。无论放在哪个里程碑，都需要**新增**需求与验收项，并调整下列已批准的内容。这些调整需要产品负责人在 M2 开工前确认，目前没有改动任何已批准的验收条件：
 
 | # | 涉及的已批准内容 | 冲突或需要的调整 |
 |---|---|---|
@@ -264,4 +268,4 @@ flowchart LR
 | 6 | MVP-STO-05 / FR-STO-04（`backup create/restore` 是 P1，在 M2） | 如果恢复是 P0，它依赖的备份能力就要提前到 P0，与"备份命令是 P1"的优先级不一致。可以复用 M0 的内部备份函数，而不提前实现 `backup` 命令 |
 | 7 | M6 的退出条件（mvp.md §7） | 放在首次公开发布前不冲突，但需要写入 mvp.md 的范围和 §7 的完成清单。风险：从 M4 开始的 dogfooding 期间没有恢复手段 |
 
-**建议**（供决定，未执行）：实现时间不晚于 M4 开始 dogfooding。技术上它与 M2 的 `purge`、`backup create/restore` 共用墓碑、备份和人工确认，放在 M2 改动最集中。无论放在哪个里程碑，都需要先确认上表第 1 ~ 4 项的调整。
+**结论**：排期为 M2，不晚于 M4 自测。它与 M2 的 `purge`、`backup create/restore` 共用墓碑、备份和人工确认。开工前仍需确认上表第 1 ~ 4 项的调整；第 5 项（M1 退出条件）不再涉及，第 7 项的风险因排在 M4 之前而消除。

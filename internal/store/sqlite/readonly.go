@@ -116,6 +116,9 @@ func readMetaReadOnly(ctx context.Context, dbPath string, sameSizes bool) (readO
 		return readOnlyMeta{}, &uninspectableError{"only one of the database's -wal and -shm files exists; reading it would recover the database"}
 	}
 
+	if readOnlyHook != nil {
+		readOnlyHook()
+	}
 	m, readErr := queryReadOnly(ctx, dbPath)
 	after, err := statDatabaseFiles(dbPath)
 	if err != nil {
@@ -134,6 +137,11 @@ func readMetaReadOnly(ctx context.Context, dbPath string, sameSizes bool) (readO
 	m.exists = true
 	return m, nil
 }
+
+// readOnlyHook, if set, runs after the file state was judged readable and
+// before the read-only connection opens (tests use it to let another
+// process act in between).
+var readOnlyHook func()
 
 func queryReadOnly(ctx context.Context, dbPath string) (readOnlyMeta, error) {
 	sdb, err := sql.Open("sqlite", "file:"+escapePath(dbPath)+"?mode=ro&readonly_shm=1&_pragma=busy_timeout(1000)")
