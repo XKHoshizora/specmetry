@@ -1,0 +1,68 @@
+{
+  "schema": "specmetry.proposal/v1",
+  "origin": "skill_init",
+  "base_version": 0,
+  "summary": "从客户需求文档提取的初始基准",
+  "items": [
+    {
+      "op": "add",
+      "type": "goal",
+      "ref": "g1",
+      "data": { "title": "上线订单管理 MVP", "description": "客户首期交付范围" },
+      "origin": "extracted",
+      "confidence": "high",
+      "sources": [{ "source": "docs/client-brief.md", "locator": "L3-L5", "excerpt": "首期需要上线订单管理" }]
+    },
+    {
+      "op": "add",
+      "type": "requirement",
+      "ref": "r1",
+      "data": { "goal": "g1", "title": "用户可以用邮箱和密码登录", "kind": "functional", "priority": "must" },
+      "origin": "extracted",
+      "confidence": "high",
+      "sources": [{ "source": "docs/client-brief.md", "locator": "L12-L18", "excerpt": "用户需要使用邮箱和密码登录系统" }]
+    },
+    {
+      "op": "add",
+      "type": "criterion",
+      "ref": "c1",
+      "data": {
+        "requirement": "r1",
+        "statement": "使用正确的邮箱和密码登录时返回会话令牌；密码错误时返回 401",
+        "verification": "automated",
+        "check": {
+          "command": "go test ./internal/auth -run TestEmailLogin",
+          "rationale": "TestEmailLogin 覆盖正确密码与错误密码两种情况"
+        }
+      },
+      "origin": "extracted",
+      "confidence": "medium"
+    },
+    {
+      "op": "add",
+      "type": "criterion",
+      "ref": "c2",
+      "data": { "requirement": "r1", "statement": "登录页面符合客户提供的视觉稿", "verification": "manual" },
+      "origin": "extracted",
+      "confidence": "medium"
+    },
+    {
+      "op": "add",
+      "type": "requirement",
+      "ref": "r2",
+      "data": { "title": "订单可以导出为 CSV", "kind": "functional", "priority": "should" },
+      "origin": "inferred_from_code",
+      "confidence": "medium",
+      "code_refs": [{ "path": "internal/export/csv.go", "lines": "1-80" }],
+      "rationale": "代码中已实现，但需求文档未提及"
+    }
+  ],
+  "questions": [
+    {
+      "text": "密码找回走短信还是邮件？",
+      "about": "r1",
+      "blocking": true,
+      "sources": [{ "source": "docs/client-brief.md", "locator": "L20", "excerpt": "支持找回密码" }]
+    }
+  ]
+}

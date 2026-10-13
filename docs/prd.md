@@ -1,93 +1,117 @@
 # Specmetry 产品需求文档（PRD）
 
-> 状态：Draft v0.1 · 2026-10-13
-> 相关文档：[vision.md](vision.md) · [mvp.md](mvp.md) · [architecture.md](architecture.md) · [data-model.md](data-model.md) · [acceptance-criteria.md](acceptance-criteria.md)
+> 状态：Draft v0.3 · 2026-10-13（依据 [codex-review-001](reviews/codex-review-001.md) 与 [codex-review-002](reviews/codex-review-002.md) 修订）
+> 相关文档：[vision.md](vision.md) · [mvp.md](mvp.md) · [architecture.md](architecture.md) · [data-model.md](data-model.md) · [acceptance-criteria.md](acceptance-criteria.md) · [review-resolution.md](review-resolution.md) · [implementation-plan.md](implementation-plan.md)
 
-功能需求的优先级定义如下：
+优先级的含义：
 
-- **P0**：MVP 必须完成
-- **P1**：MVP 应当完成，时间不足时可推迟
-- **P2**：MVP 之后再做
+- **P0**：MVP 必须完成，是里程碑的退出条件。
+- **P1**：MVP 中可选，不阻塞里程碑。
+- **P2**：MVP 之后再做。
 
 ## 1. 用户与场景
 
-### 1.1 主要用户
-
-**独立开发者 / 外包开发者**：用 Claude Code 等 AI coding agent 交付客户项目。手上有客户需求文档（可能不完整），代码主要由 Agent 编写。需要随时知道项目还差什么，并能向客户说明进度。
-
-### 1.2 关键场景
+**主要用户**：用 Claude Code 等 AI coding agent 交付客户项目的独立开发者或外包开发者。
 
 | # | 场景 | 期望结果 |
 |---|---|---|
-| S1 | **只有文档的新项目**：客户发来需求文档，还没写代码 | 得到经确认的基准，所有需求为"未开始"，同时列出文档中的歧义问题 |
-| S2 | **中途接入开发中的项目**：已有文档和部分代码 | 得到基准，以及每条验收标准当前的自述和证据状态，并给出差距清单 |
-| S3 | **文档不完整 / 几乎只有代码** | 从代码反推候选需求，并明确标识为"反推"；生成大量待澄清问题；只有经人确认后才进入基准 |
-| S4 | **日常推进**：Agent 完成一段工作 | 运行 `sync` 后，自述、证据和状态变化被记录；Dashboard 自动刷新 |
-| S5 | **需求变更**：客户改需求 | 新文档生成变更提案，确认后基准升版；受影响的旧验收被标记为"需复核" |
-| S6 | **交付前检查** | 得到"是否可交付"的判定，并列出每一条不满足的原因 |
+| S1 | 只有文档的新项目 | 得到经确认的基准和交付范围；交付状态为 `in_progress`；列出文档中的歧义 |
+| S2 | 中途接入开发中的项目 | 得到基准、范围和逐条盘点结果；没有盘点到的条目显示"未知"；交付判定只基于在交付快照上执行的检查 |
+| S3 | 文档不完整或几乎只有代码 | 从代码反推的条目有明确标识；确认范围时，人必须确认已经补充了代码中看不到的交付目标 |
+| S4 | 日常推进 | `sync` 记录自述并在当前 worktree 中运行检查；只有交付快照上的结果才影响交付判定 |
+| S5 | 需求变更 | 需求实质修订后，相关 AC 需要逐条确认是否仍然适用；范围需要重新确认 |
+| S6 | 交付判定 | 只有在"干净、确定的代码快照、已确认的完整范围、范围内全部验收或豁免"的前提下，才给出 `ready` |
+| S7 | 多个 worktree 并行开发 | feature worktree 中的检查结果不会影响交付分支的判定，反之亦然 |
 
 ## 2. 术语表
 
 | 术语 | 英文 | 定义 |
 |---|---|---|
-| 项目 | Project | 一个被 Specmetry 跟踪的代码仓库。MVP 中一个项目对应一个仓库根目录。 |
-| 来源文档 | Source | 被登记为需求依据的本地文件，如客户需求、PRD、设计文档 |
-| 项目基准 | Project Baseline | 经人确认的目标、需求、验收标准的集合，带版本号 |
-| 目标 | Goal | 项目要达成的业务或交付目标，用来组织需求 |
-| 需求 | Requirement | 一项要交付的能力或约束 |
-| 验收标准 | Acceptance Criterion（AC） | 属于某个需求、可以判定真假的条件。**验收的最小单位。** |
-| 检查 | Check | 绑定在 AC 上、经人确认的命令，由 Specmetry 执行以产生证据 |
-| 提案 | Proposal | 对基准的一组变更建议（新增、修改、退役），经人工审核后才生效 |
-| 待澄清问题 | Question | 提取或盘点时发现的歧义或缺失信息 |
-| Agent 自述 | Claim | Agent 对某个 AC 实现情况的结构化陈述 |
-| 执行证据 | Evidence | Specmetry 执行或观察到的客观记录，如检查结果、提交 |
-| 正式验收 | Acceptance | 人对某个 AC 作出的接受、拒收或豁免决定 |
-| 活动记录 | Event | Hook 采集的 Agent 会话元数据，如会话起止、命令、被修改的文件路径 |
-| 差距 | Gap | 由状态推导出的、阻碍交付的具体问题 |
-| 交付就绪 | Delivery Readiness | 所有必需需求已验收或已豁免，并且没有阻塞问题 |
-| 通道 | Channel | 操作的发起方式：`agent_cli`（非交互 CLI）、`human_cli`（交互式终端）、`dashboard`、`hook`、`system` |
+| 项目 | Project | 被跟踪的代码库，由 git 公共目录确定身份；可以有多个 worktree |
+| 工作树 | Worktree | 项目的一个检出目录，有自己独立的 HEAD 和 index |
+| 代码上下文 | Code Context | worktree、HEAD 提交、工作区状态（`clean` / `dirty` / `unknown`）三者的组合 |
+| 交付目标 | Delivery Target | 人确认的、要交付的 ref（分支或标签）。MVP 中每个项目只有 1 个。 |
+| 快照 | Snapshot | 交付目标的 ref 当前指向的提交，是交付判定所针对的代码对象 |
+| 交付范围 | Delivery Scope | 人确认的、本次要交付的需求清单，绑定交付目标、基准版本和来源集合 |
+| 来源集合 | Source Set | 全部已登记、未移除的来源及其已确认的哈希 |
+| 项目基准 | Project Baseline | 经人确认的目标、需求、AC，带版本 |
+| 验收标准 | Acceptance Criterion（AC） | 属于某个需求、可以判定的条件，是验收的最小单位 |
+| 检查 | Check | AC 上经人确认的命令，包含说明"为什么能验证该 AC"的理由 |
+| 合格执行 | Qualifying Run | 开始和结束时 HEAD 都等于记录的提交、工作区都干净的检查执行（隔离级还要求通过隔离验证） |
+| 证据等级 | Evidence Grade | `observed`（观测级）：只保证开始和结束两个时刻与快照一致，不保证执行期间未改变。`snapshot_isolated`（隔离级）：在私有快照目录中、由外部强制只读的环境中执行，并在执行前后验证。MVP 只提供观测级。 |
+| 提案 | Proposal | 对基准的变更建议，经人审核后生效 |
+| 重新确认 | Reaffirm | 父需求实质修订后，人确认某个 AC 仍然适用 |
+| Agent 自述 | Claim | Agent 对 AC 的结构化陈述，只影响"进度" |
+| 进度 | Progress | 由自述和提交推导出的工作情况，可信度低。Claim 不能单独产生 `accepted` 或 `ready`（手动 AC 的例外见 §3.1） |
+| 交付状态 | Delivery Status | 相对于快照推导出的状态，见 §3.2 |
+| 验收决定 | Decision | 人作出的接受（`normal` / `manual` / `exception`）、拒收或豁免 |
+| 沿用 | Carry-forward | 自动化 AC 的验收，在新快照上用同一检查配置再次合格通过后，可以继续适用 |
+| 差距 | Gap | 由推导得出的待处理项；阻塞差距就是交付判定的原因 |
+| 序号 | seq | 数据库分配的单调递增序号，是判断事实先后的唯一依据 |
+| 通道 | Channel | `agent_cli` / `human_cli` / `dashboard` / `hook` / `system` |
 
 ## 3. 核心概念
 
-### 3.1 三层事实
+### 3.1 三层事实与两种视图
 
-- **Claim（Agent 自述）**：只能让 AC 到达"自述完成 / 进行中 / 受阻"，**永远不能**让 AC 变为"已验证"或"已验收"。
-- **Evidence（执行证据）**：只有 Specmetry 自己执行的、经人确认的检查命令，才能产生 `verifies`（验证性）证据。提交记录只是 `relates`（关联性）证据，可以表示"进行中"，但不能证明正确。Hook 采集的活动记录只用于时间线和会话视图。
-- **Acceptance（正式验收）**：只能由人通过交互式终端或 Dashboard 产生。验收与 AC 的版本（revision）绑定。
+- **Claim**：由 Agent 产生，主要影响进度。它不能单独产生 `accepted` 或 `ready`，也不能让自动化 AC 越过 `in_progress`；对手动 AC，`done` 自述只会把它标为 `ready_for_review`，含义是"等待人工查看"，这不是验证。
+- **执行证据**：由 Specmetry 在某个代码上下文中执行检查而产生。只有在**快照上的合格执行**，才会参与交付判定。
+- **验收决定**：由人产生，绑定查看时的快照、修订和证据。它是否适用于当前快照，由推导决定。
 
-### 3.2 状态
+### 3.2 统一的交付状态
 
-AC 状态与需求状态由事实**推导**，推导规则见 [data-model.md §6](data-model.md#6-状态推导)。产品界面把细分状态归入 6 个展示分组：
+**AC 层面**（相对快照 `S`）：
 
-| 展示分组 | 包含的 AC 状态 |
-|---|---|
-| 未开始 | `not_started` |
-| 进行中 | `in_progress` |
-| 自述完成 | `claimed` |
-| 已验证 | `verified` |
-| 已验收 | `accepted`、`waived` |
-| 需关注 | `failing`、`regressed`、`rejected`、`stale`、`blocked` |
+| 状态 | 含义 | 人需要做什么 |
+|---|---|---|
+| `not_assessed` | `S` 无法解析 | 设置或修复交付目标 |
+| `in_progress` | 在 `S` 上还没有任何验证 | 实现并验证 |
+| `failing` | `S` 上的合格检查失败 | 修复 |
+| `rejected` | 人拒收。只有代码变化后出现新的合格通过，或者人改判，才会解除；在同一提交上重新运行检查不能解除。 | 返工 |
+| `needs_reverification` | 曾经验证或验收过，但对 `S` 不再适用：代码变了、AC 被修订、父需求被修订 | 重新运行检查，或人工复核 |
+| `ready_for_review` | 自动化 AC 在 `S` 上合格通过但还没有适用的验收；或者手动 AC 已由 Agent 自述完成 | 人工验收 |
+| `accepted` | 有适用于 `S` 的验收 | — |
+| `waived` | 已豁免 | — |
+
+**目标层面**：`not_assessed` → `in_progress` → `needs_reverification` → `ready_for_review` → `ready`。完整规则见 [data-model.md §6.8](data-model.md#68-交付状态目标层面)。
+
+交付判定同时给出**证据等级**（`delivery.evidence_grade`）：MVP 中为 `observed` 或 `none`，界面和 CLI 不得把 `observed` 说成"快照已验证"。
+
+`ready` 必须同时满足以下条件：
+
+- 快照可以解析；
+- 范围已确认、没有过期、不为空，也不是全部豁免；
+- 范围内所有 AC 都有适用于 `S` 的验收或豁免；
+- 没有阻塞问题；
+- 来源变化都已经由人确认。
+
+**无法判断时，一律给出更保守的状态。**
 
 ### 3.3 权限矩阵
 
-| 操作 | Agent（非交互 CLI） | 人（交互式 CLI） | 人（Dashboard） | Specmetry 自动 |
+| 操作 | Agent（非交互 CLI） | 人（交互式 CLI） | 人（Dashboard） | 自动 |
 |---|---|---|---|---|
-| 初始化项目、登记来源、确认来源变化已处理（`ack`） | ✓ | ✓ | — | — |
-| 安装 / 卸载 Skill 与 Hooks（修改 Agent 配置） | ✗ | ✓ | — | — |
-| 打开 Dashboard（从不在输出中打印令牌） | ✓ | ✓ | — | — |
+| 初始化项目、登记来源 | ✓ | ✓ | — | `init` 创建默认交付目标 |
+| 确认来源变化（`source ack`） | ✗ | ✓ | ✓ | — |
+| 移除来源 | ✗ | ✓ | — | — |
+| 安装 / 卸载 Skill 与 Hooks | ✗ | ✓ | — | — |
+| 设置交付目标 | ✗ | ✓ | — | — |
+| 打开 Dashboard（不输出令牌） | ✓ | ✓ | — | — |
 | 提交提案（待审核） | ✓ | ✓ | — | — |
-| 人工编辑基准（提案并立即应用，`propose --apply`） | ✗ | ✓ | ✓ | — |
+| 人工编辑基准（立即应用） | ✗ | ✓ | ✓ | — |
 | 审核提案（生成基准版本） | ✗ | ✓ | ✓ | — |
+| 确认交付范围 | ✗ | ✓ | ✓ | — |
 | 回答 / 驳回问题 | ✗ | ✓ | ✓ | — |
-| 提交 Claim | ✓ | ✓（`manual` 类） | — | — |
-| 触发检查 | ✓ | ✓ | ✗（MVP） | — |
-| 产生 Evidence | — | — | — | ✓ |
-| 验收决定（接受 / 拒收 / 豁免） | ✗ | ✓ | ✓ | — |
-| 查看状态与差距 | ✓ | ✓ | ✓ | — |
-| 删除项目数据 | ✗ | ✓ | ✗ | — |
+| 提交 Claim（`sync` / `audit`） | ✓ | ✓ | — | — |
+| 提交 Claim（`manual`） | ✗ | ✓ | — | — |
+| 触发检查 | ✓ | ✓ | ✗ | — |
+| 产生检查执行记录、发现提交 | — | — | — | ✓ |
+| 验收决定 | ✗ | ✓ | ✓ | — |
+| 查看 | ✓ | ✓ | ✓ | — |
+| `purge` / 恢复备份 | ✗ | ✓ | ✗ | — |
 | 直接设置状态 | ✗ | ✗ | ✗ | 只能推导 |
 
-"✗"由通道识别与 Hook 拦截共同保证，威胁模型是"防误操作，不防恶意"。详见 [architecture.md §5](architecture.md#5-信任边界与操作通道)。
+"✗"依靠启发式的通道识别和 Hook 拦截来保证，目的是**防止 Agent 误执行，不能证明操作者身份**（见 [architecture.md §5](architecture.md#5-信任边界与操作通道)）。
 
 ## 4. 功能需求
 
@@ -95,272 +119,277 @@ AC 状态与需求状态由事实**推导**，推导规则见 [data-model.md §6
 
 | ID | 需求 | 优先级 |
 |---|---|---|
-| FR-INIT-01 | `specmetry init` 在仓库根目录创建项目标识 `.specmetry/project.json`，并在本地数据库注册项目。重复执行是幂等的。 | P0 |
-| FR-INIT-02 | 检测项目的起始阶段（`docs_only` / `in_development` / `incomplete_docs`），给出建议，并允许用 `--stage` 覆盖 | P0 |
-| FR-INIT-03 | 发现候选来源文档，列出供确认，不自动登记 | P0 |
-| FR-INIT-04 | `specmetry setup` 安装或检测 Agent Skill 与 Hooks。修改任何 Agent 配置文件前，必须展示变更内容并得到显式确认。 | P0 |
-| FR-INIT-05 | 初始化是可恢复的分步流程，进度由数据推导（见 §4.1.1）。再次运行 `/specmetry init` 时，从下一步继续。 | P0 |
-| FR-INIT-06 | 默认把 `.specmetry/` 写入 `.git/info/exclude`（只影响本地、不进入版本控制），并在输出中告知；`--no-exclude` 可以关闭；不修改 `.gitignore`（见 PD-07） | P1 |
-| FR-INIT-07 | 全流程不需要账号，也不需要网络 | P0 |
-| FR-INIT-08 | 检测常见测试命令（如 `go test`、`npm test`、`pytest`），作为提示返回给 Agent | P1 |
-| FR-INIT-09 | 在非 git 目录中也能初始化。此时给出警告，并禁用基于 git 的功能。 | P0 |
+| FR-INIT-01 | `init` 创建 marker 并注册项目，可重复执行 | P0 |
+| FR-INIT-02 | 检测起始阶段，可以用 `--stage` 覆盖 | P0 |
+| FR-INIT-03 | 列出候选来源，不自动登记 | P0 |
+| FR-INIT-04 | `setup` 安装或卸载 Skill 与 Hooks：先展示改动，人确认后才写入 | P0 |
+| FR-INIT-05 | 初始化进度可以恢复，由数据推导，条件累积（§4.1.1） | P0 |
+| FR-INIT-06 | 默认写入 `.git/info/exclude`；不可写时只给出警告 | P1 |
+| FR-INIT-07 | 不需要账号；核心不需要网络 | P0 |
+| FR-INIT-08 | 提示常见的测试命令 | P1 |
+| FR-INIT-09 | 非 git 目录可以降级使用，但永远不会给出 `ready` | P0 |
+| FR-INIT-10 | 以主 worktree 当前所在的分支创建默认交付目标；分离 HEAD 或非 git 时不创建 | P0 |
 
 #### 4.1.1 初始化流程
 
-不同起始阶段的差异：
-
-| 起始阶段 | 判定提示（启发式，可覆盖） | 基准来源 | 现状盘点 |
-|---|---|---|---|
-| `docs_only` | 有需求或设计文档；源代码文件少于阈值 | 从文档提取 | 不需要对照代码，所有 AC 为 `not_started`；可以预先定义检查 |
-| `in_development` | 文档和代码都存在 | 从文档提取；代码中存在但文档未提及的功能，作为 `inferred_from_code` 提案 | Agent 对照代码盘点，运行检查，扫描 git 历史 |
-| `incomplete_docs` | 以代码为主，文档缺失或很少 | 文档提取，加上从代码反推（`inferred_from_code`，必须逐条确认），并生成较多 Question | 同 `in_development` |
-
-起始阶段只影响初始化流程的引导，不影响数据模型和状态推导。
-
-初始化进度（`init_progress`）由数据推导，不单独存储。各步骤的条件是累积的：只有前一步满足，后一步才可能成立。
-
-| 步骤 | 完成条件 | 下一步动作 |
+| 起始阶段 | 基准来源 | 现状盘点 |
 |---|---|---|
-| 1. `initialized` | 项目已注册 | 确认并登记来源文档 |
-| 2. `sources_registered` | 已登记至少 1 个来源，或显式跳过（`init --skip-sources`，适用于仅有代码的项目） | Agent 提取基准，提交提案 |
-| 3. `baseline_proposed` | 至少存在 1 个提案 | 人审核提案 |
-| 4. `baseline_confirmed` | 至少存在 1 个基准版本 | Agent 盘点现状并运行检查 |
-| 5. `inventoried` | 至少完成 1 次 `audit` 自述批次，或显式跳过（`init --skip-inventory`）；`docs_only` 项目在基准确认后自动视为完成 | 进入日常循环 |
+| `docs_only` | 从文档提取 | 所有 AC 的进度为 `not_started` |
+| `in_development` | 从文档提取；代码中存在但文档未提及的功能，作为 `inferred_from_code` 条目 | `audit`（`audit_scope = all`），然后在当前 worktree 运行检查 |
+| `incomplete_docs` | 文档提取 + 从代码反推 + 待澄清问题；确认范围时，人必须声明已经补充了代码中看不到的交付目标 | 同上 |
 
-完整流程：
+初始化进度（条件累积）：`initialized` → `sources_registered` → `baseline_proposed` → `baseline_confirmed` → `scope_confirmed` → `inventoried`。见 [data-model.md §6.12](data-model.md#612-初始化进度)。
 
-1. **一次性准备（每台机器）**：安装 `specmetry` 二进制 → 在终端执行 `specmetry setup` 安装 Skill 与 Hooks（展示改动，确认后写入）。
-2. **项目初始化**：在 Agent 中执行 `/specmetry init`。Skill 调用 `specmetry init --json` 获取起始阶段、候选文档和测试命令提示。
-3. **登记来源**：Agent 在对话中与用户确认来源列表，然后调用 `specmetry source add`。来源可以位于仓库之外，比如下载目录里的客户文档。
-4. **提取基准**：Agent 阅读来源（`in_development` / `incomplete_docs` 还要阅读代码），按 Skill 中的粒度指南生成提案 JSON，然后调用 `specmetry propose`。Specmetry 做 schema 校验和来源引用校验，并立即创建其中的 Question。
-5. **人工审核**：Agent 执行 `specmetry dashboard --page review` 为用户打开审核队列，然后停止。用户在审核队列（或终端中的 `specmetry review`）中逐条接受、编辑后接受或拒绝，并回答问题。提交审核即生成基准 v1。只有已确认的条目参与进度计算。
-6. **现状盘点**：用户再次执行 `/specmetry init`（或 `/specmetry audit`）。Agent 对照代码逐条提交 `audit` 类 Claim，并附文件和测试引用。随后 `specmetry check run --all` 产生初始证据，Specmetry 汇总 git 历史的基础事实。
-7. **差距报告**：Agent 调用 `specmetry gaps --json` 汇总结果，并执行 `specmetry dashboard --page gaps` 为用户打开差距页。
+流程：
 
-### F2 来源文档
+1. `specmetry setup`（人，每台机器一次）。
+2. Agent 中执行 `/specmetry init`：取得阶段、候选文档和默认交付目标。
+3. 人在对话中确认来源，Agent 执行 `source add`。
+4. Agent 读取 `status --json`，得到 `base_version`；然后提取基准，提交提案。
+5. Agent 执行 `dashboard --page review` 打开审核页，然后停止。人审核条目、回答问题，并**在同一次提交中确认交付范围**。
+6. 人再次执行 `/specmetry init`：Agent 进行全量 audit，然后在当前 worktree 中执行 `check run --all`。
+7. Agent 汇报交付状态、盘点覆盖率和阻塞差距。
+
+### F2 来源
 
 | ID | 需求 | 优先级 |
 |---|---|---|
-| FR-SRC-01 | 登记本地文件为来源（仓库内或仓库外均可），记录路径、类型、sha256 和大小 | P0 |
-| FR-SRC-02 | 检测来源变化（哈希变化、文件缺失），提示"基准可能需要更新"（产生 `SOURCE_CHANGED` 差距） | P0 |
-| FR-SRC-03 | 支持把粘贴的文本保存为本地快照文件后登记，例如客户的聊天消息 | P1 |
-| FR-SRC-04 | Specmetry 不解析文档语义，由 Agent 阅读文档。Specmetry 只读取文本类文件，用于校验引用。 | P0 |
+| FR-SRC-01 | 登记本地文件为来源，记录路径、类型、哈希和大小。只接受文档类文件（人可以用 `--allow-any-type` 放开）。重复登记同一路径时什么都不做，也不会更新已确认的哈希。 | P0 |
+| FR-SRC-02 | 检测来源变化，产生阻塞差距 `SOURCE_CHANGED` | P0 |
+| FR-SRC-03 | `source ack` 只能由人执行，需要填写理由，并绑定确认时磁盘上的实际哈希 | P0 |
+| FR-SRC-04 | 移除来源只能由人执行；移除后引用保留，并显示为 `source_removed` | P0 |
+| FR-SRC-05 | 计算来源集合哈希，供范围确认绑定 | P0 |
+| FR-SRC-06 | Specmetry 不解析文档语义，只为校验引用而读取文本 | P0 |
 
-### F3 基准提取与确认
-
-| ID | 需求 | 优先级 |
-|---|---|---|
-| FR-BL-01 | 接收结构化提案：对 goal / requirement / criterion 的 `add` / `update` / `retire`，外加 question。做严格的 schema 校验和引用校验，校验不通过则整体拒绝。 | P0 |
-| FR-BL-02 | 来源引用校验：引用片段（excerpt）在规范化空白后必须在来源文件中逐字出现，否则标记为 `not_found`；非文本来源标记为 `not_checkable` | P0 |
-| FR-BL-03 | 每个条目带 `origin`（`extracted` / `inferred_from_code` / `manual`）和 `confidence`。`inferred_from_code` 条目在所有界面中都有醒目标识。 | P0 |
-| FR-BL-04 | 人工审核：逐条接受、编辑后接受或拒绝，支持按目标批量操作。每次提交审核生成一个新的基准版本。 | P0 |
-| FR-BL-05 | 只有已确认的条目参与进度、差距和就绪计算 | P0 |
-| FR-BL-06 | 基准历史可查询：谁、何时、经哪个通道、改了什么（修改前后对比）、来自哪个提案条目 | P0 |
-| FR-BL-07 | 修改已确认的 AC 时，审核者选择 `material` 或 `editorial`。`material` 变更使旧证据和旧验收失效（变为 `stale`）。修改检查命令一律视为 `material`。 | P0 |
-| FR-BL-08 | 人可以直接手工新增或编辑条目。手工编辑也走提案路径并立即应用，同样产生版本。 | P0 |
-| FR-BL-09 | 提案基于旧版本，并且目标条目在此期间已被修改时，该条目标记为 `conflict`，需要对照当前值重新审核 | P0 |
-| FR-BL-10 | 待澄清问题：创建、回答、驳回，可标记为 `blocking`，可关联到需求或 AC | P0 |
-| FR-BL-11 | 基准导出为 Markdown 或 JSON | P1 |
-
-### F4 现状盘点
+### F3 基准
 
 | ID | 需求 | 优先级 |
 |---|---|---|
-| FR-INV-01 | 基准确认后，`/specmetry audit` 引导 Agent 逐条对照代码，提交 `audit` 类 Claim，并附文件、测试和提交引用 | P0 |
-| FR-INV-02 | Claim 中的文件引用由 Specmetry 校验是否存在，提交引用由 git 校验；无效的引用会被标记，但不拒绝 Claim | P0 |
-| FR-INV-03 | 盘点时汇总 git 历史的基础事实（提交数、最近提交时间、近期活跃度），供 Agent 盘点参考；此后持续扫描新提交，把引用了基准编号的提交关联为 `relates` 证据。由于编号在基准确认时才分配，关联通常只发生在基准确认之后。 | P0 |
-| FR-INV-04 | `specmetry check run --all` 运行所有已确认的检查命令，产生初始证据 | P0 |
-| FR-INV-05 | Audit 可以为缺少检查命令的自动化 AC 提议检查命令（以提案形式，需人工确认） | P1 |
-| FR-INV-06 | 记录"未映射工作"：Agent 做了、但不对应任何基准条目的工作 | P1 |
+| FR-BL-01 | 提案严格符合 schema，携带 `base_version` 和 `target_revision`；不一致时返回退出码 5 | P0 |
+| FR-BL-02 | 引用片段校验（≤ 500 字符）；界面如实说明校验证明了什么 | P0 |
+| FR-BL-03 | `origin` 和 `confidence`；反推条目必须有代码引用，并有醒目标识 | P0 |
+| FR-BL-04 | 审核：逐条或批量处理；携带 `seen_base_version`；每次提交生成一个版本 | P0 |
+| FR-BL-05 | 只有已确认的条目参与推导 | P0 |
+| FR-BL-06 | 版本历史可查询 | P0 |
+| FR-BL-07 | `material` / `editorial`；部分字段强制为 `material` | P0 |
+| FR-BL-08 | 人工编辑走同一条路径；因为会立即应用，每个更新都必须声明 `material` 或 `editorial` | P0 |
+| FR-BL-09 | 冲突条目展示三方对比，必须明确确认后才能处理 | P0 |
+| FR-BL-10 | 待澄清问题：Agent 可以提出，只能由人回答 | P0 |
+| FR-BL-11 | **需求实质修订后，其 AC 变为 `parent_revised`**；审核时可以对每个 AC 选择 `reaffirm` / 修订 / 退役 / 暂缓；提案支持 `reaffirm` 操作 | P0 |
+| FR-BL-12 | 检查配置必须有理由；不能包含密钥字面量；可以声明 `inputs` | P0 |
+| FR-BL-13 | 来源引用和代码引用绑定条目的修订，只追加 | P0 |
 
-### F5 Agent 自述
-
-| ID | 需求 | 优先级 |
-|---|---|---|
-| FR-CLM-01 | Agent 通过 CLI 批量提交 Claim，内容包括目标 AC、断言（`done` / `partial` / `not_done` / `blocked`）、摘要和引用 | P0 |
-| FR-CLM-02 | Claim 只能使 AC 到达 `claimed` / `in_progress` / `blocked` | P0 |
-| FR-CLM-03 | 摘要不超过 500 字符；所有文本在持久化前经过密钥脱敏 | P0 |
-| FR-CLM-04 | Claim 自动记录 AC 当时的 revision、git HEAD，以及所属 Agent 会话（如果能获得） | P0 |
-| FR-CLM-05 | Claim 只能指向当前已确认、未退役的 AC | P0 |
-
-### F6 执行证据
+### F4 交付目标与范围
 
 | ID | 需求 | 优先级 |
 |---|---|---|
-| FR-EV-01 | AC 可以绑定一个经人确认的检查命令。`specmetry check run` 执行它，并记录结果（`pass` / `fail` / `error`）、退出码、时长、git HEAD、工作区是否有未提交改动、脱敏后的输出尾部和完整输出的哈希。 | P0 |
-| FR-EV-02 | 检查有超时限制，超时时终止整个进程树并记为 `error` | P0 |
-| FR-EV-03 | `check run` 只能执行基准中已确认的命令，不接受临时传入的命令 | P0 |
-| FR-EV-04 | 提交中出现基准编号（trailer 或正文）时，建立 `relates` 关联 | P0 |
-| FR-EV-05 | 证据不可修改、不可删除（`purge` 除外） | P0 |
-| FR-EV-06 | 展示证据产生时的 HEAD 落后当前 HEAD 多少个提交 | P1 |
-| FR-EV-07 | 导入 CI 结果作为证据 | P2 |
+| FR-TGT-01 | 每个项目有 1 个 `active` 的交付目标，跟踪一个分支或标签 | P0 |
+| FR-TGT-02 | 修改目标只能由人操作（归档旧目标并新建目标），之后需要重新确认范围 | P0 |
+| FR-TGT-03 | 每次推导时解析快照；无法解析时为 `not_assessed` | P0 |
+| FR-TGT-04 | 范围确认只能由人操作：明确的需求清单（不能为空），绑定目标、基准版本和来源集合哈希；附带声明（范围完整、排除的待审条目数、`incomplete_docs` 项目已补充交付目标） | P0 |
+| FR-TGT-05 | 检测范围是否过期 | P0 |
+| FR-TGT-06 | 审核提交可以在同一个事务中附带范围确认 | P0 |
+| FR-TGT-07 | 确认范围时，默认选中 `must` 需求（只是界面上的默认值） | P0 |
 
-### F7 正式验收
-
-| ID | 需求 | 优先级 |
-|---|---|---|
-| FR-ACC-01 | 人在 Dashboard 或交互式 CLI 中对 AC 作出 `accepted` / `rejected` / `waived` 决定，并附说明。系统记录当时的证据快照、git HEAD 和通道。 | P0 |
-| FR-ACC-02 | Agent 通道不能产生验收：非交互 CLI 返回退出码 3；PreToolUse Hook 拦截 Agent 调用人类专属命令 | P0 |
-| FR-ACC-03 | 验收与 AC 的 revision 绑定；`material` 修订后，旧验收不再生效 | P0 |
-| FR-ACC-04 | 已验收的 AC 之后出现失败证据时，状态变为 `regressed` | P0 |
-| FR-ACC-05 | `waived` 与 `rejected` 必须填写说明 | P0 |
-| FR-ACC-06 | 新决定取代旧决定，历史完整保留 | P0 |
-
-### F8 状态与差距
+### F5 Worktree
 
 | ID | 需求 | 优先级 |
 |---|---|---|
-| FR-ST-01 | 按 [data-model.md §6](data-model.md#6-状态推导) 的决策表推导 AC 状态和需求状态，不提供任何直接设置状态的接口 | P0 |
-| FR-ST-02 | 差距分析：输出差距类型、严重度、关联条目和建议的下一步 | P0 |
-| FR-ST-03 | 交付就绪判定；未就绪时逐条列出原因 | P0 |
-| FR-ST-04 | `specmetry status`（人类可读输出，或 `--json`）与 `specmetry gaps` | P0 |
-| FR-ST-05 | 冲突标记：自述与证据矛盾时标记 | P0 |
-| FR-ST-06 | 进度快照与趋势 | P1 |
-| FR-ST-07 | 交付报告导出（Markdown）：需求状态、验收记录、未决问题（见 PD-08） | P1 |
+| FR-WT-01 | 通过 git 公共目录共享项目身份；worktree 第一次出现时自动登记 | P0 |
+| FR-WT-02 | Claim 批次、检查执行、会话和事件都记录 worktree 与代码上下文 | P0 |
+| FR-WT-03 | 检查在调用者所在的 worktree 中执行 | P0 |
+| FR-WT-04 | git 扫描游标按 ref 维护 | P0 |
+| FR-WT-05 | `status` 同时给出交付视图和当前工作区视图；Dashboard 明确显示正在观察的目标和快照 | P0 |
 
-### F9 持续更新与采集
+### F6 现状盘点
 
 | ID | 需求 | 优先级 |
 |---|---|---|
-| FR-COL-01 | 适配 Claude Code Hooks：SessionStart、SessionEnd、PostToolUse（命令执行、文件编辑）、Stop，以及用于拦截的 PreToolUse | P0 |
-| FR-COL-02 | Hook 处理永远不阻塞 Agent，也不让 Agent 出错：无论发生什么都以 0 退出（PreToolUse 拦截人类专属命令是唯一例外） | P0 |
-| FR-COL-03 | 事件至少投递一次，入库按事件 ID 去重（幂等） | P0 |
-| FR-COL-04 | 采集按字段白名单进行，落盘前完成脱敏。不读取 transcript，不保存文件内容、提示词和工具输出正文。 | P0 |
-| FR-COL-05 | `/specmetry sync` 在一段工作结束时提交 Claim、关联提交、运行相关检查，并输出状态变化 | P0 |
-| FR-COL-06 | Stop Hook 可以选择提醒 Agent 执行 sync，默认关闭（见 PD-06） | P1 |
-| FR-COL-07 | 在没有 Hook 的 Agent 环境中，CLI、检查和 git 扫描仍能工作（降级模式） | P0 |
-| FR-COL-08 | 支持 git worktree：在同一仓库的任一 worktree 中工作，都能归属到同一项目 | P0 |
+| FR-INV-01 | `audit` 批次必须声明范围（全部或部分需求）；逐条给出断言（可以是 `unknown`）和引用 | P0 |
+| FR-INV-02 | 引用存在性校验（只标记，不拒绝） | P0 |
+| FR-INV-03 | `init --json` 返回 git 基础事实（提交数、最近提交时间） | P1 |
+| FR-INV-04 | `check run --all` | P0 |
+| FR-INV-05 | audit 以提案形式为 AC 提议检查命令 | P1 |
+| FR-INV-06 | 记录未映射工作 | P1 |
+| FR-INV-07 | 计算盘点覆盖率；没有盘点到的条目，进度显示为 `unknown`；局部 audit 不算完成盘点 | P0 |
 
-### F10 Web Dashboard
+### F7 Agent 自述
 
 | ID | 需求 | 优先级 |
 |---|---|---|
-| FR-UI-01 | `specmetry dashboard` 启动本地服务并打开浏览器，只监听回环地址 | P0 |
-| FR-UI-02 | **项目概览**：交付就绪判定、必需需求验收率、状态分组漏斗、"自述未证实"数、主要差距、最近活动 | P0 |
-| FR-UI-03 | **基准**：目标 → 需求 → AC 的树形视图，显示状态、优先级和来源引用（可展开原文片段），支持按状态和优先级筛选 | P0 |
-| FR-UI-04 | **审核队列**：提案条目逐条展示（修改类显示前后对比），支持接受、编辑后接受、拒绝，以及修改类的 `material` / `editorial` 选择；集中展示待澄清问题 | P0 |
-| FR-UI-05 | **需求详情**：各 AC 的时间线（自述、证据、验收），以及验收操作 | P0 |
-| FR-UI-06 | **差距**：按类型和严重度分组，附下一步建议 | P0 |
-| FR-UI-07 | **活动**：Agent 会话、提交、事件元数据 | P1 |
-| FR-UI-08 | **趋势图** | P1 |
-| FR-UI-09 | **设置与健康**：Skill / Hook 安装状态、spool 积压、数据位置、保留期 | P0 |
-| FR-UI-10 | 数据变化后，已打开的页面在 5 秒内反映出来 | P0 |
-| FR-UI-11 | `inferred_from_code` 条目、未通过校验的引用、在有未提交改动的工作区上产生的证据，都有可见标识 | P0 |
+| FR-CLM-01 | 通过 CLI 提交 Claim 批次 | P0 |
+| FR-CLM-02 | Claim 不能单独产生 `accepted` 或 `ready`；自动化 AC 不会因为 Claim 越过 `in_progress`；手动 AC 的 `done` 自述只会让它进入 `ready_for_review` | P0 |
+| FR-CLM-03 | 摘要不超过 500 字符，只能有一段，不能包含代码块；命中密钥规则即拒绝 | P0 |
+| FR-CLM-04 | 携带 `base_version` 和 `target_revision`（不一致时返回退出码 5）；CLI 记录代码上下文；如果同一 worktree 中恰好有一个活跃会话，就关联它 | P0 |
+| FR-CLM-05 | 目标必须是 `active` 的 AC；`unknown` 断言只能用于 `audit`；`manual` 批次只能由人提交 | P0 |
+
+### F8 执行证据
+
+| ID | 需求 | 优先级 |
+|---|---|---|
+| FR-EV-01 | 检查执行绑定开始时的修订、配置哈希、输入对象 ID 和代码上下文；输出只实时转发给调用者，不保存；带 `--json` 时，stdout 只有一份 `check-run.v1` JSON，检查输出转发到 stderr | P0 |
+| FR-EV-02 | 超时后终止整个进程树 | P0 |
+| FR-EV-03 | 只能执行基准中已确认的命令 | P0 |
+| FR-EV-04 | 判定合格执行；开始与结束时的上下文不一致时，记为 `context_changed` | P0 |
+| FR-EV-05 | 执行记录只追加 | P0 |
+| FR-EV-06 | 提交关联只保存 SHA、时间和关联关系 | P0 |
+| FR-EV-07 | 导入 CI 结果 | P2 |
+| FR-EV-08 | 每条执行都标注证据等级。MVP 只产生 `observed`；`--isolation required` 在无法建立并验证隔离时不执行、不写记录，返回退出码 6；绝不把观测级记为隔离级 | P0 |
+| FR-EV-09 | 隔离执行器（`snapshot_isolated`）：私有快照目录、外部强制只读、执行前后验证；`--isolation auto`（MVP 之后，M7） | P2 |
+
+### F9 验收
+
+| ID | 需求 | 优先级 |
+|---|---|---|
+| FR-ACC-01 | 只能由人作出决定，并携带目标、快照、AC 修订、需求修订、证据 ID 和 **`seen_decision_id`**（看到的当前决定，首次为 null）；在写事务中原子比较，不一致时返回 409 或退出码 5；客户端不得自动重试，重新读取后可以明确改判 | P0 |
+| FR-ACC-02 | 阻止 Agent 通道作出决定（启发式识别加 Hook 拦截），并如实声明能力边界 | P0 |
+| FR-ACC-03 | `normal` 验收要求 AC 在 `S` 上的最新合格执行为 `pass`（人可以在自己拒收后改判）；必须确认服务端推导出的风险（观测级证据、结果不一致），`acknowledged_risks` 与之不符时拒绝 | P0 |
+| FR-ACC-04 | `manual` 验收只适用于 `S` | P0 |
+| FR-ACC-05 | `exception` 验收：只能在没有合格执行时作出；必须填写理由；只适用于 `S`；带警告标记 | P0 |
+| FR-ACC-06 | 在 `S` 上检查失败时，不能接受 | P0 |
+| FR-ACC-07 | 拒收和豁免必须填写理由；豁免与快照无关 | P0 |
+| FR-ACC-08 | 历史完整保留；当前决定按 `seq` 确定 | P0 |
+| FR-ACC-09 | 沿用规则：只适用于自动化 AC 的 `normal` 验收；要求配置和输入相同，在 `S` 上有**隔离级**合格通过，并且结果一致。MVP 没有隔离级证据，因此不会沿用。 | P0 |
+
+### F10 状态与交付判定
+
+| ID | 需求 | 优先级 |
+|---|---|---|
+| FR-ST-01 | 状态只能推导；不提供任何设置状态的接口 | P0 |
+| FR-ST-02 | 按决策表推导 AC 交付状态 | P0 |
+| FR-ST-03 | 进度单独推导；Claim 对交付状态的影响仅限于 §3.1 所述 | P0 |
+| FR-ST-04 | 推导目标层面的交付状态，只在满足 §3.2 的条件时给出 `ready` | P0 |
+| FR-ST-05 | 差距与交付原因统一 | P0 |
+| FR-ST-06 | `status` / `gaps` 命令，包括 `--session current` 和 `--diff-since <seq>` | P0 |
+| FR-ST-07 | `claimed_without_evidence` 和 `conflict` 的标记与指标 | P0 |
+| FR-ST-08 | 按 `seq` 确定性排序；输出附带 `as_of_seq` | P0 |
+| FR-ST-09 | 保守规则（[data-model.md §6.9](data-model.md#69-保守规则无法判断时)） | P0 |
+| FR-ST-10 | 趋势 | P2 |
+| FR-ST-11 | 交付报告导出 | P2 |
+
+### F11 采集
+
+| ID | 需求 | 优先级 |
+|---|---|---|
+| FR-COL-01 | Claude Code Hooks：SessionStart、SessionEnd、PostToolUse、PostToolUseFailure、Stop；PreToolUse 拦截覆盖 Bash 和 PowerShell | P0 |
+| FR-COL-02 | 延迟预算、输入上限和时间上限；丢弃时计数；始终以 0 退出 | P0 |
+| FR-COL-03 | 至少投递一次，入库去重 | P0 |
+| FR-COL-04 | 只写入 `spool-event.v1` 白名单中的字段 | P0 |
+| FR-COL-05 | `sync` 明确比较起点，变化路径包括未跟踪的文件 | P0 |
+| FR-COL-06 | Stop 时提醒执行 sync | P2 |
+| FR-COL-07 | 没有 Hook 时可以降级使用 | P0 |
+| FR-COL-08 | 会话起点 HEAD 通过读文件获取，失败时记为 `unknown` | P0 |
+| FR-COL-09 | 固定经过测试的 Claude Code 版本范围，由 `doctor` 报告 | P0 |
+
+### F12 Dashboard
+
+| ID | 需求 | 优先级 |
+|---|---|---|
+| FR-UI-01 | 只监听回环地址；令牌不打印到输出 | P0 |
+| FR-UI-02 | 概览：目标、快照、范围、交付状态、阻塞差距、指标、最近的会话 | P0 |
+| FR-UI-03 | 基准树：进度和交付状态；引用以及它实际证明了什么 | P0 |
+| FR-UI-04 | 审核队列：AC 的后续处理，以及在同一次提交中确认范围。确认范围时列出：仍待审的提案条目（要求明确排除）、各来源的状态、交付目标和快照。 | P0 |
+| FR-UI-05 | 需求详情：快照上的执行（标注证据等级），以及其他上下文中的执行（标注为"不适用于交付"）；Claim、当前决定、允许的决定类型；展示必须确认的风险说明；提交决定时携带前置条件和风险确认 | P0 |
+| FR-UI-06 | 差距页 | P0 |
+| FR-UI-07 | 完整的活动页 | P2 |
+| FR-UI-08 | 趋势图 | P2 |
+| FR-UI-09 | 健康页：Hook 与 Skill、spool 积压、drop 计数、worktree、数据目录及其权限 | P0 |
+| FR-UI-10 | 数据变化后 5 秒内刷新 | P0 |
+| FR-UI-11 | 标识：反推、`ref_not_found`、例外验收、结果不一致、自述无证据 | P0 |
 | FR-UI-12 | 多项目列表 | P0 |
+| FR-UI-13 | 页面过期时（包括其他页面刚作出决定）：收到 409 后展示最新状态并重新加载，不会产生部分写入，不会自动重试 | P0 |
+| FR-UI-14 | 批量验收：对多个 `ready_for_review` 的 AC 逐条提交决定，每条都带各自的前置条件和风险确认 | P1 |
 
-### F11 隐私与数据管理
+### F13 隐私
 
-| ID | 需求 | 优先级 |
-|---|---|---|
-| FR-PRV-01 | 默认不发出任何出站网络请求，没有遥测 | P0 |
-| FR-PRV-02 | 所有要持久化的自由文本字段（命令、摘要、输出尾部、提交标题等）都经过密钥模式脱敏 | P0 |
-| FR-PRV-03 | `specmetry purge` 删除一个项目的全部数据，需要交互确认 | P0 |
-| FR-PRV-04 | 可配置原始事件和检查日志的保留期（默认分别为 90 天、30 天） | P1 |
-| FR-PRV-05 | Dashboard 不加载任何外部资源（通过 CSP 强制） | P0 |
-
-### F12 Agent Skill
+规范来源：[architecture.md §10](architecture.md#10-隐私与数据保留契约)。
 
 | ID | 需求 | 优先级 |
 |---|---|---|
-| FR-SK-01 | Skill 包内嵌在二进制中发布，由 `specmetry setup` 安装；版本与二进制一致，不一致时由 `doctor` 报告 | P0 |
-| FR-SK-02 | 提供 `init`、`status`、`sync`、`goals`、`audit` 五个命令，行为见 §5 | P0 |
-| FR-SK-03 | Skill 只通过 CLI 的 JSON 接口读写数据，不直接访问数据库或数据目录 | P0 |
-| FR-SK-04 | Skill 指令明确禁止：执行人类专属命令；在 Claim 中粘贴代码正文或密钥；为了让检查通过而削弱测试或检查命令 | P0 |
-| FR-SK-05 | Skill 包含需求粒度指南：一条需求约等于一项用户可感知的能力或一条约束，AC 必须可判定 | P0 |
+| FR-PRV-01 | 核心不发出任何出站请求，没有遥测 | P0 |
+| FR-PRV-02 | C0 数据永不持久化（检查输出、原始命令、环境变量值、对话等） | P0 |
+| FR-PRV-03 | `purge`：只能在交互式终端执行；写墓碑；`VACUUM`；按用户的选择处理备份 | P0 |
+| FR-PRV-04 | 保留期：事件 30 天，死信 7 天 | P0 |
+| FR-PRV-05 | CSP；不加载外部资源 | P0 |
+| FR-PRV-06 | Unix `0700`，Windows 受保护的 ACL；`doctor` 检查权限 | P0 |
+| FR-PRV-07 | 检查命令和自由文本命中密钥规则即拒绝写入 | P0 |
+
+### F14 存储可靠性
+
+| ID | 需求 | 优先级 |
+|---|---|---|
+| FR-STO-01 | 迁移：加锁、`VACUUM INTO` 备份、在事务中执行 | P0 |
+| FR-STO-02 | 版本保护：旧程序拒绝打开更新版本的 schema | P0 |
+| FR-STO-03 | 打开数据库时重新执行墓碑删除 | P0 |
+| FR-STO-04 | `backup create`、`backup list`、`backup restore` | P1 |
+| FR-STO-05 | `seq` 计数器；只追加触发器 | P0 |
+
+### F15 Agent Skill
+
+| ID | 需求 | 优先级 |
+|---|---|---|
+| FR-SK-01 | Skill 包内嵌在二进制中，由 `setup` 安装，由 `doctor` 校验版本 | P0 |
+| FR-SK-02 | 五个命令（§5） | P0 |
+| FR-SK-03 | 只通过 CLI 的 JSON 接口读写数据；写入时携带读取版本；收到退出码 5 后重新读取，不盲目重试 | P0 |
+| FR-SK-04 | 禁止：通过 CLI、HTTP、浏览器自动化或写文件代做人工操作；在 Claim 中粘贴代码或密钥；为了通过检查而削弱测试或检查 | P0 |
+| FR-SK-05 | 需求粒度指南 | P0 |
+| FR-SK-06 | 建议在新会话中执行 audit；局部 audit 必须声明范围 | P0 |
 
 ## 5. Agent Skill 命令规格
 
-调用语法取决于具体 Agent。在 Claude Code 中设计为 `/specmetry <子命令>`，以实现时核实为准。所有子命令都只通过 `specmetry ... --json` 与 Specmetry 交互。
+在 Claude Code 中调用方式为 `/specmetry <子命令>`，以实现时核实为准。所有子命令都只通过 `specmetry … --json` 交互，写入时都携带读取到的版本。
 
-### `/specmetry init`
-
-- **用途**：初始化项目，并推进到下一步未完成的初始化步骤（见 §4.1.1）。
-- **步骤**：
-  1. 调用 `specmetry init --json`，读取 `init_progress`、`stage`、候选文档和测试提示。
-  2. 根据进度执行下一步：确认并登记来源 → 提取并提交提案 → 提示用户审核并**停止** → （基准确认后）执行 audit 流程并运行检查。
-- **产出**：进度说明，以及下一步需要人做什么。需要人工审核时，执行 `specmetry dashboard --page review` 为用户打开审核页。
-- **禁止**：确认提案、回答问题、写入验收、修改项目代码。
-
-### `/specmetry status`
-
-- **用途**：只读的进度摘要。
-- **步骤**：调用 `specmetry status --json` 和 `specmetry gaps --json`。
-- **产出**：交付就绪判定、必需需求验收率、各分组计数、最重要的 5 个差距，以及按差距推导出的下一步建议。
-- **禁止**：任何写操作。
-
-### `/specmetry sync`
-
-- **用途**：一段工作结束后，把进展记录为事实。
-- **步骤**：
-  1. 获取当前基准和本会话的起始 HEAD（`specmetry status --json --session current`）。
-  2. 根据本会话的改动和提交，判断哪些 AC 受到影响。
-  3. 对受影响的 AC 提交 `sync` 类 Claim，并记录未映射工作。
-  4. 对受影响、且有检查命令的 AC 执行 `specmetry check run <AC...>`。
-  5. 如果发现对话中出现了基准之外的新需求，提交提案（不会自动应用）。
-  6. 输出状态变化：哪些 AC 状态变了，新增了哪些差距。
-- **禁止**：在 Claim 中写入"已验收"之类的措辞；修改基准；验收。
-
-### `/specmetry goals`
-
-- **用途**：查看基准，或基于新输入（新文档、用户口述的变更）生成基准变更提案。
-- **步骤**：
-  1. 用 `specmetry baseline show --json` 获取当前基准。
-  2. 如果有新输入，先登记来源（如适用），再生成相对当前版本的 `add` / `update` / `retire` 提案并提交。
-  3. 提示用户审核。
-- **禁止**：确认提案。
-
-### `/specmetry audit [范围]`
-
-- **用途**：对照代码深度盘点（全部或指定的需求或 AC）。
-- **步骤**：
-  1. 获取基准和当前状态。
-  2. 在范围内逐条检查代码和测试，提交 `audit` 类 Claim，并附引用。
-  3. 指出与已有 Claim 或证据矛盾的地方。
-  4. 为缺少检查命令的自动化 AC 提议检查命令（P1）。
-  5. 运行范围内的检查。
-- **建议**：Skill 建议在一个新会话中执行 audit，以减少"自己审自己"的偏差。
-- **禁止**：修改代码、确认提案、验收。
+| 命令 | 用途与步骤 | 禁止 |
+|---|---|---|
+| `/specmetry init` | 读取 `init --json`，按初始化进度推进：确认来源 → 提交提案 → 打开审核页并停止 → 范围确认后进行全量 audit（`audit_scope = all`）并运行检查 → 汇报 | 确认提案或范围、回答问题、验收、修改代码 |
+| `/specmetry status` | 读取 `status --json` 和 `gaps --json`；汇报交付目标、快照、交付状态和阻塞差距；当前 worktree 不是快照时，单独说明工作区视图 | 任何写操作 |
+| `/specmetry sync` | 用 `status --json --session current` 取得比较起点和变化路径；判断受影响的 AC；提交 `sync` 批次；在当前 worktree 中运行相关检查；用 `--diff-since <seq>` 汇报变化；比较起点为 `none` 时，只对实际核实过的 AC 作出断言 | 修改基准、验收、把工作区结果说成交付结论 |
+| `/specmetry goals` | 读取基准；针对新输入，生成携带版本的 `add` / `update` / `retire` / `reaffirm` 提案；需求实质修订时，同时提议受影响 AC 的处理方式 | 确认提案 |
+| `/specmetry audit [范围]` | 声明 `audit_scope`；逐条给出断言（可以是 `unknown`）和引用；指出矛盾；提议检查命令（P1）；运行检查；建议在新会话中执行 | 修改代码、确认、验收 |
 
 ## 6. CLI 命令概览
 
-完整约定（输出格式、退出码、通道识别）见 [architecture.md §9](architecture.md#9-接口约定)。
+退出码与约定见 [architecture.md §9](architecture.md#9-接口约定)。面向 Agent 的 `--json` 输出 schema 是：`init.v1`、`status.v1`、`gaps.v1`、`check-run.v1`；错误输出是 `error.v1`。
 
-| 命令 | 用途 | 允许的通道 |
+| 命令 | 用途 | 通道 |
 |---|---|---|
-| `specmetry version` | 版本信息 | 任意 |
-| `specmetry setup [--scope user\|project] [--uninstall]` | 一次性安装、更新或卸载 Skill 与 Hooks | 人 |
-| `specmetry init [--name] [--stage] [--no-exclude] [--skip-sources] [--skip-inventory]` | 初始化或推进当前项目 | 任意 |
-| `specmetry doctor` | 健康检查（版本、Hook、Skill、spool、数据库） | 任意 |
-| `specmetry source add\|list\|remove\|ack` | 管理来源文档；`ack` 确认来源变化已处理 | 任意（`ack` 记录 actor 与通道） |
-| `specmetry propose --file <path\|->` | 提交提案（JSON），进入审核队列 | 任意 |
-| `specmetry propose --apply` | 人工编辑：提交后立即应用 | 人 |
-| `specmetry proposal list\|show` | 查看提案及条目（含冲突条目的三方对比） | 任意 |
-| `specmetry review` | 交互式审核提案 | 人 |
-| `specmetry baseline show\|history` / `export --format md\|json` | 查看或导出基准（导出为 P1） | 任意 |
-| `specmetry question list` / `answer` / `dismiss` | 待澄清问题 | `list`：任意；其余：人 |
-| `specmetry claim --file <path\|->` | 提交 Claim 批次 | 任意（`kind = manual` 仅限人） |
-| `specmetry check run [AC...] [--all]` | 执行已确认的检查 | 任意 |
-| `specmetry accept\|reject\|waive <AC> [-m 说明]` | 验收决定 | 人 |
-| `specmetry status [--session current] [--diff-since <时间>]` / `gaps` | 状态与差距；可附带本会话信息或某时刻以来的状态变化 | 任意 |
-| `specmetry report` | 交付报告（P1） | 任意 |
-| `specmetry dashboard [--page <页面>]` | 启动本地 Dashboard（已在运行时复用），并在浏览器中打开指定页面。令牌只交给浏览器，不打印到输出。 | 任意 |
-| `specmetry hook <agent> <event>` | Hook 入口（内部使用） | Hook |
-| `specmetry purge` | 删除项目数据 | 人 |
+| `version` / `doctor` | 版本；健康与权限检查 | 任意 |
+| `setup [--scope user\|project] [--uninstall]` | 安装或卸载 Skill 与 Hooks | 人 |
+| `init [--name] [--stage] [--no-exclude] [--skip-sources] [--skip-inventory]` | 初始化或推进 | 任意 |
+| `source add\|list` | 登记、查看来源（`add --allow-any-type` 仅限人） | 任意 |
+| `source ack\|remove` | 确认来源变化、移除来源 | 人 |
+| `target show` / `target set --ref <ref>` | 查看、设置交付目标 | `show`：任意；`set`：人 |
+| `scope show` / `scope confirm [--file]` | 查看、确认范围 | `show`：任意；`confirm`：人 |
+| `proposal list\|show` | 查看提案（含三方对比） | 任意 |
+| `propose --file <path\|->` | 提交提案 | 任意 |
+| `propose --apply --file` | 人工编辑，立即应用 | 人 |
+| `review` | 交互式审核（可以附带范围确认） | 人 |
+| `baseline show\|history` | 查看基准 | 任意 |
+| `question list` / `answer` / `dismiss` | 待澄清问题 | `list`：任意；其余：人 |
+| `claim --file <path\|->` | 提交 Claim 批次 | 任意（`manual` 仅限人） |
+| `check run [AC...] [--all] [--isolation off\|required] [--json]` | 在当前 worktree 执行检查（观测级）；`--isolation required` 在 MVP 中返回退出码 6 | 任意 |
+| `accept\|reject\|waive <AC>` | 验收决定（交互式确认，显示前置条件；`accept --exception -m` 表示例外验收） | 人 |
+| `status [--session current] [--diff-since <seq>]` / `gaps` | 状态与差距 | 任意 |
+| `dashboard [--page <页面>]` | 启动或复用 Dashboard | 任意 |
+| `hook <agent> <event>` | Hook 入口 | Hook |
+| `purge` | 删除项目数据 | 人 |
+| `backup create\|list\|restore` | 备份（P1） | `create`、`list`：任意；`restore`：人 |
 
 ## 7. 非功能需求
 
 | ID | 需求 | 指标 |
 |---|---|---|
-| NFR-01 | 无账号、无网络依赖 | 断网环境下完成全部 MVP 流程 |
-| NFR-02 | Hook 开销 | 在参考机器上，单次 Hook 处理墙钟时间 p95 ≤ 100 ms（含进程启动）；非 Specmetry 项目内 p95 ≤ 30 ms |
-| NFR-03 | 采集可靠性 | Hook 在任何错误条件下都以 0 退出；除磁盘写满外，已写入 spool 的事件不会丢失 |
-| NFR-04 | 规模 | 500 条需求 / 2000 个 AC / 10 万条事件时，`status --json` < 1 s，Dashboard 首屏 < 2 s |
-| NFR-05 | 平台 | Windows 10/11、macOS 13+、Linux（x86_64、arm64）均为一级支持 |
-| NFR-06 | 安装 | 单一二进制；运行时只依赖系统中已有的 `git` |
-| NFR-07 | 数据可移植 | 数据是单个 SQLite 文件，schema 有文档（基准导出见 FR-BL-11，P1） |
-| NFR-08 | 可升级 | schema 只做前向迁移，迁移前自动备份数据库 |
-| NFR-09 | 可诊断 | 本地日志文件，以及 `specmetry doctor` |
-| NFR-10 | 路径健壮性 | 路径中含空格或非 ASCII（如中文）字符、文件使用 CRLF 换行时，功能正常 |
+| NFR-01 | 网络边界 | 核心不发出出站请求；用人工或录制的输入可以离线完成全部推导。Agent 和检查命令的网络需求不在 Specmetry 的保证范围内（[architecture.md §10.5](architecture.md#105-网络边界)）。 |
+| NFR-02 | Hook 开销 | p95 ≤ 100 ms；非 Specmetry 项目内 p95 ≤ 30 ms；200 ms 内部预算；5 s 外部超时 |
+| NFR-03 | 采集可靠性 | 始终以 0 退出；已写入 spool 的事件不丢失；丢弃的事件可以计数、可以看到 |
+| NFR-04 | 规模 | 2000 个 AC、10 万条事件时，`status --json` < 1 s，Dashboard 首屏 < 2 s |
+| NFR-05 | 平台 | Windows 10/11、macOS 13+、Linux（x86_64、arm64） |
+| NFR-06 | 安装 | 单一二进制；运行时只依赖 `git` |
+| NFR-07 | 数据可移植 | 单个 SQLite 文件；schema 有文档 |
+| NFR-08 | 可升级 | 只前向迁移；有一致性备份；旧程序拒绝打开新 schema |
+| NFR-09 | 可诊断 | 日志（不含 C0 / C1 内容）、`doctor` |
+| NFR-10 | 路径健壮性 | 路径含空格或中文、文件使用 CRLF 时，功能正常 |
+| NFR-11 | 确定性 | 同样的事实（`as_of_seq`）、快照和来源观测哈希，推导结果完全相同；这三项都写在输出中 |
 
 ## 8. 不在范围内
 
@@ -368,22 +397,29 @@ AC 状态与需求状态由事实**推导**，推导规则见 [data-model.md §6
 
 ## 9. 产品待决策事项
 
-以下事项尚未确定。"建议默认"是本轮设计采用的假设，**需要产品负责人确认**。
+"建议默认"是本轮设计的工作假设，需要产品负责人确认。
 
-| ID | 问题 | 选项 | 建议默认 | 最晚决定于 |
-|---|---|---|---|---|
-| PD-01 | 交付就绪的口径 | 仅 `must` / `must` + `should` / 可配置 | 仅 `must`，项目设置中预留开关 | M2 |
-| PD-02 | 主进度指标的口径 | 需求级验收率 / AC 级验收率 / 加权 | 必需需求的验收率作为主指标，另附 AC 漏斗 | M2 |
-| PD-03 | 验收粒度 | 仅 AC 级 / 允许需求级直接验收 | 仅 AC 级；没有 AC 的需求显示 `needs_criteria` | M1 |
-| PD-04 | AC 修订是否使验收失效 | 总是失效 / 审核者选择 `material`、`editorial` / 永不失效 | 审核者选择；检查命令变更一律视为 `material` | M1 |
-| PD-05 | MVP 官方支持哪些 Agent | 仅 Claude Code / 加上 Codex 等 | Claude Code 完整支持（Skill + Hooks）；其他 Agent 通过 AGENTS.md 指令和 CLI 降级使用 | M3 |
-| PD-06 | Stop Hook 提醒 sync 是否算"干预 Agent" | 不提供 / 默认关闭 / 默认开启 | 提供，默认关闭 | M3 |
-| PD-07 | 在仓库中留下的痕迹 | marker 写入 `.git/info/exclude` / 建议提交 / 不用 marker，按路径识别 | 默认 exclude，可选择提交（为未来的团队共享预留） | M1 |
-| PD-08 | 交付报告是否进入 MVP | P0 / P1 / 延后 | P1 | M5 |
-| PD-09 | 界面和文档语言 | 中文 / 英文 / 双语 | 设计文档用中文；代码、CLI 输出、提交信息用英文；Dashboard 文本外置，首发语言待定 | M5 |
-| PD-10 | 开源许可证 | Apache-2.0 / MIT / AGPL-3.0 / 双许可 | **未给出倾向**：需要结合 Hosted 商业模式决定。Apache-2.0 利于采用并带专利授权；AGPL 能限制第三方托管竞争，但会抑制企业采用。 | 接受外部贡献之前（M0） |
-| PD-11 | Local 与 Hosted 的功能边界 | 本地单人能力完整，Hosted 只增加身份、同步和协作 / 部分高级功能仅在 Hosted 提供 | 前者 | 首次公开发布之前 |
-| PD-12 | 优先级方案 | MoSCoW（`must` / `should` / `could` / `wont`）/ P0–P3 | MoSCoW；`wont` 表示本次不交付，不参与指标 | M1 |
-| PD-13 | 是否支持多个交付阶段（里程碑） | MVP 不支持 / 支持 | 不支持；MVP 只有单一交付范围，靠优先级表达 | M1 |
-| PD-14 | Agent 能否代为记录用户在对话中给出的问题答复 | 能 / 不能 | 不能：问题由人回答；Agent 可以根据答复提交提案 | M1 |
-| PD-15 | Skill 质量评测阈值 | — | 初始阈值：基准提取召回率 ≥ 80%；提交的提案中，未通过校验的引用占比 ≤ 10% | M4 |
+| ID | 问题 | 建议默认 | 状态 / 最晚决定于 |
+|---|---|---|---|
+| ~~PD-01~~ | ~~交付就绪的口径~~ | 已由人工确认的交付范围取代（默认选中 `must`） | **已关闭** |
+| PD-02 | 主进度指标 | 范围内需求的验收率 + AC 状态计数 | M2 |
+| PD-03 | 验收粒度 | 只在 AC 级验收 | M1 |
+| PD-04 | AC 修订是否使验收失效 | 由审核者选择 `material` / `editorial`；部分字段强制 `material`。父需求实质修订后，对 AC 执行 `reaffirm` 会保留它已有的执行与验收。 | M1 |
+| PD-05 | MVP 正式支持哪些 Agent | Claude Code；其他 Agent 尽力而为 | M3 |
+| ~~PD-06~~ | ~~Stop Hook 提醒~~ | 移出 MVP（P2） | **已关闭** |
+| PD-07 | 在仓库中留下的痕迹 | marker 写入 `.git/info/exclude` | M1 |
+| ~~PD-08~~ | ~~交付报告~~ | 移出 MVP（P2） | **已关闭**（需要确认） |
+| PD-09 | 界面与文档语言 | 文档用中文；代码与 CLI 用英文；Dashboard 文本外置 | M5 |
+| PD-10 | 开源许可证 | **未给出倾向**，需要结合 Hosted 模式决定 | 接受外部贡献之前 |
+| PD-11 | Local 与 Hosted 的边界 | 本地单人能力完整；Hosted 只增加身份、同步和协作 | 首次公开发布之前 |
+| PD-12 | 优先级方案 | MoSCoW | M1 |
+| PD-13 | 多交付阶段 | MVP 不支持（另见 PD-19） | M1 |
+| PD-14 | Agent 能否代为记录问题的答复 | 不能 | M1 |
+| PD-15 | Skill 评测阈值 | 提取召回率 ≥ 80%；`not_found` 引用 ≤ 10%；全量 audit 覆盖率 100%（允许 `unknown` 断言） | M4 |
+| **PD-16** | **自动化 AC 的验收沿用**：在新快照上，同一检查配置、同一输入哈希合格通过后，验收自动适用 | 采纳，但**只接受隔离级证据**（codex-review-002 B1）。MVP 没有隔离执行器，所以 MVP 中目标前进后，自动化 AC 也需要人重新验收（可以用批量验收，FR-UI-14）。手动 AC 和例外验收永不沿用。 | **开工前（M1）** |
+| **PD-17** | 例外验收（自动化 AC 没有合格执行时，由人作出例外判断）是否可以计入 `ready` | 可以计入，但只适用于该快照，并带警告 | **开工前（M1）** |
+| **PD-18** | 范围全部豁免时的判定 | `not_assessed`（`ALL_WAIVED`），不给出 `ready` | M2 |
+| **PD-19** | 交付目标的形态 | 每个项目只有 1 个 `active` 目标，跟踪分支或标签；只有干净的提交快照才能得到 `ready`；非 git 项目永远不会是 `ready` | **开工前（M1）** |
+| **PD-20** | 隐私契约中允许本地保存的 C1 内容 | 来源片段 ≤ 500 字符、各类路径、检查配置、Claim 摘要、人填写的理由；Hook 不采集命令文本和文件路径 | **开工前（M0）** |
+| **PD-21** | 范围的粒度 | 以需求为单位（需求下的全部 AC 都在范围内；不交付的 AC 用豁免） | M1 |
+| **PD-22** | **MVP 只提供观测级证据**（隔离执行器在 MVP 之后）：MVP 的 `ready` 依据观测级证据，并由人确认相应风险 | 采纳（依据本轮指示：优先保证本地易用性，不强制依赖 Docker）。需要在设计冻结时由产品负责人确认这一限制。 | **冻结时（M2 开工前）** |

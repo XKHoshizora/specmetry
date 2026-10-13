@@ -1,0 +1,21 @@
+{
+  "schema": "specmetry.init/v1",
+  "project": {
+    "id": "01J9Z3K5Q8R2T4V6W8X0Y2Z4C1",
+    "name": "demo",
+    "stage": "in_development",
+    "stage_detected": "in_development"
+  },
+  "created": true,
+  "init_progress": "initialized",
+  "baseline_version": 0,
+  "target": {
+    "id": "01J9Z3K5Q8R2T4V6W8X0Y2Z4B0",
+    "ref": "refs/heads/main",
+    "snapshot": "8f3c2a1b9d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a"
+  },
+  "candidate_sources": ["docs/client-brief.md", "README.md"],
+  "test_hints": ["go test ./..."],
+  "git": { "commit_count": 37, "last_commit_at": 1791800000000 },
+  "warnings": []
+}

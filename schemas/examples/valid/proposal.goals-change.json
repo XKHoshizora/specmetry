@@ -1,0 +1,44 @@
+{
+  "schema": "specmetry.proposal/v1",
+  "origin": "skill_goals",
+  "base_version": 3,
+  "summary": "客户邮件：订单查看改为只能看自己的订单",
+  "items": [
+    {
+      "op": "update",
+      "type": "requirement",
+      "target": "REQ-002",
+      "target_revision": 1,
+      "data": { "title": "用户只能查看自己的订单" },
+      "rationale": "客户 10-10 邮件要求",
+      "sources": [{ "source": "notes/client-mail-1010.txt", "excerpt": "普通用户只能看到自己的订单" }]
+    },
+    {
+      "op": "add",
+      "type": "criterion",
+      "ref": "c1",
+      "data": {
+        "requirement": "REQ-002",
+        "statement": "用户 A 请求用户 B 的订单时返回 404",
+        "verification": "automated",
+        "check": {
+          "command": "go test ./internal/orders -run TestOrderIsolation",
+          "workdir": ".",
+          "timeout_sec": 120,
+          "inputs": ["internal/orders/isolation_test.go"],
+          "rationale": "TestOrderIsolation 用两个用户访问对方的订单，断言返回 404"
+        }
+      },
+      "origin": "extracted",
+      "confidence": "high"
+    },
+    {
+      "op": "reaffirm",
+      "type": "criterion",
+      "target": "AC-002-1",
+      "target_revision": 1,
+      "rationale": "列表接口返回 200 仍然适用"
+    }
+  ],
+  "questions": []
+}

@@ -1,0 +1,264 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/XKHoshizora/specmetry/schemas/proposal.v1.schema.json",
+  "title": "Specmetry baseline proposal v1",
+  "description": "A set of proposed baseline changes. Submitted by an Agent (pending human review) or by a human edit channel (applied immediately). base_version and target_revision are read-time preconditions; a mismatch is rejected with stale_precondition (exit 5 / HTTP 409).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "origin", "base_version", "summary", "items"],
+  "properties": {
+    "schema": { "const": "specmetry.proposal/v1" },
+    "origin": {
+      "description": "human_edit is only accepted from human channels (propose --apply in an interactive terminal, Dashboard edits).",
+      "enum": ["skill_init", "skill_goals", "skill_audit", "skill_sync", "cli", "human_edit"]
+    },
+    "base_version": { "$ref": "common.v1.schema.json#/$defs/baselineVersion" },
+    "summary": { "$ref": "common.v1.schema.json#/$defs/shortSummary" },
+    "items": {
+      "type": "array",
+      "maxItems": 500,
+      "items": {
+        "oneOf": [
+          { "$ref": "#/$defs/addGoal" },
+          { "$ref": "#/$defs/addRequirement" },
+          { "$ref": "#/$defs/addCriterion" },
+          { "$ref": "#/$defs/updateGoal" },
+          { "$ref": "#/$defs/updateRequirement" },
+          { "$ref": "#/$defs/updateCriterion" },
+          { "$ref": "#/$defs/retire" },
+          { "$ref": "#/$defs/reaffirm" }
+        ]
+      }
+    },
+    "questions": {
+      "type": "array",
+      "maxItems": 200,
+      "items": { "$ref": "#/$defs/question" }
+    }
+  },
+  "$defs": {
+    "changeClass": {
+      "description": "For update items. Required (server-side, rule V-P09) when origin is human_edit because such proposals are applied immediately; for agent proposals it is only a suggestion and the reviewer decides. Fields that force material always win.",
+      "enum": ["material", "editorial"]
+    },
+    "provenance": {
+      "description": "Common provenance fields for add/update items.",
+      "type": "object",
+      "properties": {
+        "origin": { "$ref": "common.v1.schema.json#/$defs/itemOrigin" },
+        "confidence": { "$ref": "common.v1.schema.json#/$defs/confidence" },
+        "rationale": { "$ref": "common.v1.schema.json#/$defs/rationale" },
+        "sources": {
+          "type": "array",
+          "maxItems": 20,
+          "items": { "$ref": "common.v1.schema.json#/$defs/sourceRef" }
+        },
+        "code_refs": {
+          "type": "array",
+          "maxItems": 20,
+          "items": { "$ref": "common.v1.schema.json#/$defs/codeRef" }
+        }
+      },
+      "if": {
+        "required": ["origin"],
+        "properties": { "origin": { "const": "inferred_from_code" } }
+      },
+      "then": {
+        "required": ["code_refs", "rationale"],
+        "properties": { "code_refs": { "minItems": 1 } }
+      }
+    },
+    "goalRefOrKey": {
+      "oneOf": [
+        { "$ref": "common.v1.schema.json#/$defs/goalKey" },
+        { "$ref": "common.v1.schema.json#/$defs/localRef" }
+      ]
+    },
+    "requirementRefOrKey": {
+      "oneOf": [
+        { "$ref": "common.v1.schema.json#/$defs/requirementKey" },
+        { "$ref": "common.v1.schema.json#/$defs/localRef" }
+      ]
+    },
+    "goalData": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "title": { "$ref": "common.v1.schema.json#/$defs/title" },
+        "description": { "$ref": "common.v1.schema.json#/$defs/longText" }
+      }
+    },
+    "requirementData": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "goal": { "oneOf": [{ "$ref": "#/$defs/goalRefOrKey" }, { "type": "null" }] },
+        "title": { "$ref": "common.v1.schema.json#/$defs/title" },
+        "description": { "$ref": "common.v1.schema.json#/$defs/longText" },
+        "kind": { "enum": ["functional", "non_functional", "constraint"] },
+        "priority": { "enum": ["must", "should", "could", "wont"] }
+      }
+    },
+    "criterionData": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "requirement": { "$ref": "#/$defs/requirementRefOrKey" },
+        "statement": { "$ref": "common.v1.schema.json#/$defs/plainText1000" },
+        "verification": { "enum": ["automated", "manual"] },
+        "check": { "oneOf": [{ "$ref": "common.v1.schema.json#/$defs/checkSpec" }, { "type": "null" }] }
+      },
+      "if": {
+        "required": ["check"],
+        "properties": { "check": { "type": "object" } }
+      },
+      "then": {
+        "properties": { "verification": { "const": "automated" } }
+      }
+    },
+    "addGoal": {
+      "type": "object",
+      "unevaluatedProperties": false,
+      "required": ["op", "type", "ref", "data", "origin"],
+      "allOf": [{ "$ref": "#/$defs/provenance" }],
+      "properties": {
+        "op": { "const": "add" },
+        "type": { "const": "goal" },
+        "ref": { "$ref": "common.v1.schema.json#/$defs/localRef" },
+        "data": {
+          "allOf": [{ "$ref": "#/$defs/goalData" }],
+          "required": ["title"]
+        }
+      }
+    },
+    "addRequirement": {
+      "type": "object",
+      "unevaluatedProperties": false,
+      "required": ["op", "type", "ref", "data", "origin"],
+      "allOf": [{ "$ref": "#/$defs/provenance" }],
+      "properties": {
+        "op": { "const": "add" },
+        "type": { "const": "requirement" },
+        "ref": { "$ref": "common.v1.schema.json#/$defs/localRef" },
+        "data": {
+          "allOf": [{ "$ref": "#/$defs/requirementData" }],
+          "required": ["title", "kind", "priority"]
+        }
+      }
+    },
+    "addCriterion": {
+      "type": "object",
+      "unevaluatedProperties": false,
+      "required": ["op", "type", "ref", "data", "origin"],
+      "allOf": [{ "$ref": "#/$defs/provenance" }],
+      "properties": {
+        "op": { "const": "add" },
+        "type": { "const": "criterion" },
+        "ref": { "$ref": "common.v1.schema.json#/$defs/localRef" },
+        "data": {
+          "allOf": [{ "$ref": "#/$defs/criterionData" }],
+          "required": ["requirement", "statement", "verification"]
+        }
+      }
+    },
+    "updateGoal": {
+      "type": "object",
+      "unevaluatedProperties": false,
+      "required": ["op", "type", "target", "target_revision", "data"],
+      "allOf": [{ "$ref": "#/$defs/provenance" }],
+      "properties": {
+        "op": { "const": "update" },
+        "type": { "const": "goal" },
+        "target": { "$ref": "common.v1.schema.json#/$defs/goalKey" },
+        "target_revision": { "$ref": "common.v1.schema.json#/$defs/revision" },
+        "change_class": { "$ref": "#/$defs/changeClass" },
+        "data": { "allOf": [{ "$ref": "#/$defs/goalData" }], "minProperties": 1 }
+      }
+    },
+    "updateRequirement": {
+      "type": "object",
+      "unevaluatedProperties": false,
+      "required": ["op", "type", "target", "target_revision", "data"],
+      "allOf": [{ "$ref": "#/$defs/provenance" }],
+      "properties": {
+        "op": { "const": "update" },
+        "type": { "const": "requirement" },
+        "target": { "$ref": "common.v1.schema.json#/$defs/requirementKey" },
+        "target_revision": { "$ref": "common.v1.schema.json#/$defs/revision" },
+        "change_class": { "$ref": "#/$defs/changeClass" },
+        "data": { "allOf": [{ "$ref": "#/$defs/requirementData" }], "minProperties": 1 }
+      }
+    },
+    "updateCriterion": {
+      "type": "object",
+      "unevaluatedProperties": false,
+      "required": ["op", "type", "target", "target_revision", "data"],
+      "allOf": [{ "$ref": "#/$defs/provenance" }],
+      "properties": {
+        "op": { "const": "update" },
+        "type": { "const": "criterion" },
+        "target": { "$ref": "common.v1.schema.json#/$defs/criterionKey" },
+        "target_revision": { "$ref": "common.v1.schema.json#/$defs/revision" },
+        "change_class": { "$ref": "#/$defs/changeClass" },
+        "data": {
+          "allOf": [{ "$ref": "#/$defs/criterionData" }],
+          "not": { "required": ["requirement"] },
+          "minProperties": 1
+        }
+      }
+    },
+    "retire": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op", "type", "target", "target_revision", "rationale"],
+      "properties": {
+        "op": { "const": "retire" },
+        "type": { "enum": ["goal", "requirement", "criterion"] },
+        "target": {
+          "oneOf": [
+            { "$ref": "common.v1.schema.json#/$defs/goalKey" },
+            { "$ref": "common.v1.schema.json#/$defs/requirementKey" },
+            { "$ref": "common.v1.schema.json#/$defs/criterionKey" }
+          ]
+        },
+        "target_revision": { "$ref": "common.v1.schema.json#/$defs/revision" },
+        "rationale": { "$ref": "common.v1.schema.json#/$defs/rationale" }
+      }
+    },
+    "reaffirm": {
+      "description": "Confirms that a criterion still applies after its parent requirement's material revision. Sets the criterion's requirement_revision to the parent's current revision; the criterion's own revision is unchanged.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op", "type", "target", "target_revision"],
+      "properties": {
+        "op": { "const": "reaffirm" },
+        "type": { "const": "criterion" },
+        "target": { "$ref": "common.v1.schema.json#/$defs/criterionKey" },
+        "target_revision": { "$ref": "common.v1.schema.json#/$defs/revision" },
+        "rationale": { "$ref": "common.v1.schema.json#/$defs/rationale" }
+      }
+    },
+    "question": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["text", "blocking"],
+      "properties": {
+        "text": { "$ref": "common.v1.schema.json#/$defs/plainText1000" },
+        "context": { "$ref": "common.v1.schema.json#/$defs/longText" },
+        "about": {
+          "oneOf": [
+            { "$ref": "common.v1.schema.json#/$defs/requirementKey" },
+            { "$ref": "common.v1.schema.json#/$defs/criterionKey" },
+            { "$ref": "common.v1.schema.json#/$defs/localRef" }
+          ]
+        },
+        "blocking": { "type": "boolean" },
+        "sources": {
+          "type": "array",
+          "maxItems": 10,
+          "items": { "$ref": "common.v1.schema.json#/$defs/sourceRef" }
+        }
+      }
+    }
+  }
+}

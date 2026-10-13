@@ -1,0 +1,15 @@
+{
+  "spool_version": 1,
+  "event_id": "01J9Z3K5Q8R2T4V6W8X0Y2Z4C0",
+  "agent": "claude_code",
+  "type": "session_start",
+  "occurred_at": 1791900000000,
+  "project_id": "01J9Z3K5Q8R2T4V6W8X0Y2Z4C1",
+  "worktree_path": "C:/Users/dev/projects/demo-feature",
+  "session_external_id": "4c1d2e3f-aaaa-bbbb-cccc-1234567890ab",
+  "payload": {
+    "source": "startup",
+    "head_start": "8f3c2a1b9d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a",
+    "head_start_source": "hook_file_read"
+  }
+}

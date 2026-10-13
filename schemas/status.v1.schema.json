@@ -1,0 +1,333 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/XKHoshizora/specmetry/schemas/status.v1.schema.json",
+  "title": "Specmetry status read model v1",
+  "description": "Output of `specmetry status --json` and of GET /api/v1/projects/{id}/status. Carries every version value a caller must send back as a precondition (baseline_version, revisions, snapshot, evidence ids, source hashes). Derived values are a pure function of: facts up to as_of_seq, target.snapshot, and sources[].current_sha256; all three are included so the result can be reproduced.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "as_of_seq",
+    "project",
+    "baseline_version",
+    "init_progress",
+    "source_set_hash",
+    "target",
+    "scope",
+    "delivery",
+    "workspace",
+    "goals",
+    "sources",
+    "requirements",
+    "gaps",
+    "metrics"
+  ],
+  "properties": {
+    "schema": { "const": "specmetry.status/v1" },
+    "as_of_seq": { "type": "integer", "minimum": 0 },
+    "project": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "stage"],
+      "properties": {
+        "id": { "$ref": "common.v1.schema.json#/$defs/ulid" },
+        "name": { "type": "string", "maxLength": 200 },
+        "stage": { "enum": ["docs_only", "in_development", "incomplete_docs"] }
+      }
+    },
+    "baseline_version": { "$ref": "common.v1.schema.json#/$defs/baselineVersion" },
+    "init_progress": {
+      "enum": [
+        "initialized",
+        "sources_registered",
+        "baseline_proposed",
+        "baseline_confirmed",
+        "scope_confirmed",
+        "inventoried"
+      ]
+    },
+    "inventory_coverage": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+    "source_set_hash": { "$ref": "common.v1.schema.json#/$defs/sha256" },
+    "target": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "name", "ref", "snapshot"],
+          "properties": {
+            "id": { "$ref": "common.v1.schema.json#/$defs/ulid" },
+            "name": { "type": "string", "maxLength": 200 },
+            "ref": { "type": "string", "pattern": "^refs/(heads|tags)/.+$" },
+            "snapshot": {
+              "description": "Commit the ref resolves to now, or null if unresolved.",
+              "oneOf": [{ "$ref": "common.v1.schema.json#/$defs/commitSha" }, { "type": "null" }]
+            }
+          }
+        }
+      ]
+    },
+    "scope": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["confirmation_id", "baseline_version", "source_set_hash", "stale", "requirements"],
+          "properties": {
+            "confirmation_id": { "$ref": "common.v1.schema.json#/$defs/ulid" },
+            "baseline_version": { "type": "integer", "minimum": 1 },
+            "source_set_hash": { "$ref": "common.v1.schema.json#/$defs/sha256" },
+            "stale": { "type": "boolean" },
+            "requirements": {
+              "type": "array",
+              "items": { "$ref": "common.v1.schema.json#/$defs/requirementKey" }
+            }
+          }
+        }
+      ]
+    },
+    "delivery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "evidence_grade", "blocking_gaps"],
+      "properties": {
+        "status": { "$ref": "common.v1.schema.json#/$defs/targetDeliveryStatus" },
+        "evidence_grade": {
+          "description": "Weakest grade among the runs supporting accepted automated criteria in scope: snapshot_isolated only if every such acceptance is backed by an isolated run on the snapshot; observed if any relies on observed evidence; none if no accepted automated criterion is backed by a run (manual, exception or waived only). Clients must not describe observed as snapshot-verified.",
+          "enum": ["snapshot_isolated", "observed", "none"]
+        },
+        "blocking_gaps": {
+          "type": "array",
+          "items": { "$ref": "common.v1.schema.json#/$defs/gap" }
+        }
+      }
+    },
+    "workspace": {
+      "description": "The worktree the command ran in. Informational only unless it is clean and its HEAD equals the target snapshot.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["worktree_id", "path", "head", "tree_state", "is_target_snapshot"],
+      "properties": {
+        "worktree_id": { "$ref": "common.v1.schema.json#/$defs/ulid" },
+        "path": { "type": "string", "maxLength": 4096 },
+        "head": { "oneOf": [{ "$ref": "common.v1.schema.json#/$defs/commitSha" }, { "type": "null" }] },
+        "tree_state": { "$ref": "common.v1.schema.json#/$defs/treeState" },
+        "is_target_snapshot": { "type": "boolean" },
+        "compare_from": {
+          "description": "Present with --session current.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["commit", "source"],
+          "properties": {
+            "commit": { "oneOf": [{ "$ref": "common.v1.schema.json#/$defs/commitSha" }, { "type": "null" }] },
+            "source": { "enum": ["previous_batch", "session_start", "none"] }
+          }
+        },
+        "changed_paths": {
+          "description": "Present with --session current: tracked, staged and untracked paths changed since compare_from. Paths only; never persisted.",
+          "type": "array",
+          "maxItems": 5000,
+          "items": { "$ref": "common.v1.schema.json#/$defs/relPath" }
+        }
+      }
+    },
+    "goals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["key", "revision", "title"],
+        "properties": {
+          "key": { "$ref": "common.v1.schema.json#/$defs/goalKey" },
+          "revision": { "$ref": "common.v1.schema.json#/$defs/revision" },
+          "title": { "$ref": "common.v1.schema.json#/$defs/title" }
+        }
+      }
+    },
+    "sources": {
+      "description": "Active (not removed) sources. current_sha256 is the on-disk observation used as a derivation input; it is what a human must send back as observed_sha256 when acknowledging a change.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "path", "kind", "acked_sha256", "current_sha256", "state"],
+        "properties": {
+          "id": { "$ref": "common.v1.schema.json#/$defs/ulid" },
+          "path": { "type": "string", "minLength": 1, "maxLength": 4096 },
+          "kind": { "enum": ["client_requirement", "product_doc", "design_doc", "issue", "note", "other"] },
+          "acked_sha256": { "$ref": "common.v1.schema.json#/$defs/sha256" },
+          "current_sha256": { "oneOf": [{ "$ref": "common.v1.schema.json#/$defs/sha256" }, { "type": "null" }] },
+          "state": { "$ref": "common.v1.schema.json#/$defs/sourceState" }
+        }
+      }
+    },
+    "requirements": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/requirement" }
+    },
+    "open_questions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["key", "blocking"],
+        "properties": {
+          "key": { "$ref": "common.v1.schema.json#/$defs/questionKey" },
+          "blocking": { "type": "boolean" },
+          "about": { "type": ["string", "null"], "maxLength": 32 }
+        }
+      }
+    },
+    "gaps": {
+      "type": "array",
+      "items": { "$ref": "common.v1.schema.json#/$defs/gap" }
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scope_acceptance_ratio",
+        "ac_status_counts",
+        "claimed_without_evidence",
+        "pending_review_items",
+        "open_questions",
+        "blocking_questions",
+        "exception_acceptances",
+        "observed_evidence_acceptances"
+      ],
+      "properties": {
+        "observed_evidence_acceptances": { "type": "integer", "minimum": 0 },
+        "scope_acceptance_ratio": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+        "ac_status_counts": {
+          "type": "object",
+          "propertyNames": { "$ref": "common.v1.schema.json#/$defs/criterionDeliveryStatus" },
+          "additionalProperties": { "type": "integer", "minimum": 0 }
+        },
+        "claimed_without_evidence": { "type": "integer", "minimum": 0 },
+        "pending_review_items": { "type": "integer", "minimum": 0 },
+        "open_questions": { "type": "integer", "minimum": 0 },
+        "blocking_questions": { "type": "integer", "minimum": 0 },
+        "exception_acceptances": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "changes_since": {
+      "description": "Present with --diff-since <seq>: criteria whose delivery status or progress changed after that seq.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["criterion", "field", "from", "to"],
+        "properties": {
+          "criterion": { "$ref": "common.v1.schema.json#/$defs/criterionKey" },
+          "field": { "enum": ["delivery_status", "progress"] },
+          "from": { "type": ["string", "null"] },
+          "to": { "type": "string" }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["evidence_id", "seq", "result", "evidence_grade", "qualifying"],
+      "properties": {
+        "evidence_id": { "$ref": "common.v1.schema.json#/$defs/ulid" },
+        "seq": { "$ref": "common.v1.schema.json#/$defs/seq" },
+        "result": { "enum": ["pass", "fail", "error"] },
+        "evidence_grade": { "$ref": "common.v1.schema.json#/$defs/evidenceGrade" },
+        "failure_kind": {
+          "enum": [
+            null,
+            "nonzero_exit",
+            "timeout",
+            "not_found",
+            "spawn_error",
+            "input_missing",
+            "context_changed"
+          ]
+        },
+        "qualifying": { "type": "boolean" }
+      }
+    },
+    "criterion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key",
+        "revision",
+        "requirement_revision",
+        "verification",
+        "has_check",
+        "delivery_status",
+        "reason",
+        "progress",
+        "flags",
+        "current_decision_id",
+        "snapshot_run",
+        "workspace_run"
+      ],
+      "properties": {
+        "key": { "$ref": "common.v1.schema.json#/$defs/criterionKey" },
+        "revision": { "$ref": "common.v1.schema.json#/$defs/revision" },
+        "requirement_revision": {
+          "description": "Parent revision this criterion is confirmed to apply to. Differs from the parent's revision when parent_revised.",
+          "$ref": "common.v1.schema.json#/$defs/revision"
+        },
+        "verification": { "enum": ["automated", "manual"] },
+        "has_check": { "type": "boolean" },
+        "check_config_hash": { "oneOf": [{ "$ref": "common.v1.schema.json#/$defs/sha256" }, { "type": "null" }] },
+        "delivery_status": { "$ref": "common.v1.schema.json#/$defs/criterionDeliveryStatus" },
+        "reason": { "type": ["string", "null"], "maxLength": 64 },
+        "progress": { "$ref": "common.v1.schema.json#/$defs/progress" },
+        "current_decision_id": {
+          "description": "Latest decision (by seq) for the current revision, or null. Must be sent back as seen_decision_id when deciding.",
+          "oneOf": [{ "$ref": "common.v1.schema.json#/$defs/ulid" }, { "type": "null" }]
+        },
+        "flags": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "conflict",
+              "claimed_without_evidence",
+              "inconsistent_results",
+              "exception_acceptance",
+              "observed_evidence",
+              "blocking_question",
+              "ref_not_found",
+              "inferred"
+            ]
+          }
+        },
+        "snapshot_run": {
+          "description": "Latest qualifying run on the target snapshot for the current revision and check config.",
+          "oneOf": [{ "$ref": "#/$defs/run" }, { "type": "null" }]
+        },
+        "workspace_run": {
+          "description": "Latest run in the current worktree at its current HEAD (qualifying or not). Informational.",
+          "oneOf": [{ "$ref": "#/$defs/run" }, { "type": "null" }]
+        }
+      }
+    },
+    "requirement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "revision", "goal", "title", "priority", "in_scope", "status", "criteria"],
+      "properties": {
+        "key": { "$ref": "common.v1.schema.json#/$defs/requirementKey" },
+        "revision": { "$ref": "common.v1.schema.json#/$defs/revision" },
+        "goal": { "oneOf": [{ "$ref": "common.v1.schema.json#/$defs/goalKey" }, { "type": "null" }] },
+        "title": { "$ref": "common.v1.schema.json#/$defs/title" },
+        "priority": { "enum": ["must", "should", "could", "wont"] },
+        "in_scope": { "type": "boolean" },
+        "status": { "$ref": "common.v1.schema.json#/$defs/requirementDeliveryStatus" },
+        "criteria": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/criterion" }
+        }
+      }
+    }
+  }
+}

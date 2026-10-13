@@ -1,0 +1,115 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/XKHoshizora/specmetry/schemas/decision.v1.schema.json",
+  "title": "Specmetry acceptance decision v1",
+  "description": "Human-only decision on one acceptance criterion. Every field marked as seen is a read-time precondition re-checked atomically inside the write transaction; any mismatch is rejected with stale_precondition (exit 5 / HTTP 409) and nothing is written. Clients must never retry a rejected decision automatically: they re-read and require an explicit new human action. acknowledged_risks must equal the risk set the server derives for this decision (otherwise invalid_input).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "target_id",
+    "snapshot",
+    "criterion",
+    "criterion_revision",
+    "requirement_revision",
+    "evidence_id",
+    "seen_decision_id",
+    "decision",
+    "acknowledged_risks"
+  ],
+  "properties": {
+    "schema": { "const": "specmetry.decision/v1" },
+    "target_id": { "$ref": "common.v1.schema.json#/$defs/ulid" },
+    "snapshot": {
+      "description": "Seen: commit the delivery target resolved to. May be null only for waived.",
+      "oneOf": [{ "$ref": "common.v1.schema.json#/$defs/commitSha" }, { "type": "null" }]
+    },
+    "criterion": { "$ref": "common.v1.schema.json#/$defs/criterionKey" },
+    "criterion_revision": { "$ref": "common.v1.schema.json#/$defs/revision" },
+    "requirement_revision": {
+      "description": "Seen: parent requirement's current revision. Must also equal the criterion's requirement_revision (parent applicability).",
+      "$ref": "common.v1.schema.json#/$defs/revision"
+    },
+    "evidence_id": {
+      "description": "Seen: latest qualifying check run for this criterion on the snapshot, or null if none was shown.",
+      "oneOf": [{ "$ref": "common.v1.schema.json#/$defs/ulid" }, { "type": "null" }]
+    },
+    "seen_decision_id": {
+      "description": "Seen: the criterion's current decision (latest by seq for the current revision), as returned by the read model's current_decision_id. null only when no decision exists yet. Compared atomically with the latest decision in the write transaction; a decision made by another page or terminal in between yields stale_precondition.",
+      "oneOf": [{ "$ref": "common.v1.schema.json#/$defs/ulid" }, { "type": "null" }]
+    },
+    "decision": { "enum": ["accepted", "rejected", "waived"] },
+    "mode": {
+      "description": "Required for accepted. normal: automated criterion with a passing qualifying run on the snapshot. manual: manual criterion, applies to this snapshot only. exception: automated criterion with no qualifying run on the snapshot; applies to this snapshot only and is flagged.",
+      "enum": ["normal", "manual", "exception"]
+    },
+    "acknowledged_risks": {
+      "description": "Risks the human was shown and explicitly acknowledged. observed_evidence: the supporting run is observed-grade (only start/end states were checked). inconsistent_results: qualifying runs on this snapshot disagree. no_automated_evidence: exception acceptance without any qualifying run. Must be empty for rejected and waived.",
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "common.v1.schema.json#/$defs/acknowledgedRisk" }
+    },
+    "rationale": { "$ref": "common.v1.schema.json#/$defs/rationale" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "decision": { "const": "accepted" } } },
+      "then": {
+        "required": ["mode"],
+        "properties": { "snapshot": { "$ref": "common.v1.schema.json#/$defs/commitSha" } }
+      },
+      "else": {
+        "not": { "required": ["mode"] },
+        "properties": { "acknowledged_risks": { "maxItems": 0 } }
+      }
+    },
+    {
+      "if": { "properties": { "decision": { "const": "rejected" } } },
+      "then": {
+        "required": ["rationale"],
+        "properties": { "snapshot": { "$ref": "common.v1.schema.json#/$defs/commitSha" } }
+      }
+    },
+    {
+      "if": { "properties": { "decision": { "const": "waived" } } },
+      "then": { "required": ["rationale"] }
+    },
+    {
+      "if": {
+        "required": ["mode"],
+        "properties": { "mode": { "const": "exception" } }
+      },
+      "then": {
+        "required": ["rationale"],
+        "properties": {
+          "evidence_id": { "type": "null" },
+          "acknowledged_risks": { "contains": { "const": "no_automated_evidence" } }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": ["mode"],
+        "properties": { "mode": { "const": "normal" } }
+      },
+      "then": {
+        "properties": {
+          "evidence_id": { "$ref": "common.v1.schema.json#/$defs/ulid" },
+          "acknowledged_risks": { "not": { "contains": { "const": "no_automated_evidence" } } }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": ["mode"],
+        "properties": { "mode": { "const": "manual" } }
+      },
+      "then": {
+        "properties": {
+          "evidence_id": { "type": "null" },
+          "acknowledged_risks": { "maxItems": 0 }
+        }
+      }
+    }
+  ]
+}

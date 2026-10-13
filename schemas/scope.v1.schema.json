@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/XKHoshizora/specmetry/schemas/scope.v1.schema.json",
+  "title": "Specmetry delivery scope confirmation v1",
+  "description": "Human-only. Declares the complete set of requirements to be delivered for a delivery target, bound to a baseline version and a source-set hash. Empty scopes are invalid.",
+  "type": "object",
+  "unevaluatedProperties": false,
+  "required": ["schema"],
+  "allOf": [{ "$ref": "#/$defs/confirmation" }],
+  "properties": {
+    "schema": { "const": "specmetry.scope/v1" }
+  },
+  "$defs": {
+    "attestations": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["complete_scope", "pending_items_excluded"],
+      "properties": {
+        "complete_scope": {
+          "description": "The reviewer confirms this list is the complete delivery scope for the target.",
+          "const": true
+        },
+        "pending_items_excluded": {
+          "description": "Number of proposal items still pending or in conflict at confirmation time (after applying the enclosing review, if any) that the reviewer explicitly excludes. Must equal the server's count, otherwise stale_precondition.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "missing_goals_reviewed": {
+          "description": "Required and must be true for projects at stage incomplete_docs: the reviewer has added delivery goals that the code alone cannot reveal.",
+          "type": "boolean"
+        }
+      }
+    },
+    "scopeCommon": {
+      "type": "object",
+      "properties": {
+        "target_id": { "$ref": "common.v1.schema.json#/$defs/ulid" },
+        "attestations": { "$ref": "#/$defs/attestations" },
+        "note": { "$ref": "common.v1.schema.json#/$defs/plainText1000" },
+        "source_set_hash": {
+          "description": "Must equal the current source-set hash.",
+          "$ref": "common.v1.schema.json#/$defs/sha256"
+        }
+      }
+    },
+    "confirmation": {
+      "type": "object",
+      "allOf": [{ "$ref": "#/$defs/scopeCommon" }],
+      "required": ["target_id", "baseline_version", "source_set_hash", "requirements", "attestations"],
+      "properties": {
+        "baseline_version": {
+          "description": "Must equal the current baseline version.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "requirements": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "common.v1.schema.json#/$defs/requirementKey" }
+        }
+      }
+    },
+    "confirmationInReview": {
+      "description": "Scope confirmation embedded in a review submission. It binds to the baseline version produced by the review (or the current version if the review accepts nothing). Requirements may be existing keys or the item_id of an 'add requirement' proposal item accepted in the same review; the server resolves item ids to the newly assigned keys inside the transaction.",
+      "type": "object",
+      "unevaluatedProperties": false,
+      "allOf": [{ "$ref": "#/$defs/scopeCommon" }],
+      "required": ["target_id", "source_set_hash", "requirements", "attestations"],
+      "properties": {
+        "requirements": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "oneOf": [
+              { "$ref": "common.v1.schema.json#/$defs/requirementKey" },
+              { "$ref": "common.v1.schema.json#/$defs/ulid" }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

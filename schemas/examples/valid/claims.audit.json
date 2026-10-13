@@ -1,0 +1,28 @@
+{
+  "schema": "specmetry.claims/v1",
+  "kind": "audit",
+  "base_version": 1,
+  "summary": "首次全量盘点",
+  "audit_scope": { "all": true },
+  "claims": [
+    {
+      "target": "AC-001-1",
+      "target_revision": 1,
+      "assertion": "done",
+      "summary": "登录接口与 TestEmailLogin 均已存在",
+      "refs": { "files": [{ "path": "internal/auth/login.go" }], "tests": ["TestEmailLogin"] }
+    },
+    {
+      "target": "AC-001-2",
+      "target_revision": 1,
+      "assertion": "unknown",
+      "summary": "视觉稿未提供，无法判断页面是否符合"
+    },
+    {
+      "target": "AC-002-1",
+      "target_revision": 1,
+      "assertion": "not_done",
+      "summary": "未找到订单列表接口"
+    }
+  ]
+}

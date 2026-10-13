@@ -1,0 +1,9 @@
+{
+  "schema": "specmetry.error/v1",
+  "error": {
+    "code": "stale_precondition",
+    "message": "AC-002-2 has been revised since it was read; re-read status and resubmit.",
+    "details": [{ "pointer": "/claims/0/target_revision", "problem": "expected 2, got 1" }],
+    "current": { "base_version": 5, "criteria": { "AC-002-2": { "revision": 2 } } }
+  }
+}

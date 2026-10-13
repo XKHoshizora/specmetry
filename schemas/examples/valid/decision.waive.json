@@ -1,0 +1,13 @@
+{
+  "schema": "specmetry.decision/v1",
+  "target_id": "01J9Z3K5Q8R2T4V6W8X0Y2Z4B0",
+  "snapshot": null,
+  "criterion": "AC-004-2",
+  "criterion_revision": 1,
+  "requirement_revision": 1,
+  "evidence_id": null,
+  "seen_decision_id": "01J9Z3K5Q8R2T4V6W8X0Y2Z4F0",
+  "decision": "waived",
+  "acknowledged_risks": [],
+  "rationale": "客户同意本期不要求导出 Excel 格式"
+}

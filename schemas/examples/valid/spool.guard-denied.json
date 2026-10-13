@@ -1,0 +1,11 @@
+{
+  "spool_version": 1,
+  "event_id": "01J9Z3K5Q8R2T4V6W8X0Y2Z4C3",
+  "agent": "claude_code",
+  "type": "guard_denied",
+  "occurred_at": 1791900006000,
+  "project_id": "01J9Z3K5Q8R2T4V6W8X0Y2Z4C1",
+  "worktree_path": "/home/dev/demo",
+  "session_external_id": "4c1d2e3f-aaaa-bbbb-cccc-1234567890ab",
+  "payload": { "subcommand": "accept" }
+}

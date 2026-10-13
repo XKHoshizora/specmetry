@@ -1,0 +1,14 @@
+{
+  "schema": "specmetry.decision/v1",
+  "target_id": "01J9Z3K5Q8R2T4V6W8X0Y2Z4B0",
+  "snapshot": "8f3c2a1b9d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a",
+  "criterion": "AC-002-2",
+  "criterion_revision": 1,
+  "requirement_revision": 2,
+  "evidence_id": "01J9Z3K5Q8R2T4V6W8X0Y2Z4B1",
+  "seen_decision_id": "01J9Z3K5Q8R2T4V6W8X0Y2Z4F1",
+  "decision": "accepted",
+  "mode": "normal",
+  "acknowledged_risks": ["observed_evidence", "inconsistent_results"],
+  "rationale": "重新查看拒收意见后改判：失败来自测试环境的端口冲突，已在同一快照上复跑通过"
+}

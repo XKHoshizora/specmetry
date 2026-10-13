@@ -1,0 +1,38 @@
+{
+  "schema": "specmetry.review/v1",
+  "proposal_id": "01J9Z3K5Q8R2T4V6W8X0Y2Z4A6",
+  "seen_base_version": 3,
+  "summary": "接受订单隔离变更",
+  "items": [
+    {
+      "item_id": "01J9Z3K5Q8R2T4V6W8X0Y2Z4A7",
+      "decision": "accepted",
+      "change_class": "material"
+    },
+    {
+      "item_id": "01J9Z3K5Q8R2T4V6W8X0Y2Z4A8",
+      "decision": "accepted_with_edits",
+      "final_data": { "statement": "用户 A 请求用户 B 的订单时返回 404，且不泄露订单是否存在" }
+    },
+    {
+      "item_id": "01J9Z3K5Q8R2T4V6W8X0Y2Z4A9",
+      "decision": "rejected",
+      "note": "该 AC 由新增条目替代"
+    },
+    {
+      "item_id": "01J9Z3K5Q8R2T4V6W8X0Y2Z4AB",
+      "decision": "accepted"
+    }
+  ],
+  "criterion_followups": [
+    { "criterion": "AC-002-1", "seen_revision": 1, "action": "reaffirm" },
+    { "criterion": "AC-002-3", "seen_revision": 2, "action": "retire", "rationale": "旧的全量列表行为已取消" },
+    { "criterion": "AC-002-4", "seen_revision": 1, "action": "defer" }
+  ],
+  "scope": {
+    "target_id": "01J9Z3K5Q8R2T4V6W8X0Y2Z4B0",
+    "source_set_hash": "3b5d9f0c1e2a4b6c8d0e1f2a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e",
+    "requirements": ["REQ-001", "REQ-002", "01J9Z3K5Q8R2T4V6W8X0Y2Z4AB"],
+    "attestations": { "complete_scope": true, "pending_items_excluded": 0 }
+  }
+}

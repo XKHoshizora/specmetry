@@ -1,0 +1,28 @@
+{
+  "schema": "specmetry.claims/v1",
+  "kind": "sync",
+  "base_version": 4,
+  "summary": "实现订单隔离",
+  "claims": [
+    {
+      "target": "AC-002-2",
+      "target_revision": 1,
+      "assertion": "done",
+      "summary": "订单查询增加 owner 过滤，补充 TestOrderIsolation",
+      "refs": {
+        "files": [{ "path": "internal/orders/query.go", "lines": "40-62" }],
+        "tests": ["TestOrderIsolation"],
+        "commits": ["3f2a9c1"]
+      }
+    },
+    {
+      "target": "AC-001-2",
+      "target_revision": 2,
+      "assertion": "blocked",
+      "summary": "缺少短信服务商配置，见 Q-002"
+    }
+  ],
+  "unmapped_work": [
+    { "summary": "重构日志初始化", "refs": { "files": [{ "path": "internal/log/log.go" }] } }
+  ]
+}

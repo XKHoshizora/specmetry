@@ -1,0 +1,11 @@
+{
+  "spool_version": 1,
+  "event_id": "01J9Z3K5Q8R2T4V6W8X0Y2Z4C2",
+  "agent": "claude_code",
+  "type": "tool_use",
+  "occurred_at": 1791900005000,
+  "project_id": "01J9Z3K5Q8R2T4V6W8X0Y2Z4C1",
+  "worktree_path": "C:/Users/dev/projects/demo-feature",
+  "session_external_id": "4c1d2e3f-aaaa-bbbb-cccc-1234567890ab",
+  "payload": { "tool_category": "shell", "outcome": "failure" }
+}

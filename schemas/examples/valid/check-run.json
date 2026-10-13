@@ -1,0 +1,36 @@
+{
+  "schema": "specmetry.check-run/v1",
+  "worktree_id": "01J9Z3K5Q8R2T4V6W8X0Y2Z4D1",
+  "is_target_snapshot": true,
+  "isolation": "off",
+  "runs": [
+    {
+      "criterion": "AC-002-2",
+      "criterion_revision": 1,
+      "evidence_id": "01J9Z3K5Q8R2T4V6W8X0Y2Z4B1",
+      "seq": 405,
+      "result": "pass",
+      "failure_kind": null,
+      "exit_code": 0,
+      "duration_ms": 8421,
+      "head_start": "8f3c2a1b9d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a",
+      "tree_state_start": "clean",
+      "evidence_grade": "observed",
+      "qualifying": true
+    },
+    {
+      "criterion": "AC-003-1",
+      "criterion_revision": 1,
+      "evidence_id": "01J9Z3K5Q8R2T4V6W8X0Y2Z4B2",
+      "seq": 406,
+      "result": "error",
+      "failure_kind": "timeout",
+      "exit_code": null,
+      "duration_ms": 120000,
+      "head_start": "8f3c2a1b9d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a",
+      "tree_state_start": "clean",
+      "evidence_grade": "observed",
+      "qualifying": true
+    }
+  ]
+}

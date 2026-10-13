@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/XKHoshizora/specmetry/schemas/gaps.v1.schema.json",
+  "title": "Specmetry gaps v1",
+  "description": "Output of `specmetry gaps --json`: the gap list of status.v1 with its evaluation context. Invariant: delivery_status is 'ready' if and only if no gap has blocking=true.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "as_of_seq", "snapshot", "baseline_version", "delivery_status", "gaps"],
+  "properties": {
+    "schema": { "const": "specmetry.gaps/v1" },
+    "as_of_seq": { "type": "integer", "minimum": 0 },
+    "snapshot": { "oneOf": [{ "$ref": "common.v1.schema.json#/$defs/commitSha" }, { "type": "null" }] },
+    "baseline_version": { "$ref": "common.v1.schema.json#/$defs/baselineVersion" },
+    "delivery_status": { "$ref": "common.v1.schema.json#/$defs/targetDeliveryStatus" },
+    "gaps": {
+      "type": "array",
+      "items": { "$ref": "common.v1.schema.json#/$defs/gap" }
+    }
+  }
+}

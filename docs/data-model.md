@@ -1,125 +1,204 @@
 # Specmetry 数据模型
 
-> 状态：Draft v0.1 · 2026-10-13
-> 本文定义实体、关系、生命周期和状态推导规则。**§6 的决策表是状态引擎的规范来源**，代码与测试都必须与之一一对应。
+> 状态：Draft v0.3 · 2026-10-13（依据 [codex-review-001](reviews/codex-review-001.md) 与 [codex-review-002](reviews/codex-review-002.md) 修订，处理记录见 [review-resolution.md](review-resolution.md)）
+> 本文定义实体、关系、生命周期、版本前置条件和推导规则。**§6 的决策表是推导引擎的规范来源**，代码与测试必须与之一一对应。交换格式的规范来源是 [`schemas/`](../schemas/)。
 
 ## 1. 建模约定
 
 | 约定 | 说明 |
 |---|---|
-| 主键 | ULID（TEXT，26 字符），全局唯一，按时间有序 |
-| 编号（key） | 人类可读，项目内唯一，**永不复用**：`GOAL-1`、`REQ-001`、`AC-001-1`、`Q-001`（TD-14）。AC 编号中嵌入的是创建时所属需求的序号。 |
-| 时间 | INTEGER，UTC Unix 毫秒 |
-| actor | `agent:<agent>`（如 `agent:claude_code`、`agent:unknown`）、`human:<显示名>`、`system` |
+| 主键 | ULID（TEXT，26 字符）。只用于标识，**不用于判断先后**。 |
+| 事实序号 `seq` | INTEGER，全库单调递增。在写事务内由单行计数器分配；SQLite 的写操作串行执行，所以 `seq` 与提交顺序一致。**判断"最新""之后"一律只看 `seq`**，时间戳只用于展示。 |
+| 编号（key） | 人类可读，项目内唯一，永不复用：`GOAL-1`、`REQ-001`、`AC-001-1`、`Q-001`（TD-14） |
+| 时间 | INTEGER，UTC Unix 毫秒，仅用于展示 |
+| actor | `agent:<agent>`（如 `agent:claude_code`）、`human:<显示名>`、`system` |
 | channel | `agent_cli`、`human_cli`、`dashboard`、`hook`、`system` |
-| project_id | 每张表都有该字段，用于按项目删除和未来的同步 |
-| JSON 列 | 由应用层按 schema 校验；数据库层只保证是合法 JSON |
-| 自由文本 | 持久化前一律经过脱敏（[architecture.md §10.3](architecture.md#103-脱敏)） |
+| 代码上下文 | 由三项组成：`worktree_id`、`head`（40 位提交 SHA；未知时为 NULL）、`tree_state`（`clean` / `dirty` / `unknown`）。`clean` 指 `git status --porcelain --untracked-files=all -- . ':(exclude).specmetry'` 输出为空：被 git 忽略的文件不计入；未跟踪文件计入；**Specmetry 自己的 `.specmetry/` 始终排除**，不管有没有写入 `.git/info/exclude`。项目级安装只写入已被 git 忽略的 `.claude/settings.local.json`（[architecture.md §10.6](architecture.md#106-对仓库的写入)），所以它也不会让工作区变脏。 |
+| project_id | 每张表都有，用于按项目删除和未来的同步 |
+| JSON 列 | 应用层按 schema 校验 |
+| 自由文本 | 写入前做密钥扫描，命中则**拒绝写入**（不做替换），见 [architecture.md §10](architecture.md#10-隐私与数据保留契约) |
 
 可变性分为两类：
 
 | 类别 | 表 | 规则 |
 |---|---|---|
-| **只追加（事实）** | `baseline_versions`、`baseline_changes`、`source_acks`、`events`、`claim_batches`、`claims`、`evidence`、`evidence_links`、`acceptances`、`status_snapshots` | 应用层禁止 UPDATE 和 DELETE，数据库触发器作为第二道防线；只有 `purge` 和保留期清理（仅 `events`）例外 |
-| **受控可变** | `projects`、`sources`、`goals`、`requirements`、`acceptance_criteria`、`proposals`、`proposal_items`、`questions`、`agent_sessions`、`key_counters` | 基准三表只能通过"应用基准变更"修改；`proposal_items` 的审核字段只能写一次；`questions` 的回答字段只能写一次；`agent_sessions` 是由事件重建的投影 |
+| **只追加（事实）** | `baseline_versions`、`baseline_changes`、`source_refs`、`code_refs`、`source_acks`、`scope_confirmations`、`scope_items`、`claim_batches`、`claims`、`check_runs`、`commits`、`commit_links`、`decisions`、`events` | 应用层禁止 UPDATE 和 DELETE，数据库触发器作为第二道防线。例外只有 `purge`，以及 `events` 的保留期清理。 |
+| **受控可变** | `projects`、`worktrees`、`delivery_targets`、`sources`、`goals`、`requirements`、`acceptance_criteria`、`proposals`、`proposal_items`、`questions`、`agent_sessions`、`git_scan_cursors`、`hook_drops`、`key_counters`、`meta` | 基准三表只能通过"应用基准变更"修改，每次修改记录 `updated_seq`；`proposal_items` 的审核字段、`questions` 的回答字段都只能写一次 |
 
 ## 2. 概念模型
 
 ```mermaid
 flowchart TB
     subgraph BL["Project Baseline（人确认，带版本）"]
-        G[Goal] --> R[Requirement] --> AC[Acceptance Criterion]
+        G[Goal] --> R[Requirement] --> AC["Acceptance Criterion<br/>（含检查配置）"]
     end
-    SRC[Source 来源文档] -. 引用 .-> R
-    SRC -. 引用 .-> AC
-    C["Claim<br/>Agent 自述"] -->|针对 revision| AC
-    E["Evidence<br/>执行证据"] -->|"verifies（检查）/ relates（提交）"| AC
-    A["Acceptance<br/>正式验收"] -->|针对 revision| AC
-    BL --> ENG{{"状态推导引擎（纯函数）"}}
+    subgraph DT["交付对象（人确认）"]
+        T["Delivery Target<br/>跟踪一个 ref"] --> S["Snapshot<br/>ref 当前指向的提交"]
+        SC["Scope Confirmation<br/>基准版本 + 来源集合 + 需求清单"] --> T
+    end
+    C["Claim<br/>Agent 自述"] -->|"读取时的 revision"| AC
+    CR["Check Run<br/>执行证据"] -->|"开始时的 revision + 配置 + 代码上下文"| AC
+    D["Decision<br/>人工验收"] -->|"查看时的 revision + 快照 + 证据"| AC
+    BL --> ENG{{"推导引擎（纯函数）"}}
+    DT --> ENG
     C --> ENG
-    E --> ENG
-    A --> ENG
-    ENG --> OUT["AC 状态 → 需求状态 → 差距 → 交付就绪 → 指标"]
+    CR --> ENG
+    D --> ENG
+    ENG --> P["AC 进度（自述，仅供参考）"]
+    ENG --> DS["AC 交付状态（相对快照）→ 需求 → 交付状态 → 差距"]
 ```
+
+两种推导结果相互独立：
+
+- **进度（progress）**：来自 Claim 和提交，与代码对象无关，可信度低，只用于展示"Agent 说了什么、做了什么"。
+- **交付状态（delivery status）**：来自"在交付快照上执行的合格检查"和"适用于该快照的人工决定"。
+
+**Claim 对交付状态的影响（统一表述）**：
+
+- Claim **不能单独**产生 `accepted` 或 `ready`；
+- 对自动化 AC，Claim 不能让它越过 `in_progress`；
+- 对手动 AC，`done` 自述只会把它标为 `ready_for_review`，含义是"等待人工查看"，这不是验证；
+- 拒收后的新 `done` 自述，可以让手动 AC 回到 `ready_for_review`（§6.3 第 5 条）。
 
 ## 3. 实体关系
 
 ```mermaid
 erDiagram
+    PROJECT ||--|{ WORKTREE : "checked out as"
+    PROJECT ||--o{ DELIVERY_TARGET : delivers
     PROJECT ||--o{ SOURCE : registers
     PROJECT ||--o{ GOAL : has
     PROJECT ||--o{ REQUIREMENT : has
     PROJECT ||--o{ PROPOSAL : receives
     PROJECT ||--o{ BASELINE_VERSION : versions
     PROJECT ||--o{ QUESTION : tracks
-    PROJECT ||--o{ AGENT_SESSION : observes
-    PROJECT ||--o{ EVIDENCE : collects
-    PROJECT ||--o{ STATUS_SNAPSHOT : records
+    DELIVERY_TARGET ||--o{ SCOPE_CONFIRMATION : "scoped by"
+    SCOPE_CONFIRMATION ||--|{ SCOPE_ITEM : includes
+    REQUIREMENT ||--o{ SCOPE_ITEM : "included as"
     GOAL |o--o{ REQUIREMENT : groups
     REQUIREMENT ||--o{ CRITERION : "verified by"
     SOURCE ||--o{ SOURCE_REF : "cited by"
     SOURCE ||--o{ SOURCE_ACK : "acked by"
-    GOAL ||--o{ SOURCE_REF : cites
     REQUIREMENT ||--o{ SOURCE_REF : cites
     CRITERION ||--o{ SOURCE_REF : cites
+    REQUIREMENT ||--o{ CODE_REF : "inferred from"
     PROPOSAL ||--|{ PROPOSAL_ITEM : contains
     BASELINE_VERSION ||--|{ BASELINE_CHANGE : records
-    PROPOSAL_ITEM |o--o| BASELINE_CHANGE : "applied as"
+    PROPOSAL_ITEM |o--o{ BASELINE_CHANGE : "applied as"
     QUESTION }o--o| REQUIREMENT : about
-    QUESTION }o--o| CRITERION : about
+    WORKTREE ||--o{ AGENT_SESSION : hosts
     AGENT_SESSION ||--o{ EVENT : emits
-    AGENT_SESSION |o--o{ CLAIM_BATCH : submits
+    WORKTREE ||--o{ CLAIM_BATCH : "submitted from"
     CLAIM_BATCH ||--|{ CLAIM : contains
     CRITERION ||--o{ CLAIM : "claimed in"
-    EVIDENCE ||--|{ EVIDENCE_LINK : "linked via"
-    CRITERION ||--o{ EVIDENCE_LINK : "verified/related"
-    REQUIREMENT ||--o{ EVIDENCE_LINK : related
-    CRITERION ||--o{ ACCEPTANCE : "decided by"
+    WORKTREE ||--o{ CHECK_RUN : "executed in"
+    CRITERION ||--o{ CHECK_RUN : "checked by"
+    COMMIT ||--|{ COMMIT_LINK : references
+    REQUIREMENT ||--o{ COMMIT_LINK : "referenced by"
+    CRITERION ||--o{ COMMIT_LINK : "referenced by"
+    CRITERION ||--o{ DECISION : "decided by"
+    CHECK_RUN |o--o{ DECISION : "seen in"
 ```
 
 关键基数：
 
-- 一个需求可以没有 AC，此时状态为 `needs_criteria`，这本身就是一个差距。
-- 一个需求最多属于一个目标（可以不属于任何目标）。
-- 一条 Claim 至多指向一个 AC（未映射工作不指向任何 AC）。
-- 一条证据可以链接多个目标：一个提交可以引用多个需求；一次检查只链接一个 AC。
+- **一个项目可以有多个 worktree。** 它们共享项目身份、基准和事实账本，但每条 Claim、Check Run、会话都记录自己所在的 worktree 和代码上下文。
+- MVP 中每个项目只有 1 个 `active` 的 Delivery Target（PD-19）。
+- 一个需求可以没有 AC，此时为 `needs_criteria`。
 - 一个 AC 至多有一个检查（TD-18）。
 
 ## 4. 实体定义
 
-### 4.1 `projects`
+### 4.1 `projects` 与 `worktrees`
+
+`projects`：
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | id | ULID PK | 与 marker 中的 `project_id` 相同 |
 | name | TEXT | |
-| root_path | TEXT | 主 worktree 的绝对路径（规范化） |
-| git_common_dir | TEXT NULL | 用于把其他 worktree 归属到本项目 |
-| stage | TEXT | `docs_only` / `in_development` / `incomplete_docs`（检测值或用户覆盖值） |
-| settings_json | TEXT | `sources_skipped`、`inventory_skipped`、`readiness_scope`（PD-01）、`commit_ref_mode`（TD-17） |
-| last_scanned_head | TEXT NULL | git 增量扫描位置 |
-| created_at, updated_at | INTEGER | |
+| git_common_dir | TEXT NULL | 共享的 git 公共目录；非 git 项目为 NULL |
+| main_worktree_id | ULID | |
+| stage | TEXT | `docs_only` / `in_development` / `incomplete_docs` |
+| settings_json | TEXT | `sources_skipped`、`inventory_skipped`、`commit_ref_mode`（TD-17） |
+| created_at | INTEGER | |
 
-### 4.2 `sources`
+`worktrees`：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| id | ULID PK | |
+| project_id | ULID | |
+| path | TEXT | 工作目录的绝对路径（规范化），项目内唯一 |
+| git_dir | TEXT NULL | 该 worktree 自己的 git 目录，存放它独立的 HEAD 和 index |
+| is_main | BOOLEAN | |
+| registered_seq | INTEGER | |
+| last_seen_at | INTEGER | |
+
+CLI 或 Hook 第一次在某个 worktree 中出现时，系统会自动登记它：从 cwd 解析出 `git_common_dir`，匹配到对应项目，再登记该 worktree。目录已不存在的 worktree 在读取时标记为 `missing`，历史事实保留。
+
+### 4.2 `delivery_targets`、`scope_confirmations`、`scope_items`
+
+`delivery_targets`（受控可变，只能由人修改）：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| id | ULID PK | |
+| project_id | ULID | |
+| name | TEXT | 如"首期交付" |
+| ref | TEXT | 完整引用名，只能是 `refs/heads/*` 或 `refs/tags/*` |
+| created_seq, archived_seq | INTEGER | 更换 ref 时，先归档旧目标，再新建目标 |
+| actor, channel | TEXT | `init` 自动创建的默认目标记为 `system` |
+
+`init` 会创建一个默认目标，它的 ref 是主 worktree 当前所在的分支。如果主 worktree 处于分离 HEAD，或者项目不是 git 项目，就不创建目标（差距 `NO_TARGET`）。
+
+**快照**（Snapshot）不入库：每次推导时把目标的 `ref` 解析为提交 `S`（`git rev-parse --verify <ref>^{commit}`）。refs 由所有 worktree 共享，所以在任何 worktree 中解析，结果都相同。
+
+`scope_confirmations`（只追加，只能由人产生）：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| id | ULID PK | |
+| seq | INTEGER | |
+| project_id, target_id | ULID | |
+| baseline_version | INTEGER | 确认时的基准版本号 |
+| source_set_hash | TEXT | 确认时的来源集合哈希（§4.3） |
+| attestations_json | TEXT | `complete_scope`（必须为 true）；`pending_items_excluded`（确认时仍待审的提案条目数，人已确认它们不属于本范围）；`missing_goals_reviewed`（`incomplete_docs` 项目必须为 true，表示人已补充代码中没有体现的交付目标） |
+| note | TEXT NULL | |
+| actor, channel, confirmed_at | | |
+
+`scope_items`（只追加）：`confirmation_id`、`requirement_id`、`requirement_revision`（确认时的修订）。至少 1 行。
+
+在审核中附带的范围确认（`review.v1` 的 `scope`）里，需求既可以写现有的编号，也可以写**同一次审核中被接受的"新增需求"提案条目的 `item_id`**。服务端在事务内把 `item_id` 解析为新分配的编号；如果该条目没有被接受，整次提交失败。这样，首次审核时就可以一次性确认范围。
+
+### 4.3 `sources` 与 `source_acks`
+
+`sources`：
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | id | ULID PK | |
 | project_id | ULID | |
 | kind | TEXT | `client_requirement` / `product_doc` / `design_doc` / `issue` / `note` / `other` |
-| location | TEXT | `in_repo` / `external` / `snapshot`（粘贴文本的快照，P1） |
-| path | TEXT | 仓库内为相对路径；仓库外为绝对路径 |
-| title | TEXT NULL | |
-| sha256 | TEXT | 登记时的哈希，或最近一次 `source ack` 时的哈希 |
+| location | TEXT | `in_repo` / `external` |
+| path | TEXT | 仓库内为相对路径（相对主 worktree）；仓库外为绝对路径 |
+| acked_sha256 | TEXT | 登记时的哈希，或最近一次人工 `ack` 时的哈希 |
 | size_bytes | INTEGER | |
-| registered_at | INTEGER | |
-| removed_at | INTEGER NULL | 软删除，保留历史引用 |
+| registered_seq | INTEGER | |
+| removed_seq | INTEGER NULL | 移除只能由人操作；移除后引用保留，并显示为 `source_removed` |
 
-当前文件状态（`unchanged` / `changed` / `missing`）不存储，在读取时与磁盘比对得出。
+`source_acks`（只追加，只能由人产生）：`id`、`seq`、`project_id`、`source_id`、`previous_sha256`、`acked_sha256`（必须等于确认时磁盘上的实际哈希）、`rationale`（必填）、`actor`、`channel`。
 
-`source_acks`（只追加）记录每一次"变化已处理"的确认：`id`、`project_id`、`source_id`、`previous_sha256`、`sha256`、`actor`、`channel`、`note`、`acked_at`。确认时同时更新 `sources.sha256`。
+文件的当前状态（`unchanged` / `changed` / `missing`）不存储。每次推导前，系统都会读取磁盘、计算当前哈希（`current_sha256`）；这组观测值是推导的**显式输入**（§6），并且会写进输出。
 
-### 4.3 基准条目：`goals` / `requirements` / `acceptance_criteria`
+登记规则：
+
+- **类型白名单**：只接受文档类文件（`.md`、`.markdown`、`.txt`、`.rst`、`.adoc`、`.pdf`、`.docx`、`.doc`、`.odt`、`.rtf`、`.html`、`.htm`、`.eml`）。只有人在 `human_cli` 中加上 `--allow-any-type` 时，才能登记其他类型。这样可以防止源代码被登记为来源后，被片段引用逐段复制下来。
+- **重复登记**：对已登记、未移除的路径再次执行 `source add`，什么都不做，只返回已有的来源。它**不会**更新 `acked_sha256`，因为更新只能通过人工 `ack` 完成。对已移除的路径再次登记，会创建新的来源记录（新 ID）。
+
+**来源集合哈希**：取所有未移除的来源，按 `id` 排序，把 `"<source_id>:<acked_sha256>\n"` 拼接后计算 sha256。新增、移除或确认来源，都会改变这个哈希。
+
+### 4.4 基准条目：`goals` / `requirements` / `acceptance_criteria`
 
 三张表的公共字段：
 
@@ -127,13 +206,14 @@ erDiagram
 |---|---|---|
 | id | ULID PK | |
 | project_id | ULID | |
-| key | TEXT | 项目内唯一，在提案条目被接受时分配 |
+| key | TEXT | 在提案条目被接受时分配 |
 | status | TEXT | `active` / `retired` |
-| revision | INTEGER | 从 1 开始；只有 `material` 变更才会加 1 |
+| revision | INTEGER | 从 1 开始；只有 `material` 变更才加 1 |
+| revision_seq | INTEGER | 当前 revision 生效时的 `seq` |
 | origin | TEXT | `extracted` / `inferred_from_code` / `manual` |
-| confidence | TEXT NULL | `high` / `medium` / `low`（`manual` 为 NULL） |
-| created_version, updated_version, retired_version | INTEGER | 对应的基准版本号 |
-| created_at, updated_at | INTEGER | |
+| confidence | TEXT NULL | `high` / `medium` / `low` |
+| created_version, updated_version, retired_version | INTEGER | 基准版本号 |
+| updated_seq | INTEGER | |
 
 各表的专属字段：
 
@@ -141,43 +221,37 @@ erDiagram
 |---|---|
 | `goals` | `title`、`description` |
 | `requirements` | `goal_id` NULL、`title`、`description`、`kind`（`functional` / `non_functional` / `constraint`）、`priority`（`must` / `should` / `could` / `wont`，PD-12） |
-| `acceptance_criteria` | `requirement_id`、`statement`、`verification`（`automated` / `manual`）、`check_command` NULL、`check_workdir`（默认 `.`）、`check_timeout_sec`（默认 300）、`check_shell` NULL（TD-06） |
+| `acceptance_criteria` | `requirement_id`；**`requirement_revision`**（本 AC 被确认适用于父需求的哪个修订）；`statement`；`verification`（`automated` / `manual`）；检查配置：`check_command` NULL、`check_workdir`（默认 `.`）、`check_shell` NULL、`check_inputs_json` NULL（仓库相对路径列表）、`check_rationale` NULL、`check_timeout_sec`（默认 300）；`check_config_hash` NULL |
 
 约束：
 
-- `check_command` 非空时，`verification` 必须为 `automated`。
-- AC 不能在需求之间移动；如需移动，退役后重新新增。
+- 有 `check_command` 时：`verification` 必须为 `automated`，且 `check_rationale` 必填（说明这个检查为什么能验证这条 AC）。
+- `check_command` 不得包含疑似密钥的字面量。需要秘密值时，改为引用环境变量名，如 `$API_TOKEN`。
+- `check_config_hash` = sha256(JCS 规范化的 `{"command","workdir","shell","inputs"}`，其中 `inputs` 排序)。`timeout` 不参与哈希。
+- AC 不能在需求之间移动。
 
-### 4.4 `source_refs`
+**父子适用性**：当 `acceptance_criteria.requirement_revision` ≠ 父需求当前的 `revision` 时，称该 AC"父需求已修订，适用性未确认"（`parent_revised`）。它会进入 `needs_reverification`，直到人通过 `reaffirm`、修订或退役来处理（§7.2）。
 
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| id | ULID PK | |
-| project_id, source_id | ULID | |
-| entity_type | TEXT | `goal` / `requirement` / `criterion` / `question` |
-| entity_id | ULID | |
-| locator | TEXT NULL | 例如 `L12-L18`、`§2.3`、`p.4` |
-| excerpt | TEXT | ≤ 1000 字符 |
-| verification | TEXT | `verified` / `not_found` / `source_missing` / `not_checkable`（非文本来源，例如 PDF） |
-| source_sha256 | TEXT | 建立引用时来源文件的哈希 |
-| created_at | INTEGER | |
+### 4.5 `source_refs` 与 `code_refs`
 
-### 4.5 `proposals` 与 `proposal_items`
+两张表都只追加，并绑定条目的 revision：
 
-`proposals`：
+| 表 | 字段 |
+|---|---|
+| `source_refs` | `id`、`seq`、`project_id`、`source_id`、`entity_type`（`goal` / `requirement` / `criterion` / `question`）、`entity_id`、`entity_revision`、`locator`、`excerpt`（≤ 500 字符）、`verification`（`verified` / `not_found` / `source_missing` / `not_checkable`）、`source_sha256` |
+| `code_refs` | `id`、`seq`、`project_id`、`entity_type`、`entity_id`、`entity_revision`、`path`（仓库相对路径）、`lines` NULL、`checked_head`、`exists`（BOOLEAN） |
 
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| id | ULID PK | |
-| project_id | ULID | |
-| origin | TEXT | `skill_init` / `skill_goals` / `skill_audit` / `skill_sync` / `cli` / `human_edit` |
-| actor, channel | TEXT | |
-| session_id | ULID NULL | |
-| summary | TEXT | |
-| base_version | INTEGER | 提交时的基准版本号（尚无基准时为 0） |
-| created_at | INTEGER | |
+规则：
 
-提案是否仍待处理不单独存储：只要还有条目处于 `pending` 或 `conflict`，提案就是待处理的。
+- 一条条目"当前的引用"，是 `entity_revision` 等于其当前 revision 的那些引用。
+- `material` 更新时，如果没有提供新引用，系统会沿用上一修订的引用，**重新校验**后写成新行。旧行保留，作为历史。
+- `code_refs` 只保存路径和行号，**不保存代码内容**。
+- **片段总量上限**：同一来源所有已保存片段的总长度，不超过该来源文本长度的 50%，并且不超过 20000 字符；非文本来源（`not_checkable`）总计不超过 5000 字符。超出时，提交被拒绝（V-P11）。这样可以防止通过片段逐段保存来源全文（C0）。
+- 校验只证明一件事：片段确实出现在来源中、路径确实存在。它**不证明**语义正确或覆盖完整。界面上必须如实说明这一点。
+
+### 4.6 `proposals` 与 `proposal_items`
+
+`proposals`：`id`、`seq`、`project_id`、`origin`（`skill_init` / `skill_goals` / `skill_audit` / `skill_sync` / `cli` / `human_edit`）、`actor`、`channel`、`session_id` NULL、`worktree_id`、`summary`、**`base_version`**（提交者读取的基准版本号，来自输入）。
 
 `proposal_items`：
 
@@ -185,141 +259,155 @@ erDiagram
 |---|---|---|
 | id | ULID PK | |
 | proposal_id, project_id | ULID | |
-| seq | INTEGER | 条目在提案中的顺序 |
-| op | TEXT | `add` / `update` / `retire` |
+| item_index | INTEGER | 条目在提案中的顺序 |
+| op | TEXT | `add` / `update` / `retire` / `reaffirm`（`reaffirm` 只用于 criterion） |
 | entity_type | TEXT | `goal` / `requirement` / `criterion` |
-| target_id | ULID NULL | `update` 和 `retire` 的目标 |
+| target_id | ULID NULL | `update` / `retire` / `reaffirm` 的目标 |
+| **target_revision** | INTEGER NULL | 提交者读取到的目标 revision（来自输入） |
 | ref | TEXT NULL | `add` 条目在提案内的临时引用 |
-| payload_json | TEXT | 提议的值 |
-| sources_json | TEXT | 来源引用及其校验结果 |
-| code_refs_json | TEXT NULL | `inferred_from_code` 条目的代码依据及存在性校验 |
-| rationale | TEXT NULL | |
-| origin, confidence | TEXT | |
+| payload_json, sources_json, code_refs_json | TEXT | |
+| rationale, origin, confidence | | |
 | review_state | TEXT | `pending` / `accepted` / `accepted_with_edits` / `rejected` / `conflict` |
-| final_payload_json | TEXT NULL | 编辑后接受时的最终值 |
-| change_class | TEXT NULL | `update` 条目的 `material` / `editorial` |
-| reviewed_by, reviewed_channel, reviewed_at, review_note | | 只能写一次 |
+| final_payload_json | TEXT NULL | |
+| change_class | TEXT NULL | `material` / `editorial` |
+| reviewed_by, reviewed_channel, reviewed_seq, review_note | | 只能写一次 |
 | applied_version_id | ULID NULL | |
 
-### 4.6 `baseline_versions` 与 `baseline_changes`
+### 4.7 `baseline_versions` 与 `baseline_changes`
 
 | 表 | 字段 |
 |---|---|
-| `baseline_versions` | `id`、`project_id`、`number`（项目内从 1 递增，唯一）、`summary`、`actor`、`channel`、`created_at` |
-| `baseline_changes` | `id`、`project_id`、`version_id`、`entity_type`、`entity_id`、`op`、`change_class`、`before_json`、`after_json`、`proposal_item_id` |
+| `baseline_versions` | `id`、`seq`、`project_id`、`number`（项目内从 1 递增）、`summary`、`actor`、`channel` |
+| `baseline_changes` | `id`、`seq`、`project_id`、`version_id`、`entity_type`、`entity_id`、`op`（`add` / `update` / `retire` / `reaffirm`）、`change_class`、`before_json`、`after_json`、`proposal_item_id` NULL（级联变更为 NULL） |
 
-一次审核提交，在一个事务中产生一个版本和多条变更记录。级联产生的变更（如退役需求时连带退役其 AC）也逐条记录。
+### 4.8 `questions`
 
-### 4.7 `questions`
+字段：`id`、`project_id`、`key`、`text`、`context`、`related_type`、`related_id` NULL、`proposal_item_id` NULL、`blocking`、`status`（`open` / `answered` / `dismissed`）、`answer`、`answered_by`、`answered_channel`、`answered_seq`、`origin`、`proposal_id`、`created_seq`。
 
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| id | ULID PK | |
-| project_id | ULID | |
-| key | TEXT | `Q-001` |
-| text, context | TEXT | |
-| related_type, related_id | TEXT, ULID NULL | 关联的需求或 AC |
-| proposal_item_id | ULID NULL | 关联到尚未确认的提案条目；条目被接受后回填 `related_id` |
-| blocking | BOOLEAN | |
-| status | TEXT | `open` / `answered` / `dismissed` |
-| answer, answered_by, answered_channel, answered_at | | 只能写一次 |
-| origin, proposal_id | | |
-| created_at | INTEGER | |
+Question 在提案提交时立即创建，只能由人回答或驳回（[`question-answer.v1`](../schemas/question-answer.v1.schema.json)）。
 
-Question 在提案提交时**立即创建**。它不改变基准，因此不需要先审核才能存在。
+当 `about` 指向提案内的临时引用时，先记录 `proposal_item_id`：
 
-### 4.8 `agent_sessions`（投影）与 `events`
+- 条目被**接受**时，在同一事务中把 `related_type` / `related_id` 回填为新条目；
+- 条目被**拒绝**时，问题标记为"关联条目已拒绝"，此后不再计为阻塞问题（§6.8），但仍然保持 `open`，等人驳回。
 
-`agent_sessions`：`id`、`project_id`、`agent`、`external_id`（Agent 自己的会话 ID）、`started_at`、`ended_at`、`end_reason`、`head_start`、`head_end`、`last_event_at`。`(project_id, agent, external_id)` 唯一。它在入库时由事件增量维护；事件过了保留期被清理时，会话记录保留。
+### 4.9 `agent_sessions`、`events` 与 `hook_drops`
+
+`agent_sessions`（投影）：`id`、`project_id`、`worktree_id`、`agent`、`external_id`、`started_at`、`ended_at`、`end_reason`、`head_start` NULL、`head_start_source`（`hook_file_read` / `unknown`）、`last_event_seq`。`(project_id, agent, external_id)` 唯一。
 
 `events`：
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
-| id | ULID PK | 由 Hook 进程生成 |
-| project_id | ULID | |
+| id | ULID PK | Hook 进程生成，同时作为去重键 |
+| seq | INTEGER | 入库时分配 |
+| project_id, worktree_id | ULID | |
 | session_id | ULID NULL | |
 | agent | TEXT | |
-| type | TEXT | `session_start` / `session_end` / `command` / `file_edit` / `stop` / `guard_denied` |
-| occurred_at, ingested_at | INTEGER | |
-| payload_json | TEXT | 只含白名单字段，且已脱敏 |
-| dedupe_key | TEXT UNIQUE | 等于 Hook 生成的事件 ID |
+| type | TEXT | `session_start` / `session_end` / `tool_use` / `stop` / `guard_denied` |
+| occurred_at | INTEGER | 仅用于展示 |
+| payload_json | TEXT | 只包含 [`schemas/spool-event.v1.schema.json`](../schemas/spool-event.v1.schema.json) 允许的字段：工具类别、成功或失败、会话来源、`head_start` 等。**不包含**命令文本、文件路径、工具输入和输出。 |
 
-### 4.9 `claim_batches` 与 `claims`
+`hook_drops`（受控可变计数器）：`project_id` NULL、`day`、`reason`（`oversize` / `timeout` / `parse_error` / `write_error`）、`count`。
 
-`claim_batches`：`id`、`project_id`、`kind`（`sync` / `audit` / `manual`）、`actor`、`channel`、`session_id` NULL、`summary`、`git_head`、`created_at`。
+### 4.10 `claim_batches` 与 `claims`
+
+`claim_batches`：
+
+| 字段 | 说明 |
+|---|---|
+| id, seq, project_id | |
+| kind | `sync` / `audit` / `manual` |
+| audit_scope_json | `audit` 时必填：`{"all": true}` 或 `{"requirements": ["REQ-001", ...]}` |
+| **base_version** | 提交者读取的基准版本号 |
+| worktree_id, head, tree_state | 提交时由 CLI 采集的代码上下文 |
+| compare_from | `sync` 的比较起点（提交 SHA 或 NULL），以及起点来源：`previous_batch` / `session_start` / `none` |
+| session_id, summary, actor, channel | |
 
 `claims`：
 
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| id | ULID PK | |
-| project_id, batch_id | ULID | |
-| target_type | TEXT | `criterion` / `none`（未映射工作） |
-| criterion_id | ULID NULL | |
-| criterion_revision | INTEGER NULL | 提交时 AC 的 revision |
-| assertion | TEXT NULL | `done` / `partial` / `not_done` / `blocked`；未映射工作为 NULL |
-| summary | TEXT | ≤ 500 字符 |
-| refs_json | TEXT | `files[{path, lines}]`、`tests[]`、`commits[]` |
-| refs_check_json | TEXT | 每个引用的校验结果：`ok` / `missing` / `unknown_commit` |
-| created_at | INTEGER | |
+| 字段 | 说明 |
+|---|---|
+| id, seq, project_id, batch_id | |
+| target_type | `criterion` / `none`（未映射工作） |
+| criterion_id | |
+| **criterion_revision** | 提交者读取到的 revision（来自输入，必须等于提交时的当前值） |
+| assertion | `done` / `partial` / `not_done` / `blocked` / `unknown`（`unknown` 只用于 `audit`） |
+| summary | ≤ 500 字符，单段文字，不能包含代码块 |
+| refs_json, refs_check_json | 文件路径与行号、测试名、提交 SHA，以及各自的存在性校验结果 |
 
-### 4.10 `evidence` 与 `evidence_links`
+### 4.11 `check_runs`
 
-`evidence`：
+| 字段 | 说明 |
+|---|---|
+| id, seq, project_id, criterion_id | |
+| criterion_revision, requirement_revision, check_config_hash | **开始执行时**读取的值；之后不会重新绑定 |
+| inputs_json | 开始时 `inputs` 中每个路径在 HEAD 上的 git 对象 ID（`git rev-parse <head>:<path>`）；未声明时为 NULL |
+| worktree_id, workdir | 发起执行的 worktree，以及相对工作目录 |
+| evidence_grade | `observed` / `snapshot_isolated`（见下文）。**MVP 只产生 `observed`。** |
+| isolation_mode | 调用时请求的隔离模式：`off` / `required` / `auto`（`auto` 留给隔离执行器） |
+| isolation_backend, isolation_fallback_reason | 只用于隔离执行器：使用的隔离后端；`auto` 模式下降级为 `observed` 的原因 |
+| head_start, head_end | 开始和结束时的 HEAD。隔离级执行时，两者都是物化的快照提交。 |
+| tree_state_start, tree_state_end | 开始和结束时的工作区状态（隔离级执行时，指私有快照目录的状态） |
+| result | `pass` / `fail` / `error` |
+| failure_kind | NULL / `nonzero_exit` / `timeout` / `not_found` / `spawn_error` / `input_missing` / `context_changed` |
+| exit_code, duration_ms | |
+| triggered_channel, session_id | |
+| started_at, finished_at | 仅用于展示 |
 
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| id | ULID PK | |
-| project_id | ULID | |
-| kind | TEXT | `check_run` / `commit` |
-| result | TEXT | `check_run`：`pass` / `fail` / `error`；`commit`：`info` |
-| triggered_channel | TEXT NULL | 是谁触发了检查（`agent_cli` / `human_cli`） |
-| session_id | ULID NULL | |
-| git_head | TEXT NULL | |
-| git_dirty | BOOLEAN NULL | |
-| command, command_sha256, shell | TEXT NULL | 检查命令（已脱敏）及其哈希 |
-| exit_code, duration_ms | INTEGER NULL | |
-| output_tail | TEXT NULL | 最后 4 KB，已脱敏 |
-| output_sha256 | TEXT NULL | 完整输出的哈希 |
-| log_path | TEXT NULL | 完整日志位置；超过保留期后文件被删除，记录保留 |
-| commit_sha, commit_subject, committed_at | NULL | 提交类证据。标题脱敏后截断到 200 字符。`(project_id, commit_sha)` 唯一。 |
-| occurred_at, created_at | INTEGER | |
+**不保存**命令文本（命令在基准中，可以由 `check_config_hash` 找到）、输出、输出尾部，也不保存输出的哈希。
 
-`evidence_links`：
+#### 4.11.1 证据等级
 
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| evidence_id, project_id | ULID | |
-| target_type | TEXT | `criterion` / `requirement` |
-| target_id | ULID | |
-| target_revision | INTEGER NULL | `verifies` 链接必须填写 |
-| relation | TEXT | `verifies`（只有 `check_run` → 它所绑定的 AC）/ `relates`（提交 → 被引用的需求或 AC） |
-| link_source | TEXT | `check_binding` / `commit_trailer` / `commit_message` |
+| 等级 | 执行方式 | 保证 | **不**保证 |
+|---|---|---|---|
+| `observed`（观测级） | 在发起执行的 worktree 中直接执行 | **只保证两个时刻**：开始时和结束时，该 worktree 的 HEAD 都等于记录的提交，并且工作区是干净的（排除 `.specmetry/`） | 执行**期间**代码没有变化。以下情况都无法发现：并行编辑后恢复、检查脚本自己改写受跟踪文件后再恢复、HEAD 从 A 切到 B 再切回 A。因此它**不能**被描述为"快照已验证"。 |
+| `snapshot_isolated`（隔离级） | Specmetry 把提交 `S` 物化到一个由它独占、新建的私有目录中执行 | 检查进程及其子进程在执行期间读到的所有受跟踪文件内容，都等于 `S` 的树 | 执行环境：依赖缓存、环境变量、外部服务；私有目录中没有用户 worktree 里那些被 git 忽略的文件 |
 
-主键为 `(evidence_id, target_type, target_id)`。
+一次执行只有在以下**全部**得到验证时，才记为 `snapshot_isolated`：
 
-每条证据至少有一个链接：git 扫描只把至少引用了一个基准编号的提交存为证据。引用了已退役条目的提交照常链接，用于保留历史；引用了不存在编号的提交则忽略。活动页中的完整提交列表实时从 git 读取，不入库。
+1. **物化**：私有目录是新建的，只有 Specmetry 持有；物化完成后，验证其内容与 `S` 的树完全一致。
+2. **只读由外部强制**：检查运行在隔离后端（例如容器或操作系统沙箱的只读挂载）中，受跟踪路径对检查只读，检查进程本身无法解除这一限制；可写的只有临时目录。**仅修改文件权限位不算**，因为同一用户可以自行恢复写权限。
+3. **执行前探测**：在隔离环境中尝试写入一个受跟踪路径，这次写入必须失败。
+4. **执行后验证**：私有目录的内容仍与 `S` 的树一致。如果不一致，这次执行记为 `error` / `context_changed`，不合格，也不会改记为观测级。
 
-### 4.11 `acceptances`
+**合格执行**（qualifying run）必须同时满足：
 
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| id | ULID PK | |
-| project_id, criterion_id | ULID | |
-| criterion_revision | INTEGER | |
-| decision | TEXT | `accepted` / `rejected` / `waived` |
-| rationale | TEXT | `rejected` 和 `waived` 必填 |
-| actor, channel | TEXT | `channel` 只能是 `human_cli` 或 `dashboard` |
-| evidence_ids_json | TEXT | 决定时该 AC 最新的 `verifies` 证据 |
-| git_head | TEXT NULL | |
-| supersedes_id | ULID NULL | 被取代的前一个决定 |
-| decided_at | INTEGER | |
+- `head_start = head_end`，且不为 NULL；
+- `tree_state_start = tree_state_end = clean`；
+- `failure_kind ≠ context_changed`；
+- 等级为 `snapshot_isolated` 时，上面 1–4 全部通过。
 
-### 4.12 `status_snapshots` 与 `key_counters`
+合格执行的结果只对它的 `head` 这个提交有意义。观测级和隔离级的合格执行都参与 `V` 的计算（§6.1），但只有隔离级可以支撑**沿用**（§6.2），也只有隔离级可以让交付判定标为隔离级（§6.8）。
 
-- `status_snapshots`：`id`、`project_id`、`taken_at`、`baseline_version`、`trigger`（`ingest` / `check` / `claim` / `acceptance` / `baseline`）、`metrics_json`（§6.8）。
-- `key_counters`：`(project_id, entity_type, scope)` 为主键，加上 `next_value`。目标、需求和问题的 `scope` 为空字符串（项目级序列）；AC 的 `scope` 为所属需求的 ID（每个需求一个序列，用来生成 `AC-001-1`、`AC-001-2`……）。分配编号与应用变更在同一事务中完成。
+### 4.12 `commits`、`commit_links`、`git_scan_cursors`
+
+- `commits`（只追加）：`id`、`seq`（发现时分配）、`project_id`、`sha`、`committed_at`。不保存标题和正文。`(project_id, sha)` 唯一。只保存至少引用了一个基准编号的提交。
+- `commit_links`（只追加）：`commit_id`、`project_id`、`target_type`（`requirement` / `criterion`）、`target_id`、`link_source`（`trailer` / `message`）。
+- `git_scan_cursors`（受控可变）：`project_id`、`ref`（每个本地分支，加上各 worktree 的分离 HEAD）、`last_tip`、`scanned_seq`。每次扫描只读取每个 ref 从 `last_tip` 到当前 tip 的增量；如果历史被改写（旧 tip 不再是新 tip 的祖先），就重新扫描该 ref，靠 SHA 去重。
+
+### 4.13 `decisions`（人工验收决定）
+
+| 字段 | 说明 |
+|---|---|
+| id, seq, project_id, criterion_id | |
+| decision | `accepted` / `rejected` / `waived` |
+| mode | `accepted` 时必填：`normal`（自动化 AC，基于快照上的合格通过）/ `manual`（手动 AC）/ `exception`（自动化 AC 在快照上没有合格执行时的人工例外） |
+| criterion_revision, requirement_revision | 人查看时的值（来自输入，必须等于当前值） |
+| check_config_hash, inputs_json | 自动化 AC：取自所依据的合格执行 |
+| target_id | 人查看时的交付目标，始终必填 |
+| snapshot | 人查看时的快照 `S`；只有 `waived` 可以为 NULL |
+| evidence_id | 人查看时，该 AC 在 `S` 上最新的合格执行；没有则为 NULL |
+| evidence_grade | `evidence_id` 对应执行的等级（`normal` 验收时由服务端填写） |
+| seen_decision_id | 人查看时，该 AC 的当前决定（读取模型中的 `current_decision_id`）；还没有任何决定时为 NULL。用于防止旧页面覆盖刚发生的决定（§7.1）。 |
+| acknowledged_risks_json | 人明确确认过的风险：`observed_evidence` / `inconsistent_results` / `no_automated_evidence`（§7.3） |
+| rationale | `rejected`、`waived` 和 `exception` 必填 |
+| actor, channel | `channel` 只能是 `human_cli` 或 `dashboard` |
+
+### 4.14 `meta` 与 `key_counters`
+
+- `meta`：`schema_version`、`min_binary_version`、`seq_counter`。
+- `key_counters`：`(project_id, entity_type, scope)` 为主键，加上 `next_value`。AC 的 `scope` 是需求 ID，其他实体的 `scope` 为空字符串。
 
 ## 5. 生命周期
 
@@ -327,8 +415,8 @@ Question 在提案提交时**立即创建**。它不改变基准，因此不需�
 
 ```mermaid
 stateDiagram-v2
-    [*] --> pending : 提案通过校验
-    pending --> conflict : 目标在 base_version 之后被修改
+    [*] --> pending : 提交通过校验（含版本前置条件）
+    pending --> conflict : 审核前，目标在 base_version 之后被修改
     pending --> accepted : 人接受
     pending --> accepted_with_edits : 人编辑后接受
     pending --> rejected : 人拒绝
@@ -340,190 +428,310 @@ stateDiagram-v2
     rejected --> [*]
 ```
 
-规则：
+- 接受指向本提案内需求 `ref` 的 AC 新增条目时，那个需求条目必须同时被接受，否则整次审核提交失败。
+- 冲突检测发生在两个时刻：加载审核队列时，以及应用变更的事务内。
 
-- 接受一个 `criterion` 的 `add` 条目时，如果它指向的是本提案内的 `requirement`，那个需求条目必须已被接受，或在同一次提交中被接受。否则，这次审核提交整体失败。
-- 冲突在加载审核队列时检测，应用变更前会再检测一次。
-
-### 5.2 基准条目（目标 / 需求 / AC）
+### 5.2 基准条目
 
 ```mermaid
 stateDiagram-v2
     [*] --> active : add 被接受（分配编号，revision = 1）
     active --> active : update 被接受（material 时 revision + 1）
+    active --> active : reaffirm 被接受（AC.requirement_revision 更新为父需求当前修订）
     active --> retired : retire 被接受
     retired --> [*]
 ```
 
-- `retired` 是终态。要恢复，只能新增条目，并会得到新编号。
-- 退役一个需求时，在同一版本中级联退役它的所有 AC。
-- 退役一个目标时，在同一版本中把它的需求的 `goal_id` 置为 NULL。
+- 退役需求时，在同一版本中级联退役它的 AC。
+- 退役目标时，把它的需求的 `goal_id` 置为 NULL。
 
-### 5.3 待澄清问题
+### 5.3 交付范围
 
-`open` → `answered` 或 `dismissed`。MVP 中两者都是终态。回答后如果需要改基准，另行提交提案。
+范围确认没有"状态"字段，它是否适用由推导得出（§6.8）：
+
+- 每个目标的当前范围，是该目标 `seq` 最大的那次确认。
+- 当它的 `baseline_version` 不等于当前基准版本，或者 `source_set_hash` 不等于当前来源集合哈希时，范围**过期**（`SCOPE_STALE`）。
+- 审核提交可以在同一个事务中先应用基准变更，再写入新的范围确认，从而避免"每次改基准都要单独再确认一次范围"。
 
 ### 5.4 验收决定
 
-只追加。对某个 `(criterion, revision)`，"当前决定"是最新的那一条。新决定通过 `supersedes_id` 指向被取代的决定。
+只追加。对某个 AC，"当前决定"是 `seq` 最大、且 `criterion_revision` 等于当前 revision 的那一条。决定是否适用于当前快照，由 §6.3 推导。
 
-## 6. 状态推导
+### 5.5 一次审核（或人工编辑）的应用顺序
 
-状态推导是纯函数：**同一组事实，无论插入顺序如何，都得出同一结果。** 只有 `active` 的基准条目参与推导。
+一次审核提交（或 `propose --apply`）中，所有被接受的条目在**同一个事务**内，按以下固定顺序应用。同一步内部按 `item_index` 的顺序执行。
 
-### 6.1 AC 推导的输入
+1. 校验 `seen_base_version`（人工编辑时校验 `base_version`）和冲突确认。
+2. 目标：`add`、`update`、`retire`（含级联：把需求的 `goal_id` 置空）。
+3. 需求：`add`、`update`、`retire`（含级联：退役其 AC）。`material` 更新使需求的 revision 加 1。
+4. AC 的 `add`：新 AC 的 `requirement_revision` 等于父需求在**第 3 步之后**的 revision。
+5. AC 的 `update`：被接受的更新（无论 `material` 还是 `editorial`）都会把 AC 的 `requirement_revision` 刷新为父需求当前的 revision，因为审核者是在当前父需求语义下修改它的。`material` 更新使 AC 的 revision 加 1。
+6. AC 的 `reaffirm`：在第 3 步之后执行，所以同一提案中"修订需求 + `reaffirm` 其 AC"可以正确生效。
+7. AC 的 `retire`。
+8. `review.v1` 中的 `criterion_followups`（`reaffirm` / `retire` / `defer`）。它们针对的是第 3 步之后变为 `parent_revised` 的 AC。
+9. 回填 Question 的关联（§4.8）。
+10. 如果至少有一个条目被接受，就生成新的基准版本，并写入全部变更记录；否则不生成版本。
+11. 如果附带了范围确认：解析其中的 `item_id`，校验 `source_set_hash` 和 `pending_items_excluded`（以本次审核完成后的待审数为准，包含 `conflict` 条目），然后绑定到第 10 步之后的当前版本。
 
-对每个 `active` 的 AC，记当前 revision 为 `r`，revision `r` 生效的时间为 `tR`：
+需要修订、但本次审核没有修订的 AC，选择 `defer` 即可，之后再通过人工编辑修订。`review.v1` 不能在审核中新增条目。
+
+## 6. 推导
+
+推导是纯函数，输入有四项：
+
+- 一个项目截止序号 `as_of_seq` 的全部事实（含已确认的基准）；
+- 交付目标与快照 `S`；
+- 各来源在磁盘上的观测哈希 `current_sha256`（文件缺失时为 NULL）；
+- 当前 worktree 的代码上下文（只用于工作区视图）。
+
+**同一组输入，无论事实的插入顺序如何，结果都相同。** `S`、观测哈希和 `as_of_seq` 都会写进输出（`status.v1`），所以任何结论都可以复现。只有 `active` 的基准条目参与推导。
+
+`--diff-since <seq>` 的含义：用**当前的** `S`、当前的观测哈希，分别在 `as_of_seq = <seq>` 和当前 `as_of_seq` 上各推导一次，然后输出差异。它只反映这段时间内**新增事实**带来的变化，不反映代码或来源文件本身的变化。
+
+### 6.1 符号
+
+对 AC `a`：
 
 | 符号 | 定义 |
 |---|---|
-| `D`, `tD` | 针对 revision `r` 的当前验收决定，以及它的时间。没有则为空。 |
-| `t0` | 如果 `D = rejected`，则 `t0 = tD`；否则 `t0 = -∞`。拒收之后，只有拒收之后产生的事实才有效。 |
-| `E`, `tE` | 链接到该 AC、`relation = verifies`、`target_revision = r`、`occurred_at > t0` 的最新证据结果（`pass` / `fail` / `error`）及其时间 |
-| `C`, `tC` | `criterion_revision = r`、`created_at > t0` 的最新 Claim 断言及其时间 |
-| `ACT` | 是否存在 `relation = relates` 的证据，链接到该 AC 或其所属需求，且 `occurred_at > max(t0, tR)`。因此，早于当前 revision 生效时间的提交不会让 AC 进入 `in_progress`。 |
-| `H` | 是否存在针对旧 revision（`< r`）的验收决定或 `verifies` 证据 |
+| `S` | 交付目标的 ref 解析出的提交。解析失败时为 NULL。 |
+| `r`, `h` | AC 当前的 revision 和 `check_config_hash` |
+| `pr`, `ar` | 父需求当前的 revision；AC 的 `requirement_revision` |
+| `runs(S)` | 该 AC 的合格执行中，满足 `head = S`、`criterion_revision = r`、`check_config_hash = h` 的那些 |
+| `V` | `runs(S)` 中 `seq` 最大的一条的结果：`pass`，或 `fail`（包括 `fail` 和 `error`）；为空时记为 `none` |
+| `V.seq`, `V.grade` | 决定 `V` 的那条执行的 `seq` 和证据等级 |
+| `inconsistent` | `runs(S)` 中同时存在 `pass` 和非 `pass` 的结果 |
+| `D` | 当前决定（§5.4），可能为空 |
+| `HIST` | 存在下列任一情况：`a` 在其他提交上的合格 `pass`；`a` 在旧 revision 或旧配置下的合格 `pass`；`a` 的 `accepted` 决定（任何快照、任何 revision） |
+| `P` | 进度（§6.5） |
 
-### 6.2 AC 状态决策表
+### 6.2 决定的适用性
+
+`D = accepted` 在快照 `S` 上**适用**，当且仅当满足下列条件之一：
+
+1. **直接适用**：`D.snapshot = S`。
+2. **沿用**（只适用于自动化 AC 的 `normal` 验收）：同时满足以下条件——
+   - `D.snapshot ≠ S`；
+   - `V = pass`，并且不存在 `inconsistent`；
+   - **`V.grade = snapshot_isolated`**：沿用是在没有人参与的情况下，把人的判断自动延伸到新代码上，所以必须有隔离级证据。观测级证据无法排除执行期间代码被改动，不能支撑沿用。**MVP 只产生观测级证据，因此 MVP 中沿用实际上不会发生**，目标前进后需要人重新验收（规则 7 的原因码 `observed_evidence`）。
+   - `D.check_config_hash = h`；
+   - 如果声明了 `inputs`：`S` 上这些路径的对象 ID 等于 `D.inputs_json`。
+
+手动 AC 和例外验收**永远不沿用**。沿用不产生新的决定记录，只是推导结果。
+
+`D = waived` 与快照无关：只要 revision 没变、父需求适用性没有失效，就一直适用。
+
+### 6.3 AC 交付状态决策表
 
 自上而下，**命中第一条即停止**：
 
-| # | 条件 | 状态 | 含义 |
+| # | 条件 | 状态 | 原因码 |
 |---|---|---|---|
-| 1 | `D = waived` | `waived` | 已豁免：本次交付不要求 |
-| 2 | `D = accepted`，且 `E ∈ {fail, error}`，且 `tE > tD` | `regressed` | 已验收，但之后检查失败了 |
-| 3 | `D = accepted` | `accepted` | 已验收 |
-| 4 | `D = rejected`，且拒收之后没有 `E`，也没有断言为 `done` / `partial` / `blocked` 的 `C` | `rejected` | 被拒收，需要返工。拒收之后的提交和 `not_done` 自述都不会改变这一状态。 |
-| 5 | `E ∈ {fail, error}` | `failing` | 检查未通过 |
-| 6 | `E = pass` | `verified` | 有证据，等待验收 |
-| 7 | `C = done` | `claimed` | Agent 自述完成，没有证据 |
-| 8 | `C = blocked` | `blocked` | Agent 报告受阻 |
-| 9 | `C = partial`，或 `ACT` 为真 | `in_progress` | 进行中 |
-| 10 | `H` 为真 | `stale` | AC 已实质修订，旧的证据或验收不再有效，需要复核 |
-| 11 | 其他 | `not_started` | 未开始 |
+| 1 | `S` 为 NULL | `not_assessed` | `target_unresolved` |
+| 2 | `ar ≠ pr` | `needs_reverification` | `parent_revised` |
+| 3 | `D = waived` | `waived` | — |
+| 4 | 自动化 AC，且 `V = fail` | `failing` | `check_failed`（如果 `D = accepted` 且 `D.seq` 小于该执行的 `seq`，改为 `regressed`） |
+| 5 | `D = rejected`，且拒收**没有被解除**。解除条件是 `S ≠ D.snapshot`（代码已经变化），并且：自动化 AC 的 `V = pass` **且 `V.seq > D.seq`**（通过发生在拒收之后）；手动 AC 有 `seq > D.seq` 的 `done` Claim。 | `rejected` | `rework_requested` |
+| 6 | `D = accepted` 且在 `S` 上适用（§6.2） | `accepted` | `direct` / `carried_forward` / `exception` / `manual` |
+| 7 | 自动化 AC，且 `V = pass` | `ready_for_review` | 拒收已被解除时为 `rework_submitted`；之前在其他快照上有验收、但没能沿用时，按优先级为：`exception_not_carried` > `inconsistent_results` > `inputs_changed` > `observed_evidence`；之前没有验收时为 `first_review` |
+| 8 | 手动 AC，且 `D = accepted`（在其他快照上） | `needs_reverification` | `code_changed` |
+| 9 | 手动 AC，且 `P = claimed` | `ready_for_review` | `manual_claimed` |
+| 10 | `HIST` 为真 | `needs_reverification` | 只要存在旧 revision 或旧配置下的记录，就是 `ac_revised`；否则为 `code_changed` |
+| 11 | 其他 | `in_progress` | 自动化 AC 没有检查时，固定为 `no_check`；否则由进度给出：`claimed_without_evidence` / `blocked` / `agent_in_progress` / `not_started` / `unknown` |
 
-几个要点：
+要点：
 
-- `C = not_done` 本身不推动状态，结果取决于其他事实；拒收后提交 `not_done`，状态仍保持 `rejected`。
-- Claim 永远不能让 AC 越过 `claimed`。
-- 规则 2 和规则 3 意味着：已验收的 AC，在之后的检查又通过后，会回到 `accepted`。
+- **Claim 的影响**见 §2 的统一表述：Claim 不能单独产生 `accepted` 或 `ready`；自动化 AC 不会因为 Claim 越过 `in_progress`；手动 AC 的 `done` 自述只会让它进入"等待人工查看"（第 9 条）。
+- **拒收只能由"代码变化后、拒收之后的新证据"或人来解除。** 在同一提交上重新运行检查，不能解除拒收；拒收之前就有的通过记录，也不能解除拒收。人则可以在同一快照上明确改判（§7.3）。
+- **观测级证据只能把 AC 推到 `ready_for_review`，或者支撑人在同一快照上的直接验收**，永远不会让 AC 在没有人参与的情况下变为 `accepted`。
+- 在不同提交上通过、在旧代码上验收，都只会导致 `needs_reverification`，永远不会导致 `accepted`。
+- 被 git 忽略的文件和环境变量属于执行环境，不属于代码对象。合格执行会记录它所在的 worktree，供追溯。
 
-### 6.3 AC 标记
+### 6.4 交付状态转移（AC 层面）
 
-标记与状态正交，可以同时存在多个：
+状态由事实推导而来。下图表示常见事实对状态的影响，不表示存储的状态机：
+
+```mermaid
+stateDiagram-v2
+    [*] --> in_progress
+    in_progress --> ready_for_review : S 上合格检查通过 / 手动 AC 自述完成
+    in_progress --> failing : S 上合格检查失败
+    failing --> ready_for_review : 修复后 S 上合格检查通过
+    ready_for_review --> accepted : 人在 S 上验收（前置条件见 §7.3）
+    ready_for_review --> rejected : 人拒收
+    rejected --> ready_for_review : 目标前进到新提交，且新提交上在拒收之后合格通过
+    accepted --> needs_reverification : 目标 ref 移到新提交，且新提交上没有合格通过
+    needs_reverification --> accepted : 新提交上有隔离级合格通过，且满足沿用条件
+    needs_reverification --> ready_for_review : 新提交上合格通过，但不满足沿用条件（MVP 中总是如此）
+    accepted --> failing : S 上合格检查失败（regressed）
+    accepted --> needs_reverification : AC 实质修订 / 父需求实质修订
+```
+
+### 6.5 进度（与代码对象无关，仅供参考）
+
+对 AC `a`，取 `seq` 最大、且 `criterion_revision = r` 的 Claim：
+
+| 条件 | 进度 |
+|---|---|
+| 断言为 `done` | `claimed` |
+| 断言为 `blocked` | `blocked` |
+| 断言为 `partial` | `in_progress` |
+| 断言为 `not_done` | `not_started` |
+| 断言为 `unknown` | `unknown` |
+| 没有 Claim，但存在发现序号大于 `revision_seq` 的关联提交 | `in_progress` |
+| 没有 Claim，且 `stage = docs_only` | `not_started` |
+| 其他 | `unknown`（未盘点） |
+
+### 6.6 标记
 
 | 标记 | 条件 |
 |---|---|
-| `conflict` | `C = done` 且 `E ∈ {fail, error}`；或 `C = not_done` 且 `E = pass` |
-| `unverifiable` | `verification = automated` 且 `check_command` 为空 |
-| `evidence_behind_head` | `E` 对应证据的 `git_head` 不等于当前 HEAD（附落后的提交数，P1） |
-| `dirty_evidence` | `E` 对应的证据是在有未提交改动的工作区上产生的 |
-| `blocking_question` | 存在 `open` 且 `blocking` 的 Question，关联到该 AC 或其所属需求 |
-| `unverified_source` | 该 AC 或其需求有 `verification = not_found` 的来源引用 |
-| `inferred` | 该 AC 或其需求的 `origin = inferred_from_code` |
+| `conflict` | 进度为 `claimed` 且 AC 为 `failing`；或进度为 `not_started` 且 `V = pass` |
+| `claimed_without_evidence` | 进度为 `claimed`，且交付状态不属于 {`ready_for_review`, `accepted`, `waived`} |
+| `inconsistent_results` | 见 §6.1 |
+| `exception_acceptance` | 适用的决定是 `exception` |
+| `observed_evidence` | AC 为 `accepted`（`normal`，依据的执行是观测级），或者为 `ready_for_review` 且 `V.grade = observed` |
+| `blocking_question` | 存在关联到该 AC 或其需求的、`open` 且 `blocking` 的 Question |
+| `ref_not_found` | 当前修订的引用中，有 `verification = not_found` 的 |
+| `inferred` | `origin = inferred_from_code` |
 
-### 6.4 需求状态聚合
+### 6.7 需求交付状态
 
-设该需求的 `active` AC 集合为 `S`，其中非 `waived` 的子集为 `N`。自上而下，命中第一条即停止：
+设需求的 `active` AC 集合为 `A`：
 
-| # | 条件 | 需求状态 |
+| # | 条件 | 状态 |
 |---|---|---|
-| 1 | `S` 为空 | `needs_criteria` |
-| 2 | `S` 全部为 `waived` | `waived` |
-| 3 | 任一 AC 为 `regressed` | `regressed` |
-| 4 | 任一 AC 为 `failing` | `failing` |
-| 5 | 任一 AC 为 `rejected` | `needs_rework` |
-| 6 | 任一 AC 为 `stale` | `stale` |
-| 7 | `N` 全部为 `accepted` | `accepted` |
-| 8 | `N` 全部属于 {`accepted`, `verified`} | `verified` |
-| 9 | `N` 全部属于 {`accepted`, `verified`, `claimed`} | `claimed` |
-| 10 | 任一 AC 为 `blocked` | `blocked` |
-| 11 | 任一 AC 属于 {`in_progress`, `claimed`, `verified`, `accepted`} | `in_progress` |
-| 12 | 其他 | `not_started` |
+| 1 | `A` 为空 | `needs_criteria` |
+| 2 | `S` 为 NULL | `not_assessed` |
+| 3 | 任一 AC 为 `failing` | `failing` |
+| 4 | 任一 AC 为 `rejected` | `rejected` |
+| 5 | 任一 AC 为 `in_progress` | `in_progress` |
+| 6 | 任一 AC 为 `needs_reverification` | `needs_reverification` |
+| 7 | 任一 AC 为 `ready_for_review` | `ready_for_review` |
+| 8 | 全部为 `waived` | `waived` |
+| 9 | 其他（全部为 `accepted` 或 `waived`，且至少一个 `accepted`） | `accepted` |
 
-`priority = wont` 的需求照常推导状态，但不参与差距、就绪判定和指标。
+### 6.8 交付状态（目标层面）
 
-### 6.5 展示分组
+交付状态是针对 `(target, S, 当前范围, 当前基准版本, as_of_seq)` 的判定。设当前范围中仍为 `active` 的需求集合为 `RS`，其下的 `active` AC 集合为 `AS`。
 
-| 展示分组 | AC 状态 | 需求状态 |
+| # | 条件（自上而下，命中即停） | 交付状态 |
 |---|---|---|
-| 未开始 | `not_started` | `not_started` |
-| 进行中 | `in_progress` | `in_progress` |
-| 自述完成 | `claimed` | `claimed` |
-| 已验证 | `verified` | `verified` |
-| 已验收 | `accepted`、`waived` | `accepted`、`waived` |
-| 需关注 | `failing`、`regressed`、`rejected`、`stale`、`blocked` | `failing`、`regressed`、`needs_rework`、`stale`、`blocked`、`needs_criteria` |
+| 1 | 存在前置条件差距：`NO_BASELINE`、`NO_TARGET`、`TARGET_UNRESOLVED`、`NO_SCOPE`、`EMPTY_SCOPE`（`RS` 为空） | `not_assessed` |
+| 2 | `RS` 中有 `needs_criteria`；或 `AS` 中有 `in_progress` / `failing` / `rejected`；或存在 `BLOCKING_QUESTION` | `in_progress` |
+| 3 | 存在 `SCOPE_STALE` 或 `SOURCE_CHANGED`；或 `AS` 中有 `needs_reverification` | `needs_reverification` |
+| 4 | `AS` 中有 `ready_for_review` | `ready_for_review` |
+| 5 | `AS` 全部为 `waived` | `not_assessed`（`ALL_WAIVED`：没有任何实际交付内容） |
+| 6 | 其他 | `ready` |
 
-### 6.6 差距规则
+无论命中哪一条，**所有阻塞差距都会一并列出**。**不变量：交付状态为 `ready`，当且仅当不存在阻塞差距。**
 
-| 差距类型 | 触发条件 | 基础严重度 | 建议的下一步 |
-|---|---|---|---|
-| `PENDING_REVIEW` | 存在 `pending` 或 `conflict` 的提案条目 | medium | 审核提案 |
-| `BLOCKING_QUESTION` | 存在 `open` 且 `blocking` 的 Question | high | 回答问题 |
-| `SOURCE_CHANGED` | 来源文件的哈希已变化或文件缺失，且之后没有 `ack` | medium | 用 `/specmetry goals` 生成差异提案，或确认无需变更 |
-| `NEEDS_CRITERIA` | 需求状态为 `needs_criteria` | high | 补充验收标准 |
-| `UNVERIFIABLE` | AC 带 `unverifiable` 标记 | medium | 定义检查命令，或改为 `manual` |
-| `REGRESSED` | AC 为 `regressed` | high | 修复回退 |
-| `FAILING` | AC 为 `failing` | high | 修复 |
-| `CONFLICT` | AC 带 `conflict` 标记 | high | 核实自述与证据 |
-| `REWORK` | AC 为 `rejected` | high | 按验收意见返工 |
-| `STALE` | AC 为 `stale` | medium | 重新运行检查并验收 |
-| `BLOCKED` | AC 为 `blocked` | high | 处理阻塞 |
-| `CLAIM_UNVERIFIED` | AC 为 `claimed` | medium | 运行检查或人工验收 |
-| `AWAITING_ACCEPTANCE` | AC 为 `verified` | low | 人工验收 |
-| `IN_PROGRESS` | AC 为 `in_progress` | medium | 继续实现，完成后 sync |
-| `NOT_STARTED` | AC 为 `not_started` | medium | 实现 |
+**交付判定的证据等级**（`delivery.evidence_grade`）：取 `AS` 中所有已验收自动化 AC 所依据执行的最弱等级。
 
-每个未处于 `accepted` / `waived` 的 AC，恰好产生一个与其状态对应的差距；带标记的 AC 可以额外产生 `CONFLICT` 或 `UNVERIFIABLE`。
+- 直接验收：依据 `D.evidence_id` 对应的执行；
+- 沿用：依据 `S` 上的隔离级执行。
 
-严重度按需求的优先级调整：
+结果有三种：
 
-| 优先级 | 调整 |
+- `snapshot_isolated`：全部都是隔离级；
+- `observed`：至少一个是观测级；
+- `none`：没有任何由执行支撑的自动化验收（只有手动、例外或豁免）。
+
+**MVP 中这个值只可能是 `observed` 或 `none`。** 交付状态 `ready` 本身不变，但凡是展示 `ready` 的地方，都必须同时展示证据等级。等级为 `observed` 时，不得称为"快照已验证"，只能称为"观测级：检查开始和结束时与快照一致"。
+
+`BLOCKING_QUESTION` 计算三类 `open` 且 `blocking` 的问题：关联到 `RS` 中需求的；关联到 `AS` 中 AC 的；没有关联任何条目的项目级问题。关联条目已被拒绝的问题（§4.8）不计入。
+
+目标层面的转移：
+
+```mermaid
+stateDiagram-v2
+    [*] --> not_assessed
+    not_assessed --> in_progress : 有基准、目标可解析、范围已确认且非空
+    in_progress --> ready_for_review : 范围内 AC 均已验证或已决定，且没有失败
+    in_progress --> needs_reverification : 只剩下需要复核的项
+    needs_reverification --> ready_for_review : 在新快照上重新验证
+    ready_for_review --> ready : 人完成剩余 AC 的验收
+    ready --> needs_reverification : ref 前进 / 基准或来源变化 / 范围过期
+    ready --> in_progress : S 上检查失败 / 新增阻塞问题
+    in_progress --> not_assessed : 范围被移除 / ref 无法解析
+```
+
+### 6.9 保守规则（无法判断时）
+
+| 情形 | 处理 |
 |---|---|
-| `must` | 保持基础严重度 |
-| `should` | 降一级（high → medium → low） |
-| `could` | 一律为 low |
-| `wont` | 不产生差距 |
+| 目标 ref 无法解析、git 不可用、非 git 项目 | 交付状态为 `not_assessed`，永远不会是 `ready` |
+| 执行时工作区不是 `clean`，或执行中 HEAD 发生变化 | 这次执行不合格，不参与交付判定 |
+| `tree_state` 为 `unknown` | 视为不合格 |
+| Hook 无法取得 HEAD | 会话起点记为 `unknown`，不会用入库时的 HEAD 代替 |
+| 同一快照上检查结果不一致 | 不沿用历史验收，必须在该快照上人工决定 |
+| 证据只有观测级 | 不沿用；人验收前必须确认 `observed_evidence` 风险；交付判定标为 `observed` |
+| 无法验证隔离条件（后端不可用、只读无法强制、物化不一致） | 绝不记为 `snapshot_isolated`。`--isolation required`：不执行，不写记录，退出码 6；`--isolation auto`：降级为观测级执行，并记录原因 |
+| 执行后发现私有快照被修改 | `error` / `context_changed`，不合格 |
+| 检查输入路径在快照上不存在 | 执行结果为 `error`（`input_missing`），计为失败 |
+| 读取的版本已过期 | 拒绝写入（退出码 5 / HTTP 409），要求重新读取 |
+| 推导需要的数据缺失（例如 schema 不兼容） | 拒绝推导并报错，而不是给出部分结论 |
 
-`PENDING_REVIEW`、`BLOCKING_QUESTION` 和 `SOURCE_CHANGED` 是项目级差距，保持基础严重度。
+### 6.10 差距
 
-排序依次按：严重度降序 → 本表中的类型顺序 → 优先级 → 编号。
+每个差距包含：类型、是否阻塞（相对交付目标）、关联条目、原因码、建议的下一步。**交付状态的"原因"就是全部阻塞差距**，二者共用同一套类型。
 
-### 6.7 交付就绪
+**项目级差距**：
 
-`ready` 当且仅当以下条件**同时**满足：
+| 类型 | 条件 | 阻塞 | 建议的下一步 |
+|---|---|---|---|
+| `NO_BASELINE` | 没有基准版本 | 是 | 审核提案 |
+| `NO_TARGET` | 没有 `active` 的交付目标 | 是 | 人设置交付目标 |
+| `TARGET_UNRESOLVED` | ref 无法解析 | 是 | 检查分支或标签 |
+| `NO_SCOPE` | 该目标没有范围确认 | 是 | 人确认交付范围 |
+| `EMPTY_SCOPE` | 当前范围中没有 `active` 的需求 | 是 | 重新确认范围 |
+| `ALL_WAIVED` | `AS` 非空，且全部为 `waived` | 是 | 重新确认范围 |
+| `SCOPE_STALE` | 基准版本或来源集合在确认后发生了变化 | 是 | 重新确认范围 |
+| `SOURCE_CHANGED` | 观测哈希与 `acked_sha256` 不一致，或文件缺失 | 是 | 处理变化，然后由人确认 |
+| `BLOCKING_QUESTION` | 见 §6.8 | 是 | 回答问题 |
+| `PENDING_REVIEW` | 存在 `pending` 或 `conflict` 的提案条目 | 否 | 审核提案 |
+| `INVENTORY_INCOMPLETE` | `stage ≠ docs_only`，没有设置 `inventory_skipped`，并且盘点覆盖率低于 100% | 否 | 补充 audit |
 
-1. 至少存在一个基准版本；
-2. 所有 `active` 且属于就绪范围的需求，状态都是 `accepted` 或 `waived`（就绪范围默认只含 `must`，见 PD-01）；
-3. 不存在 `open` 且 `blocking` 的 Question。
+**条目级差距只由交付状态产生**：每个需求或 AC 至多产生 1 个状态差距，外加若干标记类警告。
 
-不满足时，逐条输出原因。原因代码与上面的条件一一对应：
-
-| 原因代码 | 对应条件 | 附带信息 |
+| 交付状态与原因码 | 差距类型 | 建议的下一步 |
 |---|---|---|
-| `NO_BASELINE` | 条件 1 | — |
-| `REQUIREMENT_INCOMPLETE` | 条件 2，每个不满足的需求一条 | 需求编号、需求状态、该需求下的相关差距 |
-| `BLOCKING_QUESTION` | 条件 3，每个阻塞问题一条 | 问题编号 |
+| 需求 `needs_criteria` | `NEEDS_CRITERIA` | 补充 AC |
+| AC `in_progress` / `no_check` | `NO_CHECK` | 定义检查，或改为 `manual` |
+| AC `in_progress` / `claimed_without_evidence` | `CLAIMED_WITHOUT_EVIDENCE` | 在快照上运行检查 |
+| AC `in_progress` / 其他原因码 | `NOT_VERIFIED` | 实现并验证 |
+| AC `failing` | `FAILING` | 修复 |
+| AC `rejected` | `REJECTED` | 返工 |
+| AC `needs_reverification` / `parent_revised` | `PARENT_REVISED` | 重新确认、修订或退役 AC |
+| AC `needs_reverification` / 其他原因码 | `NEEDS_REVERIFICATION` | 在快照上重新运行检查，或人工复核 |
+| AC `ready_for_review` | `AWAITING_REVIEW` | 人工验收 |
+| AC `accepted`、`waived`、`not_assessed` | 不产生状态差距（`not_assessed` 时，项目级的 `TARGET_UNRESOLVED` 已经阻塞） | — |
 
-以下情况不阻塞就绪，但会作为警告输出：存在待审核提案；存在来源变化；`should` 需求未完成；存在带 `evidence_behind_head` 或 `dirty_evidence` 标记的已验收 AC。
+标记类警告（永不阻塞）：`CONFLICT`（`conflict` 标记）、`EXCEPTION_ACCEPTANCE`（`exception_acceptance` 标记）、`INCONSISTENT_RESULTS`（`inconsistent_results` 标记）。
 
-### 6.8 指标
+**是否阻塞**：
+
+- 存在范围确认时（包括已过期的），只有 `RS` 和 `AS` 中条目的状态差距阻塞，范围外的条目不产生差距。
+- 没有范围确认时，所有 `active` 条目的状态差距都照常列出，但都不阻塞；此时阻塞的只有项目级的 `NO_SCOPE`。
+
+排序：阻塞在前 → 本节表格中的类型顺序 → 编号。
+
+### 6.11 指标
 
 | 指标 | 定义 |
 |---|---|
-| `must_acceptance_ratio` | 状态为 `accepted` 的 `must` 需求数 ÷（`must` 需求数 − 状态为 `waived` 的 `must` 需求数）。分母为 0 时为 null。（PD-02） |
-| `ac_buckets` | 按展示分组统计的 AC 数，按优先级分开统计（不含 `wont`） |
-| `claim_unverified` | 状态为 `claimed` 的 AC 数 |
-| `conflicts` | 带 `conflict` 标记的 AC 数 |
-| `evidence_coverage` | 自动化 AC 中，存在当前 revision 的 `verifies` 证据（任何结果）的比例 |
-| `unverifiable` | 带 `unverifiable` 标记的 AC 数 |
-| `open_questions`, `blocking_questions` | 问题数 |
-| `pending_review_items` | 待审核的提案条目数 |
-| `readiness` | `ready` / `not_ready`，以及原因数 |
+| `delivery_status`、`snapshot`、`baseline_version`、`scope_id`、`as_of_seq` | 判定对象 |
+| `scope_acceptance_ratio` | `RS` 中状态为 `accepted` 的需求数 ÷（`RS` 中状态不为 `waived` 的需求数）。分母为 0 时为 null（PD-02）。 |
+| `ac_status_counts` | `AS` 中各交付状态的计数 |
+| `claimed_without_evidence` | 带该标记的 AC 数（范围内） |
+| `inventory_coverage` | `active` AC 中，当前 revision 至少有一条 `audit` Claim 的比例 |
+| `pending_review_items`、`open_questions`、`blocking_questions`、`exception_acceptances` | 计数 |
+| `observed_evidence_acceptances` | `AS` 中依据观测级执行验收的 AC 数 |
+| `delivery.evidence_grade` | 见 §6.8 |
 
-### 6.9 初始化进度
+### 6.12 初始化进度
 
-`init_progress` 由数据推导，定义见 [prd.md §4.1.1](prd.md#411-初始化流程)。条件是累积的：结果是从第一步开始、**连续**满足条件的最后一步。例如设置了 `inventory_skipped`，但还没有基准版本，结果仍然停在前面的步骤。
+条件是累积的：结果是从第一步开始、**连续**满足条件的最后一步。
 
 | 值 | 本步条件 |
 |---|---|
@@ -531,142 +739,215 @@ stateDiagram-v2
 | `sources_registered` | 存在未移除的来源，或设置了 `sources_skipped` |
 | `baseline_proposed` | 存在提案 |
 | `baseline_confirmed` | 存在基准版本 |
-| `inventoried` | 存在 `kind = audit` 的 Claim 批次，或设置了 `inventory_skipped`，或 `stage = docs_only` |
+| `scope_confirmed` | 当前目标有范围确认（不要求未过期） |
+| `inventoried` | `inventory_coverage = 100%`，或设置了 `inventory_skipped`，或 `stage = docs_only` |
 
-## 7. Revision 与失效规则
+## 7. 版本前置条件与修订规则
+
+### 7.1 写入前置条件
+
+**所有关键写入都携带"读取时的版本"。** 服务端在写事务内比对；只要有一项不一致，就整体拒绝：CLI 返回退出码 5，API 返回 HTTP 409（错误码 `stale_precondition`），并给出当前值。
+
+| 写入 | 需要携带的读取版本 | 不一致的情形 |
+|---|---|---|
+| 提案提交 | `base_version`；`update` / `retire` / `reaffirm` 条目的 `target_revision` | 当前基准版本 ≠ `base_version`，或目标 revision ≠ `target_revision` |
+| 提案审核（人） | 审核者看到的 `seen_base_version`；冲突条目需要明确确认 | 当前版本 ≠ `seen_base_version` |
+| Claim 批次 | `base_version`；每条 Claim 的 `target_revision` | 任一不一致 |
+| 验收决定（人） | `target_id`、`snapshot`、`criterion_revision`、`requirement_revision`、`evidence_id`、**`seen_decision_id`** | 目标已不是 `active`；目标 ref 已不指向 `snapshot`；任一 revision 已变；`S` 上最新的合格执行已不是 `evidence_id`；**该 AC 当前修订下最新决定的 ID 已不是 `seen_decision_id`**（两者都为空时视为一致）。`waived` 只校验 `target_id`、两个 revision 和 `seen_decision_id`，因为它与代码无关，所以不校验 `snapshot` 和 `evidence_id`。 |
+| 范围确认（人） | `target_id`、`baseline_version`、`source_set_hash`、`attestations.pending_items_excluded` | 任一不一致。`pending_items_excluded` 必须等于当前 `pending` 和 `conflict` 条目的总数。附带在审核中时，以审核完成后的数量为准，`baseline_version` 取审核完成后的版本（§5.5 第 11 步）。 |
+| 来源确认（人） | `observed_sha256` | 磁盘上的当前哈希 ≠ `observed_sha256` |
+| 回答问题（人） | 问题仍为 `open` | 已被回答或驳回 |
+| 检查执行 | 由执行器自己在开始时读取并固定（§7.4） | — |
+
+**验收决定的并发保护**：
+
+- 读取接口（`status.v1` 中每个 AC 的 `current_decision_id`，以及 Dashboard 的需求详情）返回该 AC 当前修订下最新决定的 ID。
+- 写入时，在**同一个写事务**中读取最新决定并与 `seen_decision_id` 比较；比较和插入之间不会有其他决定插入（SQLite 写事务是串行的）。
+- 不一致就整体拒绝：CLI 返回退出码 5，API 返回 409，并在 `error.current` 中给出最新决定的 ID、类型、操作者和时间。
+- **客户端不得自动重试**：CLI 和 Dashboard 收到 409 后，必须重新读取并展示新的决定，由人重新作出明确的操作。重新读取后，携带新的 `seen_decision_id` 明确改判，是允许的。
+
+### 7.2 修订规则
 
 | 规则 | 说明 |
 |---|---|
-| 哪些字段的变更强制为 `material` | AC 的 `verification`、`check_command`、`check_workdir`、`check_shell` |
-| 其他字段 | `statement` 等由审核者选择 `material` 或 `editorial`；`check_timeout_sec` 可以是 `editorial` |
-| AC revision 从 `r` 变为 `r+1` 后 | 针对 `r` 的验收、`verifies` 证据和 Claim 不再参与推导（如果当前 revision 没有新事实，就命中决策表第 10 条 `stale`） |
-| 需求的 `material` 变更 | 不直接影响其 AC 的状态；UI 会提示审核者检查相关 AC |
-| 代码变化 | 不使证据失效（TD-11），只产生 `evidence_behind_head` 标记 |
-| 退役 | 退役条目不参与任何推导；历史与事实保留 |
+| 强制 `material` | AC 的 `verification`、`check_command`、`check_workdir`、`check_shell`、`check_inputs` |
+| 其他字段 | 由审核者选择 `material` 或 `editorial`；`check_timeout_sec` 和 `check_rationale` 可以是 `editorial` |
+| AC 从 `r` 修订到 `r+1` | 针对 `r` 的 Claim、执行和决定都不再参与推导 |
+| **需求 `material` 修订** | 父需求的 revision 加 1，它的所有 `active` AC 立即成为 `parent_revised`。审核者应在同一次审核中，对每个 AC 选择 `reaffirm`（仍然适用，保留已有的执行与决定）、`retire`，或 `defer`（暂不处理，保持 `parent_revised`，之后再通过人工编辑修订）。同一次审核中被接受的 AC 更新，也会刷新它的 `requirement_revision`（§5.5 第 5 步）。 |
+| `reaffirm` | 把 AC 的 `requirement_revision` 设为父需求当前的 revision，AC 自身的 revision 不变。Agent 可以提议，由人接受。 |
+| 需求 `editorial` 修订 | 不影响 AC |
+| 代码变化 | 不修改任何事实。快照 `S` 改变后，推导结果自然改变（§6.2、§6.3）。 |
 
-## 8. Agent 交换格式
+### 7.3 人工验收的前置条件
 
-两种格式都通过 `--file` 或 stdin 提交，严格校验：未知字段视为错误。
+所有决定还须满足 §7.1 的前置条件（包括 `seen_decision_id`）。
 
-### 8.1 提案：`specmetry.proposal/v1`
+| 决定 | 前置条件 | 必须确认的风险 | 适用范围 |
+|---|---|---|---|
+| `accepted` / `normal` | 自动化 AC；`V = pass`；`evidence_id` 是 `runs(S)` 中最新的一条；父需求适用性没有失效。允许人在自己拒收之后、重新读取后，于同一快照上明确改判。 | 依据的执行是观测级 → `observed_evidence`；`runs(S)` 结果不一致 → `inconsistent_results` | `S`；只有依据隔离级证据时，才可能按 §6.2 沿用 |
+| `accepted` / `manual` | 手动 AC；`S` 可解析；父需求适用性没有失效 | 无 | 只适用于 `S` |
+| `accepted` / `exception` | 自动化 AC；`V = none`（`S` 上没有任何等级的合格执行，并且不是失败）；必须填写理由 | `no_automated_evidence` | 只适用于 `S`；永不沿用；带 `EXCEPTION_ACCEPTANCE` 警告；计入 `exception_acceptances` |
+| 任何 `accepted` | 不允许在 `V = fail` 时作出（必须先修复、修改检查，或豁免） | — | — |
+
+**风险确认（V-D01）**：`acknowledged_risks` 必须**恰好等于**服务端根据该决定推导出的风险集合，多一项、少一项都返回 `invalid_input`。这保证界面确实展示过这些风险。界面必须展示的文字：
+
+- `observed_evidence`："这次检查是观测级证据：Specmetry 只确认检查开始和结束时，worktree 的 HEAD 等于快照，并且工作区干净；无法确认执行期间代码没有被修改或切换（例如并行编辑后恢复、HEAD 切换后恢复）。"
+- `inconsistent_results`："该快照上的检查结果不一致，可能是不稳定的测试或环境差异。"
+- `no_automated_evidence`："该快照上没有任何合格的自动化证据。这次验收只适用于当前快照，不会沿用，并会在交付判定中单独列出。"
+
+例外验收不能用来把观测级证据"升级"为隔离级，也不能在检查失败时使用。
+| `rejected` | 必须填写理由 | 直到代码变化后（`S ≠` 拒收时的快照）出现新的合格 `pass`（手动 AC：新的 `done` 自述），或者人作出新的决定（§6.3 第 5 条） |
+| `waived` | 必须填写理由；父需求适用性没有失效 | 与快照无关，修订后失效 |
+
+### 7.4 检查执行的上下文绑定
+
+**观测级执行**（`--isolation off`，MVP 唯一可用的执行方式）：
+
+1. 在执行器所在的 worktree `W`（由调用时的 cwd 决定）中，读取 AC 的 `r`、`ar`、`h` 和检查配置，**固定下来**。
+2. 记录 `head_start`、`tree_state_start`；如果声明了 `inputs`，记录各路径在 `head_start` 上的对象 ID。路径不存在时，结果为 `error` / `input_missing`。
+3. 在 `W/<workdir>` 中执行。检查的输出实时转发给调用者，**不保存**：
+   - 不带 `--json` 时，检查的 stdout 和 stderr 原样转发到 stdout 和 stderr；
+   - 带 `--json` 时，stdout **只**输出一份 `check-run.v1` JSON，检查的 stdout 和 stderr 都转发到 stderr。
+4. 记录 `head_end`、`tree_state_end`。如果开始时工作区是 `clean`，而结束时不再是 `clean`，或者 HEAD 发生了变化，结果记为 `error` / `context_changed`。中途变化后又恢复的情况，观测级**无法发现**（§4.11.1）。
+5. 用第 1、2 步固定下来的值写入 `check_runs`（`evidence_grade = observed`），不会重新读取 AC。如果执行期间 AC 被修订，这条执行仍然只属于旧 revision。
+
+**隔离模式**：
+
+- `--isolation required`：在 MVP 中，因为还没有隔离执行器，一律不执行检查、不写记录，返回退出码 6（`environment`，详情为 `isolation_unavailable`）。隔离执行器上线后，只有满足 §4.11.1 中第 1–3 条时才执行，并在执行后验证第 4 条；任何一条不满足，都按同样方式拒绝。
+- `--isolation auto`：留给隔离执行器。能建立隔离时按隔离级执行；不能建立时，降级为观测级执行，并记录 `isolation_fallback_reason`。
+
+**隔离执行器**（MVP 之后，后端选择见 TD-24）：在私有快照目录中执行上述第 1–5 步，并且执行前后都要验证隔离条件。
+
+## 8. 交换格式
+
+规范定义在 [`schemas/`](../schemas/)（JSON Schema 2020-12）。CLI 和 API 都按 schema 严格校验：未知字段视为错误。
+
+| Schema | 用途 | 方向 |
+|---|---|---|
+| `common.v1` | 共享定义：编号、SHA、代码上下文、错误 | — |
+| `proposal.v1` | 提案（含 `base_version`、`target_revision`） | Agent 或人 → CLI / API |
+| `claims.v1` | 自述批次（含 `base_version`、`target_revision`、`audit_scope`） | Agent → CLI |
+| `status.v1` | 状态读取模型（含所有需要回传的版本号、观测哈希、目标和来源） | CLI / API → Agent 或人 |
+| `init.v1` | `init --json` 的输出 | CLI → Agent |
+| `check-run.v1` | `check run --json` 的输出（不含检查输出） | CLI → Agent |
+| `gaps.v1` | `gaps --json` 的输出 | CLI → Agent |
+| `review.v1` | 提案审核提交（含 `seen_base_version`、AC 的后续处理、可选的范围确认） | 人 → CLI / API |
+| `decision.v1` | 验收决定（含前置条件） | 人 → CLI / API |
+| `scope.v1` | 范围确认 | 人 → CLI / API |
+| `source-ack.v1` | 来源变化确认 | 人 → CLI / API |
+| `question-answer.v1` | 回答或驳回问题 | 人 → CLI / API |
+| `error.v1` | 错误信封 | CLI / API → 调用者 |
+| `spool-event.v1` | Hook 落盘记录（采集白名单的规范定义） | Hook → spool |
+
+示例与 schema 层面的反例：
+
+- `schemas/examples/valid/`：每种文档的合法示例；
+- `schemas/examples/invalid-cases.json`：SCH-01 ~ SCH-53，每条都是对合法示例打的 JSON Patch，打补丁后必须校验失败。
+
+M0 的 CI 会校验这两者（WP0.4）。凡是需要数据库状态才能判断的拒绝（版本过期、编号不存在、命中密钥规则），都由 acceptance-criteria 覆盖。
+
+**尚未定义 schema 的读取模型**：`proposal show`、`baseline show/history`、`source list`、`doctor` 的 JSON 输出，以及 Dashboard 专用的 GET 接口，都面向人，Agent 的流程不依赖它们。它们的 schema 在对应模块开工前补齐（[implementation-plan.md §3](implementation-plan.md#3-设计细化截止点)），并由 OpenAPI 引用。
+
+### 8.1 示例：提案
 
 ```json
 {
   "schema": "specmetry.proposal/v1",
-  "origin": "skill_init",
-  "summary": "从客户需求文档提取的初始基准",
+  "origin": "skill_goals",
+  "base_version": 3,
+  "summary": "客户邮件：订单查看改为只能看自己的订单",
   "items": [
     {
-      "op": "add", "type": "goal", "ref": "g1",
-      "data": { "title": "上线订单管理 MVP", "description": "客户首期交付范围" },
-      "origin": "extracted", "confidence": "high",
-      "sources": [{ "source": "docs/client-brief.md", "locator": "L3-L5", "excerpt": "首期需要上线订单管理" }]
-    },
-    {
-      "op": "add", "type": "requirement", "ref": "r1",
-      "data": { "goal": "g1", "title": "用户可以用邮箱和密码登录", "kind": "functional", "priority": "must" },
-      "origin": "extracted", "confidence": "high",
-      "sources": [{ "source": "docs/client-brief.md", "locator": "L12-L18", "excerpt": "用户需要使用邮箱和密码登录系统" }]
+      "op": "update", "type": "requirement", "target": "REQ-002", "target_revision": 1,
+      "data": { "title": "用户只能查看自己的订单" },
+      "rationale": "客户 10-10 邮件要求",
+      "sources": [{ "source": "notes/client-mail-1010.txt", "excerpt": "普通用户只能看到自己的订单" }]
     },
     {
       "op": "add", "type": "criterion", "ref": "c1",
       "data": {
-        "requirement": "r1",
-        "statement": "使用正确的邮箱和密码登录时返回会话令牌；密码错误时返回 401",
+        "requirement": "REQ-002",
+        "statement": "用户 A 请求用户 B 的订单时返回 404",
         "verification": "automated",
-        "check": { "command": "go test ./internal/auth -run TestEmailLogin", "workdir": ".", "timeout_sec": 120 }
+        "check": {
+          "command": "go test ./internal/orders -run TestOrderIsolation",
+          "workdir": ".",
+          "timeout_sec": 120,
+          "inputs": ["internal/orders/isolation_test.go"],
+          "rationale": "TestOrderIsolation 用两个用户访问对方的订单，断言返回 404"
+        }
       },
-      "origin": "extracted", "confidence": "medium"
+      "origin": "extracted", "confidence": "high"
     },
-    {
-      "op": "add", "type": "requirement", "ref": "r2",
-      "data": { "title": "订单可以导出为 CSV", "kind": "functional", "priority": "should" },
-      "origin": "inferred_from_code", "confidence": "medium",
-      "code_refs": [{ "path": "internal/export/csv.go" }],
-      "rationale": "代码中已实现，但需求文档未提及"
-    },
-    {
-      "op": "update", "type": "requirement", "target": "REQ-004",
-      "data": { "priority": "should" },
-      "rationale": "客户邮件同意延后",
-      "sources": [{ "source": "notes/client-mail-1010.txt", "excerpt": "报表功能可以放到二期" }]
-    },
-    { "op": "retire", "type": "criterion", "target": "AC-007-2", "rationale": "客户取消该限制" }
+    { "op": "reaffirm", "type": "criterion", "target": "AC-002-1", "target_revision": 1,
+      "rationale": "列表接口返回 200 仍然适用" }
   ],
-  "questions": [
-    {
-      "text": "密码找回走短信还是邮件？", "about": "r1", "blocking": true,
-      "sources": [{ "source": "docs/client-brief.md", "locator": "L20", "excerpt": "支持找回密码" }]
-    }
-  ]
+  "questions": []
 }
 ```
 
-### 8.2 自述：`specmetry.claims/v1`
+### 8.2 示例：自述批次
 
 ```json
 {
   "schema": "specmetry.claims/v1",
   "kind": "sync",
-  "summary": "实现邮箱登录与会话令牌",
+  "base_version": 4,
+  "summary": "实现订单隔离",
   "claims": [
     {
-      "target": "AC-001-1",
-      "assertion": "done",
-      "summary": "新增 /login 接口并签发会话令牌；补充 TestEmailLogin",
-      "refs": {
-        "files": [{ "path": "internal/auth/login.go", "lines": "10-58" }],
-        "tests": ["TestEmailLogin"],
-        "commits": ["3f2a9c1"]
-      }
-    },
-    { "target": "AC-001-2", "assertion": "blocked", "summary": "缺少短信服务商配置，见 Q-002" }
+      "target": "AC-002-2", "target_revision": 1, "assertion": "done",
+      "summary": "订单查询增加 owner 过滤，补充 TestOrderIsolation",
+      "refs": { "files": [{ "path": "internal/orders/query.go", "lines": "40-62" }], "tests": ["TestOrderIsolation"] }
+    }
   ],
-  "unmapped_work": [
-    { "summary": "重构日志初始化", "refs": { "files": [{ "path": "internal/log/log.go" }] } }
-  ]
+  "unmapped_work": []
 }
 ```
 
 ### 8.3 校验规则
 
-处理方式分两种：
+处理方式分三种：
 
-- **拒绝**：整个提交被拒绝，返回退出码 2，不写入任何数据，并以 JSON Pointer 指出错误位置。
-- **标记**：照常写入，同时记录校验结果，并在响应中给出警告。
+- **拒绝**：退出码 2，不写入任何数据，以 JSON Pointer 指出错误位置。
+- **过期**：退出码 5，不写入任何数据，返回当前的版本值。
+- **标记**：照常写入，同时记录校验结果，并给出警告。
 
 | ID | 规则 | 处理 |
 |---|---|---|
-| V-P01 | schema 严格校验，`schema` 版本受支持；顶层 `origin` 必须是 `skill_init` / `skill_goals` / `skill_audit` / `skill_sync` / `cli` 之一（`human_edit` 只由 `propose --apply` 和 Dashboard 编辑在内部生成） | 拒绝 |
-| V-P02 | `add` 必须带有提案内唯一的 `ref`；`update` / `retire` 必须带有 `target`，且指向 `active` 条目的编号 | 拒绝 |
-| V-P03 | `requirement`、`goal`、`about` 字段必须指向 `active` 的编号，或本提案内的 `ref` | 拒绝 |
-| V-P04 | 长度：title ≤ 200，description ≤ 4000，statement ≤ 1000，excerpt ≤ 1000，rationale ≤ 1000 | 拒绝 |
-| V-P05 | 有 `check` 时，`verification` 必须为 `automated`；`workdir` 规范化后不得越出项目根；`timeout_sec` 在 1–3600 之间 | 拒绝 |
-| V-P06 | `sources[].source` 必须是已登记的来源（路径或 ID） | 拒绝 |
-| V-P07 | 引用片段校验：统一换行、合并连续空白、去掉首尾空白后，在来源文本中逐字出现 → `verified`；未出现 → `not_found`；文件缺失 → `source_missing`；非 UTF-8 文本 → `not_checkable` | 标记 |
-| V-P08 | `inferred_from_code` 条目至少有 1 个 `code_refs` | 拒绝 |
-| V-P09 | `code_refs` 的路径存在 | 标记 |
-| V-P10 | 同一提案内，同一个 `target` 至多出现一次 | 拒绝 |
-| V-C01 | schema 严格校验 | 拒绝 |
-| V-C02 | `target` 必须是 `active` 的 AC 编号 | 拒绝 |
-| V-C03 | `assertion` 必须是 `done` / `partial` / `not_done` / `blocked` 之一；`blocked` 时 `summary` 必填 | 拒绝 |
-| V-C04 | `summary` ≤ 500 字符；`unmapped_work` ≤ 50 条 | 拒绝 |
-| V-C05 | 同一批次内，同一个 `target` 至多出现一次 | 拒绝 |
-| V-C06 | `kind = manual` 只允许来自 `human_cli` 通道 | 拒绝（退出码 3：需要人工操作） |
-| V-C07 | `refs.files` 存在；`refs.commits` 能被 git 解析 | 标记 |
-| V-ALL | 所有文本字段先脱敏再保存；命中脱敏时在响应中给出警告 | 标记 |
+| V-P01 | 严格符合 schema；`origin = human_edit` 只允许来自人工编辑通道（交互式终端中的 `propose --apply`、Dashboard 编辑），Agent 通道使用它会被拒绝（退出码 3） | 拒绝 |
+| V-P02 | `base_version` 等于当前基准版本；每个 `target_revision` 等于目标当前的 revision | 过期 |
+| V-P03 | `ref` 在提案内唯一；`target`、`requirement`、`goal`、`about` 指向 `active` 编号或本提案内的 `ref`；同一 `target` 至多出现一次 | 拒绝 |
+| V-P04 | 自动化 AC 的 `check` 必须有 `rationale`；`workdir` 和 `inputs` 规范化后不得越出仓库根；`timeout_sec` 在 1–3600 之间 | 拒绝 |
+| V-P05 | `check.command` 及所有文本字段都不能命中密钥规则；所有文本字段都不能包含代码围栏；标题只能有一行 | 拒绝 |
+| V-P06 | `sources[].source` 是已登记且未移除的来源；`excerpt` ≤ 500 字符 | 拒绝 |
+| V-P07 | 片段校验结果：`verified` / `not_found` / `source_missing` / `not_checkable` | 标记 |
+| V-P08 | `inferred_from_code` 条目至少有 1 个 `code_refs`；路径是否存在 | 缺少引用时拒绝；路径不存在时标记 |
+| V-P09 | `origin = human_edit` 时，每个 `update` 条目都必须带 `change_class`；强制 `material` 的字段一律按 `material` 处理 | 拒绝 |
+| V-P11 | 加上本次提交的片段之后，每个来源的片段总量不超过 §4.5 的上限 | 拒绝 |
+| V-S01 | `source add`：只接受白名单中的文件类型（§4.3），除非人在 `human_cli` 中使用 `--allow-any-type` | 拒绝 |
+| V-C01 | 严格符合 schema；`kind = manual` 只允许来自 `human_cli`（否则退出码 3） | 拒绝 |
+| V-C02 | `base_version` 和每个 `target_revision` 都是当前值 | 过期 |
+| V-C03 | `target` 是 `active` 的 AC 编号；同一批次内不重复；`unknown` 断言只能用于 `audit` | 拒绝 |
+| V-C04 | `summary` ≤ 500 字符，单段文字，不能包含代码围栏（三个反引号）；不能命中密钥规则 | 拒绝 |
+| V-C05 | `audit` 批次必须声明 `audit_scope` | 拒绝 |
+| V-C06 | 文件路径是否存在、提交能否被 git 解析 | 标记 |
+| V-D01 | 验收决定的 `acknowledged_risks` 恰好等于服务端推导的风险集合（§7.3） | 拒绝 |
+| V-D02 | 验收决定的全部读取版本（含 `seen_decision_id`）都是当前值（§7.1） | 过期 |
 
-## 9. 数据保留与删除
+## 9. 数据分级、保留与删除
 
-| 数据 | 默认保留期 |
-|---|---|
-| `events` | 90 天（P1 可配置） |
-| 检查的完整日志（`logs/checks/`） | 30 天。证据记录本身永久保留。 |
-| `spool/dead/` | 30 天 |
-| 其他所有表 | 永久，直到 `purge` |
+数据分级与保留契约的规范定义在 [architecture.md §10](architecture.md#10-隐私与数据保留契约)。各表的归属：
 
-`specmetry purge`：只能在交互式终端中执行，需要输入项目名确认。它删除该项目在数据库中的全部行、检查日志和 spool 文件，并询问是否同时删除仓库中的 `.specmetry/`。其他项目不受影响。
+| 表或文件 | 级别 | 保留 |
+|---|---|---|
+| 基准条目、提案、版本与变更、问题、决定、范围确认 | C2（基准与状态）/ C1（理由与回答） | 直到 `purge` |
+| `source_refs.excerpt`、各类路径、检查配置、Claim 摘要 | C1 | 直到 `purge` |
+| `check_runs`、`commits`、`commit_links` | C2（只含结果码、SHA、序号） | 直到 `purge` |
+| `events`、`hook_drops` | C2（活动元数据） | 30 天 |
+| `spool/`、`spool/dead/` | 同 `events` | 入库后删除；死信保留 7 天 |
+| `backups/` | 包含全部项目数据 | 保留最近 3 份；`purge` 时按用户的选择处理（[architecture.md §11](architecture.md#11-本地数据生命周期)） |
 
 ## 10. 相关待决策事项
 
-PD-01、PD-02、PD-03、PD-04、PD-12、PD-13（[prd.md §9](prd.md#9-产品待决策事项)）；TD-01、TD-11、TD-14、TD-17、TD-18（[architecture.md §16](architecture.md#16-技术待决策事项)）。
+PD-02、PD-03、PD-04、PD-12、PD-16 ~ PD-22（[prd.md §9](prd.md#9-产品待决策事项)）；TD-01、TD-14、TD-17、TD-18、TD-21、TD-24（[architecture.md §16](architecture.md#16-技术待决策事项)）。

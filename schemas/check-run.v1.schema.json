@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/XKHoshizora/specmetry/schemas/check-run.v1.schema.json",
+  "title": "Specmetry check run result v1",
+  "description": "Output of `specmetry check run --json`. With --json, stdout carries exactly one JSON document conforming to this schema and nothing else; the checks' own stdout and stderr are streamed to the caller's stderr. Without --json, check output is passed through to stdout/stderr unchanged. In both modes check output is never persisted. Exit code 10 when any run is not pass; exit code 6 with --isolation required when isolation cannot be established (no run is recorded).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "worktree_id", "is_target_snapshot", "isolation", "runs"],
+  "properties": {
+    "schema": { "const": "specmetry.check-run/v1" },
+    "worktree_id": { "$ref": "common.v1.schema.json#/$defs/ulid" },
+    "is_target_snapshot": {
+      "description": "True when the worktree HEAD equals the delivery target snapshot at start; only then can observed qualifying runs affect delivery status.",
+      "type": "boolean"
+    },
+    "isolation": {
+      "description": "Requested isolation mode. The MVP supports off and required (required always fails with exit 6 until the isolated executor ships); auto is reserved for the isolated executor.",
+      "enum": ["off", "required", "auto"]
+    },
+    "runs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "criterion",
+          "criterion_revision",
+          "evidence_id",
+          "seq",
+          "result",
+          "failure_kind",
+          "exit_code",
+          "duration_ms",
+          "head_start",
+          "tree_state_start",
+          "evidence_grade",
+          "qualifying"
+        ],
+        "properties": {
+          "criterion": { "$ref": "common.v1.schema.json#/$defs/criterionKey" },
+          "criterion_revision": { "$ref": "common.v1.schema.json#/$defs/revision" },
+          "evidence_id": { "$ref": "common.v1.schema.json#/$defs/ulid" },
+          "seq": { "$ref": "common.v1.schema.json#/$defs/seq" },
+          "result": { "enum": ["pass", "fail", "error"] },
+          "failure_kind": {
+            "enum": [null, "nonzero_exit", "timeout", "not_found", "spawn_error", "input_missing", "context_changed"]
+          },
+          "exit_code": { "type": ["integer", "null"] },
+          "duration_ms": { "type": "integer", "minimum": 0 },
+          "head_start": { "oneOf": [{ "$ref": "common.v1.schema.json#/$defs/commitSha" }, { "type": "null" }] },
+          "tree_state_start": { "$ref": "common.v1.schema.json#/$defs/treeState" },
+          "evidence_grade": { "$ref": "common.v1.schema.json#/$defs/evidenceGrade" },
+          "isolation_fallback_reason": {
+            "description": "Only with isolation auto: why isolation could not be established before the run, so it ran as observed in the caller's worktree. A change detected in the private snapshot after the run is not a fallback: that run is recorded as error/context_changed and is not qualifying.",
+            "enum": [null, "backend_unavailable", "readonly_not_enforced", "materialization_mismatch"]
+          },
+          "qualifying": { "type": "boolean" }
+        }
+      }
+    }
+  }
+}

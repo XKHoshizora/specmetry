@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/XKHoshizora/specmetry/schemas/init.v1.schema.json",
+  "title": "Specmetry init result v1",
+  "description": "Output of `specmetry init --json`. Consumed by the /specmetry init Skill command to decide the next onboarding step.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "project",
+    "created",
+    "init_progress",
+    "baseline_version",
+    "target",
+    "candidate_sources",
+    "warnings"
+  ],
+  "properties": {
+    "schema": { "const": "specmetry.init/v1" },
+    "project": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "stage", "stage_detected"],
+      "properties": {
+        "id": { "$ref": "common.v1.schema.json#/$defs/ulid" },
+        "name": { "type": "string", "maxLength": 200 },
+        "stage": { "enum": ["docs_only", "in_development", "incomplete_docs"] },
+        "stage_detected": { "enum": ["docs_only", "in_development", "incomplete_docs"] }
+      }
+    },
+    "created": { "description": "false when the project already existed (idempotent re-run).", "type": "boolean" },
+    "init_progress": {
+      "enum": [
+        "initialized",
+        "sources_registered",
+        "baseline_proposed",
+        "baseline_confirmed",
+        "scope_confirmed",
+        "inventoried"
+      ]
+    },
+    "baseline_version": { "$ref": "common.v1.schema.json#/$defs/baselineVersion" },
+    "target": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "ref", "snapshot"],
+          "properties": {
+            "id": { "$ref": "common.v1.schema.json#/$defs/ulid" },
+            "ref": { "type": "string", "pattern": "^refs/(heads|tags)/.+$" },
+            "snapshot": { "oneOf": [{ "$ref": "common.v1.schema.json#/$defs/commitSha" }, { "type": "null" }] }
+          }
+        }
+      ]
+    },
+    "candidate_sources": {
+      "description": "Document-like files found in the repository; never registered automatically.",
+      "type": "array",
+      "maxItems": 200,
+      "items": { "$ref": "common.v1.schema.json#/$defs/relPath" }
+    },
+    "test_hints": {
+      "description": "P1: detected test commands, e.g. 'go test ./...'.",
+      "type": "array",
+      "maxItems": 20,
+      "items": { "type": "string", "maxLength": 200 }
+    },
+    "git": {
+      "description": "P1: basic git facts for audit context.",
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["commit_count", "last_commit_at"],
+          "properties": {
+            "commit_count": { "type": "integer", "minimum": 0 },
+            "last_commit_at": { "type": ["integer", "null"], "minimum": 0 }
+          }
+        }
+      ]
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "not_a_git_repository",
+          "detached_head_no_target",
+          "exclude_not_writable",
+          "data_dir_permissions_loose"
+        ]
+      }
+    }
+  }
+}

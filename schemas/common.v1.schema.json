@@ -1,0 +1,259 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/XKHoshizora/specmetry/schemas/common.v1.schema.json",
+  "title": "Specmetry common definitions v1",
+  "description": "Shared definitions referenced by all Specmetry exchange schemas. Not a document type on its own.",
+  "$defs": {
+    "ulid": {
+      "type": "string",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "commitSha": {
+      "description": "Full 40-hex git commit SHA.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "commitShaPrefix": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{7,40}$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "seq": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "baselineVersion": {
+      "description": "Baseline version number. 0 means no baseline version exists yet.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "goalKey": {
+      "type": "string",
+      "pattern": "^GOAL-[1-9][0-9]*$"
+    },
+    "requirementKey": {
+      "type": "string",
+      "pattern": "^REQ-[0-9]{3,}$"
+    },
+    "criterionKey": {
+      "type": "string",
+      "pattern": "^AC-[0-9]{3,}-[1-9][0-9]*$"
+    },
+    "questionKey": {
+      "type": "string",
+      "pattern": "^Q-[0-9]{3,}$"
+    },
+    "localRef": {
+      "description": "Proposal-local temporary reference for items being added in the same proposal.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]{0,31}$"
+    },
+    "relPath": {
+      "description": "Repository-relative path. Must not be absolute and must not contain '..' segments.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024,
+      "pattern": "^(?![/\\\\])(?![A-Za-z]:)(?!(.*[/\\\\])?\\.\\.([/\\\\]|$)).+$"
+    },
+    "lineRange": {
+      "type": "string",
+      "pattern": "^[1-9][0-9]*(-[1-9][0-9]*)?$"
+    },
+    "title": {
+      "description": "Single line.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "pattern": "^[^\\r\\n]*$"
+    },
+    "longText": {
+      "description": "Plain text; fenced code blocks are not accepted (privacy contract). Secret-like content is rejected server-side.",
+      "type": "string",
+      "maxLength": 4000,
+      "pattern": "^(?![\\s\\S]*```)[\\s\\S]*$"
+    },
+    "plainText1000": {
+      "description": "Plain text up to 1000 characters; no fenced code blocks.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1000,
+      "pattern": "^(?![\\s\\S]*```)[\\s\\S]*$"
+    },
+    "rationale": {
+      "description": "Plain text; no fenced code blocks.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1000,
+      "pattern": "^(?![\\s\\S]*```)[\\s\\S]*$"
+    },
+    "shortSummary": {
+      "description": "Single paragraph, at most 500 characters, no fenced code blocks, no blank lines. Secret-like content is rejected server-side.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500,
+      "pattern": "^(?![\\s\\S]*```)(?![\\s\\S]*\\n[ \\t]*\\n)[\\s\\S]*$"
+    },
+    "treeState": {
+      "enum": ["clean", "dirty", "unknown"]
+    },
+    "sourceState": {
+      "enum": ["unchanged", "changed", "missing"]
+    },
+    "evidenceGrade": {
+      "description": "observed: start and end states of the executing worktree matched the snapshot; changes during the run are NOT ruled out. snapshot_isolated: run in a private materialization of the snapshot under a read-only enforcement the check cannot undo, verified before and after the run. The MVP only produces observed.",
+      "enum": ["observed", "snapshot_isolated"]
+    },
+    "acknowledgedRisk": {
+      "enum": ["observed_evidence", "inconsistent_results", "no_automated_evidence"]
+    },
+    "codeContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["worktree_id", "head", "tree_state"],
+      "properties": {
+        "worktree_id": { "$ref": "#/$defs/ulid" },
+        "head": { "oneOf": [{ "$ref": "#/$defs/commitSha" }, { "type": "null" }] },
+        "tree_state": { "$ref": "#/$defs/treeState" }
+      }
+    },
+    "itemOrigin": {
+      "enum": ["extracted", "inferred_from_code", "manual"]
+    },
+    "confidence": {
+      "enum": ["high", "medium", "low"]
+    },
+    "sourceRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "excerpt"],
+      "properties": {
+        "source": {
+          "description": "Registered source: its repository-relative or absolute path as registered, or its ULID.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "locator": { "type": "string", "maxLength": 100 },
+        "excerpt": { "type": "string", "minLength": 1, "maxLength": 500 }
+      }
+    },
+    "codeRef": {
+      "description": "Path and optional line range only. Code content is never accepted.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path"],
+      "properties": {
+        "path": { "$ref": "#/$defs/relPath" },
+        "lines": { "$ref": "#/$defs/lineRange" }
+      }
+    },
+    "checkSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["command", "rationale"],
+      "properties": {
+        "command": {
+          "description": "Executed by the configured shell. Must not contain secret literals; reference environment variables by name instead.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "workdir": { "$ref": "#/$defs/relPath", "default": "." },
+        "shell": { "enum": ["sh", "bash", "cmd", "pwsh", "powershell"] },
+        "timeout_sec": { "type": "integer", "minimum": 1, "maximum": 3600, "default": 300 },
+        "inputs": {
+          "description": "Repository-relative paths whose git object IDs are recorded at run time. Changes block carry-forward of acceptances.",
+          "type": "array",
+          "maxItems": 50,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/relPath" }
+        },
+        "rationale": {
+          "description": "Why this check verifies the acceptance criterion. Reviewed by a human.",
+          "$ref": "#/$defs/rationale"
+        }
+      }
+    },
+    "criterionDeliveryStatus": {
+      "enum": [
+        "not_assessed",
+        "in_progress",
+        "failing",
+        "rejected",
+        "needs_reverification",
+        "ready_for_review",
+        "accepted",
+        "waived"
+      ]
+    },
+    "requirementDeliveryStatus": {
+      "enum": [
+        "needs_criteria",
+        "not_assessed",
+        "failing",
+        "rejected",
+        "in_progress",
+        "needs_reverification",
+        "ready_for_review",
+        "waived",
+        "accepted"
+      ]
+    },
+    "targetDeliveryStatus": {
+      "enum": ["not_assessed", "in_progress", "needs_reverification", "ready_for_review", "ready"]
+    },
+    "progress": {
+      "enum": ["claimed", "blocked", "in_progress", "not_started", "unknown"]
+    },
+    "gapType": {
+      "enum": [
+        "NO_BASELINE",
+        "NO_TARGET",
+        "TARGET_UNRESOLVED",
+        "NO_SCOPE",
+        "EMPTY_SCOPE",
+        "ALL_WAIVED",
+        "SCOPE_STALE",
+        "SOURCE_CHANGED",
+        "BLOCKING_QUESTION",
+        "NEEDS_CRITERIA",
+        "PARENT_REVISED",
+        "NO_CHECK",
+        "FAILING",
+        "REJECTED",
+        "CLAIMED_WITHOUT_EVIDENCE",
+        "NOT_VERIFIED",
+        "NEEDS_REVERIFICATION",
+        "AWAITING_REVIEW",
+        "CONFLICT",
+        "EXCEPTION_ACCEPTANCE",
+        "INCONSISTENT_RESULTS",
+        "PENDING_REVIEW",
+        "INVENTORY_INCOMPLETE"
+      ]
+    },
+    "gap": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "blocking", "next_action"],
+      "properties": {
+        "type": { "$ref": "#/$defs/gapType" },
+        "blocking": { "type": "boolean" },
+        "target_key": {
+          "description": "Requirement, criterion or question key, a source path, or null for project-level gaps.",
+          "type": ["string", "null"],
+          "maxLength": 4096
+        },
+        "reason": { "type": ["string", "null"], "maxLength": 64 },
+        "next_action": { "type": "string", "maxLength": 200 }
+      }
+    }
+  }
+}

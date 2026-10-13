@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/XKHoshizora/specmetry/schemas/question-answer.v1.schema.json",
+  "title": "Specmetry question answer v1",
+  "description": "Human-only. Answers or dismisses an open question. The question must still be open (otherwise stale_precondition). Answering never changes the baseline; follow-up changes go through a proposal.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "question", "action"],
+  "properties": {
+    "schema": { "const": "specmetry.question-answer/v1" },
+    "question": { "$ref": "common.v1.schema.json#/$defs/questionKey" },
+    "action": { "enum": ["answer", "dismiss"] },
+    "answer": { "$ref": "common.v1.schema.json#/$defs/longText" },
+    "rationale": { "$ref": "common.v1.schema.json#/$defs/rationale" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "action": { "const": "answer" } } },
+      "then": { "required": ["answer"], "properties": { "answer": { "minLength": 1 } } }
+    },
+    {
+      "if": { "properties": { "action": { "const": "dismiss" } } },
+      "then": { "required": ["rationale"], "not": { "required": ["answer"] } }
+    }
+  ]
+}

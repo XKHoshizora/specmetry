@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/XKHoshizora/specmetry/schemas/claims.v1.schema.json",
+  "title": "Specmetry claim batch v1",
+  "description": "Agent self-reports about acceptance criteria. Claims affect progress only and never delivery status. base_version and each target_revision are read-time preconditions. The CLI records the submitting worktree's code context itself.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "kind", "base_version", "summary", "claims"],
+  "properties": {
+    "schema": { "const": "specmetry.claims/v1" },
+    "kind": {
+      "description": "manual is only accepted from an interactive human terminal (otherwise exit 3).",
+      "enum": ["sync", "audit", "manual"]
+    },
+    "base_version": { "$ref": "common.v1.schema.json#/$defs/baselineVersion" },
+    "summary": { "$ref": "common.v1.schema.json#/$defs/shortSummary" },
+    "audit_scope": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["all"],
+          "properties": { "all": { "const": true } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["requirements"],
+          "properties": {
+            "requirements": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": { "$ref": "common.v1.schema.json#/$defs/requirementKey" }
+            }
+          }
+        }
+      ]
+    },
+    "claims": {
+      "type": "array",
+      "maxItems": 2000,
+      "items": { "$ref": "#/$defs/claim" }
+    },
+    "unmapped_work": {
+      "type": "array",
+      "maxItems": 50,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["summary"],
+        "properties": {
+          "summary": { "$ref": "common.v1.schema.json#/$defs/shortSummary" },
+          "refs": { "$ref": "#/$defs/refs" }
+        }
+      }
+    }
+  },
+  "if": {
+    "properties": { "kind": { "const": "audit" } }
+  },
+  "then": {
+    "required": ["audit_scope"]
+  },
+  "else": {
+    "not": { "required": ["audit_scope"] },
+    "properties": {
+      "claims": {
+        "items": {
+          "properties": { "assertion": { "not": { "const": "unknown" } } }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "claim": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["target", "target_revision", "assertion", "summary"],
+      "properties": {
+        "target": { "$ref": "common.v1.schema.json#/$defs/criterionKey" },
+        "target_revision": { "$ref": "common.v1.schema.json#/$defs/revision" },
+        "assertion": {
+          "description": "unknown is only allowed in audit batches.",
+          "enum": ["done", "partial", "not_done", "blocked", "unknown"]
+        },
+        "summary": { "$ref": "common.v1.schema.json#/$defs/shortSummary" },
+        "refs": { "$ref": "#/$defs/refs" }
+      }
+    },
+    "refs": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "files": {
+          "type": "array",
+          "maxItems": 50,
+          "items": { "$ref": "common.v1.schema.json#/$defs/codeRef" }
+        },
+        "tests": {
+          "type": "array",
+          "maxItems": 50,
+          "items": { "type": "string", "minLength": 1, "maxLength": 200 }
+        },
+        "commits": {
+          "type": "array",
+          "maxItems": 50,
+          "items": { "$ref": "common.v1.schema.json#/$defs/commitShaPrefix" }
+        }
+      }
+    }
+  }
+}

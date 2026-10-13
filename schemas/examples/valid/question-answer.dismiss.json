@@ -1,0 +1,6 @@
+{
+  "schema": "specmetry.question-answer/v1",
+  "question": "Q-002",
+  "action": "dismiss",
+  "rationale": "该问题针对的需求已被拒绝"
+}

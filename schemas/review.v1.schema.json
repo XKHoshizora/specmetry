@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/XKHoshizora/specmetry/schemas/review.v1.schema.json",
+  "title": "Specmetry proposal review submission v1",
+  "description": "Human-only. Applies reviewed proposal items as one new baseline version (in the fixed order defined in data-model §5.5), records follow-up decisions for criteria affected by material requirement revisions, and optionally confirms the delivery scope against the resulting version in the same transaction. If no item is accepted, no version is created and an embedded scope binds to the current version.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "proposal_id", "seen_base_version", "items"],
+  "properties": {
+    "schema": { "const": "specmetry.review/v1" },
+    "proposal_id": { "$ref": "common.v1.schema.json#/$defs/ulid" },
+    "seen_base_version": {
+      "description": "Baseline version the reviewer was looking at. Mismatch => stale_precondition.",
+      "$ref": "common.v1.schema.json#/$defs/baselineVersion"
+    },
+    "summary": { "$ref": "common.v1.schema.json#/$defs/shortSummary" },
+    "items": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/itemDecision" }
+    },
+    "criterion_followups": {
+      "description": "For each active criterion under a requirement accepted with change_class=material. Omitted criteria are treated as defer (they stay parent_revised).",
+      "type": "array",
+      "items": { "$ref": "#/$defs/criterionFollowup" }
+    },
+    "scope": {
+      "description": "Optional delivery scope confirmation, evaluated against the baseline version produced by this review.",
+      "$ref": "scope.v1.schema.json#/$defs/confirmationInReview"
+    }
+  },
+  "$defs": {
+    "itemDecision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["item_id", "decision"],
+      "properties": {
+        "item_id": { "$ref": "common.v1.schema.json#/$defs/ulid" },
+        "decision": { "enum": ["accepted", "accepted_with_edits", "rejected"] },
+        "final_data": {
+          "description": "Edited values; validated against the same data definition as the proposal item.",
+          "type": "object"
+        },
+        "change_class": { "enum": ["material", "editorial"] },
+        "acknowledged_conflict": {
+          "description": "Must be true when the item is in conflict state; confirms the reviewer saw the three-way comparison.",
+          "type": "boolean"
+        },
+        "note": { "$ref": "common.v1.schema.json#/$defs/plainText1000" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "decision": { "const": "accepted_with_edits" } } },
+          "then": { "required": ["final_data"] }
+        }
+      ]
+    },
+    "criterionFollowup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["criterion", "seen_revision", "action"],
+      "properties": {
+        "criterion": { "$ref": "common.v1.schema.json#/$defs/criterionKey" },
+        "seen_revision": { "$ref": "common.v1.schema.json#/$defs/revision" },
+        "action": { "enum": ["reaffirm", "retire", "defer"] },
+        "rationale": { "$ref": "common.v1.schema.json#/$defs/rationale" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "action": { "const": "retire" } } },
+          "then": { "required": ["rationale"] }
+        }
+      ]
+    }
+  }
+}

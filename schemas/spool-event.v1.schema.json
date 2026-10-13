@@ -1,0 +1,132 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/XKHoshizora/specmetry/schemas/spool-event.v1.schema.json",
+  "title": "Specmetry hook spool record v1",
+  "description": "Normative collection whitelist. A hook writes only these fields; anything not listed here (command text, file paths, tool input/output, prompts, transcript paths, environment values) is never written to disk. Contains no free text.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "spool_version",
+    "event_id",
+    "agent",
+    "type",
+    "occurred_at",
+    "project_id",
+    "worktree_path",
+    "session_external_id",
+    "payload"
+  ],
+  "properties": {
+    "spool_version": { "const": 1 },
+    "event_id": { "$ref": "common.v1.schema.json#/$defs/ulid" },
+    "agent": { "enum": ["claude_code"] },
+    "type": { "enum": ["session_start", "session_end", "tool_use", "stop", "guard_denied"] },
+    "occurred_at": { "type": "integer", "minimum": 0 },
+    "project_id": { "$ref": "common.v1.schema.json#/$defs/ulid" },
+    "worktree_path": {
+      "description": "Absolute path of the worktree root resolved from cwd (C1, local only).",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096
+    },
+    "session_external_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9._:-]+$"
+    },
+    "payload": { "type": "object" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "type": { "const": "session_start" } } },
+      "then": {
+        "properties": {
+          "payload": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["source", "head_start", "head_start_source"],
+            "properties": {
+              "source": { "enum": ["startup", "resume", "clear", "compact", "unknown"] },
+              "head_start": {
+                "oneOf": [{ "$ref": "common.v1.schema.json#/$defs/commitSha" }, { "type": "null" }]
+              },
+              "head_start_source": { "enum": ["hook_file_read", "unknown"] }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "type": { "const": "session_end" } } },
+      "then": {
+        "properties": {
+          "payload": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["reason"],
+            "properties": {
+              "reason": { "enum": ["clear", "logout", "prompt_input_exit", "other"] }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "type": { "const": "tool_use" } } },
+      "then": {
+        "properties": {
+          "payload": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["tool_category", "outcome"],
+            "properties": {
+              "tool_category": { "enum": ["shell", "edit", "read", "other"] },
+              "outcome": { "enum": ["success", "failure"] }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "type": { "const": "stop" } } },
+      "then": {
+        "properties": {
+          "payload": { "type": "object", "additionalProperties": false, "properties": {} }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "type": { "const": "guard_denied" } } },
+      "then": {
+        "properties": {
+          "payload": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["subcommand"],
+            "properties": {
+              "subcommand": {
+                "enum": [
+                  "accept",
+                  "reject",
+                  "waive",
+                  "review",
+                  "scope_confirm",
+                  "target_set",
+                  "source_ack",
+                  "source_remove",
+                  "question_answer",
+                  "question_dismiss",
+                  "purge",
+                  "setup",
+                  "backup_restore",
+                  "propose_apply"
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

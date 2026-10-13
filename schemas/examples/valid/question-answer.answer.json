@@ -1,0 +1,6 @@
+{
+  "schema": "specmetry.question-answer/v1",
+  "question": "Q-001",
+  "action": "answer",
+  "answer": "密码找回只走邮件，本期不做短信"
+}
