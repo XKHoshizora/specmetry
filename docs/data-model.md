@@ -14,7 +14,7 @@
 | actor | `agent:<agent>`（如 `agent:claude_code`）、`human:<显示名>`、`system` |
 | channel | `agent_cli`、`human_cli`、`dashboard`、`hook`、`system` |
 | 代码上下文 | 由三项组成：`worktree_id`、`head`（40 位提交 SHA；未知时为 NULL）、`tree_state`（`clean` / `dirty` / `unknown`）。`clean` 指 `git status --porcelain --untracked-files=all -- . ':(exclude).specmetry'` 输出为空：被 git 忽略的文件不计入；未跟踪文件计入；**Specmetry 自己的 `.specmetry/` 始终排除**，不管有没有写入 `.git/info/exclude`。项目级安装只写入已被 git 忽略的 `.claude/settings.local.json`（[architecture.md §10.6](architecture.md#106-对仓库的写入)），所以它也不会让工作区变脏。 |
-| project_id | 每张表都有，用于按项目删除和未来的同步 |
+| project_id | 每张保存项目数据的表都有，用于按项目删除和未来的同步（`projects` 以 `id` 作为项目 ID；`meta`、`maintenance` 是全库表）。见 §1.1 |
 | JSON 列 | 应用层按 schema 校验 |
 | 自由文本 | 写入前做密钥扫描，命中则**拒绝写入**（不做替换），见 [architecture.md §10](architecture.md#10-隐私与数据保留契约) |
 
@@ -22,8 +22,16 @@
 
 | 类别 | 表 | 规则 |
 |---|---|---|
-| **只追加（事实）** | `baseline_versions`、`baseline_changes`、`source_refs`、`code_refs`、`source_acks`、`scope_confirmations`、`scope_items`、`claim_batches`、`claims`、`check_runs`、`commits`、`commit_links`、`decisions`、`events` | 应用层禁止 UPDATE 和 DELETE，数据库触发器作为第二道防线。例外只有 `purge`，以及 `events` 的保留期清理。 |
+| **只追加（事实）** | `baseline_versions`、`baseline_changes`、`source_refs`、`code_refs`、`source_acks`、`scope_confirmations`、`scope_items`、`claim_batches`、`claims`、`check_runs`、`commits`、`commit_links`、`decisions`、`events` | 应用层禁止 UPDATE、DELETE 和 REPLACE 冲突处理（`INSERT OR REPLACE`、`REPLACE INTO`、`ON CONFLICT REPLACE`），数据库触发器作为第二道防线。REPLACE 通过删除旧行实现，只有开启 `recursive_triggers` 时才会触发删除触发器，所以每个连接都开启它，写事务执行前再确认一次。例外只有 `purge`，以及 `events` 的保留期清理。 |
 | **受控可变** | `projects`、`worktrees`、`delivery_targets`、`sources`、`goals`、`requirements`、`acceptance_criteria`、`proposals`、`proposal_items`、`questions`、`agent_sessions`、`git_scan_cursors`、`hook_drops`、`key_counters`、`meta` | 基准三表只能通过"应用基准变更"修改，每次修改记录 `updated_seq`；`proposal_items` 的审核字段、`questions` 的回答字段都只能写一次 |
+
+### 1.1 建表约束（M1 起）
+
+codex-review-004 N1 的结论。`purge` 和墓碑按项目删除数据，并且不依赖 schema 版本（[architecture.md §11.4](architecture.md#114-删除purge与墓碑)），所以建表必须满足：
+
+1. 每张保存项目数据的表都有 `project_id` 列，子表也不例外（例如 `scope_items`），不能只靠父表间接归属；项目登记表 `projects` 以 `id` 作为项目 ID，墓碑逻辑单独处理它。全库表只有 `meta` 和 `maintenance`。schema 不变量测试对所有迁移执行这条规则。
+2. 外键只引用同一项目的行。墓碑删除在事务内延迟外键检查（`defer_foreign_keys`），因此删除顺序与表名无关；跨项目的引用会让提交失败，而不是留下残缺数据。
+3. 建表语句不声明 `ON CONFLICT REPLACE`；只追加表在创建它的迁移中附加只追加触发器（§1）。
 
 ## 2. 概念模型
 
@@ -167,7 +175,7 @@ CLI 或 Hook 第一次在某个 worktree 中出现时，系统会自动登记它
 | note | TEXT NULL | |
 | actor, channel, confirmed_at | | |
 
-`scope_items`（只追加）：`confirmation_id`、`requirement_id`、`requirement_revision`（确认时的修订）。至少 1 行。
+`scope_items`（只追加）：`confirmation_id`、`project_id`、`requirement_id`、`requirement_revision`（确认时的修订）。至少 1 行。
 
 在审核中附带的范围确认（`review.v1` 的 `scope`）里，需求既可以写现有的编号，也可以写**同一次审核中被接受的"新增需求"提案条目的 `item_id`**。服务端在事务内把 `item_id` 解析为新分配的编号；如果该条目没有被接受，整次提交失败。这样，首次审核时就可以一次性确认范围。
 
@@ -238,7 +246,7 @@ CLI 或 Hook 第一次在某个 worktree 中出现时，系统会自动登记它
 
 | 表 | 字段 |
 |---|---|
-| `source_refs` | `id`、`seq`、`project_id`、`source_id`、`entity_type`（`goal` / `requirement` / `criterion` / `question`）、`entity_id`、`entity_revision`、`locator`、`excerpt`（≤ 500 字符）、`verification`（`verified` / `not_found` / `source_missing` / `not_checkable`）、`source_sha256` |
+| `source_refs` | `id`、`seq`、`project_id`、`source_id`、`entity_type`（`goal` / `requirement` / `criterion` / `question`）、`entity_id`、`entity_revision`、`locator`、`excerpt` NULL（≤ 500 字符；`hash_only` 模式下或被擦除后为 NULL）、`excerpt_sha256`、`excerpt_erased_seq` NULL、`verification`（`verified` / `not_found` / `source_missing` / `not_checkable`）、`source_sha256` |
 | `code_refs` | `id`、`seq`、`project_id`、`entity_type`、`entity_id`、`entity_revision`、`path`（仓库相对路径）、`lines` NULL、`checked_head`、`exists`（BOOLEAN） |
 
 规则：
@@ -246,6 +254,7 @@ CLI 或 Hook 第一次在某个 worktree 中出现时，系统会自动登记它
 - 一条条目"当前的引用"，是 `entity_revision` 等于其当前 revision 的那些引用。
 - `material` 更新时，如果没有提供新引用，系统会沿用上一修订的引用，**重新校验**后写成新行。旧行保留，作为历史。
 - `code_refs` 只保存路径和行号，**不保存代码内容**。
+- 片段的保存与擦除遵循 [architecture.md §10.7](architecture.md#107-来源片段的采集策略保护与用户控制)：`excerpt_storage = hash_only` 时只保存 `excerpt_sha256`；`source remove --erase-excerpts` 在维护模式下把 `excerpt` 置为 NULL 并写入 `excerpt_erased_seq`。这是 `source_refs` 只追加约束的唯一受控例外（另一个例外是 `purge`）。
 - **片段总量上限**：同一来源所有已保存片段的总长度，不超过该来源文本长度的 50%，并且不超过 20000 字符；非文本来源（`not_checkable`）总计不超过 5000 字符。超出时，提交被拒绝（V-P11）。这样可以防止通过片段逐段保存来源全文（C0）。
 - 校验只证明一件事：片段确实出现在来源中、路径确实存在。它**不证明**语义正确或覆盖完整。界面上必须如实说明这一点。
 
@@ -762,7 +771,7 @@ stateDiagram-v2
 **验收决定的并发保护**：
 
 - 读取接口（`status.v1` 中每个 AC 的 `current_decision_id`，以及 Dashboard 的需求详情）返回该 AC 当前修订下最新决定的 ID。
-- 写入时，在**同一个写事务**中读取最新决定并与 `seen_decision_id` 比较；比较和插入之间不会有其他决定插入（SQLite 写事务是串行的）。
+- 写入时，写事务必须以 **`BEGIN IMMEDIATE`** 开始，**先取得写锁，再**读取最新决定并与 `seen_decision_id` 比较，然后插入。普通的延迟事务先读后写，可能基于旧快照比较，然后在升级为写事务时失败，不能视为已经实现了并发保护。验证方法：用两个独立的数据库连接，同时竞争同一个决定版本（MVP-ACC-11）。
 - 不一致就整体拒绝：CLI 返回退出码 5，API 返回 409，并在 `error.current` 中给出最新决定的 ID、类型、操作者和时间。
 - **客户端不得自动重试**：CLI 和 Dashboard 收到 409 后，必须重新读取并展示新的决定，由人重新作出明确的操作。重新读取后，携带新的 `seen_decision_id` 明确改判，是允许的。
 
@@ -842,7 +851,7 @@ stateDiagram-v2
 示例与 schema 层面的反例：
 
 - `schemas/examples/valid/`：每种文档的合法示例；
-- `schemas/examples/invalid-cases.json`：SCH-01 ~ SCH-53，每条都是对合法示例打的 JSON Patch，打补丁后必须校验失败。
+- `schemas/examples/invalid-cases.json`：SCH-01 ~ SCH-64，每条都是对合法示例打的 JSON Patch，打补丁后必须校验失败。
 
 M0 的 CI 会校验这两者（WP0.4）。凡是需要数据库状态才能判断的拒绝（版本过期、编号不存在、命中密钥规则），都由 acceptance-criteria 覆盖。
 

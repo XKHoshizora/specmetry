@@ -15,13 +15,13 @@
 
 ## 2. 开工前提条件
 
-| 门槛 | 内容 | 阻塞哪个里程碑 |
-|---|---|---|
-| G0 技术决策 | 确认 TD-02（数据目录）、TD-04（SQLite 驱动；需要先做一个 spike，验证 `VACUUM INTO` 和 WAL 检查点）、TD-10（CLI 框架）、TD-16（迁移策略）、TD-22（Windows ACL 授权对象） | M0 |
-| G1 隐私契约 | 确认 PD-20（C1 允许的内容） | M0 中的存储部分 |
-| G2 交付模型 | 确认 PD-16（沿用，仅限隔离级证据）、PD-17（例外验收）、PD-19（交付目标形态）、PD-21（范围粒度）；确认 PD-03、PD-04、PD-12 的建议默认 | M1（因为它们会冻结 `decision`、`scope` 和 `proposal` 的契约） |
-| G2b 证据等级 | 确认 PD-22（MVP 只提供观测级证据，交付判定标为观测级，人验收时确认风险）；codex 对 B1、B2 的复审通过 | M2（Check Runner 与人工决定的契约在此冻结） |
-| G3 许可证 | PD-10 | 接受外部贡献之前（不阻塞内部编码） |
+| 门槛 | 内容 | 阻塞哪个里程碑 | 状态 |
+|---|---|---|---|
+| G0 技术决策 | 确认 TD-02（数据目录）、TD-04（SQLite 驱动；需要先做一个 spike，验证 `VACUUM INTO` 和 WAL 检查点）、TD-10（CLI 框架）、TD-16（迁移策略）、TD-22（Windows ACL 授权对象） | M0 | **已满足**（2026-10-13；spike 通过；TD-22 选择当前用户 + SYSTEM） |
+| G1 隐私契约 | 确认 PD-20（C1 允许的内容） | M0 中的存储部分 | **已满足**（2026-10-13；附加的采集策略与用户控制见 architecture §10.7） |
+| G2 交付模型 | 确认 PD-16（沿用，仅限隔离级证据）、PD-17（例外验收）、PD-19（交付目标形态）、PD-21（范围粒度）；确认 PD-03、PD-04、PD-12 的建议默认 | M1（因为它们会冻结 `decision`、`scope` 和 `proposal` 的契约） | **未满足**，M1 开工前需要确认 |
+| G2b 证据等级 | 确认 PD-22（MVP 只提供观测级证据，交付判定标为观测级，人验收时确认风险）；codex 对 B1、B2 的复审通过 | M2（Check Runner 与人工决定的契约在此冻结） | **已满足**（PD-22 已确认；codex-review-003 结论为 GO） |
+| G3 许可证 | PD-10 | 接受外部贡献之前（不阻塞内部编码） | 未满足 |
 
 ## 3. 设计细化截止点
 
@@ -38,6 +38,7 @@
 | Windows 上执行检查的 shell | 默认 shell 的探测顺序；`shell` 字段的取值映射 | M2 开工前 | TD-06 |
 | `inputs` 的对象 ID | 文件和目录的取值方式；子模块的处理 | M2 开工前 | TD-23 |
 | 备份恢复命令（P1） | `backup restore` 的锁、原子替换、恢复后的墓碑处理 | M2 开工前 | 审查 #12 |
+| 数据库恢复命令 | `db recover` 的备份方式、墓碑顺序、一致性检查、拒绝路径的文件副作用；§8.1 表中第 1 ~ 4 项的确认；补齐需求与验收项 | M2 开工前 | PD-23 |
 | Claude Code Hook 核实 | 事件名、输入字段、PreToolUse 拒绝协议、PowerShell 工具名；固定经过测试的版本范围；更新 architecture §12.1 | M3 开工前 | 审查 #10、TD-12 |
 | 其他 Agent 的约束 | Codex 等的沙箱可写路径、是否支持 Skill、受保护的 git 路径；更新兼容矩阵 | M4 开工前 | 审查 #11 |
 | Dashboard 技术细节 | OpenAPI 组织方式、SSE、UI 方案、端口 | M5 开工前 | TD-07、08、09、19 |
@@ -80,12 +81,13 @@ flowchart LR
 | WP0.1 | Go module、cobra CLI 骨架、`version` 与 `doctor`（框架）、lint、三平台 CI |
 | WP0.2 | 数据目录与权限：Unix `0700` / `0600`，Windows 受保护的 DACL；`SPECMETRY_HOME`；`config.toml` |
 | WP0.3 | SQLite 存储：WAL、`busy_timeout`、单一写连接；迁移框架（`.migrate.lock`、`BEGIN EXCLUSIVE`、`VACUUM INTO` 备份、`schema_version` / `min_binary_version`）；`seq` 计数器；只追加触发器辅助；墓碑检查的挂载点 |
-| WP0.4 | 内嵌 `schemas/`，选定 JSON Schema 2020-12 校验库；CI 校验所有 schema 本身，`schemas/examples/valid/` 全部通过，`invalid-cases.json`（SCH-01 ~ 53）全部失败；`error.v1` 输出。设计阶段只用一个精简的自制校验器做过自检，正式校验库的结果以 M0 为准。 |
+| WP0.4 | 内嵌 `schemas/`，选定 JSON Schema 2020-12 校验库；CI 校验所有 schema 本身，`schemas/examples/valid/` 全部通过，`invalid-cases.json`（SCH-01 ~ 64）全部失败；`error.v1` 输出。设计阶段只用一个精简的自制校验器做过自检，正式校验库的结果以 M0 为准。 |
 | WP0.5 | 测试基座：临时 HOME、夹具仓库构造器（用脚本创建 git 仓库、分支、worktree）、golden 工具、伪终端辅助、canary 搜索工具 |
 | WP0.6 | 前端工程骨架（Vite + React + TS），通过 `go:embed` 内嵌，并提供跳过前端的构建标签 |
 
-**退出条件（P0）**：MVP-PLT-01、MVP-PRV-05、MVP-PRV-06、MVP-STO-01 ~ 04。
+**退出条件（P0）**：MVP-PLT-01、MVP-PRV-05、MVP-PRV-06、MVP-STO-01 ~ 04、MVP-STO-06、MVP-STO-07（后两项由 codex-review-004 增补）。
 **交付物**：可以运行的 `specmetry version`、`specmetry doctor`；空库的迁移 v1；CI 通过。
+**状态（2026-10-14）**：**已验收**（产品负责人，2026-10-14）。代码审查经过五轮（codex-review-004 ~ 008），最终结论 GO，BLOCKER 为 0；GitHub Actions 第二轮 CI 8/8 通过，Windows、Linux（race detector，以 root 运行的跨用户测试）、macOS（含 ACL 检测）均在实际平台上运行；九项退出条件全部满足。记录见 [review-resolution.md §12](review-resolution.md#12-m0-验收github-actions-ci-与产品负责人决定)。**后续事项（不属于 M0 退出条件，尚未完成）**：Windows 真实双用户验证未执行；N1 部分修复，最晚在 M2 的 `purge` 验收前完成；`specmetry db recover`（PD-23）在 M2（WP2.10）实现，最晚在 M4 自测前完成。
 
 ### M1 基准、来源、交付目标与范围
 
@@ -96,11 +98,13 @@ flowchart LR
 | WP1.1 | 项目与 worktree 的解析和登记（git 公共目录）、marker、`init`（输出 `init.v1`，包括 `init_progress` 和 `baseline_version`）、阶段检测、候选来源、默认交付目标 |
 | WP1.2 | 通道识别：TTY、已知的 Agent 环境变量、交互式确认组件 |
 | WP1.3 | 密钥规则与自由文本校验（拒绝写入） |
-| WP1.4 | 来源：`add` / `list` / `remove` / `ack`，哈希，来源集合哈希，变化检测 |
+| WP1.4 | 来源：`add` / `list` / `remove`（含 `--erase-excerpts`）/ `ack`，哈希，来源集合哈希，变化检测；项目设置 `excerpt_storage`（architecture §10.7） |
 | WP1.5 | 提案：schema 校验、版本前置条件、引用片段校验、代码引用、编号分配（AC 按需求的作用域分配） |
 | WP1.6 | 审核：逐条决定、冲突检测与三方对比、版本与变更记录、级联、父需求修订与 AC 后续处理、`reaffirm`、`propose --apply` |
 | WP1.7 | 待澄清问题（只能由人回答） |
 | WP1.8 | `target set`、`scope confirm`（独立提交，或附带在审核中）、声明校验 |
+
+**建表约束**（codex-review-004 N1）：见 [data-model.md §1.1](data-model.md#11-建表约束m1-起)；由 schema 不变量测试强制。
 
 **退出条件（P0）**：acceptance-criteria 中标注 M1 的全部 P0 项，以及 CX-14、CX-17（CLI 部分）。标注为"M1 / M2"的项，在 M1 中只验证写入侧（退出码、写入的数据、`init --json` 的输出），推导侧（差距、交付状态）在 M2 中验证。
 **可选（P1）**：MVP-INIT-08、INIT-10、INV-05。
@@ -119,10 +123,12 @@ flowchart LR
 | WP2.6 | 决定：前置条件（含 `seen_decision_id`，在写事务中原子比较）、风险推导与确认（V-D01）、`normal` / `manual` / `exception`、交互式的 `accept` / `reject` / `waive`（收到退出码 5 后重新读取，不自动重试） |
 | WP2.7 | `status --json`（`status.v1`）、`gaps`、人类可读输出、`--diff-since <seq>` |
 | WP2.8 | `purge` 与墓碑生效；（P1）`backup create`、`backup restore` |
+| WP2.10 | 数据库恢复命令 `specmetry db recover`（PD-23，见 §8.1）；**必须在 M4 自测开始前完成**。需求与验收项在 M2 开工前补齐，并先确认 §8.1 表中第 1 ~ 4 项的调整 |
 | WP2.9 | 夹具与 oracle：`fx-docs-only`、`fx-in-dev`（含 feature 分支和 worktree 脚本）、`fx-incomplete`、`fx-scale`；完整的 CX 测试套件 |
 
 **退出条件（P0）**：标注 M2 的全部 P0 项（包括 M1 / M2 项的推导侧；INIT-07、INIT-09、BL-18、WT-02 ~ 05、INV-01 ~ 04、CLM、EV（含 EV-12、EV-13）、ACC（ACC-03 除外，含 ACC-10、ACC-11）、ST（ST-06 除外）、PRV-03、PLT-05、COL-12），以及 **CX-01 ~ CX-22、CX-24 的检查部分、CX-25 ~ CX-28 的 MVP 部分**（CX-08 的 UI 部分和 CX-23 除外）。
 **可选（P1）**：INV-06、STO-05。
+**PD-23**：`db recover`（WP2.10）在 M2 完成；它的验收项补齐后加入本里程碑的退出条件。
 **里程碑评审**：M2 结束时，用 CX 结果和 E2E-1、E2E-2 的 CLI 版本做一次设计复核，确认推导规则在真实夹具上没有产生意外结论，然后再进入 M4 和 M5。
 
 ### M3 Hook 采集与 setup
@@ -194,22 +200,22 @@ flowchart LR
 
 ## 6. 审查问题的关闭计划
 
-| 审查问题 | 设计状态 | 实现验证（里程碑；目前均未开始） | 验证依据 |
+| 审查问题 | 设计状态（codex-review-003 GO 后全部冻结） | 实现验证（里程碑；M0 部分已验证，其余未开始） | 验证依据 |
 |---|---|---|---|
 | #1 隐私 | 本轮 | M2（检查）、M3（Hook）、M6（综合） | EV-05、EV-11、COL-05、PRV-02 |
 | #2 交付代码绑定 | 主体：v0.2；剩余部分见 B1 | M2 | CX-01、CX-02、CX-19 ~ 22 |
-| codex-002 B1 证据与快照一致性 | v0.3 设计已解决（分级证据；MVP 只有观测级，并收窄保证）；**待复审冻结** | M2（观测级、不沿用、风险确认）；M7（隔离级） | EV-13、ACC-09 ~ 10、CX-26 ~ 28 |
+| codex-002 B1 证据与快照一致性 | 已冻结（codex-review-003 GO；分级证据，MVP 只有观测级） | M2（观测级、不沿用、风险确认）；M7（隔离级） | EV-13、ACC-09 ~ 10、CX-26 ~ 28 |
 | #3 worktree | 本轮 | M1（登记）、M2（执行与扫描） | WT-*、CX-03、CX-04 |
 | #4 交付范围 | 本轮 | M1（确认）、M2（推导） | TGT-*、CX-05、CX-06、CX-18 |
 | #5 父需求依赖 | 本轮 | M1（后续处理）、M2（推导） | BL-18 ~ 20、CX-07 |
-| #6 前置条件与 `seq` | 主体：v0.2；剩余部分见 B2 | M0（`seq`）、M1（写入侧）、M2（Claim、决定、检查） | STO-04、BL-03、BL-10、CX-08、CX-09、CX-13 ~ 15 |
-| codex-002 B2 旧页面覆盖拒收 | v0.3 设计已解决（`seen_decision_id`）；**待复审冻结** | M2（CLI）、M5（API 与界面） | ACC-11、CX-08 (e)(f) |
+| #6 前置条件与 `seq` | 主体：v0.2；剩余部分见 B2 | M0（`seq`，已验证）、M1（写入侧）、M2（Claim、决定、检查） | STO-04、BL-03、BL-10、CX-08、CX-09、CX-13 ~ 15 |
+| codex-002 B2 旧页面覆盖拒收 | 已冻结（codex-review-003 GO；`seen_decision_id`） | M2（CLI）、M5（API 与界面） | ACC-11、CX-08 (e)(f) |
 | #7 检查语义 | 本轮 | M2 | ACC-04 ~ 06、CX-19 ~ 21 |
 | #8 来源确认 | 本轮 | M1 | SRC-03、SRC-04、CX-17 |
 | #9 盘点 | 本轮 | M2（模型）、M4（Skill） | INV-*、CX-10、SK-06 |
 | #10 Hook | 模型：本轮；细节：M3 开工前 | M3 | COL-*、ACC-03 |
 | #11 跨 Agent | 措辞：本轮；核实：M4 开工前 | M3、M4、M5 | SK-03、UI-14、CX-23 |
-| #12 数据生命周期 | 模型：本轮；ACL：M0 开工前；恢复：M2 开工前 | M0、M2 | PRV-03、05、06、STO-*、CX-11 |
+| #12 数据生命周期 | 模型：本轮；ACL：M0 开工前；恢复：M2 开工前 | M0（已验证：PRV-05、PRV-06、STO-01 ~ 04、STO-06、STO-07）、M2 | PRV-03、05、06、STO-*、CX-11 |
 | 中-1 引用归属 | 本轮 | M1 | BL-04、BL-22 |
 | 中-2 退出条件 | 本轮 | — | 本计划的结构 |
 | 中-3 离线边界 | 本轮 | M6 | PRV-01 |
@@ -222,3 +228,44 @@ flowchart LR
 | 检查会弄脏工作区，导致执行普遍不合格 | dogfooding 中 `context_changed` 频繁出现 | 完善文档与 `doctor` 的提示；不放宽合格判定 |
 | Claude Code Hook 接口变化 | WP3.0 核实结果与 §12.1 不一致 | 只修改适配器映射；`spool-event.v1` 不变 |
 | JSON Schema 校验库对 2020-12 支持不完整 | WP0.4 选型时发现 | 在 M0 中更换库，或调整 schema 写法（不改变语义） |
+
+## 8. 已决策、待排期的功能
+
+### 8.1 数据库恢复命令 `specmetry db recover`（PD-23）
+
+**决策**（2026-10-13，产品负责人）：采用 [review-resolution.md §8](review-resolution.md#8-m0-第二次代码审查codex-review-005的处理) 中的方案 B，并做如下调整：
+
+1. 普通打开和 `doctor` 保持严格：遇到无法只读确认版本的状态，继续拒绝（退出码 6）或报告版本未知。
+2. 恢复是独立命令 `specmetry db recover`，不放进 `doctor`；`doctor` 必须保持只读。
+3. 恢复必须由用户明确授权（仅限人，交互式确认），并实际检查 schema 版本、`min_binary_version` 和数据库一致性；不能仅凭用户声明"正在使用最新版本"就允许恢复。
+4. 恢复前必须已有一致性备份；不得直接删除 `-wal` / `-shm`；不得绕过版本兼容限制。
+5. M0 不开发；提交 `3e0b0bc` 的代码保持不变，先完成 Codex 对 B1 ~ B3 的复审。
+6. **排期**（2026-10-13 确认）：在 M2 实现（WP2.10），必须在 M4 自测（dogfooding）开始前完成。
+
+**适用的数据库状态**（[architecture.md §11.5](architecture.md#115-只读检查) 中报告"版本未知"、普通打开会被拒绝的状态）：WAL 模式数据库缺少 `-wal` 与 `-shm`；只有其中一个；存在非空的 `-journal`。
+
+**功能依赖**：
+
+| 依赖 | 现状 | 说明 |
+|---|---|---|
+| 通道识别与交互式确认 | M1 WP1.2 | 恢复仅限人；Agent 通道返回退出码 3 |
+| 打开锁 | M0 已实现 | 恢复全程持有，与其他进程的打开和迁移互斥 |
+| 版本保护规则 | M0 已实现（`guardVersion`） | 与普通打开共用同一规则，不另设规则 |
+| 墓碑 | M0 已有挂载点；完整的 `purge` 在 M2 | 恢复产生的备份不得含有已删除项目的数据（见下表第 2 项） |
+| 一致性备份 | M0 有迁移前备份（`VACUUM INTO`）；`backup create/restore` 是 P1，在 M2（MVP-STO-05） | 见下表第 1、6 项 |
+| 数据库一致性检查 | 尚未设计（例如 `PRAGMA integrity_check`） | 必须在不改动原文件的前提下完成 |
+| N1 的剩余部分 | 最晚在 M2 的 `purge` 验收前解决 | 恢复同样要合并 WAL，不能在 checkpoint 返回 busy 时误报完成 |
+
+**排期评估**（排期已确认为 M2，评估保留作记录）：现有验收项中没有与 `db recover` 直接矛盾的条目。无论放在哪个里程碑，都需要**新增**需求与验收项，并调整下列已批准的内容。这些调整需要产品负责人在 M2 开工前确认，目前没有改动任何已批准的验收条件：
+
+| # | 涉及的已批准内容 | 冲突或需要的调整 |
+|---|---|---|
+| 1 | architecture §11.3："只使用一致性备份机制（`VACUUM INTO`），不直接复制正在使用的数据库文件" | 在适用状态下，对原文件执行 `VACUUM INTO` 必须先用 SQLite 打开它，而这正是会修改文件的操作（§11.5）。要在不改动原文件的前提下完成检查与备份，可行做法是先在数据目录内复制数据库文件，在副本上检查。这需要修改 §11.3 的表述，例如：持有打开锁、并确认复制期间文件没有变化时，允许复制静止的数据库文件 |
+| 2 | architecture §11.2、§11.4，CX-11，MVP-PRV-03："墓碑在备份之前执行，新生成的备份中不含已删除项目的数据" | 恢复前的备份如果直接取自原文件，墓碑还没有执行，可能含有已删除项目的数据，与 CX-11 的承诺冲突。设计必须先在副本上执行墓碑，再生成要保留的备份，并删除中间副本 |
+| 3 | MVP-STO-02 的严格标准（拒绝时数据库、WAL、SHM 和目录项都不变） | 恢复命令拒绝时（版本不兼容、一致性检查失败、用户未授权）同样必须满足。如果检查在数据目录内的副本上进行，拒绝后副本必须删除，目录项最终不变，但检查期间会短暂出现副本；是否接受，需要在新验收项中写明 |
+| 4 | mvp.md §2（范围的唯一依据）、prd §6 CLI 概览、AGENTS.md 中的人类专属操作 | 新命令需要写入范围、新增需求（FR）和 CLI 概览，并列为人类专属操作。权限矩阵（prd §3.3）已按本决定加入"仅限人"，标为待排期 |
+| 5 | M1 的退出条件（标注 M1 的全部 P0 项） | 放在 M1 会增加 M1 的 P0 验收项，扩大 M1 的退出条件，并且必须排在 WP1.2 之后。另外 G2 尚未满足，M1 本身还没有开工 |
+| 6 | MVP-STO-05 / FR-STO-04（`backup create/restore` 是 P1，在 M2） | 如果恢复是 P0，它依赖的备份能力就要提前到 P0，与"备份命令是 P1"的优先级不一致。可以复用 M0 的内部备份函数，而不提前实现 `backup` 命令 |
+| 7 | M6 的退出条件（mvp.md §7） | 放在首次公开发布前不冲突，但需要写入 mvp.md 的范围和 §7 的完成清单。风险：从 M4 开始的 dogfooding 期间没有恢复手段 |
+
+**结论**：排期为 M2，不晚于 M4 自测。它与 M2 的 `purge`、`backup create/restore` 共用墓碑、备份和人工确认。开工前仍需确认上表第 1 ~ 4 项的调整；第 5 项（M1 退出条件）不再涉及，第 7 项的风险因排在 M4 之前而消除。

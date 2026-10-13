@@ -62,6 +62,8 @@
     { "id": "SCH-59", "schema": "check-run.v1", "base": "valid/check-run.json", "patch": [{ "op": "remove", "path": "/runs/0/evidence_grade" }], "why": "every run must state its evidence grade (review-002 B1)" },
     { "id": "SCH-60", "schema": "status.v1", "base": "valid/status.minimal.json", "patch": [{ "op": "replace", "path": "/requirements/0/criteria/0/snapshot_run/evidence_grade", "value": "snapshot_verified" }], "why": "only observed and snapshot_isolated grades exist" },
     { "id": "SCH-61", "schema": "status.v1", "base": "valid/status.minimal.json", "patch": [{ "op": "remove", "path": "/requirements/0/criteria/1/current_decision_id" }], "why": "read model must return the current decision id (review-002 B2)" },
-    { "id": "SCH-62", "schema": "status.v1", "base": "valid/status.minimal.json", "patch": [{ "op": "remove", "path": "/delivery/evidence_grade" }], "why": "delivery judgement must state its evidence grade" }
+    { "id": "SCH-62", "schema": "status.v1", "base": "valid/status.minimal.json", "patch": [{ "op": "remove", "path": "/delivery/evidence_grade" }], "why": "delivery judgement must state its evidence grade" },
+    { "id": "SCH-63", "schema": "gaps.v1", "base": "valid/gaps.ready-observed.json", "patch": [{ "op": "remove", "path": "/evidence_grade" }], "why": "a ready judgement must never be shown without its evidence grade (codex-003)" },
+    { "id": "SCH-64", "schema": "gaps.v1", "base": "valid/gaps.ready-observed.json", "patch": [{ "op": "replace", "path": "/evidence_grade", "value": "snapshot_verified" }], "why": "only snapshot_isolated, observed and none exist" }
   ]
 }

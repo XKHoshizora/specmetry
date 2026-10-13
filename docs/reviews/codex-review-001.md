@@ -6,7 +6,7 @@
 
 1. **严重｜C0 隐私约束与实际采集设计直接冲突。开发前必须解决。**
 
-   仓库规定不保存文件内容、工具输出正文和环境变量值，但架构要求流式保存完整检查输出，并保存输出尾部、来源原文片段和命令文本。[架构设计:197](C:/Users/hoshi/Desktop/specmetry/docs/architecture.md:197)、[数据分级:298](C:/Users/hoshi/Desktop/specmetry/docs/architecture.md:298)
+   仓库规定不保存文件内容、工具输出正文和环境变量值，但架构要求流式保存完整检查输出，并保存输出尾部、来源原文片段和命令文本。[架构设计:197](../../docs/architecture.md#L197)、[数据分级:298](../../docs/architecture.md#L298)
 
    脱敏不能消除这个冲突：检查可能打印代码、客户数据；命令参数本身可能包含提示词、内联代码或普通格式的秘密。它们即使没有命中密钥规则，仍属于禁止保存的数据。
 
@@ -14,7 +14,7 @@
 
 2. **严重｜验收绑定 AC revision，没有可靠绑定交付代码。开发前必须解决。**
 
-   代码变化不使证据失效，落后 HEAD、dirty evidence 只产生警告。验收虽记录 HEAD，却不以它限定适用范围。[失效规则:544](C:/Users/hoshi/Desktop/specmetry/docs/data-model.md:544)、[就绪判定:508](C:/Users/hoshi/Desktop/specmetry/docs/data-model.md:508)
+   代码变化不使证据失效，落后 HEAD、dirty evidence 只产生警告。验收虽记录 HEAD，却不以它限定适用范围。[失效规则:544](../../docs/data-model.md#L544)、[就绪判定:508](../../docs/data-model.md#L508)
 
    规格反例：在提交 A 上通过检查并验收，之后提交 B 删除该功能，只要没有重新运行失败检查，状态仍可为 `accepted`、交付仍可为 `ready`。同一 HEAD 下修改未提交代码，甚至可能没有 HEAD 落后标记。
 
@@ -22,7 +22,7 @@
 
 3. **严重｜worktree 的项目归属正确，证据与执行上下文却没有隔离。开发前必须解决。**
 
-   `projects.root_path` 是主 worktree 路径，检查工作目录相对项目根解析；状态引擎又选择项目内该 AC 的最新证据，没有 worktree 或交付对象筛选条件。[项目模型:96](C:/Users/hoshi/Desktop/specmetry/docs/data-model.md:96)、[证据选择:382](C:/Users/hoshi/Desktop/specmetry/docs/data-model.md:382)
+   `projects.root_path` 是主 worktree 路径，检查工作目录相对项目根解析；状态引擎又选择项目内该 AC 的最新证据，没有 worktree 或交付对象筛选条件。[项目模型:96](../../docs/data-model.md#L96)、[证据选择:382](../../docs/data-model.md#L382)
 
    这可能让 feature worktree 的通过结果覆盖交付分支的失败结果，也可能让从 worktree 发起的检查实际运行在主 worktree。Git 明确规定不同 worktree 有各自的 HEAD 和 index。[Git 官方说明](https://git-scm.com/docs/git-worktree#_refs)
 
@@ -30,7 +30,7 @@
 
 4. **严重｜部分确认甚至空交付范围都可能得到 `ready`。开发前必须解决。**
 
-   就绪条件只要求存在基准版本、范围内需求全部验收、没有阻塞问题；待审核提案和来源变化仅作为警告。[就绪规则:494](C:/Users/hoshi/Desktop/specmetry/docs/data-model.md:494)
+   就绪条件只要求存在基准版本、范围内需求全部验收、没有阻塞问题；待审核提案和来源变化仅作为警告。[就绪规则:494](../../docs/data-model.md#L494)
 
    例如提取出八条需求，只确认并验收其中一条，其余七条仍待审，已经可能满足就绪条件。若没有 `must` 需求，“全部完成”也会因空集合而成立。提取召回率 ≥80% 的发布门槛，更不能证明基准完整。
 
@@ -38,7 +38,7 @@
 
 5. **严重｜需求语义变化可以绕过 AC 验收失效。开发前必须解决。**
 
-   需求发生 `material` 变更时，不直接影响子 AC，只在 UI 提醒审核者检查。[Revision 规则:543](C:/Users/hoshi/Desktop/specmetry/docs/data-model.md:543)
+   需求发生 `material` 变更时，不直接影响子 AC，只在 UI 提醒审核者检查。[Revision 规则:543](../../docs/data-model.md#L543)
 
    例如需求从“用户可以查看订单”改成“用户只能查看自己的订单”，原有 AC 若没同步修改，旧验收仍有效。系统已经确认了新需求，却可能继续用证明旧需求的验收宣布完成。
 
@@ -46,23 +46,23 @@
 
 6. **严重｜交换格式缺少读取版本前置条件，容易把旧判断写成新版本事实。开发前必须解决。**
 
-   Proposal 的 `base_version` 定义为提交时版本，输入示例没有客户端读取版本；Claim 只传 AC 编号，由系统记录提交时 revision。验收接口也没有要求携带用户实际查看的 revision 和证据快照。[Proposal 模型:177](C:/Users/hoshi/Desktop/specmetry/docs/data-model.md:177)、[Claim 格式:605](C:/Users/hoshi/Desktop/specmetry/docs/data-model.md:605)、[验收流程:205](C:/Users/hoshi/Desktop/specmetry/docs/architecture.md:205)
+   Proposal 的 `base_version` 定义为提交时版本，输入示例没有客户端读取版本；Claim 只传 AC 编号，由系统记录提交时 revision。验收接口也没有要求携带用户实际查看的 revision 和证据快照。[Proposal 模型:177](../../docs/data-model.md#L177)、[Claim 格式:605](../../docs/data-model.md#L605)、[验收流程:205](../../docs/architecture.md#L205)
 
    Agent 读了 r1、用户随后改成 r2、Agent 再提交时，旧判断可能被盖上 r2 标签。用户在旧页面点击接受，也可能接受后台已经更新的 AC。
 
-   **建议：**输入携带读取时的基准版本、目标 revision，以及验收时看到的证据 ID；不匹配则要求重新查看。检查开始时固定配置和 revision，完成后不得重新绑定新版。另外，“最新事实”必须有确定性排序规则：当前仅用毫秒时间及严格 `>`，同毫秒或时钟回拨会产生歧义。[时间与推导输入:380](C:/Users/hoshi/Desktop/specmetry/docs/data-model.md:380)
+   **建议：**输入携带读取时的基准版本、目标 revision，以及验收时看到的证据 ID；不匹配则要求重新查看。检查开始时固定配置和 revision，完成后不得重新绑定新版。另外，“最新事实”必须有确定性排序规则：当前仅用毫秒时间及严格 `>`，同毫秒或时钟回拨会产生歧义。[时间与推导输入:380](../../docs/data-model.md#L380)
 
 7. **高｜检查成功的含义和人工验收前置条件不够明确。M2 前必须解决。**
 
-   当前退出码 0 就产生 `pass`，命令哈希只能证明命令字符串一致。它不能证明测试确实执行、覆盖了该 AC，也无法识别同名测试被削弱。[检查执行:198](C:/Users/hoshi/Desktop/specmetry/docs/architecture.md:198)
+   当前退出码 0 就产生 `pass`，命令哈希只能证明命令字符串一致。它不能证明测试确实执行、覆盖了该 AC，也无法识别同名测试被削弱。[检查执行:198](../../docs/architecture.md#L198)
 
-   同时，规则允许 `accepted` 覆盖验收之前的失败证据；并规定回退后检查通过，自动恢复 `accepted`。规格没有明确自动化 AC 在无证据或失败状态下能否直接接受。[状态决策表:393](C:/Users/hoshi/Desktop/specmetry/docs/data-model.md:393)
+   同时，规则允许 `accepted` 覆盖验收之前的失败证据；并规定回退后检查通过，自动恢复 `accepted`。规格没有明确自动化 AC 在无证据或失败状态下能否直接接受。[状态决策表:393](../../docs/data-model.md#L393)
 
    **建议：**把 `verified` 的含义限定为“已确认检查执行成功”，要求审核检查与 AC 的对应理由。明确正常验收与人工例外的规则，例外必须记录原因。自动恢复验收应受第 2 项的代码对象约束。测试文件或检查入口的哈希可作为变化提示，不必扩展成代码审查系统。
 
 8. **高｜Agent 可以自行消除来源变化告警，削弱了人工确认边界。M1 前必须解决。**
 
-   权限允许 Agent 执行 `source ack`；执行后更新来源哈希并消除 `SOURCE_CHANGED`。来源移除也开放给任意 CLI 通道。[权限矩阵:75](C:/Users/hoshi/Desktop/specmetry/docs/prd.md:75)、[来源模型:120](C:/Users/hoshi/Desktop/specmetry/docs/data-model.md:120)
+   权限允许 Agent 执行 `source ack`；执行后更新来源哈希并消除 `SOURCE_CHANGED`。来源移除也开放给任意 CLI 通道。[权限矩阵:75](../../docs/prd.md#L75)、[来源模型:120](../../docs/data-model.md#L120)
 
    “来源变化已经处理”因此可能只是 Agent 自述，却被系统当作告警解除依据。这也超出了仓库硬约束中明确列出的 Agent 允许操作。
 
@@ -70,7 +70,7 @@
 
 9. **高｜中途导入可行，但“盘点完成”的定义过弱。M1/M2 前必须解决。**
 
-   任意一个 audit 批次就使初始化进入 `inventoried`；指定范围的局部 audit 也可能满足它。真实 Skill 评测只要求覆盖至少90%的 AC。[初始化进度:534](C:/Users/hoshi/Desktop/specmetry/docs/data-model.md:534)、[Skill 评测:181](C:/Users/hoshi/Desktop/specmetry/docs/acceptance-criteria.md:181)
+   任意一个 audit 批次就使初始化进入 `inventoried`；指定范围的局部 audit 也可能满足它。真实 Skill 评测只要求覆盖至少90%的 AC。[初始化进度:534](../../docs/data-model.md#L534)、[Skill 评测:181](../../docs/acceptance-criteria.md#L181)
 
    因此“已完成盘点”可能掩盖大量未检查条目。仅有代码时，反推只能发现现有能力，无法发现客户要求但尚未实现的能力。当前夹具也不足以支撑“任意阶段项目30分钟建立基准”的承诺。
 
@@ -78,13 +78,13 @@
 
 10. **高｜Hook 职责合理，但规格与真实运行时存在缺口。M3 前必须解决。**
 
-    架构要求 Hook 不启动子进程，却要求 SessionStart/End 保存准确 HEAD，sync 又依赖这个起点；没有定义如何获取它。当前官方输入没有 HEAD 字段。官方也区分 `PostToolUse` 与 `PostToolUseFailure`，并提供 PowerShell 工具，而现有白名单和拦截主要针对 Bash。[Hook 白名单:306](C:/Users/hoshi/Desktop/specmetry/docs/architecture.md:306)、[Claude Code 官方接口](https://code.claude.com/docs/en/hooks)
+    架构要求 Hook 不启动子进程，却要求 SessionStart/End 保存准确 HEAD，sync 又依赖这个起点；没有定义如何获取它。当前官方输入没有 HEAD 字段。官方也区分 `PostToolUse` 与 `PostToolUseFailure`，并提供 PowerShell 工具，而现有白名单和拦截主要针对 Bash。[Hook 白名单:306](../../docs/architecture.md#L306)、[Claude Code 官方接口](https://code.claude.com/docs/en/hooks)
 
     **建议：**确定准确 HEAD 的获取方案，无法取得时明确标为未知，不能用延迟入库时的 HEAD 冒充。覆盖失败事件和实际支持的 shell 工具，固定兼容版本。增加输入大小、处理时限及丢弃计数；将“永不阻塞”改成可验证的延迟预算。Hook 继续只记录活动，语义映射由 Skill 完成，这个分工应保留。
 
 11. **高｜“能够执行 shell”不足以保证跨 Agent 兼容。相关接入开发前必须解决。**
 
-    默认数据目录在工作区外，初始化还可能写 `.git/info/exclude`。沙箱可能分别禁止这些操作；例如 Codex 的默认工作区权限与受保护 Git 路径，就会影响该方案。[文件布局:225](C:/Users/hoshi/Desktop/specmetry/docs/architecture.md:225)、[官方权限说明](https://learn.chatgpt.com/docs/agent-approvals-security)
+    默认数据目录在工作区外，初始化还可能写 `.git/info/exclude`。沙箱可能分别禁止这些操作；例如 Codex 的默认工作区权限与受保护 Git 路径，就会影响该方案。[文件布局:225](../../docs/architecture.md#L225)、[官方权限说明](https://learn.chatgpt.com/docs/agent-approvals-security)
 
     TTY 加已知环境变量也只是启发式识别。其他 Agent 使用伪终端时可能落入 `human_cli`；有效 Dashboard 令牌同样不能证明操作者是人。这属于现有“防误操作”模型的边界。
 
@@ -92,7 +92,7 @@
 
 12. **高｜本地数据生命周期尚未闭合。存储与 purge 开发前必须解决。**
 
-    Windows 是一级支持平台，但数据权限验收只有 Unix 0700。`purge` 删除当前数据库行、日志和 spool，却没有处理包含该项目数据的全库备份；删除行也不等于清除 WAL 或数据库残留。[安全约定:331](C:/Users/hoshi/Desktop/specmetry/docs/architecture.md:331)、[删除规则:668](C:/Users/hoshi/Desktop/specmetry/docs/data-model.md:668)
+    Windows 是一级支持平台，但数据权限验收只有 Unix 0700。`purge` 删除当前数据库行、日志和 spool，却没有处理包含该项目数据的全库备份；删除行也不等于清除 WAL 或数据库残留。[安全约定:331](../../docs/architecture.md#L331)、[删除规则:668](../../docs/data-model.md#L668)
 
     此外，WAL 模式下不能把正在使用的主数据库文件直接当作完整可移植副本。[SQLite 官方说明](https://www.sqlite.org/wal.html)
 
@@ -102,9 +102,9 @@
 
 | 问题 | 影响 | 建议 |
 |---|---|---|
-| **来源与代码引用的历史归属未完整定义**。[引用模型:151](C:/Users/hoshi/Desktop/specmetry/docs/data-model.md:151) | `source_refs` 未明确可变性及绑定 revision；代码依据主要留在提案中。路径存在、片段出现只能证明引用存在，不能证明语义覆盖。 | 明确引用随版本保留、更新及校验的规则，展示校验实际证明了什么。 |
-| **MVP 的可选项与里程碑退出条件矛盾**。[可选范围:29](C:/Users/hoshi/Desktop/specmetry/docs/mvp.md:29)、[里程碑验收:272](C:/Users/hoshi/Desktop/specmetry/docs/acceptance-criteria.md:272) | P1 可以延期，但里程碑要求分配的验收项全部通过；JSON Schema 到 M4 才安排，M1/M2 已依赖严格交换格式。 | 区分必需与可选退出条件，将交换契约提前。趋势、完整活动页、导出及 Hosted 预留可以推迟，优先完成可信交付闭环。 |
-| **离线承诺没有区分核心与外部依赖**。[MVP 目标:8](C:/Users/hoshi/Desktop/specmetry/docs/mvp.md:8) | 核心无网络不代表用户的 Agent、依赖安装及检查命令无网络。录制输出回放不能证明真实 Agent 全流程离线可用。 | 分别声明核心、Agent 和检查环境的网络边界；保留人工或录制输入的离线流程。 |
+| **来源与代码引用的历史归属未完整定义**。[引用模型:151](../../docs/data-model.md#L151) | `source_refs` 未明确可变性及绑定 revision；代码依据主要留在提案中。路径存在、片段出现只能证明引用存在，不能证明语义覆盖。 | 明确引用随版本保留、更新及校验的规则，展示校验实际证明了什么。 |
+| **MVP 的可选项与里程碑退出条件矛盾**。[可选范围:29](../../docs/mvp.md#L29)、[里程碑验收:272](../../docs/acceptance-criteria.md#L272) | P1 可以延期，但里程碑要求分配的验收项全部通过；JSON Schema 到 M4 才安排，M1/M2 已依赖严格交换格式。 | 区分必需与可选退出条件，将交换契约提前。趋势、完整活动页、导出及 Hosted 预留可以推迟，优先完成可信交付闭环。 |
+| **离线承诺没有区分核心与外部依赖**。[MVP 目标:8](../../docs/mvp.md#L8) | 核心无网络不代表用户的 Agent、依赖安装及检查命令无网络。录制输出回放不能证明真实 Agent 全流程离线可用。 | 分别声明核心、Agent 和检查环境的网络边界；保留人工或录制输入的离线流程。 |
 
 **开发前必须先确定第 1—6 项，以及 MVP 必需范围和交换契约的安排。** 这些会改变数据模型、权限和状态引擎，拖到实现后解决会造成结构性返工。第 7—12 项最晚应在对应模块开发前关闭；M0 工程骨架和只读技术验证可以先推进。
 

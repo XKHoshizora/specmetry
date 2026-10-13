@@ -4,7 +4,7 @@
 
 ### B1：执行前后的观测，不能证明检查确实针对所记录的快照
 
-架构承诺“执行期间 HEAD 始终等于快照提交”，但执行流程只记录开始和结束的 HEAD、工作区状态。[架构约束](C:/Users/hoshi/Desktop/specmetry/docs/architecture.md:78)、[合格条件](C:/Users/hoshi/Desktop/specmetry/docs/data-model.md:350)、[执行流程](C:/Users/hoshi/Desktop/specmetry/docs/data-model.md:735)
+架构承诺“执行期间 HEAD 始终等于快照提交”，但执行流程只记录开始和结束的 HEAD、工作区状态。[架构约束](../../docs/architecture.md#L78)、[合格条件](../../docs/data-model.md#L350)、[执行流程](../../docs/data-model.md#L735)
 
 **反例：**检查开始时为提交 A、工作区干净；检查脚本或并行操作临时修改受跟踪代码，测试读取临时版本并通过，然后恢复原文件。结束时仍为 A、工作区干净。现有规则会把结果认作 A 的合格证据，之后允许正常验收并得到 `ready`。HEAD 的 A→B→A 变化也有同类问题。
 
@@ -16,7 +16,7 @@
 
 ### B2：旧页面可以覆盖刚发生的人工拒收
 
-验收前置条件检查目标、快照、两个 revision 和证据 ID，**没有检查用户看到的上一条人工决定**；交换 schema 也没有对应字段。[写入前置条件](C:/Users/hoshi/Desktop/specmetry/docs/data-model.md:706)、[decision schema](C:/Users/hoshi/Desktop/specmetry/schemas/decision.v1.schema.json:8)
+验收前置条件检查目标、快照、两个 revision 和证据 ID，**没有检查用户看到的上一条人工决定**；交换 schema 也没有对应字段。[写入前置条件](../../docs/data-model.md#L706)、[decision schema](../../schemas/decision.v1.schema.json#L8)
 
 **反例：**
 
@@ -45,7 +45,7 @@
 | #5 父需求变化 | 已解决：父修订不匹配会阻塞，恢复需要人工复核或修订。 |
 | #6 读取版本与排序 | 主体已解决；仍需关闭 B2。 |
 
-处理记录中的“前六项已关闭”需要按上述结果调整，不能直接作为冻结依据。[处理记录](C:/Users/hoshi/Desktop/specmetry/docs/review-resolution.md:333)
+处理记录中的“前六项已关闭”需要按上述结果调整，不能直接作为冻结依据。[处理记录](../../docs/review-resolution.md#L333)
 
 **八类反例均已具备可执行的验收预期：**
 
@@ -60,13 +60,13 @@
 | 局部 audit | CX-10：覆盖率不足，不算完成盘点，不能替代交付证据。 |
 | purge 后恢复备份 | CX-11：墓碑先于迁移和迁移前备份生效，已删除数据不复活。 |
 
-这些是可实现的测试规格，目前不能称为已通过的业务验收。[反例定义](C:/Users/hoshi/Desktop/specmetry/docs/acceptance-criteria.md:295)
+这些是可实现的测试规格，目前不能称为已通过的业务验收。[反例定义](../../docs/acceptance-criteria.md#L295)
 
 另有三处可在开发中修正的契约细节：
 
-- **拒收解除的“新证据”条件不完整。** 自动化分支只检查不同快照和 `V = pass`，未要求执行发生在拒收之后；历史通过可能提前解除拒收。建议增加 `V.seq > D.seq` 并补测试。它目前只能推到等待复审，不能直接造成就绪。[决策表](C:/Users/hoshi/Desktop/specmetry/docs/data-model.md:504)
-- **Claim 的表述需要统一。** “不影响交付状态”与手动 AC 的 `manual_claimed → ready_for_review` 例外不一致。统一为“不能单独产生 accepted／ready；手动 AC 可以提示等待人工查看”。[规则](C:/Users/hoshi/Desktop/specmetry/docs/data-model.md:508)
-- **明确 `check run --json` 的输出流。** JSON 应独占 stdout，检查输出在该模式下转到 stderr，避免混合后无法解析。[输出契约](C:/Users/hoshi/Desktop/specmetry/schemas/check-run.v1.schema.json:5)
+- **拒收解除的“新证据”条件不完整。** 自动化分支只检查不同快照和 `V = pass`，未要求执行发生在拒收之后；历史通过可能提前解除拒收。建议增加 `V.seq > D.seq` 并补测试。它目前只能推到等待复审，不能直接造成就绪。[决策表](../../docs/data-model.md#L504)
+- **Claim 的表述需要统一。** “不影响交付状态”与手动 AC 的 `manual_claimed → ready_for_review` 例外不一致。统一为“不能单独产生 accepted／ready；手动 AC 可以提示等待人工查看”。[规则](../../docs/data-model.md#L508)
+- **明确 `check run --json` 的输出流。** JSON 应独占 stdout，检查输出在该模式下转到 stderr，避免混合后无法解析。[输出契约](../../schemas/check-run.v1.schema.json#L5)
 
 ## ACCEPTED RISK
 
@@ -79,6 +79,6 @@
 - Hook 为尽力采集，缺失时降级；中途导入不承诺自动发现未实现的客户需求。
 - 删除不承诺物理擦除或清理用户自行保存的副本。
 
-**未发现需要阻止开发的明显过度设计。** 云端、调度、复杂影响分析、完整日志、趋势和导出已移出范围；快照、范围、版本保护、墓碑和纯函数推导都有直接需求依据。无需重选技术栈或扩大重构。既有 G0/G1/G2 门槛应按里程碑落实，不必把后续模块的细化事项全部提前。[开工门槛](C:/Users/hoshi/Desktop/specmetry/docs/implementation-plan.md:16)
+**未发现需要阻止开发的明显过度设计。** 云端、调度、复杂影响分析、完整日志、趋势和导出已移出范围；快照、范围、版本保护、墓碑和纯函数推导都有直接需求依据。无需重选技术栈或扩大重构。既有 G0/G1/G2 门槛应按里程碑落实，不必把后续模块的细化事项全部提前。[开工门槛](../../docs/implementation-plan.md#L16)
 
 **最终结论：NO-GO。** 原因仅为 B1、B2 两项实际缺口；关闭后可重新冻结。M0 工程骨架和技术验证可在满足既有门槛后推进。

@@ -4,9 +4,28 @@
   "snapshot": "8f3c2a1b9d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a",
   "baseline_version": 4,
   "delivery_status": "in_progress",
+  "evidence_grade": "observed",
   "gaps": [
-    { "type": "FAILING", "blocking": true, "target_key": "AC-003-1", "reason": "check_failed", "next_action": "修复" },
-    { "type": "CLAIMED_WITHOUT_EVIDENCE", "blocking": true, "target_key": "AC-004-1", "reason": "claimed_without_evidence", "next_action": "在快照上运行检查" },
-    { "type": "CONFLICT", "blocking": false, "target_key": "AC-003-1", "reason": null, "next_action": "核实自述" }
+    {
+      "type": "FAILING",
+      "blocking": true,
+      "target_key": "AC-003-1",
+      "reason": "check_failed",
+      "next_action": "修复"
+    },
+    {
+      "type": "CLAIMED_WITHOUT_EVIDENCE",
+      "blocking": true,
+      "target_key": "AC-004-1",
+      "reason": "claimed_without_evidence",
+      "next_action": "在快照上运行检查"
+    },
+    {
+      "type": "CONFLICT",
+      "blocking": false,
+      "target_key": "AC-003-1",
+      "reason": null,
+      "next_action": "核实自述"
+    }
   ]
 }

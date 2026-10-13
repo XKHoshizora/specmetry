@@ -62,6 +62,7 @@
 | MVP-SRC-05 | `source add` 一个不存在的路径 → 退出码 2，不写入 | 集成 | FR-SRC-01 | M1 |
 | MVP-SRC-06 | 同一组来源，以不同顺序登记 → 来源集合哈希相同 | 单元 | FR-SRC-05 | M1 |
 | MVP-SRC-07 | `source add internal/auth/login.go`（非文档类型）→ 退出码 2；在 TTY 中加上 `--allow-any-type` → 成功；修改已登记的来源后，Agent 再次 `source add` 同一路径 → 什么都不做，`acked_sha256` 不变，`SOURCE_CHANGED` 仍然存在。审查确认 Specmetry 只为引用校验读取文本，不解析文档语义。 | 集成 + 审查 | FR-SRC-01、FR-SRC-06 | M1 |
+| MVP-SRC-08 | 在 TTY 中执行 `source remove --erase-excerpts` → 该来源所有引用的 `excerpt` 变为 NULL，`excerpt_sha256` 和 `locator` 保留，`excerpt_erased_seq` 已写入；对数据库文件和 WAL 做字节搜索，找不到原片段（执行 `VACUUM` 之后）；非 TTY 执行 → 退出码 3 | 集成 | FR-SRC-07 | M1 |
 
 ### 2.3 基准（BL）
 
@@ -149,7 +150,7 @@
 | MVP-EV-04 | 检查命令不存在 → `error` / `not_found` | 集成 | FR-EV-01 | M2 |
 | MVP-EV-05 | 检查输出中有 canary 字符串 → 不带 `--json` 时，调用者的 stdout 中能看到它；数据库、WAL、日志和备份中都找不到 | 集成 | FR-EV-01、FR-PRV-02 | M2 |
 | MVP-EV-06 | `check run` 没有接受临时命令的参数；对没有检查的 AC 执行 → 退出码 2 | 集成 | FR-EV-03 | M2 |
-| MVP-EV-07 | 直接对任一只追加表执行 UPDATE 或 DELETE → 被触发器中止 | 集成 | FR-EV-05、FR-STO-05 | M2 |
+| MVP-EV-07 | 直接对任一只追加表执行 UPDATE、DELETE、REPLACE（主键冲突与 UNIQUE 冲突）或 UPSERT → 被触发器中止，原记录不变 | 集成 | FR-EV-05、FR-STO-05 | M2 |
 | MVP-EV-08 | 工作区有未跟踪的文件时执行检查 → `tree_state_start = dirty`，`qualifying = false` | 集成 | FR-EV-04 | M2 |
 | MVP-EV-09 | 检查在执行过程中写入一个未被忽略的文件 → `error` / `context_changed`；检查在执行过程中执行 `git commit` → `context_changed` | 集成 | FR-EV-04 | M2 |
 | MVP-EV-10 | 声明了 `inputs` → 记录对象 ID；某个输入路径在 HEAD 上不存在 → `error` / `input_missing` | 集成 | FR-EV-01 | M2 |
@@ -171,7 +172,7 @@
 | MVP-ACC-08 | 自动化 AC 在 `S` 上 `V = pass` → 人依次在同一快照上作出接受、拒收、接受，每次都携带上一条决定的 ID 作为 `seen_decision_id`（第二次接受是人在重新读取后明确改判）→ 三条都保留，当前决定是 `seq` 最大的那一条，AC 为 `accepted` | 集成 | FR-ACC-08、FR-ACC-03 | M2 |
 | MVP-ACC-09 | 沿用：在 A 上 `normal` 验收 → 目标前进到 B。**单元**：在 B 上有一条合成的隔离级合格通过 → `accepted`（`carried_forward`），没有声明 `inputs` 时同样适用；如果是观测级合格通过 → `ready_for_review`（`observed_evidence`）。**集成（MVP）**：在 B 上执行 `check run` → `ready_for_review`（`observed_evidence`），没有人参与时**绝不**变为 `accepted`。隔离级的集成验证在 M7 进行。 | 单元 + 集成 | FR-ACC-09 | M2 |
 | MVP-ACC-10 | **风险确认**：观测级证据上的 `normal` 验收缺少 `observed_evidence` → 退出码 2（API 为 400）；多确认一项实际不存在的风险 → 退出码 2；`runs(S)` 结果不一致却没有确认 `inconsistent_results` → 退出码 2；例外验收没有确认 `no_automated_evidence` → 退出码 2。以上情况都不写入。 | 集成 | FR-ACC-03、FR-ACC-05 | M2 / M5 |
-| MVP-ACC-11 | **并发决定**：两个会话都读到 `current_decision_id = D1` → 会话乙拒收（写入 D2）→ 会话甲用 `seen_decision_id = D1` 提交接受 → 退出码 5（API 为 409），不写入，`error.current` 中给出 D2；CLI 在伪终端中收到退出码 5 后不再发出任何请求；会话甲重新读取后，用 `seen_decision_id = D2` 明确接受 → 成功 | 集成 | FR-ACC-01 | M2 / M5 |
+| MVP-ACC-11 | **并发决定**（用两个独立的数据库连接或进程，写事务使用 `BEGIN IMMEDIATE`）：两个会话都读到 `current_decision_id = D1` → 会话乙拒收（写入 D2）→ 会话甲用 `seen_decision_id = D1` 提交接受 → 退出码 5（API 为 409），不写入，`error.current` 中给出 D2；CLI 在伪终端中收到退出码 5 后不再发出任何请求；会话甲重新读取后，用 `seen_decision_id = D2` 明确接受 → 成功 | 集成 | FR-ACC-01 | M2 / M5 |
 
 ### 2.10 推导与交付判定（ST）
 
@@ -254,14 +255,18 @@
 | MVP-PRV-02 | **C0 canary 综合测试**：在检查输出、Hook 的命令文本和工具输出、环境变量的值、文件内容、提示词和 transcript、提交标题中埋入 canary，跑完全部 E2E → 数据库、WAL、spool、日志、备份中都找不到 | E2E | FR-PRV-02 | M6 |
 | MVP-PRV-03 | 有项目 A 和 B → 在 TTY 中对 A 执行 `purge` → A 的所有行被删除；数据库文件和 WAL 中找不到 A 的 canary；B 不受影响；默认删除旧备份；`tombstones.json` 中有 A；非 TTY 执行 → 退出码 3 | 集成 | FR-PRV-03、FR-STO-03 | M2 |
 | MVP-PRV-04 | 伪造时间，使事件超过 30 天 → 入库时被清除；其他事实不受影响 | 集成 | FR-PRV-04 | M3 |
-| MVP-PRV-05 | Unix 上，数据目录为 `0700`，文件为 `0600` | 集成 | FR-PRV-06 | M0 |
-| MVP-PRV-06 | Windows 上，数据目录的 DACL 是受保护的，只授予 TD-22 规定的对象；`doctor` 能发现被放宽的权限 | 集成 | FR-PRV-06 | M0 |
+| MVP-PRV-05 | Unix 上，数据目录为 `0700`，文件为 `0600`；已有的数据目录或其中任何文件（包括数据库、WAL、SHM）权限过宽、属主不是当前用户、是符号链接，或（macOS）带有允许访问的 ACL 时，在写入任何数据之前拒绝（退出码 6），目录内容不变；从根目录到数据目录的任何一级目录属主不是当前用户或 root，或能被其他用户写入（不带 sticky 位，或带 sticky 位但下一级条目不属于当前用户或 root），在创建或写入任何内容之前拒绝（退出码 6）；用真实的跨 UID 替换攻击验证（Linux，测试需要 root 以切换用户） | 集成 | FR-PRV-06 | M0 |
+| MVP-PRV-06 | Windows 上，数据目录的 DACL 是受保护的，只授予 TD-22 规定的对象；已有目录或文件不满足（额外的授权对象、DACL 不受保护或不能被新文件继承、属主不符、联接或符号链接）时，在写入任何数据之前拒绝（退出码 6），目录内容不变；路径上的目录是联接或符号链接、属主不是当前用户 / SYSTEM / Administrators / TrustedInstaller，或允许其他用户 DELETE、FILE_DELETE_CHILD、WRITE_DAC、WRITE_OWNER 时，在创建或写入任何内容之前拒绝（退出码 6）；`doctor` 能发现被放宽的权限 | 集成 | FR-PRV-06 | M0 |
 | MVP-PRV-07 | 每条内置密钥规则至少有 2 个应命中和 2 个不应命中的样本 | 单元 | FR-PRV-07 | M1 |
-| MVP-STO-01 | 两个进程同时触发迁移 → 一个执行，另一个等待或返回退出码 6；迁移前的备份可以打开，内容一致 | 集成 | FR-STO-01 | M0 |
-| MVP-STO-02 | 旧程序打开更新版本的 schema → 退出码 6，不做任何写入 | 集成 | FR-STO-02 | M0 |
+| MVP-PRV-08 | 项目设置 `excerpt_storage = hash_only` → 提交含片段的提案后，`source_refs.excerpt` 为 NULL，`excerpt_sha256` 和校验结果照常写入；对数据目录做字节搜索，找不到片段原文 | 集成 | FR-PRV-08 | M1 |
+| MVP-PRV-09 | 对所有人类可读输出的 golden 文件做静态检查：`evidence_grade = observed` 时，不出现 snapshot-verified / snapshot verified / "快照已验证"等措辞（CLI 在 M2 检查，Dashboard 在 M5 检查） | 单元 + UI | FR-PRV-09 | M2 / M5 |
+| MVP-STO-01 | 两个进程同时触发迁移 → 一个执行，另一个等待或返回退出码 6；迁移前的备份可以打开，内容一致；锁由操作系统持有，持有锁的进程崩溃后不会阻塞其他进程 | 集成 | FR-STO-01 | M0 |
+| MVP-STO-02 | 旧程序打开更新版本的 schema（包括恢复的 `VACUUM INTO` 备份、崩溃遗留的 WAL），或不满足 `min_binary_version`（包括无法解析的值）→ 退出码 6。Specmetry 不修改 schema、业务数据、事实、`seq` 或任何已提交数据，不改写或删除已有的数据库、WAL、SHM 文件，不执行 checkpoint，不绕过版本检查；无法确定版本时一律拒绝，不判为兼容。Specmetry 自身**只允许两种文件副作用**（产品负责人批准，2026-10-13）：① 数据目录中还没有协调文件时，创建空的、权限符合 architecture §11.1、拒绝后不被持有的 `.migrate.lock`；② 仅当另一个 SQLite 进程在版本检查期间并发关闭数据库、删除了 `-wal` / `-shm` 时，原生只读连接新建的空 `-wal` / `-shm`，权限符合同一要求。外部进程自己造成的文件变化不算 Specmetry 的副作用；这两项例外不扩大为一般性的文件修改许可，也不放宽版本保护或数据完整性约束。没有外部竞争操作、且协调文件已存在时，拒绝不改变任何文件。已打开的连接在其他进程升级 schema 或提高 `min_binary_version` 之后写入 → 退出码 6，写入回调不执行，事实和 `seq` 不变；打开过程与另一进程的升级并发时，升级等待打开完成，或旧程序在上述限度内拒绝，不允许在恢复或合并新数据库之后才拒绝；旧进程此后关闭最后一个连接时，升级后的数据库保持完整 | 集成 | FR-STO-02 | M0 |
 | MVP-STO-03 | 合成一个会在中途失败的迁移 → 整体回滚，数据库不变 | 集成 | FR-STO-01 | M0 |
 | MVP-STO-04 | 多个进程并发写入 → `seq` 严格递增、没有重复 | 集成 | FR-STO-05 | M0 |
 | MVP-STO-05 | `[P1]` `backup create` 和 `backup restore`；恢复后墓碑生效 | 集成 | FR-STO-04 | M2 |
+| MVP-STO-06 | 对带只追加触发器的表执行 UPDATE、DELETE、`INSERT OR REPLACE` / `REPLACE INTO`（主键冲突、UNIQUE 冲突）、建表时声明的 `ON CONFLICT REPLACE`、UPSERT → 全部被中止，原记录完整保留；连接池新建的每个连接都开启 `recursive_triggers`，缺失时写事务拒绝执行；生产代码和迁移中不出现 REPLACE 冲突处理（静态检查） | 集成 | FR-STO-05 | M0 |
+| MVP-STO-07 | `doctor` 是非破坏性诊断：不执行 SQL 写入、迁移、恢复或 checkpoint；用 SQLite 只读连接读取，只在实测确认不修改文件的状态下进行（`-wal` 与 `-shm` 都存在；没有辅助文件的回滚日志模式数据库）；无法保证一致读取时（缺少 `-wal` 与 `-shm`、只有其一、存在回滚日志、另一程序持有写锁、读取期间文件变化）报告版本未知，不报告版本或正常；进行中的事务（WAL 模式或回滚日志模式）未提交的数据永不被报告；没有外部竞争操作时，检查前后数据库、WAL、SHM 的内容和目录项完全一致。**受限的已知行为**（与 MVP-STO-02 的例外 ② 相同，产品负责人批准）：另一个 SQLite 进程在检查期间并发关闭数据库并删除 `-wal`、`-shm` 时，原生只读连接可能新建空的 `-wal` / `-shm`（权限符合安全契约）；此时必须报告版本未知，主数据库、业务数据和已有文件内容不变。命令帮助和文档说明 `doctor` 不提供取证级的绝对只读保证。打开数据库前的版本检查使用同一读取方式，同样不报告未提交数据，它的文件副作用见 MVP-STO-02 | 集成 | FR-STO-02、NFR-09 | M0 |
 
 ### 2.15 平台（PLT）
 
@@ -307,7 +312,7 @@
 | **CX-05** | **只确认了部分基准**（审查反例 3） | 提取 8 条需求，只确认 1 条并验收，没有范围确认 | 交付状态为 `not_assessed`（`NO_SCOPE`）；**绝不**为 `ready`。确认范围时 `pending_items_excluded` 与实际不符 → 退出码 5；范围为空 → 退出码 2；明确确认"范围只包含这 1 条，排除 7 条待审条目"之后，才可能得到 `ready`。 | M2 |
 | **CX-06** | 范围全部豁免 | 范围内的唯一一个 AC 被豁免 | `not_assessed`（`ALL_WAIVED`） | M2 |
 | **CX-07** | **父需求实质变更**（审查反例 4） | 需求的全部 AC 已验收，交付状态为 `ready` → 需求以 `material` 方式修订，审核时选择 `defer` | 所有 AC 为 `needs_reverification`（`parent_revised`），差距中有 `PARENT_REVISED`，交付状态不是 `ready`。之后 `reaffirm` 其中一个 → 该 AC 恢复为 `accepted`（快照没变）；`retire` 另一个 → 移出；新增的 AC → `in_progress`。 | M2 |
-| **CX-08** | **在过期的页面上提交验收**（codex-001 反例 5、codex-002 B2） | 页面甲读取 AC 详情（rev 1，证据 E1，快照 S1，`current_decision_id = null`）之后，分别发生：(a) AC 被修订为 rev 2；(b) 在 S1 上又执行了一次，得到 E2；(c) 目标前进到 S2；(d) 父需求被修订；**(e) 页面乙对同一快照、同一 AC 作出拒收（D1）** | 五种情况下，页面甲用旧的值（(e) 中为 `seen_decision_id = null`）提交接受 → CLI 返回退出码 5，API 返回 409，**不写入**；(e) 中拒收保持有效，`error.current` 给出 D1。**(f)** 客户端不会自动重试；页面甲重新读取后，携带 `seen_decision_id = D1` 明确改判为接受 → 成功，三条决定的历史完整保留。UI 部分在 M5 验证。 | M2 / M5 |
+| **CX-08** | **在过期的页面上提交验收**（codex-001 反例 5、codex-002 B2） | 页面甲读取 AC 详情（rev 1，证据 E1，快照 S1，`current_decision_id = null`）之后，分别发生：(a) AC 被修订为 rev 2；(b) 在 S1 上又执行了一次，得到 E2；(c) 目标前进到 S2；(d) 父需求被修订；**(e) 页面乙对同一快照、同一 AC 作出拒收（D1）** | 五种情况下，页面甲用旧的值（(e) 中为 `seen_decision_id = null`）提交接受 → CLI 返回退出码 5，API 返回 409，**不写入**；(e) 中拒收保持有效，`error.current` 给出 D1。**(f)** 客户端不会自动重试；页面甲重新读取后，携带 `seen_decision_id = D1` 明确改判为接受 → 成功，写入 D2。从没有决定开始，最终**恰好有两条决定**：D1（拒收）和 D2（接受，`seen_decision_id = D1`）。那次被拒绝的过期接受不留下任何决定记录。UI 部分在 M5 验证。 | M2 / M5 |
 | **CX-09** | **同一毫秒的事实**（审查反例 6） | 把时钟固定，让两次执行（先 `fail` 后 `pass`）的时间戳相同；再把时钟回拨，让后发生的拒收时间戳更早 | 先后顺序只由 `seq` 决定：`V` 取 `seq` 更大的那次执行；拒收是否生效，同样按 `seq` 判断。结果与时间戳无关。 | M2 |
 | **CX-10** | **局部 audit**（审查反例 7） | 只对 REQ-001 执行 `audit`（`audit_scope = requirements`） | `inventory_coverage < 1`；`init_progress` 不是 `inventoried`；其他 AC 的进度为 `unknown`；出现 `INVENTORY_INCOMPLETE` 警告；交付判定不受盘点影响（仍然需要快照证据） | M2 |
 | **CX-11** | **`purge` 之后恢复备份**（审查反例 8） | 有项目 A 和 B；迁移时生成备份 X → `purge` A，并选择保留备份 → 手动把 X 复制回数据库位置 → 执行任意命令 | 打开数据库时，墓碑生效，A 被自动删除；B 保持不变；日志中有记录。如果 X 的 schema 版本较旧，打开时会触发迁移：墓碑在迁移**之前**执行，因此新生成的迁移前备份中也找不到 A 的数据（用 canary 断言）。如果 `purge` 时选择默认处理方式，X 会被删除。 | M2 |
@@ -324,8 +329,8 @@
 | **CX-22** | 目标无法解析，或者不是 git 项目 | 删除目标分支；或者在非 git 目录中执行 | `not_assessed`，**绝不**为 `ready` | M2 |
 | **CX-24** | marker 让工作区变脏 | 不写 `.git/info/exclude`（`--no-exclude`，或者 exclude 文件只读）→ 在主 worktree 中运行检查；另外，在 `.claude/settings.local.json` 没有被 git 忽略的仓库中执行项目级 `setup` | 未跟踪的 `.specmetry/project.json` 不影响 `tree_state`，执行仍然合格；项目级 `setup` 被拒绝，并建议改用用户级安装 | M2 / M3 |
 | **CX-25** | Agent 试图不经返工解除拒收 | (a) 人在 `S1` 上拒收 AC → Agent 在同一提交上再次执行 `check run` 并通过；(b) 在拒收**之前**，提交 `S2` 上已经有一条合格通过，之后目标前进到 `S2`，但没有重新执行检查 | (a)(b) 都仍然是 `rejected`，交付状态不是 `ready`：(b) 中那条通过的 `seq` 小于拒收的 `seq`。之后在 `S2` 上重新执行检查并通过 → `ready_for_review`（`rework_submitted`）。人重新读取后，在 `S1` 上明确改判为接受 → `accepted`。 | M2 |
-| **CX-26** | **检查期间修改源码，然后恢复**（codex-002 B1） | 检查脚本先改写一个受跟踪的文件，让测试读到改写后的内容并通过，然后用 `git checkout -- <file>` 恢复；开始和结束时工作区都干净，HEAD 都是 A | 这次执行记为 `observed`，合格（观测级无法发现中途变化，这是已声明的边界）。系统**绝不**：把它记为 `snapshot_isolated`；据此沿用其他快照上的验收（AC 为 `ready_for_review`，原因码 `observed_evidence`）；在没有确认 `observed_evidence` 的情况下接受验收；在输出中称其为"快照已验证"。交付判定的 `evidence_grade` 为 `observed`。M7 追加：以 `--isolation required` 执行时，改写会因为只读而失败，或者在执行后的树比对中被发现（`context_changed`）；无论哪种情况，都不会产生隔离级的通过。 | M2（M7 追加） |
-| **CX-27** | **检查期间 HEAD 从 A 切到 B 再切回 A**（codex-002 B1） | 检查脚本执行 `git checkout B`，运行测试，再 `git checkout A` | 断言与 CX-26 相同：只是观测级，不沿用，必须确认风险，不称为"快照已验证"。HEAD 在结束时没有回到 A 的情况，仍然是 `context_changed`（MVP-EV-09）。M7 追加：隔离级执行在私有快照目录中进行，用户 worktree 的 HEAD 变化不会影响它。 | M2（M7 追加） |
+| **CX-26** | **检查期间修改源码，然后恢复**（codex-002 B1） | **夹具**：范围内只有一条自动化 AC；它在较早的快照 P 上已经以 `normal` 验收；交付目标随后前进到提交 A（A ≠ P），A 上还没有任何执行。**操作**：在 A 上执行检查，检查脚本先改写一个受跟踪的文件，让测试读到改写后的内容并通过，然后用 `git checkout -- <file>` 恢复；开始和结束时工作区都干净，HEAD 都是 A | 这次执行记为 `observed`，合格（观测级无法发现中途变化，这是已声明的边界）。系统**绝不**：把它记为 `snapshot_isolated`；据此沿用 P 上的验收；在没有确认 `observed_evidence` 的情况下接受验收；在输出中称其为"快照已验证"。**人工验收之前**：AC 为 `ready_for_review`（原因码 `observed_evidence`），交付状态为 `ready_for_review`，`evidence_grade` 为 **`none`**（A 上还没有被验收的自动化 AC）；不带 `observed_evidence` 的验收 → 退出码 2。**人确认 `observed_evidence` 并在 A 上 `normal` 验收之后**：AC 为 `accepted`（`direct`，带 `observed_evidence` 标记），交付状态为 `ready`，`evidence_grade` 为 **`observed`**。M7 追加：以 `--isolation required` 执行时，改写会因为只读而失败，或者在执行后的树比对中被发现（`context_changed`）；无论哪种情况，都不会产生隔离级的通过。 | M2（M7 追加） |
+| **CX-27** | **检查期间 HEAD 从 A 切到 B 再切回 A**（codex-002 B1） | **夹具**：与 CX-26 相同（P 上已有验收，目标前进到 A）。**操作**：检查脚本执行 `git checkout B`，运行测试，再 `git checkout A` | 断言与 CX-26 相同：只是观测级，不沿用；人工验收之前为 `ready_for_review`，`evidence_grade = none`；人确认风险并验收之后为 `ready`，`evidence_grade = observed`；不称为"快照已验证"。HEAD 在结束时没有回到 A 的情况，仍然是 `context_changed`（MVP-EV-09）。M7 追加：隔离级执行在私有快照目录中进行，用户 worktree 的 HEAD 变化不会影响它。 | M2（M7 追加） |
 | **CX-28** | **执行环境无法保证源码只读**（codex-002 B1） | (a) MVP 中执行 `check run --isolation required`；(b) M7 中依次模拟：隔离后端不可用；后端只能修改文件权限位（同一用户可以恢复写权限）；执行前的写入探测成功；物化内容与 `S` 的树不一致 | (a)(b) 中的 `required`：不执行，不写入任何 `check_runs`，退出码 6（`isolation_unavailable`，并给出具体原因）。(b) 中的 `auto`：降级为观测级执行，`evidence_grade = observed`，并记录 `isolation_fallback_reason`。任何情况下，都不存在未经验证的 `snapshot_isolated` 记录。 | M2（a）；M7（b） |
 | **CX-23** | Agent 试图通过 Dashboard 代做验收 | Agent 通道执行 `dashboard` | 输出中没有令牌（MVP-UI-14）；Skill 静态检查确认禁止这种做法（MVP-SK-03）。**已知边界**：如果 Agent 读取了仅当前用户可读的运行时文件，它仍然可以调用 API。这一点已在 [architecture.md §5](architecture.md#5-信任边界与操作通道) 中如实声明。 | M5 |
 
@@ -349,7 +354,7 @@
 | 需求组 | 验收项 |
 |---|---|
 | FR-INIT | INIT-01 ~ 11、PRV-01（FR-INIT-07） |
-| FR-SRC | SRC-01 ~ 07、CX-17 |
+| FR-SRC | SRC-01 ~ 08、CX-17 |
 | FR-BL | BL-01 ~ 26、CX-07、CX-14 |
 | FR-TGT | TGT-01 ~ 09、CX-05、CX-06、CX-18（FR-TGT-05）、CX-22（FR-TGT-03）、INIT-09（FR-TGT-03） |
 | FR-WT | WT-01 ~ 05、COL-10、CX-03、CX-04 |
@@ -360,8 +365,8 @@
 | FR-ST | ST-01 ~ 14、CLM-01（FR-ST-07）、CX-09、CX-12（FR-ST-07）、CX-22 |
 | FR-COL | COL-01 ~ 15 |
 | FR-UI | UI-01 ~ 16、CX-08 的 UI 部分（FR-UI-13）、CX-23 |
-| FR-PRV、FR-STO | PRV-01 ~ 07、STO-01 ~ 05、EV-05、EV-11、BL-23、BL-26、CX-11（FR-STO-03）、CX-24 |
+| FR-PRV、FR-STO | PRV-01 ~ 09、STO-01 ~ 07、EV-05、EV-11、BL-23、BL-26、CX-11（FR-STO-03）、CX-24 |
 | FR-SK | SK-01 ~ 08 |
-| NFR | ST-08、UI-04、COL-01、PLT-01 ~ 05、PRV-01 |
+| NFR | ST-08、UI-04、COL-01、PLT-01 ~ 05、PRV-01、STO-07 |
 
 P2 项（FR-EV-07、FR-EV-09、FR-ST-10、FR-ST-11、FR-COL-06、FR-UI-07、FR-UI-08）不在 MVP 中，没有对应的验收项；FR-EV-09（隔离执行器）的验收在 M7 中追加到 CX-26 ~ CX-28 和 MVP-ACC-09。

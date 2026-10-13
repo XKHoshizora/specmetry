@@ -1,7 +1,7 @@
 # Codex 审查意见处理记录
 
-> 状态：2026-10-13 · 对应设计版本 Draft v0.3
-> 原始审查：[reviews/codex-review-001.md](reviews/codex-review-001.md)（第一轮，§1 ~ §4）、[reviews/codex-review-002.md](reviews/codex-review-002.md)（冻结审查，§5）
+> 状态：2026-10-14 · 对应设计版本 Draft v0.3
+> 原始审查：[reviews/codex-review-001.md](reviews/codex-review-001.md)（第一轮，§1 ~ §4）、[reviews/codex-review-002.md](reviews/codex-review-002.md)（冻结审查，§5）、[reviews/codex-review-003.md](reviews/codex-review-003.md)（最终设计审查，§6）、[reviews/codex-review-004.md](reviews/codex-review-004.md)（M0 代码审查，§7）、[reviews/codex-review-005.md](reviews/codex-review-005.md)（M0 第二次代码审查，§8）、[reviews/codex-review-006.md](reviews/codex-review-006.md)（M0 第三次代码审查，§9）、[reviews/codex-review-007.md](reviews/codex-review-007.md)（M0 最终定向复审，§10）、[reviews/codex-review-008.md](reviews/codex-review-008.md)（M0 代码审查 GO，§11）
 > 处理原则：逐条分析，不默认全盘接受；只要会改变核心模型或交换协议，就在本轮设计清楚；只涉及实现细节的，安排在对应模块开工前关闭。不用"开发时再说"来掩盖当前的数据模型矛盾。
 
 **状态术语**（本文和 implementation-plan 统一使用）：
@@ -9,33 +9,33 @@
 | 维度 | 取值 | 含义 |
 |---|---|---|
 | 设计状态 | 未解决 | 设计中还存在已知缺口 |
-| | **已解决（待冻结复审）** | 文档、schema 和验收项已经修订，但还没有经过审查方确认 |
+| | 已解决（待冻结复审） | 文档、schema 和验收项已经修订，但还没有经过审查方确认 |
 | | **已冻结** | 审查方复审通过，契约冻结；之后只能通过变更流程修改 |
 | 实现状态 | 未开始 / 进行中 | — |
 | | **已验证** | 对应的验收项和 CX 反例已经在实现中通过 |
 
-**当前总体状态**：所有条目的设计状态都是"已解决（待冻结复审）"，codex-review-002 认定的缺口 B1、B2 也已在 v0.3 中解决。**没有任何条目处于"已冻结"或"已验证"**：冻结需要审查方复审 B1、B2 的修订；验证需要等到对应里程碑实现完成。
+**当前总体状态**（2026-10-14 更新）：codex-review-003 结论为 **GO**，BLOCKER 为 0。本文所有条目的设计状态均为**已冻结**（包括 codex-review-003 要求的两处同步修正，见 §6）；冻结后的修改必须走 implementation-plan §1 的变更流程。**没有任何条目整体处于"已验证"**：验证需要等到对应里程碑实现完成，并通过验收项和 CX 反例；目前只有 #6、#12 中属于 M0 的验收项已验证（§12）。M0 的代码审查经过五轮（codex-review-004 ~ 008），第五轮（codex-review-008）结论为 **GO**，BLOCKER 为 0（§11）；GitHub Actions 三平台 CI 通过后，产品负责人于 2026-10-14 正式验收 M0（§12）。
 
 ## 1. 总览（codex-review-001）
 
 | # | 问题 | 结论 | 设计状态 | 实现验证（里程碑） | 主要验收项 |
 |---|---|---|---|---|---|
-| 1 | 隐私约束与采集设计冲突 | **采纳**（有调整） | 已解决（待冻结复审） | 未开始；M2、M3、M6 | MVP-EV-05、EV-11、EV-12、COL-05、PRV-02、BL-21 |
+| 1 | 隐私约束与采集设计冲突 | **采纳**（有调整） | 已冻结 | 未开始；M2、M3、M6 | MVP-EV-05、EV-11、EV-12、COL-05、PRV-02、BL-21 |
 | 2 | 验收没有绑定交付代码 | **采纳**（不做工作区指纹） | v0.2 解决主体；**剩余缺口 B1 已在 v0.3 解决**，待冻结复审 | 未开始；M2（观测级）、M7（隔离级） | CX-01、CX-02、CX-19 ~ 22、CX-26 ~ 28、ACC-09 |
-| 3 | worktree 上下文没有隔离 | **采纳** | 已解决（待冻结复审） | 未开始；M1、M2 | WT-01 ~ 05、CX-03、CX-04 |
-| 4 | 部分确认或空范围也可能 `ready` | **采纳** | 已解决（待冻结复审） | 未开始；M1、M2 | TGT-01 ~ 09、CX-05、CX-06、CX-18 |
-| 5 | 需求语义变化可以绕过 AC 失效 | **采纳** | 已解决（待冻结复审） | 未开始；M1、M2 | BL-18 ~ 20、CX-07 |
-| 6 | 缺少读取版本前置条件；时间戳排序有歧义 | **采纳**（范围扩大到所有关键写入） | v0.2 解决主体；**剩余缺口 B2 已在 v0.3 解决**，待冻结复审 | 未开始；M0、M1、M2、M5 | STO-04、BL-03、BL-10、TGT-05、ACC-11、CX-08、CX-09、CX-13 ~ 15 |
-| 7 | 检查成功的含义与验收前置条件不明确 | **部分采纳** | 已解决（待冻结复审） | 未开始；M2 | ACC-04 ~ 06、ACC-09、ACC-10、CX-19 ~ 21 |
-| 8 | Agent 可以自行消除来源告警 | **采纳** | 已解决（待冻结复审） | 未开始；M1 | SRC-03、SRC-04、CX-17 |
-| 9 | "盘点完成"的定义过弱 | **采纳**（不作为交付前置条件） | 已解决（待冻结复审） | 未开始；M2、M4 | INV-01 ~ 04、CX-10、COL-11、SK-06 |
+| 3 | worktree 上下文没有隔离 | **采纳** | 已冻结 | 未开始；M1、M2 | WT-01 ~ 05、CX-03、CX-04 |
+| 4 | 部分确认或空范围也可能 `ready` | **采纳** | 已冻结 | 未开始；M1、M2 | TGT-01 ~ 09、CX-05、CX-06、CX-18 |
+| 5 | 需求语义变化可以绕过 AC 失效 | **采纳** | 已冻结 | 未开始；M1、M2 | BL-18 ~ 20、CX-07 |
+| 6 | 缺少读取版本前置条件；时间戳排序有歧义 | **采纳**（范围扩大到所有关键写入） | v0.2 解决主体；**剩余缺口 B2 已在 v0.3 解决**，待冻结复审 | M0 部分已验证（STO-04，§12）；M1、M2、M5 未开始 | STO-04、BL-03、BL-10、TGT-05、ACC-11、CX-08、CX-09、CX-13 ~ 15 |
+| 7 | 检查成功的含义与验收前置条件不明确 | **部分采纳** | 已冻结 | 未开始；M2 | ACC-04 ~ 06、ACC-09、ACC-10、CX-19 ~ 21 |
+| 8 | Agent 可以自行消除来源告警 | **采纳** | 已冻结 | 未开始；M1 | SRC-03、SRC-04、CX-17 |
+| 9 | "盘点完成"的定义过弱 | **采纳**（不作为交付前置条件） | 已冻结 | 未开始；M2、M4 | INV-01 ~ 04、CX-10、COL-11、SK-06 |
 | 10 | Hook 规格与运行时有缺口 | **采纳**（事件细节在 M3 前核实） | 模型已解决；细节在 M3 开工前确定 | 未开始；M3 | COL-01 ~ 15、ACC-03 |
 | 11 | 跨 Agent 兼容性 | **部分采纳** | 措辞与矩阵结构已解决；其他 Agent 的核实在 M4 开工前完成 | 未开始；M3、M4、M5 | SK-03、UI-14、CX-23、COL-15 |
-| 12 | 本地数据生命周期没有闭合 | **采纳**（不承诺物理擦除） | 模型已解决；ACL 细节在 M0 开工前、恢复命令在 M2 开工前确定 | 未开始；M0、M2 | PRV-03、PRV-05、PRV-06、STO-01 ~ 05、CX-11 |
-| 中-1 | 引用的历史归属 | **采纳** | 已解决（待冻结复审） | 未开始；M1、M5 | BL-04、BL-22、UI-06 |
-| 中-2 | 可选项与里程碑退出条件矛盾 | **采纳** | 已解决（待冻结复审） | — | 结构调整 |
-| 中-3 | 离线承诺没有区分边界 | **采纳** | 已解决（待冻结复审） | 未开始；M6 | PRV-01 |
-| 结论段 | 八类反例测试 | **采纳**，并补充"自述完成但缺乏有效证据"等反例 | 已解决（待冻结复审） | 未开始；M1 ~ M5 | CX-01 ~ CX-28 |
+| 12 | 本地数据生命周期没有闭合 | **采纳**（不承诺物理擦除） | 模型已解决；ACL 细节在 M0 开工前、恢复命令在 M2 开工前确定 | M0 部分已验证（PRV-05、PRV-06、STO-01 ~ 04，§12）；M2 未开始 | PRV-03、PRV-05、PRV-06、STO-01 ~ 05、CX-11 |
+| 中-1 | 引用的历史归属 | **采纳** | 已冻结 | 未开始；M1、M5 | BL-04、BL-22、UI-06 |
+| 中-2 | 可选项与里程碑退出条件矛盾 | **采纳** | 已冻结 | — | 结构调整 |
+| 中-3 | 离线承诺没有区分边界 | **采纳** | 已冻结 | 未开始；M6 | PRV-01 |
+| 结论段 | 八类反例测试 | **采纳**，并补充"自述完成但缺乏有效证据"等反例 | 已冻结 | 未开始；M1 ~ M5 | CX-01 ~ CX-28 |
 
 修改的文档：`data-model.md`（重写）、`architecture.md`（重写）、`prd.md`（重写）、`mvp.md`（重写）、`acceptance-criteria.md`（重写）、`vision.md`、`AGENTS.md`；新增 `schemas/*.json`（14 个）、`schemas/examples/`（20 个合法示例，53 条 schema 反例）、`implementation-plan.md` 和本文。
 
@@ -381,11 +381,11 @@ v0.2 初稿完成后，由一个独立的审查代理通读全部文档和 schem
 
 | 编号 | 问题 | 结论 | 设计状态 | 实现依赖 | 验证 |
 |---|---|---|---|---|---|
-| B1 | 只观测执行前后两端，不能证明检查针对的是所记录的快照 | **采纳**：分级证据 + 收窄保证 | 已解决（待冻结复审） | M2：观测级执行器、证据等级、观测级证据不沿用、风险确认、`--isolation required` 返回退出码 6。M7（MVP 之后）：隔离执行器。 | MVP-EV-13、ACC-09、ACC-10、CX-26 ~ 28 |
-| B2 | 旧页面可以覆盖刚发生的人工拒收 | **采纳** | 已解决（待冻结复审） | M2：CLI 与写事务；M5：API 与界面 | MVP-ACC-08、ACC-11、UI-08、UI-16、CX-08 (e)(f) |
-| NB-1 | 新的通过证据解除拒收时，没有要求发生在拒收之后 | **采纳**：增加 `V.seq > D.seq` | 已解决（待冻结复审） | M2 | CX-25 (b) |
-| NB-2 | Claim 对交付状态影响的表述不一致 | **采纳**：统一表述 | 已解决（待冻结复审） | — | data-model §2；不变量 #3 |
-| NB-3 | `check run --json` 的输出流不明确 | **采纳**：stdout 只输出 JSON，检查输出转到 stderr | 已解决（待冻结复审） | M2 | MVP-EV-12 |
+| B1 | 只观测执行前后两端，不能证明检查针对的是所记录的快照 | **采纳**：分级证据 + 收窄保证 | 已冻结 | M2：观测级执行器、证据等级、观测级证据不沿用、风险确认、`--isolation required` 返回退出码 6。M7（MVP 之后）：隔离执行器。 | MVP-EV-13、ACC-09、ACC-10、CX-26 ~ 28 |
+| B2 | 旧页面可以覆盖刚发生的人工拒收 | **采纳** | 已冻结 | M2：CLI 与写事务；M5：API 与界面 | MVP-ACC-08、ACC-11、UI-08、UI-16、CX-08 (e)(f) |
+| NB-1 | 新的通过证据解除拒收时，没有要求发生在拒收之后 | **采纳**：增加 `V.seq > D.seq` | 已冻结 | M2 | CX-25 (b) |
+| NB-2 | Claim 对交付状态影响的表述不一致 | **采纳**：统一表述 | 已冻结 | — | data-model §2；不变量 #3 |
+| NB-3 | `check run --json` 的输出流不明确 | **采纳**：stdout 只输出 JSON，检查输出转到 stderr | 已冻结 | M2 | MVP-EV-12 |
 
 ### B1：证据与快照的一致性
 
@@ -457,3 +457,329 @@ codex-review-002 列出的 ACCEPTED RISK 全部接受，已经分别写在对应
 ### 修改的文件
 
 `schemas/common.v1`、`decision.v1`、`status.v1`、`check-run.v1`；`schemas/examples/`（新增 1 个合法示例；更新 5 个合法示例；新增反例 SCH-54 ~ SCH-62）；`docs/data-model.md`、`architecture.md`、`prd.md`、`mvp.md`、`acceptance-criteria.md`、`implementation-plan.md`、本文；`AGENTS.md`。
+
+## 6. 最终审查（codex-review-003）与产品决策记录
+
+**审查结论**：GO，BLOCKER 为 0。B1、B2 的核心设计关闭，设计冻结。
+
+**审查要求的同步修正**（已完成）：
+
+| 事项 | 修正 | 验证 |
+|---|---|---|
+| `gaps.v1` 缺少证据等级 | 新增必填的 `evidence_grade`（与 `status.v1` 共用 `common.v1#/$defs/deliveryEvidenceGrade`）；新增合法示例 `gaps.ready-observed.json`，以及反例 SCH-63、SCH-64 | Schema 自检通过 |
+| CX-08 的预期 | 从没有决定开始，最终恰好有两条决定（D1 拒收、D2 接受）；被拒绝的过期接受不留下记录 | 实现阶段：M2 / M5 |
+| CX-26 / CX-27 的夹具与预期 | 明确了"较早的快照 P 上已经有验收"这一前置条件；人工验收之前 `evidence_grade = none`，人确认风险并验收之后为 `observed` | 实现阶段：M2 |
+| 实现提示：并发比较 | data-model §7.1 写明：必须以 `BEGIN IMMEDIATE` 先取得写锁，再比较；MVP-ACC-11 用两个独立连接验证 | 实现阶段：M2 |
+
+**产品与技术决策**（2026-10-13，产品负责人确认）：
+
+| 决策 | 结论 | 记录位置 |
+|---|---|---|
+| PD-22 | 批准：MVP 只提供观测级证据，隔离执行器放在 MVP 之后 | prd §9 |
+| PD-20 | 批准建议的 C1 内容，并附加以下约束：允许保存片段不等于允许自动持久化客户文档原文；C1 默认只存在本地，未来同步必须独立授权；`observed` 不得被描述为 snapshot-verified。由此新增 FR-SRC-07、FR-PRV-08、FR-PRV-09 和对应验收项（M1、M2、M5 实现）。 | prd §9、architecture §10.1 和 §10.7 |
+| G0：TD-02、TD-04、TD-10、TD-16 | 按建议默认确认；TD-04 的 spike 已通过 | architecture §16 |
+| TD-22 | 当前用户 + SYSTEM | architecture §11.1、§16 |
+
+按照要求，这些补充没有引发新的整体架构审查。
+
+## 7. M0 代码审查（codex-review-004）的处理
+
+**审查结论**：NO-GO，4 项 BLOCKER、4 项 NON-BLOCKER。审查针对提交 `ae195b9`、`23c4479`。
+
+**处理方式**：先把审查中的复现条件写成自动化测试，确认它们在原代码上失败，再做最小修改，然后运行 M0 的全部检查。没有修改冻结的产品目标，也没有删除或放宽任何验收约束；验收项只增不减（MVP-PRV-05、PRV-06、STO-02、EV-07 的描述加严，新增 MVP-STO-06、STO-07 并纳入 M0 退出条件）。
+
+**实现状态**：已修复，本地验证通过（Windows 原生；Linux 通过 WSL 运行交叉编译的测试），**待 Codex 复审**。macOS 只在 CI 中验证，CI 尚未运行。
+
+### 阻塞项
+
+| 编号 | 根因 | 修复 | 反例测试 |
+|---|---|---|---|
+| B1 已有目录或数据库权限不安全时仍然写入 | `Ensure` 对已存在的目录直接返回；Windows 上的文件保护依赖继承，没有任何写入前检查；`doctor` 只能事后发现 | `Ensure` 对已存在的目录做完整检查，不满足即在写入前拒绝（退出码 6）；检查范围是目录本身和其中所有条目。新增检查：符号链接与联接（含数据目录本身）、Windows 属主与可继承性、macOS 扩展 ACL（architecture §11.1） | `TestOpenRefusesInsecureExistingDirectory`、`...InsecureExistingDatabase`、`...InsecureLeftoverWAL`、`...SymlinkedDatabase`；datadir 包内对目录、文件、链接、联接、不可继承 DACL、macOS ACL 的测试。全部断言拒绝后数据目录逐字节不变 |
+| B2 `doctor` 隐式改写数据库 | `query_only` 只限制 SQL，不限制 SQLite 的恢复与 checkpoint；遗留的 WAL 被合并并删除 | 新的只读快照读取：只读打开文件，在内存中按 SQLite 规则应用已提交的 WAL 帧，经只读 VFS 查询，读后校验并重试；无法只读读取时报告限制（architecture §11.5）。实测了驱动在各种文件状态下的行为，并以表征测试 `TestSQLiteReadOnlyModesModifyFiles` 固定下来（SQLite 自身的只读模式在常见状态下都会改动文件） | `TestInspectLeaves...`（崩溃遗留 WAL 与 SHM、只有 WAL、干净关闭、另一进程正在写入、恢复的备份）、`TestDoctorLeavesCrashedDatabaseUntouched`；与 SQLite 自身恢复结果比较的 `TestSnapshotIgnores...`（损坏或截断的最后一帧、未提交的帧、WAL 重新开始后的旧帧）；`TestSnapshotRetriesWhenDatabaseChanges`、`TestSnapshotGivesUpOnContinuousChanges`、`TestHotJournalIsReportedNotRecovered` |
+| B3 版本保护晚于写入，也不保护已打开的连接 | 连接初始化先执行 `journal_mode(WAL)` 再检查版本；`WriteTx` 不重新检查 | 打开前用只读快照完成版本保护，通过后才建立读写连接（之后在真实连接上再检查一次）；`WriteTx` 在取得写锁后、执行回调前检查 `schema_version`、`min_binary_version` 和 `recursive_triggers`；迁移在排他事务内再确认一次版本；无法解析的 `min_binary_version` 一律拒绝 | `TestOlderBinaryLeavesRestoredNewerBackupUntouched`、`...CrashedNewerDatabaseUntouched`、`TestWriteTxRefusesAfterConcurrentSchemaUpgrade`、`...AfterMinBinaryVersionRaised`、`TestUnreadableMinBinaryVersionIsRefused`；断言回调未执行，事实、`seq` 和文件都不变 |
+| B4 `INSERT OR REPLACE` 绕过只追加约束 | REPLACE 通过删除旧行实现，只有开启 `recursive_triggers` 才触发删除触发器；驱动默认关闭 | 每个连接通过 DSN 开启 `recursive_triggers`（连接池新建的连接同样适用），打开和每次写事务都确认；生产代码和迁移禁止 REPLACE 冲突处理，由静态测试检查 | `TestAppendOnlyRejectsReplace`（主键冲突、UNIQUE 冲突、`REPLACE INTO`、UPSERT、`UPDATE OR REPLACE`）、`...DeclaredReplaceConflict`、`TestEveryPoolConnectionEnablesRecursiveTriggers`、`TestWriteTxRefusesConnectionWithoutRecursiveTriggers`、`TestProductionSQLNeverUsesReplace` |
+
+### 非阻塞项
+
+| 编号 | 处理 | 状态 |
+|---|---|---|
+| N1 墓碑清理的崩溃恢复与外键顺序 | 删除时延迟外键检查；`projects` 按 `id` 删除；整理前写入标记文件，崩溃后下次打开时完成整理（architecture §11.4）。M1 建表约束写入 data-model §1.1，并由 `TestEveryTableHasProjectID` 对全部迁移强制；同时为 `scope_items` 补上 `project_id` | 已修复；完整的 `purge` 命令仍在 M2 实现 |
+| N2 非法墓碑测试是假阳性 | 用相同的迁移集合重新打开，断言错误来自非法 `project_id`，且数据目录不变；墓碑文件改为在写入任何数据之前校验 | 已修复 |
+| N3 `doctor` 忽略 `min_binary_version` | `doctor` 复用打开数据库时的版本保护规则 | 已修复（`TestDoctorReportsMinBinaryVersion`） |
+| N4 公开文档包含本机绝对路径 | 外部审查原文中的链接目标改为仓库相对路径，文字内容不变；CI 和 `scripts/check.sh` 增加检查，Markdown 链接中不得出现本机绝对路径 | 已修复 |
+
+### 其他发现
+
+- **Linux 上的 lint 失败**：复核三平台时发现，`perm_unix.go` 对目录 `chmod 0700` 会被 gosec（G302）报告，而 CI 的 lint 任务运行在 Linux 上，M0 原提交的首次 CI 会因此失败。目录需要执行位，`0700` 是正确的；已加注说明并排除。现在对 Windows、Linux、macOS 三个目标分别运行 golangci-lint，结果均为 0。
+- **测试本身的有效性**：对 WAL 解析做了变异测试（关闭校验和、关闭盐值与校验和、应用未提交的帧、关闭读后校验），确认对应的测试会失败。只关闭盐值检查时测试仍通过，因为累积校验和已经能拒绝旧帧；盐值检查与 SQLite 保持一致，作为第二道检查保留。
+
+### 尚未验证
+
+- MVP-PLT-01：GitHub Actions 三平台 CI 尚未运行（需要推送）。
+- macOS：权限、ACL 检测（`TestDarwinCheckReportsACL`）和全部测试只在 CI 中运行；本地只做了交叉编译和 vet、lint。
+- Linux 上的 race detector：本机没有 C 编译器，只在 CI 中运行。
+- 只读检查不加锁；它保证不修改文件，读到的是某一时刻已提交的一致状态。另一个进程在检查期间持续写入时会重试，仍然失败则报告限制。
+- 残余竞态：只读快照通过版本检查之后、建立读写连接之前，如果另一个进程恰好把数据库升级到更新的版本，读写连接上的再次检查会拒绝打开；但如果这时本进程是最后一个连接，关闭连接时 SQLite 会把对方已提交的 WAL 帧 checkpoint 进数据库。逻辑内容不变，文件字节会变化。驱动的公开接口没有提供关闭时不做 checkpoint 的设置（`SQLITE_DBCONFIG_NO_CKPT_ON_CLOSE`），因此记录为已知边界。
+
+## 8. M0 第二次代码审查（codex-review-005）的处理
+
+**审查结论**：NO-GO。B4 关闭；B1、B2 未关闭，B3 部分修复仍阻塞；N1 部分修复；N2 ~ N4 关闭。审查针对提交 `9fcda14`。
+
+**处理方式**：先把审查中的三个反例写成通过公开调用路径（`sqlite.Open`、`sqlite.Inspect`、`specmetry doctor`）的自动化测试，确认它们在 `9fcda14` 上失败；然后**删除**第二轮自行实现的 WAL 快照读取器，改用 SQLite 原生的读取与锁；最后运行全部检查。B4 的实现与测试未改动；N2 ~ N4 未改动。
+
+### 阻塞项
+
+| 编号 | 根因 | 最终解决方式 | 反例测试（修复前失败，修复后通过） |
+|---|---|---|---|
+| B1 路径替换 | 只检查了数据目录本身，之后按路径重新访问；能写入上级目录的其他用户可以在检查之后把数据目录换成链接 | 从根目录到数据目录逐级检查（Unix 按内核方式跟随路径中的链接）：每一级目录只能由当前用户或 root / 管理员改动，否则在创建或写入任何内容之前拒绝。MVP 对这类位置保守拒绝，不做防御（architecture §11.1） | Linux 真实跨 UID：受害者 uid 4242、攻击者 uid 65534 不断把数据目录换成指向自己数据库的链接，3 秒内的每次打开都被拒绝，攻击者目录中找不到 canary（修复前 canary 出现在攻击者的 WAL 中）；上级目录属于其他用户时拒绝；安全父目录和 sticky 父目录下，攻击者的改名被内核拒绝且 specmetry 正常工作。Windows：上级目录授予 Everyone 完全控制、DELETE 或 FILE_DELETE_CHILD 时拒绝，路径中有联接时拒绝 |
+| B2 读到未提交数据 | 自行实现的读取器不持有 SQLite 的锁，无法识别读取期间开始、尚未提交的回滚日志事务 | 删除该读取器。改为 SQLite 只读连接（`mode=ro`、`readonly_shm=1`），只在实测确认不修改文件的状态下读取，由 SQLite 的锁和事务隔离保证只读到已提交的数据；其他状态报告版本未知。另外让每个连接保留 WAL 文件（`SQLITE_FCNTL_PERSIST_WAL`，WAL 在关闭时截断为 0 字节），使 specmetry 关闭后的数据库始终处于可读状态（architecture §11.5） | 回滚日志模式的进行中事务把 `schema_version = 9` 写进主库（日志在内存中，没有 `-journal` 文件）：修复前读取器返回 9，修复后为版本未知（SQLITE_BUSY）。WAL 模式的进行中事务：只报告已提交的版本。各文件状态下 `Inspect` 与 `doctor` 前后目录逐字节一致 |
+| B3 打开与升级之间的竞态 | 只读预检与读写连接之间没有协调；升级可以在这个窗口内发生，旧程序随后在读写连接上才发现不兼容，关闭时把新数据库合并 | 把 `.migrate.lock` 改为操作系统排他锁（Unix `flock`，Windows `LockFileEx`），并把整个打开过程（只读版本检查、建立读写连接、墓碑、迁移）放进锁内。升级只能在锁内进行，所以会等旧程序打开完成；旧程序打开后的写入由 `WriteTx` 的复查拒绝。锁由操作系统持有，进程崩溃时自动释放 | 在旧程序判断兼容之后、建立连接之前暂停它，另一进程尝试升级：修复前升级立即完成，旧程序拒绝时主库从 20 480 字节变为 24 576 字节、WAL 和 SHM 被删除；修复后升级等待旧程序打开完成，旧程序随后的写入被拒绝（回调未执行，`seq` 不变），旧程序关闭最后一个连接后，升级后的数据库完整可用 |
+
+### 新方案为什么更简单可靠
+
+- **一致性交给 SQLite**：不再自行解析 WAL、重建页面、做读后校验和重试；"什么是已提交的数据"由 SQLite 的锁与事务隔离决定，这正是审查指出旧方案无法替代的部分。
+- **不修改文件的保证来自实测的状态表**：只在两类实测零修改的状态下读取，其余一律报告未知；表征测试 `TestReadOnlyConnectionByFileState` 在两个平台上固定驱动的行为。
+- **竞态由一把锁消除**：版本判断、连接建立和迁移在同一个锁内，不再依赖"读后再检查"。操作系统锁还去掉了旧锁文件在崩溃后需要人工删除的运维问题。
+- **代码量**：删除 `snapshot.go`（约 460 行）及其专用测试（约 360 行），新增的只读读取约 170 行、锁约 100 行。
+
+### 删除的实现
+
+- `internal/store/sqlite/snapshot.go`：WAL 解析（文件头、盐值、校验和、提交帧）、页面映像、只读 VFS 接入、读后校验与重试。
+- `internal/store/sqlite/snapshot_test.go`：针对上述解析器的测试（损坏帧、截断帧、未提交帧、WAL 旧代、读取期间变化、持续变化），以及只为它们服务的崩溃辅助进程。其中与解析器无关的两项（墓碑整理的崩溃恢复、兼容程序恢复崩溃数据库）已移到 `tombstone_test.go`、`inspect_test.go`。
+- 旧的 `O_EXCL` 锁文件实现（`acquireMigrateLock`）。
+
+### 与上一轮行为不同之处（未放宽验收）
+
+- `MVP-STO-07` 按审查意见与本轮要求改写："只有 WAL、没有 SHM"等状态下，上一轮报告版本，本轮报告版本未知。审查已确认"无法安全读取时报告限制、保持版本未知"可以接受。
+- 留下的锁文件不再是问题，`doctor` 改为报告"锁是否正被持有"（信息），不再因锁文件存在而报告失败。相应测试按新机制重写：用真实持锁进程验证超时（退出码 6、文件不变），并新增"持锁进程崩溃后不阻塞"。
+- 在 Windows 上，测试使用 `%LOCALAPPDATA%\specmetry-test` 下的目录：本机的 `%TEMP%` 授予了其他本地账户（如编码代理的沙箱账户）修改权限，按 B1 的规则会被拒绝，这是正确行为。
+
+### 产品决策：无法只读确认版本的数据库如何恢复（已确认，PD-23）
+
+**决定**（2026-10-13，产品负责人）：采用方案 B 并调整：恢复是独立命令 `specmetry db recover`（不放进 `doctor`）；普通打开与 `doctor` 保持严格；恢复必须由用户明确授权，并实际检查 schema 版本、`min_binary_version` 和数据库一致性，不能仅凭用户声明；恢复前必须已有一致性备份，不得直接删除 `-wal` / `-shm`，不得绕过版本兼容限制。现在不开发，`3e0b0bc` 保持不变，先完成复审。依赖与排期评估见 [implementation-plan.md §8](implementation-plan.md#8-已决策待排期的功能)。
+
+以下是提交决定时的问题与选项（保留作记录）。
+
+**问题。** 被其他程序以普通方式关闭过的数据库（`-wal`、`-shm` 被删除），或只剩 `-wal` 没有 `-shm` 的数据库，本轮任何版本的 specmetry 都会拒绝打开（退出码 6），以保持 MVP-STO-02 的严格标准。specmetry 自己关闭的数据库不会进入这些状态。最小复现：用 `sqlite3` 命令行打开再退出 `specmetry.db`，随后任何 specmetry 命令都会被拒绝。可选方案：
+
+| 方案 | 做法 | 代价 |
+|---|---|---|
+| A 保持现状（当前实现） | 一律拒绝，错误信息说明原因 | 用其他工具打开过数据库的用户无法继续使用，需要手动处理 |
+| B 增加显式恢复命令 | 例如 `specmetry doctor --recover`：用户确认使用的是最新的 specmetry 后，由它以读写方式打开一次，恢复 WAL 文件 | 新增一个命令；用户确认错误时，旧程序可能合并新数据库的 WAL（逻辑内容不变） |
+| C 对"缺少 `-wal` 与 `-shm`"放宽为"最终状态不变" | 此状态下数据库文件是完整的；用读写连接读取，若不兼容则关闭（SQLite 会删除它临时创建的 `-wal`、`-shm`），数据库字节和目录项最终不变 | 需要把 MVP-STO-02 对这一状态的要求改为"最终状态不变"；读取期间短暂出现辅助文件 |
+
+### NON-BLOCKER
+
+| 编号 | 状态 |
+|---|---|
+| N1 | **部分修复**：崩溃恢复和外键顺序已修复；checkpoint 返回 busy 时仍可能误报整理完成。最晚在 M2 的 `purge` 验收前解决（修复方向见 architecture §11.4） |
+| N2 ~ N4 | 已关闭，本轮未改动 |
+
+### 尚未验证与残余边界
+
+- MVP-PLT-01：GitHub Actions 三平台 CI 尚未运行。
+- macOS：全部测试（包括路径与 ACL 检查）只在 CI 中运行；本地只做了交叉编译、vet、lint。
+- Linux 上的 race detector 只在 CI 中运行。CI 另加一步以 root 运行跨用户测试。
+- Windows 上没有跨用户的真实测试（需要第二个账户）；Windows 的路径规则以 ACL 测试验证。
+- 操作系统层面的竞态边界：路径检查保证的是"其他用户无法改变检查结果"；当前用户本人和 root / 管理员仍可以在检查之后改变目录，属于已声明的信任边界。网络文件系统、绑定挂载等的权限语义不在 MVP 范围内。
+- 检查期间另一程序以普通方式关闭数据库（删除 `-wal`、`-shm`）时，只读连接可能留下空的辅助文件；读取后的检查会发现变化并报告版本未知，但无法撤销。这只涉及非 specmetry 的程序。
+
+## 9. M0 第三次代码审查（codex-review-006）的处理
+
+**审查结论**：NO-GO。B1 关闭，B4 保持关闭；B2 的未提交数据问题和 B3 的原有升级竞态已解决，但严格的文件不变验收分别被 R2、R1 两个反例阻断。审查确认可以保留原生 SQLite、路径检查、操作系统打开锁和写事务复核的整体实现。
+
+### 产品决策（2026-10-13，产品负责人）
+
+对 MVP-STO-02 和 MVP-STO-07 的保证边界做**有限调整**，不再为非核心的文件系统绝对不变性持续增加复杂实现。
+
+| 决策 | 内容 | 理由 |
+|---|---|---|
+| 调整 MVP-STO-02 | 版本不兼容而拒绝时，仍禁止修改 schema、业务数据、事实、`seq` 和已有数据库 / WAL 的内容；**允许**创建权限正确、不含业务数据的协调文件 `.migrate.lock`。该例外只适用于协调文件，不适用于任意辅助文件，也不能用来放宽版本保护或数据完整性约束 | 协调文件是打开锁的载体，不含数据，权限私有；为在锁文件不存在时也做到零副作用而增加的复杂度，与它保护的价值不相称。数据与版本保护不变 |
+| 调整 MVP-STO-07 | `doctor` 定位为非破坏性诊断：不执行 SQL 写入、迁移、恢复或 checkpoint；不把未提交数据当作已提交数据报告；无法保证一致性时报告 Unknown；没有外部竞争操作时保持文件级不变性检查；外部 SQLite 进程并发关闭导致的 WAL / SHM 辅助文件变化列为受限的已知行为；不得借此允许修改主数据库或业务数据；向用户说明它不提供取证级的绝对只读保证 | 驱动的 `mode=ro` 本身允许在目录可写时创建辅助文件，要完全阻止需要受限 VFS 或操作系统访问边界，属于存储层重构；而这一竞态只改变空的辅助文件，不影响数据和诊断结论的正确性（此时报告 Unknown） |
+| PD-23 排期 | `db recover` 在 M2 实现，必须在 M4 自测前完成 | 见 implementation-plan §8.1 |
+
+### 验收契约的前后差异
+
+| 验收项 | 调整前 | 调整后 |
+|---|---|---|
+| MVP-STO-02 | 拒绝时"数据库、WAL、SHM 和目录项都不变"；并发升级时"旧程序拒绝且文件不变" | schema、业务数据、事实、`seq` 和已有数据库 / WAL / SHM 内容不变，不删除文件；**唯一**允许的副作用是创建空、私有、拒绝后不被持有的 `.migrate.lock`（目录修改时间随之变化）；协调文件已存在时拒绝不改变任何文件；并发升级时"旧程序在上述限度内拒绝"。其余（写事务复核、升级等待打开完成、关闭后数据库完整）不变 |
+| MVP-STO-07 | "`doctor` 和打开数据库前的版本检查都只读"；"检查前后数据库、WAL、SHM 的内容和目录项完全一致"（无条件） | `doctor` 是非破坏性诊断（不写 SQL、不迁移、不恢复、不 checkpoint）；未提交数据永不报告、无法一致读取时报告未知（不变）；文件级完全不变只在**没有外部竞争操作时**要求；外部 SQLite 并发关闭时可能新建空的 `-wal` / `-shm`，列为受限的已知行为，此时必须报告未知且主数据库、业务数据、已有文件内容不变；说明不提供取证级保证。打开前的版本检查改由 MVP-STO-02 约束文件副作用 |
+
+### 阻塞项的处理
+
+| 编号 | 处理 | 代码 | 测试 |
+|---|---|---|---|
+| R1 / B3：拒绝不兼容数据库时新建锁文件 | 按调整后的 MVP-STO-02，这是唯一允许的副作用 | 现有代码满足新契约：锁文件由 `CreatePrivateFile` 以私有权限创建、为空，拒绝时释放；**未修改业务代码** | 新增 `TestIncompatibleRefusalMayOnlyCreateCoordinationFile`：审查中的状态（新目录、只有恢复的备份、没有锁文件），按新 schema 和 `min_binary_version` 两种原因各拒绝一次。允许的副作用：只新增空的 `.migrate.lock`（及目录修改时间），权限检查通过，锁未被持有；禁止的修改：数据库字节不变，schema、`min_binary_version`、`seq`、事实不变；锁文件已存在时再次拒绝，目录完全不变 |
+| R2 / B2：外部关闭与只读连接之间的辅助文件创建 | 按调整后的 MVP-STO-07，列为受限的已知行为；打开前检查的同一行为按方案 A 纳入 MVP-STO-02（见下文） | 现有代码满足新契约：此时报告未知，不报告版本，不写 SQL、不 checkpoint；**未修改业务逻辑**。为让审查的跨进程调度反例在仓库内可重复，在只读读取中加入测试钩子 `readOnlyHook`（生产中为空）；`doctor --help` 改为说明它是非破坏性、非取证级的诊断 | 新增 `TestInspectDuringExternalCloseReportsUnknown`（保留审查反例）：判断文件状态之后，真实的独立子进程用普通 SQLite 连接读取并关闭数据库（确认 `-wal`、`-shm` 被删除）。断言：报告未知且版本为空；从外部关闭完成之后起，诊断只新增空的 `-wal` / `-shm`（Windows 两个都新增，Linux 只新增 `-wal`），没有改写或删除任何文件，权限检查通过；数据库中的 schema、`seq`、事实正确 |
+
+### 打开前检查的同一竞态：产品决策（方案 A，已批准）
+
+本轮复核时发现：**普通打开**前的版本检查使用同一只读读取，在相同的外部关闭竞态下同样会新建空的辅助文件。两个平台上的表现：
+
+- Linux：打开拒绝（"读取期间文件变化，无法确认"），新增空的 `-wal`；
+- Windows：SQLite 重新建出了被删除的 `-wal`、`-shm`，存在情况的比较看不出变化，打开按读到的已提交版本判断（不兼容则拒绝），新增空的 `-wal`、`-shm`。
+
+提交决定时的选项：A 把 MVP-STO-07 的外部关闭例外有限扩展到打开前检查；B 改用受限 VFS 或操作系统访问边界（存储层改动）；C 维持现状，作为已知缺陷到 M2 处理。
+
+**决定**（2026-10-13，产品负责人）：**方案 A**。边界：
+
+1. 数据安全与版本保护不变：不修改 schema、业务数据、事实、`seq` 或已提交数据；不绕过 `schema_version`、`min_binary_version` 检查；不执行 checkpoint，不删除有效 WAL 事务，不覆盖已有有效数据；无法可靠判断兼容性时拒绝打开或报告未知。
+2. 文件副作用严格限定：除私有的 `.migrate.lock` 外，只允许外部 SQLite 进程并发关闭期间，原生只读连接产生的必要 `-wal` / `-shm`；新增文件符合本地数据的权限与保密要求；不扩大为一般性的文件修改许可；区分 Specmetry 自身的副作用与外部进程造成的变化；没有外部竞争操作时，继续执行原有的文件不变性要求。
+
+**是否仍有数据完整性、安全或错误版本接受问题**（按要求复核，未发现）：
+
+- 只读连接以只读方式打开数据库文件；SQLite 只在能写数据库时才 checkpoint，只在 checkpoint 成功后才删除 WAL，所以它不能合并、删除或覆盖任何数据。
+- Linux 上竞态被发现，版本未确认，打开拒绝。Windows 上竞态没被发现，但只读连接是在外部关闭之后、持有 SQLite 的锁读取的，读到的是已提交的版本；兼容时打开随后还会在读写连接上再检查一次版本。因此不会接受错误的版本。
+- 新增的辅助文件由 SQLite 按数据库文件的权限创建（Unix 0600；Windows 继承受保护的 DACL），测试用权限检查确认。
+- 可用性：外部关闭本身已使数据库进入 PD-23 的"缺少辅助文件"状态，普通打开会拒绝；Linux 上只读连接留下的空 `-wal` 使它变为"只有其一"，同样拒绝，需要 M2 的 `db recover`。Windows 上留下的空 `-wal`、`-shm` 恰好使数据库回到可读状态。两种情况都没有让数据变得更难恢复。
+
+**验收契约的前后差异**（本次，在 §9 前文调整的基础上）：
+
+| 验收项 | 调整前 | 调整后 |
+|---|---|---|
+| MVP-STO-02 | 唯一允许的副作用是创建 `.migrate.lock`；该例外不适用于 WAL、SHM 等其他辅助文件 | Specmetry 自身只允许两种副作用：① `.migrate.lock`；② 仅在外部 SQLite 进程于版本检查期间并发关闭数据库时，原生只读连接新建的空 `-wal` / `-shm`（权限合规）。增加"无法确定版本时一律拒绝，不判为兼容""不执行 checkpoint""外部进程造成的变化不算 Specmetry 的副作用"；没有外部竞争操作时文件不变的要求保留 |
+| MVP-STO-07 | 外部关闭的已知行为只针对 `doctor`；打开前检查的副作用"以 MVP-STO-02 为准" | 已知行为写明与 MVP-STO-02 的例外 ② 相同，两项契约对同一行为的边界一致 |
+
+**测试**（受控的多进程同步：外部进程在只读读取判断文件状态之后、打开连接之前同步运行完毕，并确认它删除了辅助文件；不依赖固定等待）：
+
+- `TestOpenDuringExternalCloseOnlyAddsEmptyAuxiliaryFiles`：
+  - 不兼容的数据库仍被拒绝（Windows 按已提交的新版本拒绝，Linux 按无法确认拒绝）；
+  - 兼容的数据库不被误判（Windows 读到正确版本后正常打开；Linux 报告无法确认并拒绝）。
+  - 两种情况下都确认：外部关闭之后，Specmetry 只新增空的 `-wal` / `-shm`，权限检查通过；schema、`min_binary_version`、`seq`、事实不变；锁已释放。
+- `TestOpenRefusesWhenVersionIsUnknown`：没有竞态时，"被其他程序关闭"和"只有 `-wal`"两种版本无法确定的状态下，打开一律拒绝，文件完全不变。
+- 无竞争场景的原有文件不变性测试全部保留并通过（如 `TestOlderBinaryLeavesCrashedNewerDatabaseUntouched`、`TestIncompatibleRefusalMayOnlyCreateCoordinationFile`、`TestInspectLeaves...`）。
+
+代码：只修改了 `readonly.go`、`inspect.go`、`store.go` 中不再准确的注释（原文称"不修改任何文件"），没有改动逻辑。
+
+### 非阻塞项
+
+| 编号 | 状态 |
+|---|---|
+| N1 墓碑整理 | 保持**部分修复**，M2 的 `purge` 验收前必须解决（architecture §11.4） |
+| N2 PD-23 排期 | 已同步：prd PD-23、implementation-plan §8.1、M2 的 WP2.10、§3 设计细化截止点 |
+| N3 并发升级测试的启动握手 | 已改进：升级进程在等待打开锁时（测试钩子 `lockWaitHook`，生产中为空）写出信号文件，测试据此确认它确实被锁阻塞，不再依赖固定的 2 秒等待；用"锁总是成功"的变异确认测试会失败 |
+| B1、B4 | 已关闭，本轮未改动 |
+
+### 修改的代码
+
+只有测试钩子和用户可见的说明，没有改动业务逻辑：`readonly.go` 的 `readOnlyHook`、`lock.go` 的 `lockWaitHook`（均在生产中为空），`doctor` 的命令帮助。
+
+### 尚未验证
+
+- MVP-PLT-01：GitHub Actions 三平台 CI 尚未运行。
+- macOS 上的全部测试；Linux race detector；Windows 真实双用户测试。
+
+## 10. M0 最终定向复审（codex-review-007）的处理
+
+**审查结论**：NO-GO，只剩一项 BLOCKER（B2）；B1、B3、B4 已关闭，本轮未改动。审查接受产品负责人批准的方案 A 及其文件副作用边界。验收契约（MVP-STO-02、MVP-STO-07）本轮**没有修改**。
+
+### B2：Windows 上连续外部关闭竞态时 `doctor` 漏报版本未知
+
+**根因**：`doctor` 读取前后只比较数据库文件的存在情况和大小。在 Windows 上，第一次外部关闭竞态之后，只读连接留下空的 `-wal` 和空的 `-shm`。第二次同样的竞态中，外部进程删除这两个文件，只读连接又以相同的文件名、相同的大小（都是 0）重建它们，前后比较看不出变化，于是 `doctor` 报告了版本（`[ok] database schema v1`），违反 MVP-STO-07 中"此时必须报告版本未知"。Linux 上只读连接不重建 `-shm`，第一次之后只剩 `-wal`，属于"只有其一"的状态，本来就报告未知，因此不会进入这一重复状态。
+
+**修复**（`internal/store/sqlite/readonly.go`，只影响 `doctor`）：`-shm` 为空时，`doctor` 不打开任何连接，直接报告版本未知。理由：
+
+- 只读连接在外部关闭之后重建的 `-shm` 总是空的。读取前 `-shm` 不为空时，重建会表现为大小变化，原有比较能发现；读取前 `-shm` 为空时，重建无法发现，所以不读取。
+- specmetry 自己的连接关闭后会留下 32 KB 的 `-shm`（持久 WAL），只有只读连接在竞态中才会留下空的 `-shm`。下一次正常打开会重建它，之后无竞争的 `doctor` 又能报告版本。
+- 在打开连接之前就返回，不产生任何文件副作用；不读取数据，不可能报告未提交的数据。
+- 打开前的版本检查不适用这条规则：审查已确认 Windows 上普通打开在这一状态下读到的是可靠的已提交版本，并在读写连接上再检查一次。因此不会引入新的不兼容版本接受问题，也不降低可用性。
+- 没有重新引入自行解析 WAL，没有新增 VFS。
+
+**测试**（真实 SQLite 子进程，判断文件状态之后同步完成外部关闭，不依赖固定等待；修复前在 Windows 上失败，修复后通过）：
+
+| 测试 | 修复前 | 修复后 |
+|---|---|---|
+| `TestInspectRepeatedExternalCloseReportsUnknown`（公开 `Inspect`） | 第 1 轮未知；第 2 轮报告 schema v2，失败 | 两轮都报告未知。第 1 轮确实发生竞态，并在 Windows 上自然留下空的 `-wal`、`-shm`（审查反例的前置状态）；第 2 轮在读取前因为 `-shm` 为空而报告未知，目录完全不变。每轮确认权限合规，schema、`min_binary_version`、`seq`、事实不变；之后正常打开（Windows）重建 `-shm`，无竞争的检查重新报告 schema v2 且不改变文件；Linux 上正常打开按 PD-23 状态拒绝 |
+| `TestDoctorRepeatedExternalCloseReportsUnknown`（公开 `doctor` 命令） | 第 2 轮输出 `[ok] database schema v1`，失败 | 两轮都输出 `[warn] database version unknown`，不出现版本；主数据库文件不变 |
+
+`doctor` 命令测试位于存储包的外部测试包中，通过 `export_test.go` 使用已有的测试钩子；生产代码没有为此新增导出。
+
+### NON-BLOCKER：兼容打开成功分支的断言
+
+已补齐：`TestOpenDuringExternalCloseOnlyAddsEmptyAuxiliaryFiles` 的成功分支现在断言打开后主数据库文件未变，schema、`min_binary_version`、`seq`、事实内容正确，权限检查通过，打开锁已释放，后续写入取得 seq 3。
+
+### N1
+
+保持部分修复，最晚在 M2 的 `purge` 验收前解决；本轮未改动。
+
+### 是否还有同类漏报
+
+在审查描述和本轮测试覆盖的场景中没有。理论上，如果在读取期间有**另一个**程序恰好以与读取前完全相同的大小重新建出这两个文件，基于大小的比较仍然看不出来；这需要多个外部进程交错操作。即使发生，读取仍在 SQLite 的锁内进行，报告的是已提交的版本，不会读到未提交的数据，也不会接受错误的版本。
+
+### 修改的文件
+
+- `internal/store/sqlite/readonly.go`：`doctor` 的空 `-shm` 规则；参数 `sameSizes` 更名为 `diagnostic`，注释说明两种模式的差异。
+- 测试：`externalclose_test.go`（两轮回归、成功分支断言）、`doctor_race_test.go`（新增）、`export_test.go`（新增，只在测试中编译）。
+- 文档：architecture §11.5、本节、implementation-plan 状态、development.md。
+
+### 尚未验证
+
+- MVP-PLT-01：GitHub Actions 三平台 CI 尚未运行。
+- macOS 上的全部测试；Linux race detector；Windows 真实双用户测试。
+
+## 11. M0 代码审查结论（codex-review-008）
+
+**审查结论**：**GO**，BLOCKER 为 0。审查提交 `d212524`。B2 正式关闭；B1、B3、B4 沿用此前的关闭结论。可以保留现有实现，不需要存储层重构。
+
+审查同时确认：
+
+- 第二轮的两项新测试证明的是"读取前保守拒绝"：`-shm` 为空时不进入读取，不能描述为"检测到了第二次删除和重建"。
+- **已接受的风险**：两个真实外部 SQLite 进程先后关闭、重建辅助文件且大小相同时，基于大小的比较不能记录这类外部活动（审查已复现）。此时读取的仍是已提交的真实版本，诊断自身没有创建或修改文件，最低二进制版本的拒绝仍然有效。当前实现不提供完整捕获外部活动历史的保证。
+- 稳定但 `-shm` 为空的有效数据库会保守报告版本未知；正常打开一次之后恢复。
+- N1 仍在 M2 的 `purge` 验收前处理。
+
+**代码审查 GO 不等于 M0 完整验收通过**。仍需完成：GitHub Actions 三平台 CI（MVP-PLT-01）、macOS 实际运行、Linux race detector；Windows 上因缺少符号链接权限而跳过的两项测试不能算作通过；Windows 真实双用户测试尚未执行。
+
+## 12. M0 验收（GitHub Actions CI 与产品负责人决定）
+
+**结论**：产品负责人于 2026-10-14 正式验收 M0。依据：codex-review-008 结论为 GO（§11）；GitHub Actions 第二轮 CI 8/8 通过；Windows、Linux、macOS 都在实际平台上运行测试，没有用交叉编译代替；M0 的九项退出条件（MVP-PLT-01、PRV-05、PRV-06、STO-01 ~ 04、STO-06、STO-07）全部满足。
+
+### CI 运行记录
+
+PR：<https://github.com/XKHoshizora/specmetry/pull/1>（`feat/m0-foundation` → `master`）。
+
+| 轮次 | 提交 | 结果 | 说明 |
+|---|---|---|---|
+| [run 38425973237](https://github.com/XKHoshizora/specmetry/actions/runs/38425973237) | `f730ec3` | 6/8 | macOS、Windows 的 Go 测试在 `TestGitRepoCommitsAndWorktrees` 失败；其余各包（包括存储、权限、ACL）通过 |
+| [run 38427328911](https://github.com/XKHoshizora/specmetry/actions/runs/38427328911) | `85ce2ea`（CI 测试的是 PR 合并提交 `acd42a4`，代码与 `85ce2ea` 相同） | **8/8** | — |
+
+**第一轮失败的原因与修复**：失败在测试辅助代码，与存储层和业务代码无关。`NewGitRepo` 直接使用 `t.TempDir()`：它在 macOS 上是 `/var/...`（指向 `/private/var` 的符号链接），在 Windows runner 上含 8.3 短名（`RUNNER~1`）；git 输出规范路径，两者比较不相等。修复前在本地复现了两种情形（Windows 使用短名 TEMP，Linux 使用经过符号链接的 TMPDIR），修复后通过。
+
+- `8ce753a`：`NewGitRepo` 用 `filepath.EvalSymlinks` 解析临时目录。只改测试辅助代码。
+- `85ce2ea`：CI 的 Go 测试加 `-v`，日志列出每项测试，能看出各平台跳过了哪些测试。
+
+这两个提交在 codex-review-008 的审查范围（截至 `d212524`）之外，都不改动生产代码。
+
+### 各平台的实际执行情况（第二轮）
+
+| 平台 | 执行与结果 | 跳过 |
+|---|---|---|
+| Linux（ubuntu-latest，linux/amd64） | 开启 race detector：95 项顶层测试通过；另一步以 `sudo` 运行 4 项真实跨用户测试，全部通过 | 主步骤中的 4 项跨用户测试（不是 root 时按设计跳过，在 `sudo` 步骤中运行） |
+| Windows（windows-latest，windows/amd64） | 96 项通过，包括 DACL、上级目录、联接测试和两项符号链接测试 | 0 |
+| macOS（macos-latest，darwin/arm64） | 96 项通过，包括 `TestDarwinCheckReportsACL` 和 Unix 权限、上级目录测试 | 0 |
+
+三个平台共有的 88 项测试都实际运行；平台之间只差平台专属测试。其余任务全部通过：三平台带前端构建、`go test ./web/` 和冒烟测试（`version` 报告 schema v1、内嵌前端；`doctor` 之后数据目录没有被创建）；前端的格式、lint、类型检查、测试、构建；`go mod tidy`、`go vet`、Markdown 链接检查、golangci-lint v2.14.0。
+
+§11 提到的"Windows 上因缺少符号链接权限而跳过的两项测试"：CI 的 Windows runner 有创建符号链接的权限，这两项在第二轮中实际运行并通过。
+
+### 退出条件
+
+| 验收项 | 结果 | 主要证据 |
+|---|---|---|
+| MVP-PLT-01 | 通过 | 第二轮 8/8 |
+| MVP-PRV-05 | 通过 | Linux、macOS 的权限与上级目录测试；macOS ACL 检测；Linux 以 root 运行的真实跨 UID 攻击测试 |
+| MVP-PRV-06 | 通过 | Windows 的 DACL、上级目录、联接、符号链接测试 |
+| MVP-STO-01 ~ 04 | 通过 | 三平台；Linux 开启 race detector |
+| MVP-STO-06 | 通过 | 三平台 |
+| MVP-STO-07 | 通过 | 三平台，包括 codex-review-007 的两项回归测试 |
+
+据此，§1 中 #6、#12 属于 M0 的验收项为**已验证**；这两项中属于其他里程碑的部分仍未开始。
+
+### 证据的边界与后续事项（尚未完成，不属于 M0 退出条件）
+
+- **Windows 真实双用户验证**：未执行，不标为已验证。MVP-PRV-06 没有要求跨用户攻击测试（真实跨 UID 测试只在 MVP-PRV-05 中要求在 Linux 上做）；Windows 上的测试由当前用户给其他账户授权来构造场景。
+- **race detector**：只在 Linux 上运行。CI 日志不打印展开后的命令，依据是 CI 配置（Linux 上加 `-race`）和耗时（存储包在 Linux 上 38 秒，其他平台 7 ~ 10 秒）；日志中没有数据竞争报告。
+- **macOS**：只覆盖 arm64，没有 Intel；没有跨用户测试（只在 Linux 上做）。
+- **N1**：部分修复，最晚在 M2 的 `purge` 验收前完成。
+- **PD-23 `specmetry db recover`**：未实现，在 M2（WP2.10）实现，最晚在 M4 自测前完成。在此之前，无法确认版本的数据库只能拒绝（退出码 6），`doctor` 报告版本未知。
+- §11 中已接受的风险，以及方案 A 的文件副作用边界，保持不变。

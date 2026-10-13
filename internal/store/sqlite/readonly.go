@@ -1,0 +1,205 @@
+package sqlite
+
+import (
+	"bytes"
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"io"
+	"io/fs"
+	"os"
+
+	sqlitedrv "modernc.org/sqlite"
+	sqlite3 "modernc.org/sqlite/lib"
+)
+
+// This file reads the database version without writing to the database,
+// using SQLite itself — its locks and transaction isolation decide what is
+// committed (codex-review-005 B2). SQLite only leaves the files untouched in
+// some file states, measured with the driver in use (modernc.org/sqlite
+// 1.60.1, SQLite 3.53.4) on Windows and Linux
+// (TestReadOnlyConnectionByFileState):
+//
+//   - with both -wal and -shm present, a connection with mode=ro and
+//     readonly_shm=1 changes nothing — after a crash, while another process
+//     writes, and in the state a specmetry connection leaves on close
+//     (persistent WAL, see dsn);
+//   - a rollback-journal database (such as a restored VACUUM INTO backup)
+//     with no -wal, -shm or -journal is read without changes;
+//   - in every other state a read-only connection creates or rewrites the
+//     -wal or -shm, so the version is reported as unknown instead.
+//
+// Uncommitted data is never read: in WAL mode readers see only committed
+// frames, and in rollback mode a writer that has put uncommitted pages into
+// the database file holds a lock that makes the read fail with SQLITE_BUSY,
+// which is reported as unknown too.
+//
+// Known, accepted behavior (MVP-STO-02 and MVP-STO-07, product decision of
+// 2026-10-13): if another SQLite program closes the database, removing -wal
+// and -shm, between the file-state check and the read, the read-only
+// connection creates empty -wal/-shm files (Linux: -wal; Windows: both) with
+// the database's permissions. The database file is opened read-only, so the
+// connection cannot checkpoint, remove a WAL or change data; the version it
+// reads is committed data, or the read is reported as unknown. Nothing else
+// may change, and without such outside activity no file changes at all
+// (TestInspectDuringExternalCloseReportsUnknown,
+// TestOpenDuringExternalCloseOnlyAddsEmptyAuxiliaryFiles).
+
+// uninspectableError explains why the database cannot be read without
+// changing it; the version is then unknown.
+type uninspectableError struct{ reason string }
+
+func (e *uninspectableError) Error() string { return e.reason }
+
+// readOnlyMeta is what a read-only inspection found.
+type readOnlyMeta struct {
+	exists  bool
+	version int
+	minBin  string
+}
+
+// fileState records which database files exist and their sizes.
+type fileState struct {
+	exists [4]bool
+	sizes  [4]int64
+}
+
+var databaseSuffixes = [4]string{"", "-wal", "-shm", "-journal"}
+
+const (
+	dbFile = iota
+	walFile
+	shmFile
+	journalFile
+)
+
+func statDatabaseFiles(dbPath string) (fileState, error) {
+	var s fileState
+	for i, suffix := range databaseSuffixes {
+		fi, err := os.Lstat(dbPath + suffix)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return s, err
+		}
+		if !fi.Mode().IsRegular() {
+			return s, fmt.Errorf("%s is not a regular file", dbPath+suffix)
+		}
+		s.exists[i], s.sizes[i] = true, fi.Size()
+	}
+	return s, nil
+}
+
+// readMetaReadOnly reads the schema version and minimum binary version
+// without writing to the database (see the file comment for the one known
+// file side effect). A missing database reports exists=false. It
+// returns an *uninspectableError when that is not possible.
+//
+// diagnostic selects doctor's stricter rules (MVP-STO-07), which only ever
+// turn a result into "unknown": a change in the size of any database file
+// during the read counts as a change, and an empty -shm is not read at all.
+// A read-only connection that recreates -shm after an outside close always
+// leaves it empty (codex-review-007 B2): with a non-empty -shm before the
+// read, the recreation shows as a size change; with an empty one, a second
+// race would recreate both files with the same names and sizes and go
+// unnoticed, so the version is reported as unknown without reading.
+// specmetry's own connections never leave an empty -shm (persistent WAL),
+// so the next normal open makes the database readable again. Open's check
+// (diagnostic false) only treats files appearing or disappearing as a
+// change, since other processes may be writing; its result stays committed
+// data either way and is checked again on the read-write connection.
+func readMetaReadOnly(ctx context.Context, dbPath string, diagnostic bool) (readOnlyMeta, error) {
+	before, err := statDatabaseFiles(dbPath)
+	if err != nil {
+		return readOnlyMeta{}, err
+	}
+	if !before.exists[dbFile] {
+		return readOnlyMeta{}, nil
+	}
+	if before.exists[journalFile] && before.sizes[journalFile] > 0 {
+		return readOnlyMeta{}, &uninspectableError{"a rollback journal (" + dbPath + "-journal) is present: another program is writing the database, or an interrupted write must be played back first"}
+	}
+	if before.sizes[dbFile] == 0 {
+		if before.exists[walFile] {
+			return readOnlyMeta{}, &uninspectableError{"the database file is empty but has a -wal file"}
+		}
+		return readOnlyMeta{exists: true}, nil // created, never written
+	}
+	wal, err := walModeHeader(dbPath)
+	if err != nil {
+		return readOnlyMeta{}, err
+	}
+	switch {
+	case before.exists[walFile] && before.exists[shmFile] && diagnostic && before.sizes[shmFile] == 0:
+		return readOnlyMeta{}, &uninspectableError{"the database's -shm file is empty, as left when another program closed the database during an earlier check; the version cannot be confirmed until specmetry opens the database again"}
+	case before.exists[walFile] && before.exists[shmFile]:
+	case !before.exists[walFile] && !before.exists[shmFile] && !wal:
+	case !before.exists[walFile] && !before.exists[shmFile]:
+		return readOnlyMeta{}, &uninspectableError{"the database's -wal and -shm files are missing (it was last closed by a program other than specmetry, or they were deleted); reading it would create them"}
+	default:
+		return readOnlyMeta{}, &uninspectableError{"only one of the database's -wal and -shm files exists; reading it would recover the database"}
+	}
+
+	if readOnlyHook != nil {
+		readOnlyHook()
+	}
+	m, readErr := queryReadOnly(ctx, dbPath)
+	after, err := statDatabaseFiles(dbPath)
+	if err != nil {
+		return readOnlyMeta{}, err
+	}
+	if after.exists != before.exists || (diagnostic && after.sizes != before.sizes) {
+		return readOnlyMeta{}, &uninspectableError{"the database files changed while they were being read; run the command again"}
+	}
+	if readErr != nil {
+		var se *sqlitedrv.Error
+		if errors.As(readErr, &se) && (se.Code()&0xff == sqlite3.SQLITE_BUSY || se.Code()&0xff == sqlite3.SQLITE_LOCKED) {
+			return readOnlyMeta{}, &uninspectableError{"another program holds a write lock on the database"}
+		}
+		return readOnlyMeta{}, fmt.Errorf("cannot read the database: %w", readErr)
+	}
+	m.exists = true
+	return m, nil
+}
+
+// readOnlyHook, if set, runs after the file state was judged readable and
+// before the read-only connection opens (tests use it to let another
+// process act in between).
+var readOnlyHook func()
+
+func queryReadOnly(ctx context.Context, dbPath string) (readOnlyMeta, error) {
+	sdb, err := sql.Open("sqlite", "file:"+escapePath(dbPath)+"?mode=ro&readonly_shm=1&_pragma=busy_timeout(1000)")
+	if err != nil {
+		return readOnlyMeta{}, err
+	}
+	defer func() { _ = sdb.Close() }()
+	sdb.SetMaxOpenConns(1)
+	tx, err := sdb.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return readOnlyMeta{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var m readOnlyMeta
+	m.version, m.minBin, err = readMeta(ctx, tx)
+	return m, err
+}
+
+// walModeHeader reports whether the database header marks a WAL database
+// (file format bytes 18 and 19).
+func walModeHeader(dbPath string) (bool, error) {
+	f, err := os.Open(dbPath)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = f.Close() }()
+	hdr := make([]byte, 20)
+	if _, err := io.ReadFull(f, hdr); err != nil {
+		return false, fmt.Errorf("cannot read the database header: %w", err)
+	}
+	if !bytes.Equal(hdr[:16], []byte("SQLite format 3\x00")) {
+		return false, errors.New("the database file is not a SQLite database")
+	}
+	return hdr[18] == 2 || hdr[19] == 2, nil
+}
