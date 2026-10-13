@@ -864,7 +864,7 @@ stateDiagram-v2
 示例与 schema 层面的反例：
 
 - `schemas/examples/valid/`：每种文档的合法示例；
-- `schemas/examples/invalid-cases.json`：SCH-01 ~ SCH-92，每条都是对合法示例打的 JSON Patch，打补丁后必须校验失败。
+- `schemas/examples/invalid-cases.json`：SCH-01 ~ SCH-97，每条都是对合法示例打的 JSON Patch，打补丁后必须校验失败。
 
 M0 的 CI 会校验这两者（WP0.4）。凡是需要数据库状态才能判断的拒绝（版本过期、编号不存在、命中密钥规则），都由 acceptance-criteria 覆盖。
 

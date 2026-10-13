@@ -844,7 +844,7 @@ PR：<https://github.com/XKHoshizora/specmetry/pull/1>（`feat/m0-foundation` �
   - `status.v1`：AC 增加 `decision`；
   - `scope.v1`：增加 `acknowledged_waivers`（最终确认时改为必填，并增加 `seen_scope_confirmation_id`）；
   - `review.v1`、`claims.v1`、`common.v1`：只改说明。
-- **新增**：9 个 schema、11 个合法示例（包括 `status.exception.json`），以及反例 SCH-65 ~ SCH-92。`internal/contract` 的测试只更新了 schema 清单和示例前缀映射。
+- **新增**：9 个 schema、10 个合法示例（包括 `status.exception.json`），以及反例 SCH-65 ~ SCH-92。`internal/contract` 的测试只更新了 schema 清单和示例前缀映射。
 - **与 TD-20 原规则的关系**：
   - 全部是新增：新的 schema、新的可选字段，以及只出现在输出中、在条件满足时才必有的 `decision`。
   - 没有删除或改变已有字段的含义。
