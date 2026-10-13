@@ -65,8 +65,8 @@ type OpenResult struct {
 //     everything in it and the directories on its path are safe — before
 //     anything is written;
 //  2. take the open lock, held until Open returns;
-//  3. version guard, decided by a read-only connection that changes no file,
-//     before any connection that could;
+//  3. version guard, decided by a read-only connection that does not write
+//     to the database, before any connection that could;
 //  4. apply tombstones;
 //  5. if migration is needed: VACUUM INTO backup, then all pending
 //     migrations in one BEGIN EXCLUSIVE transaction.
@@ -109,8 +109,11 @@ func Open(ctx context.Context, dir datadir.Dir, opts Options) (*DB, OpenResult, 
 	defer lock.release()
 
 	dbPath := dir.Join(datadir.DatabaseFile)
-	// Decided by a read-only SQLite connection that changes no file, so a
-	// database this binary must not open is refused untouched (MVP-STO-02).
+	// Decided by a read-only SQLite connection that does not write to the
+	// database, so a database this binary must not open is refused with its
+	// data untouched. Allowed file side effects (MVP-STO-02): the coordination
+	// file above, and empty -wal/-shm if another SQLite program closes the
+	// database during the check (readonly.go).
 	ro, err := readMetaReadOnly(ctx, dbPath, false)
 	if err != nil {
 		var u *uninspectableError

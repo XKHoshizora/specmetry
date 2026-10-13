@@ -22,10 +22,12 @@ type Inspection struct {
 	Limitation string
 }
 
-// Inspect reports the database state without creating, migrating,
-// recovering, checkpointing or writing anything: the database, its -wal and
-// -shm and the directory are left as they were (codex-review-004 B2,
-// codex-review-005 B2; see readonly.go). The version is reported only when a
+// Inspect reports the database state without writing SQL, migrating,
+// recovering or checkpointing (MVP-STO-07). Without outside activity the
+// database, its -wal and -shm and the directory are left as they were; if
+// another SQLite program closes the database during the check, empty
+// -wal/-shm files may be created and the version is reported as unknown
+// (see readonly.go). The version is reported only when a
 // read-only SQLite connection could read it in a file state where it changes
 // nothing, and no database file changed in size or appeared or disappeared
 // meanwhile; otherwise Limitation says why it is unknown.

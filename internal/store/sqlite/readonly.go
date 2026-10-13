@@ -14,11 +14,12 @@ import (
 	sqlite3 "modernc.org/sqlite/lib"
 )
 
-// This file reads the database version without writing anything, using
-// SQLite itself — its locks and transaction isolation decide what is
-// committed (codex-review-005 B2). SQLite only writes nothing in some file
-// states, measured with the driver in use (modernc.org/sqlite 1.60.1, SQLite
-// 3.53.4) on Windows and Linux (TestReadOnlyConnectionByFileState):
+// This file reads the database version without writing to the database,
+// using SQLite itself — its locks and transaction isolation decide what is
+// committed (codex-review-005 B2). SQLite only leaves the files untouched in
+// some file states, measured with the driver in use (modernc.org/sqlite
+// 1.60.1, SQLite 3.53.4) on Windows and Linux
+// (TestReadOnlyConnectionByFileState):
 //
 //   - with both -wal and -shm present, a connection with mode=ro and
 //     readonly_shm=1 changes nothing — after a crash, while another process
@@ -33,6 +34,17 @@ import (
 // frames, and in rollback mode a writer that has put uncommitted pages into
 // the database file holds a lock that makes the read fail with SQLITE_BUSY,
 // which is reported as unknown too.
+//
+// Known, accepted behavior (MVP-STO-02 and MVP-STO-07, product decision of
+// 2026-10-13): if another SQLite program closes the database, removing -wal
+// and -shm, between the file-state check and the read, the read-only
+// connection creates empty -wal/-shm files (Linux: -wal; Windows: both) with
+// the database's permissions. The database file is opened read-only, so the
+// connection cannot checkpoint, remove a WAL or change data; the version it
+// reads is committed data, or the read is reported as unknown. Nothing else
+// may change, and without such outside activity no file changes at all
+// (TestInspectDuringExternalCloseReportsUnknown,
+// TestOpenDuringExternalCloseOnlyAddsEmptyAuxiliaryFiles).
 
 // uninspectableError explains why the database cannot be read without
 // changing it; the version is then unknown.
@@ -81,7 +93,8 @@ func statDatabaseFiles(dbPath string) (fileState, error) {
 }
 
 // readMetaReadOnly reads the schema version and minimum binary version
-// without modifying any file. A missing database reports exists=false. It
+// without writing to the database (see the file comment for the one known
+// file side effect). A missing database reports exists=false. It
 // returns an *uninspectableError when that is not possible. With
 // sameSizes, a change in the size of any database file during the read is
 // also reported as uninspectable (doctor); otherwise only files appearing or

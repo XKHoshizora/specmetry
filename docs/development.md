@@ -98,7 +98,7 @@ go build -o dist/ ./cmd/specmetry
 - 先后顺序只由 `seq` 决定：在写事务中调用 `NextSeq(ctx, tx)`。
 - 连接：每个连接都开启 `recursive_triggers` 并保留 WAL 文件（`SQLITE_FCNTL_PERSIST_WAL`，`journal_size_limit = 0`），所以关闭后 `-wal`（0 字节）和 `-shm` 仍在。
 - 只读检查（`readonly.go`；`sqlite.Inspect`、`doctor` 和打开前的版本检查都用它）：SQLite 只读连接（`mode=ro`、`readonly_shm=1`），只在实测不会修改文件的状态下读取，否则报告版本未知（状态表见 architecture §11.5，由 `TestReadOnlyConnectionByFileState` 固定）。**不要**用 `query_only`、`immutable=1` 或 `nolock=1` 做只读检查，也不要自行解析 WAL。
-- `doctor` 是非破坏性诊断，不是取证级只读工具：另一个 SQLite 程序在检查期间关闭数据库时，SQLite 可能新建空的 `-wal` / `-shm`，此时报告版本未知（MVP-STO-07，`TestInspectDuringExternalCloseReportsUnknown`）。版本不兼容而拒绝打开时，唯一允许的文件副作用是创建空的 `.migrate.lock`（MVP-STO-02，`TestIncompatibleRefusalMayOnlyCreateCoordinationFile`）。
+- `doctor` 是非破坏性诊断，不是取证级只读工具：另一个 SQLite 程序在检查期间关闭数据库时，SQLite 可能新建空的 `-wal` / `-shm`，此时报告版本未知（MVP-STO-07，`TestInspectDuringExternalCloseReportsUnknown`）。版本不兼容而拒绝打开时，Specmetry 只允许两种文件副作用（MVP-STO-02）：创建空的 `.migrate.lock`（`TestIncompatibleRefusalMayOnlyCreateCoordinationFile`），以及另一个 SQLite 程序在版本检查期间关闭数据库时只读连接新建的空 `-wal` / `-shm`（`TestOpenDuringExternalCloseOnlyAddsEmptyAuxiliaryFiles`）。写测试时用 `readOnlyHook` 在判断文件状态之后插入外部进程的操作，不要用固定等待。
 
 ## 6. 测试
 

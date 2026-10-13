@@ -471,7 +471,7 @@ PD-20 允许本地保存来源片段，但这**不等于**允许自动持久化�
 
   墓碑一定在迁移前备份之前执行，因此从旧备份恢复后再迁移，新生成的备份中也不会含有已删除项目的数据。
 - **迁移协调**（codex-review-005 B3）：从版本检查到连接建立、墓碑和迁移完成，整个打开过程都在 `.migrate.lock` 的操作系统排他锁内进行（Unix 用 `flock`，Windows 用 `LockFileEx`）。因此，一个进程在"判断兼容"与"建立读写连接"之间时，其他进程不可能升级数据库；升级会等它打开完成。等待超时则返回退出码 6，不修改任何文件。锁由操作系统持有，进程崩溃时自动释放，锁文件本身保留；`doctor` 只探测锁是否被持有，不创建也不删除锁文件。迁移在锁内用 `VACUUM INTO` 生成一致性备份，然后在 `BEGIN EXCLUSIVE` 事务内执行，再写入 `meta.schema_version` 和 `min_binary_version`。
-- **版本保护**：程序发现数据库的 `schema_version` 高于自己支持的版本，或者自己的版本低于 `min_binary_version` 时，**拒绝打开**（退出码 6），提示升级；`min_binary_version` 无法解析时同样拒绝。拒绝时 schema、业务数据、事实和 `seq` 不变，已有的数据库、WAL、SHM 文件内容不变，不删除任何文件。**唯一允许的文件副作用**（2026-10-13 产品决定，MVP-STO-02）：数据目录中还没有协调文件 `.migrate.lock` 时，打开会先创建它（空文件，权限同 §11.1，拒绝后释放），所以拒绝之后它可能留下。该例外只适用于这个协调文件，不适用于 WAL、SHM 或其他辅助文件，也不放宽版本保护或数据完整性约束。
+- **版本保护**：程序发现数据库的 `schema_version` 高于自己支持的版本，或者自己的版本低于 `min_binary_version` 时，**拒绝打开**（退出码 6），提示升级；`min_binary_version` 无法解析时同样拒绝。拒绝时 schema、业务数据、事实和 `seq` 不变，已有的数据库、WAL、SHM 文件不被改写或删除，不执行 checkpoint；无法确定版本时一律拒绝。Specmetry 自身**只允许两种文件副作用**（产品负责人批准，2026-10-13，MVP-STO-02）：① 数据目录中还没有协调文件 `.migrate.lock` 时，打开会先创建它（空文件，权限同 §11.1，拒绝后释放），所以拒绝之后它可能留下；② 仅当另一个 SQLite 进程在版本检查期间并发关闭数据库时，原生只读连接新建的空 `-wal` / `-shm`（§11.5）。外部进程自己造成的文件变化不算 Specmetry 的副作用。这两项例外不扩大为一般性的文件修改许可，也不放宽版本保护或数据完整性约束；没有外部竞争操作时，除①外不改变任何文件。
 - **写入时再次检查**（codex-review-004 B3）：已经打开的进程不会因为其他进程升级了 schema 而继续按旧结构写入。每个写事务取得写锁之后、执行写入之前，重新检查 `schema_version` 和 `min_binary_version`，不兼容时回滚并返回退出码 6，写入逻辑不会执行。同时确认连接开启了 `recursive_triggers`（[data-model.md §1](data-model.md#1-建模约定)）。这样的旧进程随后关闭最后一个连接时，SQLite 会把新程序已提交的 WAL 合并进数据库；这只是移动已提交的内容，不改变逻辑内容（codex-review-005 认定不违反 MVP-STO-02）。
 - **保留 WAL 文件**：每个连接都设置 `SQLITE_FCNTL_PERSIST_WAL`，并设 `journal_size_limit = 0`。最后一个连接关闭时，SQLite 合并 WAL 并把它截断为 0 字节，但保留 `-wal` 和 `-shm` 文件。这样，关闭后的数据库始终处于只读连接可以零修改读取的状态（§11.5），WAL 中也不留下旧的页面内容。
 
@@ -518,9 +518,9 @@ PD-20 允许本地保存来源片段，但这**不等于**允许自动持久化�
 
 读取后再次比较数据库文件的存在情况（`doctor` 还比较大小）；有变化则同样报告版本未知。这是诊断手段，用来避免报告不可靠的结果，不能证明读取没有写入文件。不使用 `immutable=1` 或 `nolock=1`，它们会绕过 SQLite 的锁。
 
-**受限的已知行为**（codex-review-006 R2，2026-10-13 产品决定接受）：判断文件状态与打开只读连接之间，如果另一个 SQLite 程序以普通方式关闭数据库并删除 `-wal`、`-shm`，SQLite 的只读连接会新建空的 `-wal`（Linux）或空的 `-wal` 和 `-shm`（Windows），权限与数据库相同。SQLite 的 `mode=ro` 本来就允许在目录可写时创建这些辅助文件（[SQLite 文档](https://www.sqlite.org/wal.html#read_only_databases)）。此时 `doctor` 报告版本未知，主数据库、业务数据和已有文件内容不变。回归测试 `TestInspectDuringExternalCloseReportsUnknown` 固定这一行为。
+**受限的已知行为**（codex-review-006 R2，2026-10-13 产品决定接受）：判断文件状态与打开只读连接之间，如果另一个 SQLite 程序以普通方式关闭数据库并删除 `-wal`、`-shm`，SQLite 的只读连接会新建空的 `-wal`（Linux）或空的 `-wal` 和 `-shm`（Windows），权限与数据库相同。SQLite 的 `mode=ro` 本来就允许在目录可写时创建这些辅助文件（[SQLite 文档](https://www.sqlite.org/wal.html#read_only_databases)）。此时 `doctor` 报告版本未知，主数据库、业务数据和已有文件内容不变。只读连接以只读方式打开数据库文件，不能 checkpoint、不能删除 WAL、不能改写数据。回归测试 `TestInspectDuringExternalCloseReportsUnknown` 固定这一行为。
 
-**尚未解决、等待决定**：打开数据库前的版本检查在同一竞态下也会新建空的 `-wal` / `-shm`，随后拒绝（Linux 上因为文件变化而报告无法确认；Windows 上 SQLite 重新建出了被删除的文件，存在情况的比较看不出变化，于是按读到的已提交版本作出正确的不兼容判断）。这超出了 MVP-STO-02 只针对协调文件的例外，见 [review-resolution.md §9](review-resolution.md#9-m0-第三次代码审查codex-review-006的处理)。
+**同一行为也适用于打开前的版本检查**（产品负责人批准，2026-10-13，MVP-STO-02 的例外 ②）：打开会新建同样的空辅助文件，然后：Linux 上因为文件变化而报告无法确认，拒绝打开；Windows 上 SQLite 重新建出了被删除的文件，存在情况的比较看不出变化，于是按读到的已提交版本判断——不兼容则拒绝，兼容则正常打开（之后在读写连接上再检查一次）。两种情况都不会把未确认的版本当作兼容，也不会改动数据。外部关闭本身已使数据库进入 PD-23 的"缺少辅助文件"状态；Linux 上只读连接留下的空 `-wal` 使它变为"只有其一"，同样需要 `db recover`（M2）。回归测试 `TestOpenDuringExternalCloseOnlyAddsEmptyAuxiliaryFiles`。
 
 版本未知时：`doctor` 报告警告"version unknown"及原因，不报告版本，也不报告正常；打开数据库时拒绝（退出码 6），因为无法确认兼容性。
 
