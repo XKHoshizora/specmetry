@@ -84,9 +84,21 @@
       "description": "Current values for a new confirmation of this target. A confirmation built from them is still rejected if anything changes before it is written.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["target_id", "baseline_version", "source_set_hash", "pending_items", "must_requirements", "effective_waivers"],
+      "required": [
+        "target_id",
+        "seen_scope_confirmation_id",
+        "baseline_version",
+        "source_set_hash",
+        "pending_items",
+        "must_requirements",
+        "effective_waivers"
+      ],
       "properties": {
         "target_id": { "oneOf": [{ "$ref": "common.v1.schema.json#/$defs/ulid" }, { "type": "null" }] },
+        "seen_scope_confirmation_id": {
+          "description": "The target's current scope confirmation (scope.confirmation_id), or null; send it back unchanged in scope.v1.",
+          "oneOf": [{ "$ref": "common.v1.schema.json#/$defs/ulid" }, { "type": "null" }]
+        },
         "baseline_version": { "$ref": "common.v1.schema.json#/$defs/baselineVersion" },
         "source_set_hash": { "$ref": "common.v1.schema.json#/$defs/sha256" },
         "pending_items": {
@@ -100,7 +112,7 @@
           "items": { "$ref": "common.v1.schema.json#/$defs/requirementKey" }
         },
         "effective_waivers": {
-          "description": "Every waiver currently in effect on an active criterion, with its requirement so a client can keep those of the requirements it confirms. The reviewer must be shown each one with its rationale and send back the IDs of those under the confirmed requirements as acknowledged_waivers.",
+          "description": "Every waiver currently in effect on an active criterion, with its requirement so a client can keep those of the requirements it confirms. Waivers that are no longer effective are never listed. The reviewer must be shown each one with its rationale and send back the IDs of those under the confirmed requirements as acknowledged_waivers.",
           "type": "array",
           "items": {
             "type": "object",

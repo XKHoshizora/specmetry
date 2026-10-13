@@ -29,6 +29,7 @@
   },
   "confirm_inputs": {
     "target_id": "01J9Z3K5Q8R2T4V6W8X0Y2Z4B0",
+    "seen_scope_confirmation_id": "01J9Z3K5Q8R2T4V6W8X0Y2Z4D0",
     "baseline_version": 5,
     "source_set_hash": "3b5d9f0c1e2a4b6c8d0e1f2a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e",
     "pending_items": 2,

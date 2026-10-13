@@ -92,6 +92,11 @@
     { "id": "SCH-89", "schema": "question-list.v1", "base": "valid/question-list.json", "patch": [{ "op": "replace", "path": "/questions/1/answer", "value": null }], "why": "an answered question shows its answer" },
     { "id": "SCH-90", "schema": "question-list.v1", "base": "valid/question-list.json", "patch": [{ "op": "replace", "path": "/questions/1/answer/channel", "value": "agent_cli" }], "why": "only a human channel can answer (PD-14)" },
     { "id": "SCH-91", "schema": "target-scope.v1", "base": "valid/target-scope.json", "patch": [{ "op": "remove", "path": "/confirm_inputs/effective_waivers" }], "why": "a confirmation must be able to show the waivers it acknowledges (PD-21)" },
-    { "id": "SCH-92", "schema": "target-scope.v1", "base": "valid/target-scope.json", "patch": [{ "op": "replace", "path": "/target/ref", "value": "refs/remotes/origin/main" }], "why": "a delivery target tracks a branch or a tag only (PD-19)" }
+    { "id": "SCH-92", "schema": "target-scope.v1", "base": "valid/target-scope.json", "patch": [{ "op": "replace", "path": "/target/ref", "value": "refs/remotes/origin/main" }], "why": "a delivery target tracks a branch or a tag only (PD-19)" },
+    { "id": "SCH-93", "schema": "scope.v1", "base": "valid/scope.json", "patch": [{ "op": "remove", "path": "/acknowledged_waivers" }], "why": "the confirmation must state the waivers it keeps, even when there are none (PD-21)" },
+    { "id": "SCH-94", "schema": "scope.v1", "base": "valid/scope.json", "patch": [{ "op": "remove", "path": "/seen_scope_confirmation_id" }], "why": "a scope confirmation must carry the confirmation it replaces (V-T02)" },
+    { "id": "SCH-95", "schema": "review.v1", "base": "valid/review.with-followups-and-scope.json", "patch": [{ "op": "remove", "path": "/scope/seen_scope_confirmation_id" }], "why": "an embedded scope confirmation must carry the confirmation it replaces (V-T02)" },
+    { "id": "SCH-96", "schema": "review.v1", "base": "valid/review.with-followups-and-scope.json", "patch": [{ "op": "remove", "path": "/scope/acknowledged_waivers" }], "why": "an embedded scope confirmation must state the waivers it keeps (PD-21)" },
+    { "id": "SCH-97", "schema": "target-scope.v1", "base": "valid/target-scope.json", "patch": [{ "op": "remove", "path": "/confirm_inputs/seen_scope_confirmation_id" }], "why": "the read model must give the value to send back as seen_scope_confirmation_id" }
   ]
 }

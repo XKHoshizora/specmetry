@@ -42,18 +42,30 @@
           "$ref": "common.v1.schema.json#/$defs/sha256"
         },
         "acknowledged_waivers": {
-          "description": "IDs of the waivers (decisions) the reviewer was shown and confirms should keep applying: every effective waiver on an active criterion of a confirmed requirement, evaluated like pending_items_excluded (after applying the enclosing review, if any). Omitted means none. Must equal the server's set exactly, otherwise stale_precondition (rule V-T01). To stop a waiver, record a new decision for that criterion first.",
+          "description": "IDs of every effective waiver in the confirmed scope, each shown to the reviewer with its rationale: the current decision (latest for the criterion's current revision) of an active criterion under a confirmed requirement is waived, and the parent revision has not moved on. Evaluated like pending_items_excluded (after applying the enclosing review, if any). Waivers that are no longer effective (criterion revised or retired, parent revised, superseded by a newer decision, requirement outside the scope) must not be listed. Must equal the server's set exactly, otherwise stale_precondition (rule V-T01); an empty array states that there are none. To stop a waiver, record a new decision for that criterion first.",
           "type": "array",
           "maxItems": 2000,
           "uniqueItems": true,
           "items": { "$ref": "common.v1.schema.json#/$defs/ulid" }
+        },
+        "seen_scope_confirmation_id": {
+          "description": "The target's current scope confirmation when the reviewer read it (target-scope.v1 confirm_inputs.seen_scope_confirmation_id), or null when there was none. Mismatch => stale_precondition (rule V-T02), so a stale page cannot silently replace a confirmation made meanwhile.",
+          "oneOf": [{ "$ref": "common.v1.schema.json#/$defs/ulid" }, { "type": "null" }]
         }
       }
     },
     "confirmation": {
       "type": "object",
       "allOf": [{ "$ref": "#/$defs/scopeCommon" }],
-      "required": ["target_id", "baseline_version", "source_set_hash", "requirements", "attestations"],
+      "required": [
+        "target_id",
+        "baseline_version",
+        "source_set_hash",
+        "requirements",
+        "attestations",
+        "acknowledged_waivers",
+        "seen_scope_confirmation_id"
+      ],
       "properties": {
         "baseline_version": {
           "description": "Must equal the current baseline version.",
@@ -73,7 +85,14 @@
       "type": "object",
       "unevaluatedProperties": false,
       "allOf": [{ "$ref": "#/$defs/scopeCommon" }],
-      "required": ["target_id", "source_set_hash", "requirements", "attestations"],
+      "required": [
+        "target_id",
+        "source_set_hash",
+        "requirements",
+        "attestations",
+        "acknowledged_waivers",
+        "seen_scope_confirmation_id"
+      ],
       "properties": {
         "requirements": {
           "type": "array",

@@ -14,7 +14,7 @@
 | 实现状态 | 未开始 / 进行中 | — |
 | | **已验证** | 对应的验收项和 CX 反例已经在实现中通过 |
 
-**当前总体状态**（2026-10-14 更新）：codex-review-003 结论为 **GO**，BLOCKER 为 0。本文所有条目的设计状态均为**已冻结**（包括 codex-review-003 要求的两处同步修正，见 §6）；冻结后的修改必须走 implementation-plan §1 的变更流程。**没有任何条目整体处于"已验证"**：验证需要等到对应里程碑实现完成，并通过验收项和 CX 反例；目前只有 #6、#12 中属于 M0 的验收项已验证（§12）。M0 的代码审查经过五轮（codex-review-004 ~ 008），第五轮（codex-review-008）结论为 **GO**，BLOCKER 为 0（§11）；GitHub Actions 三平台 CI 通过后，产品负责人于 2026-10-14 正式验收 M0（§12）。M1 开工准备中的产品决策与设计收尾见 §13，其中的补充设计**待最终确认**。
+**当前总体状态**（2026-10-14 更新）：codex-review-003 结论为 **GO**，BLOCKER 为 0。本文所有条目的设计状态均为**已冻结**（包括 codex-review-003 要求的两处同步修正，见 §6）；冻结后的修改必须走 implementation-plan §1 的变更流程。**没有任何条目整体处于"已验证"**：验证需要等到对应里程碑实现完成，并通过验收项和 CX 反例；目前只有 #6、#12 中属于 M0 的验收项已验证（§12）。M0 的代码审查经过五轮（codex-review-004 ~ 008），第五轮（codex-review-008）结论为 **GO**，BLOCKER 为 0（§11）；GitHub Actions 三平台 CI 通过后，产品负责人于 2026-10-14 正式验收 M0（§12）。M1 开工准备中的产品决策与设计收尾见 §13，已于 2026-10-14 最终确认，G2 已满足。
 
 ## 1. 总览（codex-review-001）
 
@@ -786,9 +786,9 @@ PR：<https://github.com/XKHoshizora/specmetry/pull/1>（`feat/m0-foundation` �
 
 ## 13. M1 开工准备：产品决策与设计收尾（2026-10-14）
 
-**背景**：M0 验收之后，产品负责人对截止在 M1 的待决策事项作出决定，并要求在不实现 M1 业务功能的前提下完成设计收尾。本节记录决定、对补充条件的核对，以及据此作出的修改。**本节的补充设计，以及 PD-24、TD-20、TD-21，都等待产品负责人的最终确认。**
+**背景**：M0 验收之后，产品负责人对截止在 M1 的待决策事项作出决定，并要求在不实现 M1 业务功能的前提下完成设计收尾。本节记录决定、对补充条件的核对，以及据此作出的修改。**本节的全部内容已于 2026-10-14 最终确认**（见本节末尾的"最终确认"）。
 
-### 决定
+### 第一轮决定（之后的最终确认见本节末尾）
 
 | 事项 | 决定 | 记录位置 |
 |---|---|---|
@@ -808,7 +808,7 @@ PR：<https://github.com/XKHoshizora/specmetry/pull/1>（`feat/m0-foundation` �
 |---|---|---|
 | PD-17：显示例外、理由、适用快照和证据等级 | `status.v1` 中每个 AC 只有 `current_decision_id`、原因码和标记，没有理由、快照和等级 | `status.v1` 的 AC 增加 `decision` 摘要（`current_decision_id` 不为空时必有）。schema 强制：`exception` 和 `manual` 的等级只能是 `none`；`exception` 必须有理由；`accepted` 必须有快照；`normal` 的等级只能是 `observed` 或 `snapshot_isolated`。FR-ACC-05、MVP-ACC-05 同步 |
 | PD-17：`none` 不得描述为已通过自动化验证 | FR-PRV-09 只约束 `observed` | 扩展 FR-PRV-09、MVP-PRV-09、data-model §6.8，以及 `common.v1` 中 `deliveryEvidenceGrade` 的说明；PD-22 增加补充说明 |
-| PD-17：全部豁免的范围不得为 `ready` | **已满足**：data-model §6.8 第 5 条，以及阻塞差距 `ALL_WAIVED` | 不修改。这与 PD-18 的建议默认一致，PD-18 本身仍待确认 |
+| PD-17：全部豁免的范围不得为 `ready` | **已满足**：data-model §6.8 第 5 条，以及阻塞差距 `ALL_WAIVED` | 不修改。这与 PD-18 的建议默认一致（PD-18 已在最终确认中一并批准） |
 | PD-21：豁免绑定 AC 的 revision | **已满足**：当前决定只取当前 revision 下的（§5.4），所以实质修订后豁免不再适用；父需求修订先进入 `parent_revised`（§6.3 第 2 条先于第 3 条） | 只在 §6.2 补充说明 |
 | PD-21：重新确认范围时展示并确认已有豁免 | 不存在 | `scope.v1` 增加可选字段 `acknowledged_waivers`（省略视为空集合）；新规则 V-T01 要求它恰好等于服务端计算的有效豁免集合，否则 `stale_precondition`。这沿用了 `pending_items_excluded` 的现有模式。新增读取模型 `target-scope.v1` 列出有效豁免及其理由。要停止某项豁免，先对该 AC 作出新的决定 |
 | PD-04 方案 A | `review.v1` 的 `change_class` 可选，没有对应规则 | 新增服务端规则 V-R01，`review.v1` 的结构不变，只改说明；合法示例中缺少类别的更新条目已补上 |
@@ -842,7 +842,7 @@ PR：<https://github.com/XKHoshizora/specmetry/pull/1>（`feat/m0-foundation` �
 
 - **修改**：
   - `status.v1`：AC 增加 `decision`；
-  - `scope.v1`：增加可选的 `acknowledged_waivers`；
+  - `scope.v1`：增加 `acknowledged_waivers`（最终确认时改为必填，并增加 `seen_scope_confirmation_id`）；
   - `review.v1`、`claims.v1`、`common.v1`：只改说明。
 - **新增**：9 个 schema、11 个合法示例（包括 `status.exception.json`），以及反例 SCH-65 ~ SCH-92。`internal/contract` 的测试只更新了 schema 清单和示例前缀映射。
 - **与 TD-20 原规则的关系**：
@@ -850,10 +850,23 @@ PR：<https://github.com/XKHoshizora/specmetry/pull/1>（`feat/m0-foundation` �
   - 没有删除或改变已有字段的含义。
   - 这些 schema 都还没有实现，也没有发布过的使用方。
 
-### 仍待确认
+### 最终确认（2026-10-14）
 
-- PD-17、PD-21 的补充设计（上表）。
-- PD-24（来源片段的默认保存模式）。
-- TD-20（交换格式的版本策略）、TD-21（§10.8 的规则集）。
-- PD-18：PD-17 的第三项条件与它的建议默认相同，可以一并确认。
-- PD-10：确认项见 [licensing.md §4](licensing.md#4-pd-10-的确认项)。
+产品负责人正式批准 PD-17、PD-18、PD-21、PD-24，以及 TD-01、TD-05、TD-14、TD-18、TD-20（调整后）、TD-21；此前已批准的 PD 和 TD 保持不变。G2 因此满足。最终批准附带的要求，以及据此所做的修改：
+
+| 要求 | 修改 |
+|---|---|
+| PD-17：采用 `decision` 摘要；例外验收显示理由、适用快照和证据等级；`none` 不得表述为自动化验证通过；**不能因此删除或隐藏已有的实际测试证据**；保留全部豁免不得 `ready` | `status.v1` 中 `snapshot_run` 的说明写明：无论作出什么决定，执行都照常输出；`decisionSummary` 说明决定之后的执行不改变它的等级。data-model §6.8 写明：例外验收之后的执行照常显示，不会把这次例外验收升级为 `observed`。MVP-ACC-05 增加对应的断言 |
+| PD-21：`acknowledged_waivers` 必须覆盖范围内全部有效豁免；写入时校验用户读取的基准、范围和相关 AC 的 revision；已失效的历史豁免不进入确认列表 | `scope.v1`：`acknowledged_waivers` 改为**必填**（空数组表示没有豁免）；新增必填的 `seen_scope_confirmation_id` 和规则 V-T02，与 `seen_decision_id` 的做法相同，用来防止旧页面覆盖刚写入的范围确认。`target-scope.v1` 给出需要回传的值。AC 的 revision 由两处保证：任何 revision 变化都产生新的基准版本；每条豁免都绑定 AC 的 revision。`scope_confirmations` 保存确认的豁免和读取到的范围确认。新增 MVP-TGT-11 和不变量 #11，修改 MVP-TGT-10 |
+| TD-20：调整后的六条版本策略 | architecture §9.3；TD-20 已确认。本轮的 schema 修改发生在首次正式发布之前，属于完善 v1，已同步 schema、示例和测试 |
+| TD-21：批准 14 条规则；命中即拒绝持久化，不回显；规则集只能降低风险 | architecture §10.8 的"已知限制"、FR-PRV-07 写明这一点；TD-21 已确认 |
+| PD-24：默认 `hash_only`；M1 不提供原文持久化；`full`、人工授权和删除保证在 M2 | 与 §13 中的设计一致；PD-24 已确认 |
+
+新增的 schema 反例为 SCH-93 ~ SCH-97，覆盖缺少 `acknowledged_waivers` 或 `seen_scope_confirmation_id` 的情况。
+
+**仍未确认、但不阻塞 M1 的事项**：
+
+- PD-10（许可证，接受外部贡献之前）：确认项见 [licensing.md §4](licensing.md#4-pd-10-的确认项)。
+- PD-02（M2）。
+- TD-17（M2）、TD-24（M7）。
+- 其他 Agent 的环境变量与约束（M4 开工前）。

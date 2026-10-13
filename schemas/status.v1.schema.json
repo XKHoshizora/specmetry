@@ -303,7 +303,7 @@
           }
         },
         "snapshot_run": {
-          "description": "Latest qualifying run on the target snapshot for the current revision and check config.",
+          "description": "Latest qualifying run on the target snapshot for the current revision and check config. Always reported, whatever the decision: an exception (or any other) acceptance never removes or hides runs (PD-17).",
           "oneOf": [{ "$ref": "#/$defs/run" }, { "type": "null" }]
         },
         "workspace_run": {
@@ -316,7 +316,7 @@
       "else": { "not": { "required": ["decision"] } }
     },
     "decisionSummary": {
-      "description": "What a human decided, why, and on which snapshot. evidence_grade is the grade of the run the decision relied on; none means no automated run supports it (manual, exception, waived, or a rejection without a run) and must never be presented as automated verification.",
+      "description": "What a human decided, why, and on which snapshot. evidence_grade is the grade of the run the decision relied on; none means no automated run supports it (manual, exception, waived, or a rejection without a run) and must never be presented as automated verification. A run recorded after the decision is reported in snapshot_run as usual and does not change this grade.",
       "type": "object",
       "additionalProperties": false,
       "required": ["id", "seq", "decision", "mode", "snapshot", "evidence_grade", "rationale"],

@@ -172,6 +172,8 @@ CLI 或 Hook 第一次在某个 worktree 中出现时，系统会自动登记它
 | baseline_version | INTEGER | 确认时的基准版本号 |
 | source_set_hash | TEXT | 确认时的来源集合哈希（§4.3） |
 | attestations_json | TEXT | `complete_scope`（必须为 true）；`pending_items_excluded`（确认时仍待审的提案条目数，人已确认它们不属于本范围）；`missing_goals_reviewed`（`incomplete_docs` 项目必须为 true，表示人已补充代码中没有体现的交付目标） |
+| acknowledged_waivers_json | TEXT | 人确认继续适用的有效豁免（决定 ID 列表，可以为空；V-T01） |
+| seen_scope_confirmation_id | ULID NULL | 确认时读取到的该目标当前范围确认；首次确认为 NULL（V-T02） |
 | note | TEXT NULL | |
 | actor, channel, confirmed_at | | |
 
@@ -648,7 +650,7 @@ stateDiagram-v2
 - `observed`：至少一个是观测级；
 - `none`：没有任何由执行支撑的自动化验收（只有手动、例外或豁免）。
 
-**MVP 中这个值只可能是 `observed` 或 `none`。** 交付状态 `ready` 本身不变，但凡是展示 `ready` 的地方，都必须同时展示证据等级。等级为 `observed` 时，不得称为"快照已验证"，只能称为"观测级：检查开始和结束时与快照一致"。等级为 `none` 时，只能称为"没有自动化执行证据（依据手动、例外或豁免）"，不得称为已通过自动化验证（PD-17、FR-PRV-09）。
+**MVP 中这个值只可能是 `observed` 或 `none`。** 交付状态 `ready` 本身不变，但凡是展示 `ready` 的地方，都必须同时展示证据等级。等级为 `observed` 时，不得称为"快照已验证"，只能称为"观测级：检查开始和结束时与快照一致"。等级为 `none` 时，只能称为"没有自动化执行证据（依据手动、例外或豁免）"，不得称为已通过自动化验证（PD-17、FR-PRV-09）。证据等级只反映验收所依据的执行：例外验收之后在 `S` 上记录的执行照常输出（`status.v1` 的 `snapshot_run`），不会被删除或隐藏，也不会把这次例外验收的等级改为 `observed`；人可以基于这条执行重新作出 `normal` 验收。
 
 `BLOCKING_QUESTION` 计算三类 `open` 且 `blocking` 的问题：关联到 `RS` 中需求的；关联到 `AS` 中 AC 的；没有关联任何条目的项目级问题。关联条目已被拒绝的问题（§4.8）不计入。
 
@@ -765,7 +767,7 @@ stateDiagram-v2
 | 提案审核（人） | 审核者看到的 `seen_base_version`；冲突条目需要明确确认 | 当前版本 ≠ `seen_base_version` |
 | Claim 批次 | `base_version`；每条 Claim 的 `target_revision` | 任一不一致 |
 | 验收决定（人） | `target_id`、`snapshot`、`criterion_revision`、`requirement_revision`、`evidence_id`、**`seen_decision_id`** | 目标已不是 `active`；目标 ref 已不指向 `snapshot`；任一 revision 已变；`S` 上最新的合格执行已不是 `evidence_id`；**该 AC 当前修订下最新决定的 ID 已不是 `seen_decision_id`**（两者都为空时视为一致）。`waived` 只校验 `target_id`、两个 revision 和 `seen_decision_id`，因为它与代码无关，所以不校验 `snapshot` 和 `evidence_id`。 |
-| 范围确认（人） | `target_id`、`baseline_version`、`source_set_hash`、`attestations.pending_items_excluded`、`acknowledged_waivers`（省略视为空集合） | 任一不一致。`pending_items_excluded` 必须等于当前 `pending` 和 `conflict` 条目的总数。`acknowledged_waivers` 必须恰好等于**有效豁免集合**：确认的需求下、`active` AC 的当前决定（§5.4）为 `waived`，并且父需求适用性没有失效（V-T01，PD-21）。附带在审核中时，两者都以审核完成后的状态为准，`baseline_version` 取审核完成后的版本（§5.5 第 11 步）。要停止某项豁免，先对该 AC 作出新的决定，再确认范围。 |
+| 范围确认（人） | `target_id`、`baseline_version`、`source_set_hash`、`attestations.pending_items_excluded`、`acknowledged_waivers`、**`seen_scope_confirmation_id`** | 任一不一致。`pending_items_excluded` 必须等于当前 `pending` 和 `conflict` 条目的总数。`acknowledged_waivers` 必须恰好等于**有效豁免集合**：确认的需求下、`active` AC 的当前决定（§5.4）为 `waived`，并且父需求适用性没有失效；已失效的历史豁免（AC 已修订或退役、父需求已修订、已被更新的决定取代、需求不在范围内）不得列入（V-T01）。`seen_scope_confirmation_id` 必须等于该目标当前的范围确认，首次确认时为 NULL（V-T02），用来防止旧页面覆盖刚写入的确认。AC 的 revision 由两处保证：任何 revision 变化都会产生新的基准版本，所以 `baseline_version` 不再一致；每条豁免绑定 AC 的 revision，所以豁免集合也不再一致。附带在审核中时，以上各项都以审核完成后的状态为准，`baseline_version` 取审核完成后的版本（§5.5 第 11 步）。要停止某项豁免，先对该 AC 作出新的决定。 |
 | 来源确认（人） | `observed_sha256` | 磁盘上的当前哈希 ≠ `observed_sha256` |
 | 回答问题（人） | 问题仍为 `open` | 已被回答或驳回 |
 | 检查执行 | 由执行器自己在开始时读取并固定（§7.4） | — |
@@ -955,7 +957,8 @@ M0 的 CI 会校验这两者（WP0.4）。凡是需要数据库状态才能判�
 | V-D01 | 验收决定的 `acknowledged_risks` 恰好等于服务端推导的风险集合（§7.3） | 拒绝 |
 | V-D02 | 验收决定的全部读取版本（含 `seen_decision_id`）都是当前值（§7.1） | 过期 |
 | V-R01 | 审核中被接受（`accepted`、`accepted_with_edits`，包括冲突条目）的 `update` 条目必须带 `change_class`；强制 `material` 的字段一律按 `material` 处理；提案中建议的类别不能代替审核者的选择（PD-04 方案 A） | 拒绝 |
-| V-T01 | 范围确认的 `acknowledged_waivers`（省略视为空集合）恰好等于服务端计算的有效豁免集合（§7.1；PD-21） | 过期 |
+| V-T01 | 范围确认的 `acknowledged_waivers` 恰好等于服务端计算的有效豁免集合；已失效的历史豁免不得列入（§7.1；PD-21） | 过期 |
+| V-T02 | 范围确认的 `seen_scope_confirmation_id` 等于该目标当前的范围确认（首次确认为 NULL）（§7.1） | 过期 |
 
 ## 9. 数据分级、保留与删除
 
@@ -972,4 +975,4 @@ M0 的 CI 会校验这两者（WP0.4）。凡是需要数据库状态才能判�
 
 ## 10. 相关待决策事项
 
-已确认：PD-03、PD-04、PD-12、PD-16、PD-19、PD-20、PD-22；有条件批准：PD-17、PD-21；待确认：PD-02、PD-18、PD-24（[prd.md §9](prd.md#9-产品待决策事项)）。技术：TD-01、TD-14、TD-18 原则批准；TD-17、TD-20、TD-21、TD-24 待确认（[architecture.md §16](architecture.md#16-技术待决策事项)）。
+已确认：PD-03、PD-04、PD-12、PD-16 ~ PD-22、PD-24；待确认：PD-02（[prd.md §9](prd.md#9-产品待决策事项)）。技术：TD-01、TD-14、TD-18、TD-20、TD-21 已确认；TD-17、TD-24 待确认（[architecture.md §16](architecture.md#16-技术待决策事项)）。

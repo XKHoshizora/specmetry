@@ -112,7 +112,8 @@
 | MVP-TGT-07 | **首次审核时一次性确认范围**：审核中接受 3 个新增需求，附带的范围用这 3 个条目的 `item_id` 表示 → 新版本与范围确认在同一事务中写入，`item_id` 被解析为新编号，范围绑定新版本号；范围引用了一个被拒绝的条目，或者范围无效 → 整次审核提交失败 | 集成 | FR-TGT-06 | M1 |
 | MVP-TGT-08 | 交互式 `scope confirm` 默认选中全部 `must` 需求，可以修改 | 集成 | FR-TGT-07 | M1 |
 | MVP-TGT-09 | 范围确认之后，审核生成了新版本但没有附带范围 → `status --json` 中 `scope.stale = true`，出现阻塞差距 `SCOPE_STALE`；人确认一个新来源后，同样出现 `SCOPE_STALE` | 集成 | FR-TGT-05 | M2 |
-| MVP-TGT-10 | **范围确认时确认已有豁免**（PD-21，V-T01）：`scope show --json`（`target-scope.v1`）列出每条有效豁免及其 AC、需求和理由；确认（独立提交，或附带在审核中，以审核完成后的状态为准）时 `acknowledged_waivers` 少一项或多一项 → 退出码 5，`error.current` 中给出当前的有效豁免，不写入；一致时写入。M1 验证没有豁免时的写入侧与输出；M2 用真实的豁免验证，并验证 AC 实质修订后，该豁免不再出现在有效集合中 | 集成 | FR-TGT-04 | M1 / M2 |
+| MVP-TGT-10 | **范围确认时确认已有豁免**（PD-21，V-T01）：`scope show --json`（`target-scope.v1`）列出范围内每条有效豁免及其 AC、需求和理由，已失效的历史豁免不出现；确认（独立提交，或附带在审核中，以审核完成后的状态为准）时 `acknowledged_waivers` 少一项、多一项，或列入了已失效的豁免 → 退出码 5，`error.current` 中给出当前的有效豁免，不写入；一致时写入，并在范围确认中保存。M1 验证没有豁免时的写入侧与输出；M2 用真实的豁免验证，并验证 AC 实质修订、父需求修订或新决定之后，该豁免不再出现在有效集合中 | 集成 | FR-TGT-04 | M1 / M2 |
+| MVP-TGT-11 | **防止旧页面覆盖范围确认**（PD-21，V-T02）：两个会话都读到同一个范围确认 C1 → 会话乙确认范围（写入 C2）→ 会话甲用 `seen_scope_confirmation_id = C1` 确认 → 退出码 5，不写入，`error.current` 中给出 C2；首次确认时 `seen_scope_confirmation_id = null`，此时已经存在确认 → 退出码 5；会话甲重新读取后用 C2 确认 → 成功。附带在审核中的确认同样适用 | 集成 | FR-TGT-04 | M1 |
 
 ### 2.5 Worktree（WT）
 
@@ -171,7 +172,7 @@
 | MVP-ACC-02 | 非 TTY 执行 `accept` → 退出码 3；在 TTY 中执行，但存在已知的 Agent 环境变量 → 退出码 3 | 集成 | FR-ACC-02 | M2 |
 | MVP-ACC-03 | **必须拒绝**（Bash 和 PowerShell 两种 payload）：`specmetry accept AC-001-1`、`cd app && specmetry waive AC-002-1 -m x`、`specmetry scope confirm`、`specmetry source ack docs/a.md`、`specmetry propose --apply --file x.json`、`specmetry question answer Q-001`、`specmetry question dismiss Q-002`、`specmetry project set excerpt-storage full`、`bash -c "specmetry review"` → 输出拒绝决定，并记录 `guard_denied`。**必须放行**：`specmetry status --json`、`specmetry dashboard --page review`、`echo "specmetry accept"`、正文中含有 accept / review / setup 字样的 `specmetry propose --file - <<EOF … EOF`、`specmetry claim --file -` | 单元 + 集成 | FR-ACC-02 | M3 |
 | MVP-ACC-04 | 在 `V = none` 时执行 `normal` 验收 → 退出码 2（提示使用例外）；在 `V = fail` 时作出任何 `accepted` → 退出码 2 | 集成 | FR-ACC-03、06 | M2 |
-| MVP-ACC-05 | 例外验收没有理由 → 退出码 2；有理由时 → AC 为 `accepted`（`exception`），并带 `EXCEPTION_ACCEPTANCE` 警告；`status --json` 中该 AC 的 `decision` 显示 `mode = exception`、理由、快照和 `evidence_grade = none`，人类可读输出同样显示这四项（PD-17） | 集成 | FR-ACC-05 | M2 |
+| MVP-ACC-05 | 例外验收没有理由 → 退出码 2；有理由时 → AC 为 `accepted`（`exception`），并带 `EXCEPTION_ACCEPTANCE` 警告；`status --json` 中该 AC 的 `decision` 显示 `mode = exception`、理由、快照和 `evidence_grade = none`，人类可读输出同样显示这四项。之后在 `S` 上记录合格的 `pass` → `snapshot_run` 显示这条执行，AC 仍为 `accepted`（`exception`），交付判定的证据等级不因此改变；记录 `fail` → `failing`（`regressed`）（PD-17） | 集成 | FR-ACC-05 | M2 |
 | MVP-ACC-06 | 手动 AC 在 `S` 上被验收 → `accepted`（`manual`） | 集成 | FR-ACC-04 | M2 |
 | MVP-ACC-07 | 拒收或豁免没有理由 → CLI 退出码 2（M2），API 返回 400（M5） | 集成 | FR-ACC-07 | M2 / M5 |
 | MVP-ACC-08 | 自动化 AC 在 `S` 上 `V = pass` → 人依次在同一快照上作出接受、拒收、接受，每次都携带上一条决定的 ID 作为 `seen_decision_id`（第二次接受是人在重新读取后明确改判）→ 三条都保留，当前决定是 `seq` 最大的那一条，AC 为 `accepted` | 集成 | FR-ACC-08、FR-ACC-03 | M2 |
@@ -311,6 +312,7 @@
 8. 交付状态为 `ready`，当且仅当不存在阻塞差距。
 9. MVP 构建中，不存在 `evidence_grade = snapshot_isolated` 的执行；`delivery.evidence_grade` 只可能是 `observed` 或 `none`；没有任何 AC 在没有人参与的情况下，依据观测级证据变为 `accepted`。
 10. 每条决定的 `seen_decision_id`，都等于写入时该 AC 当前修订下的前一条最新决定（第一条为 NULL）。
+11. 每条范围确认的 `seen_scope_confirmation_id`，都等于写入时该目标的前一条范围确认（第一条为 NULL）；它的 `acknowledged_waivers` 等于写入时的有效豁免集合。
 
 ## 4. 反例与异常场景（CX）
 
@@ -369,7 +371,7 @@
 | FR-INIT | INIT-01 ~ 11、PRV-01（FR-INIT-07） |
 | FR-SRC | SRC-01 ~ 08、CX-17 |
 | FR-BL | BL-01 ~ 28、CX-07、CX-14 |
-| FR-TGT | TGT-01 ~ 10、CX-05、CX-06、CX-18（FR-TGT-05）、CX-22（FR-TGT-03）、INIT-09（FR-TGT-03） |
+| FR-TGT | TGT-01 ~ 11、CX-05、CX-06、CX-18（FR-TGT-05）、CX-22（FR-TGT-03）、INIT-09（FR-TGT-03） |
 | FR-WT | WT-01 ~ 05、COL-10、CX-03、CX-04 |
 | FR-INV | INV-01 ~ 06、CX-10 |
 | FR-CLM | CLM-01 ~ 05、CX-12、CX-13 |

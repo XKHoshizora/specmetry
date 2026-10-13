@@ -19,7 +19,7 @@
 |---|---|---|---|
 | G0 技术决策 | 确认 TD-02（数据目录）、TD-04（SQLite 驱动；需要先做一个 spike，验证 `VACUUM INTO` 和 WAL 检查点）、TD-10（CLI 框架）、TD-16（迁移策略）、TD-22（Windows ACL 授权对象） | M0 | **已满足**（2026-10-13；spike 通过；TD-22 选择当前用户 + SYSTEM） |
 | G1 隐私契约 | 确认 PD-20（C1 允许的内容） | M0 中的存储部分 | **已满足**（2026-10-13；附加的采集策略与用户控制见 architecture §10.7） |
-| G2 交付模型 | 确认 PD-16（沿用，仅限隔离级证据）、PD-17（例外验收）、PD-19（交付目标形态）、PD-21（范围粒度）；确认 PD-03、PD-04、PD-12 的建议默认；同时确认截止在 M1 的 PD-07、PD-13、PD-14、PD-24，以及技术决策 TD-01、TD-05、TD-14、TD-18、TD-20、TD-21 | M1（冻结 `proposal`、`review`、`scope` 的契约和 M1 读取模型；`decision` 契约在 G2b 冻结，这里只确认它的语义前提 PD-03、PD-16、PD-17） | **部分满足**（2026-10-14）：PD-03、PD-04（方案 A）、PD-07、PD-12、PD-13、PD-14、PD-16、PD-19 已确认；PD-17、PD-21 有条件批准，补充设计待最终确认；PD-24 待确认；TD-01、TD-05、TD-14、TD-18 原则批准；TD-20、TD-21 待确认 |
+| G2 交付模型 | 确认 PD-16（沿用，仅限隔离级证据）、PD-17（例外验收）、PD-19（交付目标形态）、PD-21（范围粒度）；确认 PD-03、PD-04、PD-12 的建议默认；同时确认截止在 M1 的 PD-07、PD-13、PD-14、PD-24，以及技术决策 TD-01、TD-05、TD-14、TD-18、TD-20、TD-21 | M1（冻结 `proposal`、`review`、`scope` 的契约和 M1 读取模型；`decision` 契约在 G2b 冻结，这里只确认它的语义前提 PD-03、PD-16、PD-17） | **已满足**（2026-10-14）：上述 PD 与 TD 全部已确认（PD-04 采用方案 A；PD-18 一并确认）；补充设计见 [review-resolution.md §13](review-resolution.md#13-m1-开工准备产品决策与设计收尾2026-10-14) |
 | G2b 证据等级 | 确认 PD-22（MVP 只提供观测级证据，交付判定标为观测级，人验收时确认风险）；codex 对 B1、B2 的复审通过 | M2（Check Runner 与人工决定的契约在此冻结） | **已满足**（PD-22 已确认；codex-review-003 结论为 GO） |
 | G3 许可证 | PD-10 | 接受外部贡献之前（不阻塞内部编码） | 未满足 |
 
@@ -31,8 +31,8 @@
 |---|---|---|---|
 | Windows ACL | 授权对象（当前用户；是否加入 SYSTEM）、实现方式、`doctor` 的检测方法 | M0 开工前 | 审查 #12、TD-22 |
 | SQLite 驱动 spike | 验证 `VACUUM INTO`、`wal_checkpoint(TRUNCATE)`、`BEGIN EXCLUSIVE`、触发器 | M0 开工前 | TD-04 |
-| 密钥规则集 | 内置规则清单、正反样本、配置扩展方式 | M1 开工前 | TD-21；**已细化**：architecture §10.8，待确认 |
-| 人类读取模型的 schema | `proposal show`（含三方对比和 `item_id`）、`baseline show/history`、`source list` 的 `--json` 输出 | M1 开工前 | 第二轮自检 #5；**已补齐**（连同 M1 的其他读取模型和 Agent 结果输出，data-model §8），待确认 |
+| 密钥规则集 | 内置规则清单、正反样本、配置扩展方式 | M1 开工前 | TD-21；**已确认**（2026-10-14）：architecture §10.8 |
+| 人类读取模型的 schema | `proposal show`（含三方对比和 `item_id`）、`baseline show/history`、`source list` 的 `--json` 输出 | M1 开工前 | 第二轮自检 #5；**已补齐**（连同 M1 的其他读取模型和 Agent 结果输出，data-model §8） |
 | `doctor --json` 的 schema | 版本、路径、权限、Hook 与 Skill、spool、兼容版本 | M3 开工前 | 第二轮自检 #5 |
 | 隔离执行器的后端 | TD-24：物化方式、只读强制机制、写入探测、执行后比对、子模块和 LFS | M7 开工前（MVP 之后） | codex-002 B1 |
 | Windows 上执行检查的 shell | 默认 shell 的探测顺序；`shell` 字段的取值映射 | M2 开工前 | TD-06 |
@@ -93,6 +93,8 @@ flowchart LR
 
 **目标**：审查 #4、#5、#8 和中-1 的实现；#3、#6 中属于写入侧的部分。
 
+**状态（2026-10-14）**：设计收尾完成，G2 已满足（[review-resolution.md §13](review-resolution.md#13-m1-开工准备产品决策与设计收尾2026-10-14)）；**尚未开工，等待开发授权**。
+
 | 工作包 | 内容 |
 |---|---|
 | WP1.0 | M1 夹具：`fx-docs-only`（含录制的 `proposal.json`）、`fx-in-dev` 的文件与分支脚本、`fx-incomplete`（acceptance-criteria §1.1；原属 WP2.9，提前到 M1，因为 INIT-03、INIT-04、BL-01 需要它们） |
@@ -103,7 +105,7 @@ flowchart LR
 | WP1.5 | 提案：schema 校验、版本前置条件、引用片段校验、代码引用、编号分配（AC 按需求的作用域分配）；输出 `proposal-receipt.v1` |
 | WP1.6 | 审核：逐条决定（接受 `update` 条目必须选择 `change_class`，V-R01）、冲突检测与三方对比、版本与变更记录、级联、父需求修订与 AC 后续处理、`reaffirm`、`propose --apply`；输出 `proposal-list.v1`、`proposal-show.v1`、`baseline-show.v1`、`baseline-history.v1` |
 | WP1.7 | 待澄清问题（只能由人回答或驳回）；输出 `question-list.v1` |
-| WP1.8 | `target set`、`scope confirm`（独立提交，或附带在审核中）、声明校验、已有豁免的确认（V-T01）；输出 `target-scope.v1` |
+| WP1.8 | `target set`、`scope confirm`（独立提交，或附带在审核中）、声明校验、已有豁免的确认（V-T01）、读取时范围确认的校验（V-T02）；输出 `target-scope.v1` |
 
 **建表约束**（codex-review-004 N1）：见 [data-model.md §1.1](data-model.md#11-建表约束m1-起)；由 schema 不变量测试强制。
 
