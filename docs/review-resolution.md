@@ -14,7 +14,7 @@
 | 实现状态 | 未开始 / 进行中 | — |
 | | **已验证** | 对应的验收项和 CX 反例已经在实现中通过 |
 
-**当前总体状态**（2026-10-14 更新）：codex-review-003 结论为 **GO**，BLOCKER 为 0。本文所有条目的设计状态均为**已冻结**（包括 codex-review-003 要求的两处同步修正，见 §6）；冻结后的修改必须走 implementation-plan §1 的变更流程。**没有任何条目整体处于"已验证"**：验证需要等到对应里程碑实现完成，并通过验收项和 CX 反例；目前只有 #6、#12 中属于 M0 的验收项已验证（§12）。M0 的代码审查经过五轮（codex-review-004 ~ 008），第五轮（codex-review-008）结论为 **GO**，BLOCKER 为 0（§11）；GitHub Actions 三平台 CI 通过后，产品负责人于 2026-10-14 正式验收 M0（§12）。
+**当前总体状态**（2026-10-14 更新）：codex-review-003 结论为 **GO**，BLOCKER 为 0。本文所有条目的设计状态均为**已冻结**（包括 codex-review-003 要求的两处同步修正，见 §6）；冻结后的修改必须走 implementation-plan §1 的变更流程。**没有任何条目整体处于"已验证"**：验证需要等到对应里程碑实现完成，并通过验收项和 CX 反例；目前只有 #6、#12 中属于 M0 的验收项已验证（§12）。M0 的代码审查经过五轮（codex-review-004 ~ 008），第五轮（codex-review-008）结论为 **GO**，BLOCKER 为 0（§11）；GitHub Actions 三平台 CI 通过后，产品负责人于 2026-10-14 正式验收 M0（§12）。M1 开工准备中的产品决策与设计收尾见 §13，已于 2026-10-14 最终确认，G2 已满足。
 
 ## 1. 总览（codex-review-001）
 
@@ -783,3 +783,90 @@ PR：<https://github.com/XKHoshizora/specmetry/pull/1>（`feat/m0-foundation` �
 - **N1**：部分修复，最晚在 M2 的 `purge` 验收前完成。
 - **PD-23 `specmetry db recover`**：未实现，在 M2（WP2.10）实现，最晚在 M4 自测前完成。在此之前，无法确认版本的数据库只能拒绝（退出码 6），`doctor` 报告版本未知。
 - §11 中已接受的风险，以及方案 A 的文件副作用边界，保持不变。
+
+## 13. M1 开工准备：产品决策与设计收尾（2026-10-14）
+
+**背景**：M0 验收之后，产品负责人对截止在 M1 的待决策事项作出决定，并要求在不实现 M1 业务功能的前提下完成设计收尾。本节记录决定、对补充条件的核对，以及据此作出的修改。**本节的全部内容已于 2026-10-14 最终确认**（见本节末尾的"最终确认"）。
+
+### 第一轮决定（之后的最终确认见本节末尾）
+
+| 事项 | 决定 | 记录位置 |
+|---|---|---|
+| PD-03、PD-07、PD-12、PD-13、PD-14、PD-16、PD-19 | 已确认，采纳建议默认 | prd §9 |
+| PD-04 | 已确认，方案 A：审核时接受 `update` 条目，审核者必须明确选择 `material` 或 `editorial`，否则拒绝；强制 `material` 的字段继续优先 | prd §9；data-model §7.2、V-R01 |
+| PD-17 | 有条件批准：例外验收可以计入 `ready`；必须显示例外、理由、适用快照和证据等级；`evidence_grade = none` 不得描述为已通过自动化验证；全部豁免的范围不得为 `ready` | prd §9；data-model §6.8、§7.3 |
+| PD-21 | 有条件批准：范围以需求为单位；豁免绑定 AC 的 revision，实质修订后重新决定；重新确认范围时展示已有豁免，由人确认继续适用 | prd §9；data-model §6.2、§7.1、V-T01 |
+| TD-01、TD-05、TD-14、TD-18 | 原则批准 | architecture §16 |
+| TD-20 | 待确认：先提供原规则和兼容性策略 | architecture §16（未修改） |
+| PD-10 | 倾向 Apache-2.0，**尚未确认** | prd §9；[licensing.md](licensing.md) |
+
+### 补充条件与现有设计的核对
+
+结论：补充条件与现有的推导规则、schema 和验收项**没有实质冲突**。其中两项现有设计已经满足，其余三项通过**只做加法**的最小修改实现，不改变任何推导规则。
+
+| 条件 | 现有设计 | 处理 |
+|---|---|---|
+| PD-17：显示例外、理由、适用快照和证据等级 | `status.v1` 中每个 AC 只有 `current_decision_id`、原因码和标记，没有理由、快照和等级 | `status.v1` 的 AC 增加 `decision` 摘要（`current_decision_id` 不为空时必有）。schema 强制：`exception` 和 `manual` 的等级只能是 `none`；`exception` 必须有理由；`accepted` 必须有快照；`normal` 的等级只能是 `observed` 或 `snapshot_isolated`。FR-ACC-05、MVP-ACC-05 同步 |
+| PD-17：`none` 不得描述为已通过自动化验证 | FR-PRV-09 只约束 `observed` | 扩展 FR-PRV-09、MVP-PRV-09、data-model §6.8，以及 `common.v1` 中 `deliveryEvidenceGrade` 的说明；PD-22 增加补充说明 |
+| PD-17：全部豁免的范围不得为 `ready` | **已满足**：data-model §6.8 第 5 条，以及阻塞差距 `ALL_WAIVED` | 不修改。这与 PD-18 的建议默认一致（PD-18 已在最终确认中一并批准） |
+| PD-21：豁免绑定 AC 的 revision | **已满足**：当前决定只取当前 revision 下的（§5.4），所以实质修订后豁免不再适用；父需求修订先进入 `parent_revised`（§6.3 第 2 条先于第 3 条） | 只在 §6.2 补充说明 |
+| PD-21：重新确认范围时展示并确认已有豁免 | 不存在 | `scope.v1` 增加可选字段 `acknowledged_waivers`（省略视为空集合）；新规则 V-T01 要求它恰好等于服务端计算的有效豁免集合，否则 `stale_precondition`。这沿用了 `pending_items_excluded` 的现有模式。新增读取模型 `target-scope.v1` 列出有效豁免及其理由。要停止某项豁免，先对该 AC 作出新的决定 |
+| PD-04 方案 A | `review.v1` 的 `change_class` 可选，没有对应规则 | 新增服务端规则 V-R01，`review.v1` 的结构不变，只改说明；合法示例中缺少类别的更新条目已补上 |
+
+### M1 设计收尾
+
+| 项 | 结果 | 位置 |
+|---|---|---|
+| 1. TD-21 密钥识别规则集 | 14 条内置规则（正则加附加条件），每条 2 个命中、2 个不命中样本，用运行时拼接的方式书写；扫描范围是写入输入中的每个字符串值；命中时的错误格式（不回显命中文本）；`config.toml` 中 `[secrets]` 的追加方式（只能追加）。已在本地用一次性程序验证：每个命中样本都先命中自己的规则，每个不命中样本都不命中任何规则，另有 8 个常见文本没有误报 | architecture §10.8 |
+| 2. M1 读取模型 schema | `source-list.v1`、`proposal-list.v1`、`proposal-show.v1`（三方对比 = `base` / `current` / `proposed`）、`baseline-show.v1`、`baseline-history.v1`、`question-list.v1`、`target-scope.v1` | `schemas/`；data-model §8 |
+| 3. M1 Agent 调用接口的 JSON 输出 | `source-add.v1`、`proposal-receipt.v1`（不回显片段）；已有的 `init.v1`、`error.v1` 不变。人类专属写命令在 MVP 中只输出人类可读文本 | `schemas/`；prd §6；architecture §9.1 |
+| 4. 通道识别的已知边界 | 规则、已核实的 Agent 环境变量（`CLAUDECODE`、`CLAUDE_CODE_ENTRYPOINT`；只检查是否存在，从不读取或保存值）、交互式确认（不提供跳过参数）、六种已知边界 | architecture §5.1；MVP-CH-01、CH-02 |
+| 5. 阶段识别与来源发现 | 只读取路径和文件大小；扫描范围与排除规则；候选来源的排序和截断；三种阶段的判定表 | architecture §6.1.1；MVP-INIT-03、INIT-04 |
+| 6. `excerpt_storage` | 新增 PD-24：默认 `hash_only`；`full` 只能由人开启，M2 起可用；`hash_only` 下原文不写入任何位置；沿用引用的重新校验规则；`project set` 加入人类专属操作和拦截清单 | prd FR-PRV-08、PD-24；architecture §10.7；data-model §4.1、§4.5 |
+| 7. M1 夹具与依赖 | 新增 WP1.0：把 `fx-docs-only`（含录制的 `proposal.json`）、`fx-in-dev` 的文件与分支脚本、`fx-incomplete` 从 WP2.9 提前到 M1 | implementation-plan M1；acceptance-criteria §1.1 |
+| WT-01 依赖 M2 的 `status` | 拆成两部分：M1 用 `init --json` 验证项目相同、worktree 被登记；M2 用 `status --json` 验证 `worktree_id` | MVP-WT-01 |
+| SRC-08 依赖 N1 | M1 只有 `hash_only` 引用，没有原文需要擦除，因此只验证命令和通道；`full` 模式、擦除后的整理和字节级验证一起移到 M2（新增 WP2.11），与 N1 的修复、`purge` 共用整理步骤。没有降低擦除保证：在保证可以兑现之前，不保存任何原文 | MVP-SRC-08；implementation-plan WP2.11 |
+
+### 文档与一致性修正
+
+- 术语："验收标准"改为唯一的验收单位（PD-03）；"沿用"补充隔离级证据和 `inputs` 条件（PD-16）；PD-16 的"输入哈希"改为"输入对象 ID"。
+- PD-22 增加补充说明：证据等级 `none` 的含义，以及不得描述为已通过自动化验证。
+- `claims.v1` 的说明与 data-model 中 Claim 的统一表述保持一致：手动 AC 的 `done` 自述只会让它进入"等待人工查看"。
+- G2 与 G2b：G2 列出截止在 M1 的全部 PD 和 TD；`decision` 契约在 G2b 冻结，G2 只确认它的语义前提（PD-03、PD-16、PD-17）。
+- data-model §7.3 中断开的表格已修复，`rejected` 和 `waived` 两行回到表中。
+- PD-14 的覆盖：AGENTS.md 的人类专属操作清单、不变量 #1、E2E-7、MVP-ACC-03 的拦截样本、MVP-BL-17（增加驳回）。
+- MVP-BL-12 增加：修改 `verification` 时强制按 `material` 记录。
+- data-model §10 更新各项决策的状态。
+
+### Schema 变更
+
+- **修改**：
+  - `status.v1`：AC 增加 `decision`；
+  - `scope.v1`：增加 `acknowledged_waivers`（最终确认时改为必填，并增加 `seen_scope_confirmation_id`）；
+  - `review.v1`、`claims.v1`、`common.v1`：只改说明。
+- **新增**：9 个 schema、10 个合法示例（包括 `status.exception.json`），以及反例 SCH-65 ~ SCH-92。`internal/contract` 的测试只更新了 schema 清单和示例前缀映射。
+- **与 TD-20 原规则的关系**：
+  - 全部是新增：新的 schema、新的可选字段，以及只出现在输出中、在条件满足时才必有的 `decision`。
+  - 没有删除或改变已有字段的含义。
+  - 这些 schema 都还没有实现，也没有发布过的使用方。
+
+### 最终确认（2026-10-14）
+
+产品负责人正式批准 PD-17、PD-18、PD-21、PD-24，以及 TD-01、TD-05、TD-14、TD-18、TD-20（调整后）、TD-21；此前已批准的 PD 和 TD 保持不变。G2 因此满足。最终批准附带的要求，以及据此所做的修改：
+
+| 要求 | 修改 |
+|---|---|
+| PD-17：采用 `decision` 摘要；例外验收显示理由、适用快照和证据等级；`none` 不得表述为自动化验证通过；**不能因此删除或隐藏已有的实际测试证据**；保留全部豁免不得 `ready` | `status.v1` 中 `snapshot_run` 的说明写明：无论作出什么决定，执行都照常输出；`decisionSummary` 说明决定之后的执行不改变它的等级。data-model §6.8 写明：例外验收之后的执行照常显示，不会把这次例外验收升级为 `observed`。MVP-ACC-05 增加对应的断言 |
+| PD-21：`acknowledged_waivers` 必须覆盖范围内全部有效豁免；写入时校验用户读取的基准、范围和相关 AC 的 revision；已失效的历史豁免不进入确认列表 | `scope.v1`：`acknowledged_waivers` 改为**必填**（空数组表示没有豁免）；新增必填的 `seen_scope_confirmation_id` 和规则 V-T02，与 `seen_decision_id` 的做法相同，用来防止旧页面覆盖刚写入的范围确认。`target-scope.v1` 给出需要回传的值。AC 的 revision 由两处保证：任何 revision 变化都产生新的基准版本；每条豁免都绑定 AC 的 revision。`scope_confirmations` 保存确认的豁免和读取到的范围确认。新增 MVP-TGT-11 和不变量 #11，修改 MVP-TGT-10 |
+| TD-20：调整后的六条版本策略 | architecture §9.3；TD-20 已确认。本轮的 schema 修改发生在首次正式发布之前，属于完善 v1，已同步 schema、示例和测试 |
+| TD-21：批准 14 条规则；命中即拒绝持久化，不回显；规则集只能降低风险 | architecture §10.8 的"已知限制"、FR-PRV-07 写明这一点；TD-21 已确认 |
+| PD-24：默认 `hash_only`；M1 不提供原文持久化；`full`、人工授权和删除保证在 M2 | 与 §13 中的设计一致；PD-24 已确认 |
+
+新增的 schema 反例为 SCH-93 ~ SCH-97，覆盖缺少 `acknowledged_waivers` 或 `seen_scope_confirmation_id` 的情况。
+
+**仍未确认、但不阻塞 M1 的事项**：
+
+- PD-10（许可证，接受外部贡献之前）：确认项见 [licensing.md §4](licensing.md#4-pd-10-的确认项)。
+- PD-02（M2）。
+- TD-17（M2）、TD-24（M7）。
+- 其他 Agent 的环境变量与约束（M4 开工前）。

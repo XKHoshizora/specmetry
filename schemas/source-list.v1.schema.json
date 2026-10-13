@@ -1,0 +1,125 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/XKHoshizora/specmetry/schemas/source-list.v1.schema.json",
+  "title": "Specmetry source list v1",
+  "description": "Output of `specmetry source list --json`. Active sources with their on-disk observation; removed sources only with --include-removed; references and stored excerpts only with --refs. This is where a human checks which excerpts are stored (architecture §10.7).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "excerpt_storage", "source_set_hash", "sources"],
+  "properties": {
+    "schema": { "const": "specmetry.source-list/v1" },
+    "excerpt_storage": {
+      "description": "The project's excerpt storage mode; it applies to references written from now on.",
+      "enum": ["hash_only", "full"]
+    },
+    "source_set_hash": {
+      "description": "Hash of the active sources (data-model §4.3), as a scope confirmation must carry it.",
+      "$ref": "common.v1.schema.json#/$defs/sha256"
+    },
+    "sources": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/source" }
+    }
+  },
+  "$defs": {
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "path",
+        "location",
+        "kind",
+        "acked_sha256",
+        "current_sha256",
+        "state",
+        "size_bytes",
+        "registered_seq",
+        "removed_seq"
+      ],
+      "properties": {
+        "id": { "$ref": "common.v1.schema.json#/$defs/ulid" },
+        "path": {
+          "description": "Repository-relative for in_repo sources, absolute for external ones.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "location": { "enum": ["in_repo", "external"] },
+        "kind": { "enum": ["client_requirement", "product_doc", "design_doc", "issue", "note", "other"] },
+        "acked_sha256": { "$ref": "common.v1.schema.json#/$defs/sha256" },
+        "current_sha256": {
+          "description": "On-disk hash read for this output; null when the file is missing or the source is removed.",
+          "oneOf": [{ "$ref": "common.v1.schema.json#/$defs/sha256" }, { "type": "null" }]
+        },
+        "state": {
+          "description": "null for removed sources, which are no longer observed.",
+          "oneOf": [{ "$ref": "common.v1.schema.json#/$defs/sourceState" }, { "type": "null" }]
+        },
+        "size_bytes": { "type": "integer", "minimum": 0 },
+        "registered_seq": { "$ref": "common.v1.schema.json#/$defs/seq" },
+        "removed_seq": { "oneOf": [{ "$ref": "common.v1.schema.json#/$defs/seq" }, { "type": "null" }] },
+        "refs": {
+          "description": "Present with --refs: every reference to this source, current and historical.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/ref" }
+        }
+      },
+      "if": { "properties": { "removed_seq": { "type": "integer" } } },
+      "then": { "properties": { "state": { "const": null }, "current_sha256": { "const": null } } },
+      "else": { "properties": { "state": { "type": "string" } } }
+    },
+    "ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "seq",
+        "entity_type",
+        "entity_key",
+        "entity_revision",
+        "current",
+        "locator",
+        "verification",
+        "excerpt_sha256",
+        "excerpt_state",
+        "excerpt"
+      ],
+      "properties": {
+        "seq": { "$ref": "common.v1.schema.json#/$defs/seq" },
+        "entity_type": { "enum": ["goal", "requirement", "criterion", "question"] },
+        "entity_key": {
+          "anyOf": [
+            { "$ref": "common.v1.schema.json#/$defs/goalKey" },
+            { "$ref": "common.v1.schema.json#/$defs/requirementKey" },
+            { "$ref": "common.v1.schema.json#/$defs/criterionKey" },
+            { "$ref": "common.v1.schema.json#/$defs/questionKey" }
+          ]
+        },
+        "entity_revision": { "$ref": "common.v1.schema.json#/$defs/revision" },
+        "current": {
+          "description": "true when entity_revision is the entity's current revision.",
+          "type": "boolean"
+        },
+        "locator": { "type": ["string", "null"], "maxLength": 100 },
+        "verification": { "$ref": "#/$defs/verification" },
+        "excerpt_sha256": { "$ref": "common.v1.schema.json#/$defs/sha256" },
+        "excerpt_state": {
+          "description": "stored: the text is kept (excerpt_storage = full when written); not_stored: written under hash_only, the text was only checked in memory; erased: removed by source remove --erase-excerpts.",
+          "enum": ["stored", "not_stored", "erased"]
+        },
+        "excerpt": {
+          "description": "The stored excerpt text; null unless excerpt_state is stored.",
+          "type": ["string", "null"],
+          "maxLength": 500
+        }
+      },
+      "if": { "properties": { "excerpt_state": { "const": "stored" } } },
+      "then": { "properties": { "excerpt": { "type": "string", "minLength": 1 } } },
+      "else": { "properties": { "excerpt": { "const": null } } }
+    },
+    "verification": {
+      "description": "What the excerpt check proved: it appears verbatim (after whitespace normalization) in the source. It never proves semantic correctness or completeness. not_checkable: the source is not a text type, or a carried-over hash_only reference whose source changed (data-model §4.5).",
+      "enum": ["verified", "not_found", "source_missing", "not_checkable"]
+    }
+  }
+}

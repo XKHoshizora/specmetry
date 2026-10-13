@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/XKHoshizora/specmetry/schemas/claims.v1.schema.json",
   "title": "Specmetry claim batch v1",
-  "description": "Agent self-reports about acceptance criteria. Claims affect progress only and never delivery status. base_version and each target_revision are read-time preconditions. The CLI records the submitting worktree's code context itself.",
+  "description": "Agent self-reports about acceptance criteria. A claim never produces accepted or ready on its own: it cannot move an automated criterion past in_progress, and a done claim on a manual criterion only marks it ready_for_review (awaiting human review, which is not verification; data-model §2). base_version and each target_revision are read-time preconditions. The CLI records the submitting worktree's code context itself.",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema", "kind", "base_version", "summary", "claims"],

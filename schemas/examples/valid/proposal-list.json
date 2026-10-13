@@ -1,0 +1,38 @@
+{
+  "schema": "specmetry.proposal-list/v1",
+  "baseline_version": 3,
+  "proposals": [
+    {
+      "id": "01J9Z3K5Q8R2T4V6W8X0Y2Z4A6",
+      "seq": 88,
+      "origin": "skill_goals",
+      "actor": "agent:claude_code",
+      "channel": "agent_cli",
+      "summary": "订单隔离需求的修订",
+      "base_version": 3,
+      "counts": {
+        "pending": 1,
+        "conflict": 1,
+        "accepted": 0,
+        "accepted_with_edits": 0,
+        "rejected": 0
+      }
+    },
+    {
+      "id": "01J9Z3K5Q8R2T4V6W8X0Y2Z4A5",
+      "seq": 20,
+      "origin": "skill_init",
+      "actor": "agent:claude_code",
+      "channel": "agent_cli",
+      "summary": "从客户需求说明提取的初始基准",
+      "base_version": 0,
+      "counts": {
+        "pending": 0,
+        "conflict": 0,
+        "accepted": 7,
+        "accepted_with_edits": 1,
+        "rejected": 2
+      }
+    }
+  ]
+}

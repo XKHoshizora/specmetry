@@ -1,0 +1,51 @@
+{
+  "schema": "specmetry.target-scope/v1",
+  "target": {
+    "id": "01J9Z3K5Q8R2T4V6W8X0Y2Z4B0",
+    "name": "首期交付",
+    "ref": "refs/heads/main",
+    "snapshot": "8f3c2a1b9d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a",
+    "created_seq": 5
+  },
+  "scope": {
+    "confirmation_id": "01J9Z3K5Q8R2T4V6W8X0Y2Z4D0",
+    "seq": 64,
+    "baseline_version": 4,
+    "source_set_hash": "3b5d9f0c1e2a4b6c8d0e1f2a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e",
+    "requirements": [
+      {
+        "key": "REQ-002",
+        "revision": 2
+      }
+    ],
+    "attestations": {
+      "complete_scope": true,
+      "pending_items_excluded": 0
+    },
+    "acknowledged_waivers": [
+      "01J9Z3K5Q8R2T4V6W8X0Y2Z4G1"
+    ],
+    "stale": true
+  },
+  "confirm_inputs": {
+    "target_id": "01J9Z3K5Q8R2T4V6W8X0Y2Z4B0",
+    "seen_scope_confirmation_id": "01J9Z3K5Q8R2T4V6W8X0Y2Z4D0",
+    "baseline_version": 5,
+    "source_set_hash": "3b5d9f0c1e2a4b6c8d0e1f2a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e",
+    "pending_items": 2,
+    "must_requirements": [
+      "REQ-002",
+      "REQ-005"
+    ],
+    "effective_waivers": [
+      {
+        "decision_id": "01J9Z3K5Q8R2T4V6W8X0Y2Z4G1",
+        "criterion": "AC-002-4",
+        "criterion_revision": 1,
+        "requirement": "REQ-002",
+        "rationale": "客户确认首期不需要导出 CSV",
+        "seq": 63
+      }
+    ]
+  }
+}

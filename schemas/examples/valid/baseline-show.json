@@ -1,0 +1,60 @@
+{
+  "schema": "specmetry.baseline-show/v1",
+  "as_of_seq": 120,
+  "baseline_version": 4,
+  "goals": [
+    {
+      "key": "GOAL-1",
+      "revision": 1,
+      "status": "active",
+      "title": "上线订单管理 MVP",
+      "description": null,
+      "origin": "extracted"
+    }
+  ],
+  "requirements": [
+    {
+      "key": "REQ-002",
+      "revision": 2,
+      "status": "active",
+      "goal": "GOAL-1",
+      "title": "用户只能查看自己名下的订单",
+      "description": null,
+      "kind": "functional",
+      "priority": "must",
+      "origin": "extracted",
+      "confidence": "high",
+      "criteria": [
+        {
+          "key": "AC-002-1",
+          "revision": 1,
+          "status": "active",
+          "requirement_revision": 2,
+          "statement": "用户 A 请求用户 B 的订单时返回 404",
+          "verification": "automated",
+          "check": {
+            "command": "go test ./internal/orders -run TestIsolation",
+            "workdir": ".",
+            "timeout_sec": 300,
+            "rationale": "该测试以两个用户的身份分别请求对方订单，断言返回 404"
+          },
+          "check_config_hash": "aa11bb22cc33dd44ee55ff66aa77bb88cc99dd00ee11ff22aa33bb44cc55dd66",
+          "origin": "extracted",
+          "confidence": "high"
+        },
+        {
+          "key": "AC-002-2",
+          "revision": 1,
+          "status": "active",
+          "requirement_revision": 1,
+          "statement": "订单列表只显示当前用户的订单",
+          "verification": "manual",
+          "check": null,
+          "check_config_hash": null,
+          "origin": "extracted",
+          "confidence": "medium"
+        }
+      ]
+    }
+  ]
+}

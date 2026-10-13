@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/XKHoshizora/specmetry/schemas/proposal-receipt.v1.schema.json",
+  "title": "Specmetry proposal receipt v1",
+  "description": "Output of `specmetry propose --file <path|-> --json` (Agent-facing). Reports what was stored and the marks recorded by validation (V-P07, V-P08). Agent proposals stay pending until a human reviews them; `propose --apply` (human only) applies them at once and reports the new version and assigned keys. Excerpt text is never echoed.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "proposal_id", "seq", "origin", "base_version", "applied_version", "items", "questions"],
+  "properties": {
+    "schema": { "const": "specmetry.proposal-receipt/v1" },
+    "proposal_id": { "$ref": "common.v1.schema.json#/$defs/ulid" },
+    "seq": { "$ref": "common.v1.schema.json#/$defs/seq" },
+    "origin": { "enum": ["skill_init", "skill_goals", "skill_audit", "skill_sync", "cli", "human_edit"] },
+    "base_version": { "$ref": "common.v1.schema.json#/$defs/baselineVersion" },
+    "applied_version": {
+      "description": "The baseline version created by `propose --apply`; null for proposals waiting for review.",
+      "oneOf": [{ "type": "integer", "minimum": 1 }, { "type": "null" }]
+    },
+    "items": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/item" }
+    },
+    "questions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["key", "about", "blocking"],
+        "properties": {
+          "key": { "$ref": "common.v1.schema.json#/$defs/questionKey" },
+          "about": {
+            "description": "Existing key, or the proposal-local ref it points to until that item is accepted.",
+            "type": ["string", "null"],
+            "maxLength": 64
+          },
+          "blocking": { "type": "boolean" }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "origin": { "const": "human_edit" } } },
+      "then": { "properties": { "applied_version": { "type": "integer" } } },
+      "else": { "properties": { "applied_version": { "const": null } } }
+    }
+  ],
+  "$defs": {
+    "item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["item_id", "item_index", "op", "type", "ref", "target", "review_state", "assigned_key", "sources", "code_refs"],
+      "properties": {
+        "item_id": { "$ref": "common.v1.schema.json#/$defs/ulid" },
+        "item_index": { "type": "integer", "minimum": 0 },
+        "op": { "enum": ["add", "update", "retire", "reaffirm"] },
+        "type": { "enum": ["goal", "requirement", "criterion"] },
+        "ref": { "oneOf": [{ "$ref": "common.v1.schema.json#/$defs/localRef" }, { "type": "null" }] },
+        "target": {
+          "description": "Key of the existing entity for update, retire and reaffirm; null for add.",
+          "type": ["string", "null"],
+          "maxLength": 32
+        },
+        "review_state": {
+          "description": "pending for Agent proposals; accepted for applied human edits.",
+          "enum": ["pending", "accepted"]
+        },
+        "assigned_key": {
+          "description": "Key assigned to an applied add item; null otherwise.",
+          "type": ["string", "null"],
+          "maxLength": 32
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["source_id", "verification"],
+            "properties": {
+              "source_id": { "$ref": "common.v1.schema.json#/$defs/ulid" },
+              "verification": { "$ref": "source-list.v1.schema.json#/$defs/verification" }
+            }
+          }
+        },
+        "code_refs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "exists"],
+            "properties": {
+              "path": { "$ref": "common.v1.schema.json#/$defs/relPath" },
+              "exists": { "type": "boolean" }
+            }
+          }
+        }
+      }
+    }
+  }
+}

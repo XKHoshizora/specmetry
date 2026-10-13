@@ -128,7 +128,7 @@ erDiagram
 | git_common_dir | TEXT NULL | 共享的 git 公共目录；非 git 项目为 NULL |
 | main_worktree_id | ULID | |
 | stage | TEXT | `docs_only` / `in_development` / `incomplete_docs` |
-| settings_json | TEXT | `sources_skipped`、`inventory_skipped`、`commit_ref_mode`（TD-17） |
+| settings_json | TEXT | `sources_skipped`、`inventory_skipped`、`commit_ref_mode`（TD-17）、`excerpt_storage`（`hash_only` 默认 / `full`，PD-24） |
 | created_at | INTEGER | |
 
 `worktrees`：
@@ -172,6 +172,8 @@ CLI 或 Hook 第一次在某个 worktree 中出现时，系统会自动登记它
 | baseline_version | INTEGER | 确认时的基准版本号 |
 | source_set_hash | TEXT | 确认时的来源集合哈希（§4.3） |
 | attestations_json | TEXT | `complete_scope`（必须为 true）；`pending_items_excluded`（确认时仍待审的提案条目数，人已确认它们不属于本范围）；`missing_goals_reviewed`（`incomplete_docs` 项目必须为 true，表示人已补充代码中没有体现的交付目标） |
+| acknowledged_waivers_json | TEXT | 人确认继续适用的有效豁免（决定 ID 列表，可以为空；V-T01） |
+| seen_scope_confirmation_id | ULID NULL | 确认时读取到的该目标当前范围确认；首次确认为 NULL（V-T02） |
 | note | TEXT NULL | |
 | actor, channel, confirmed_at | | |
 
@@ -255,7 +257,9 @@ CLI 或 Hook 第一次在某个 worktree 中出现时，系统会自动登记它
 - `material` 更新时，如果没有提供新引用，系统会沿用上一修订的引用，**重新校验**后写成新行。旧行保留，作为历史。
 - `code_refs` 只保存路径和行号，**不保存代码内容**。
 - 片段的保存与擦除遵循 [architecture.md §10.7](architecture.md#107-来源片段的采集策略保护与用户控制)：`excerpt_storage = hash_only` 时只保存 `excerpt_sha256`；`source remove --erase-excerpts` 在维护模式下把 `excerpt` 置为 NULL 并写入 `excerpt_erased_seq`。这是 `source_refs` 只追加约束的唯一受控例外（另一个例外是 `purge`）。
-- **片段总量上限**：同一来源所有已保存片段的总长度，不超过该来源文本长度的 50%，并且不超过 20000 字符；非文本来源（`not_checkable`）总计不超过 5000 字符。超出时，提交被拒绝（V-P11）。这样可以防止通过片段逐段保存来源全文（C0）。
+- **`hash_only` 模式下，片段原文不写入任何位置**：`source_refs.excerpt` 为 NULL；`proposal_items` 的 `sources_json` 和 `final_payload_json` 中，每个引用只保存 `locator` 和 `excerpt_sha256`；输出（`proposal-receipt.v1`、`proposal-show.v1`、`source-list.v1`）、错误信息和程序日志都不回显原文。
+- **沿用引用的重新校验**：`material` 更新沿用上一修订的引用时，`full` 引用照常逐字重新校验；`hash_only` 引用没有原文，无法逐字校验——来源的当前哈希仍等于该引用的 `source_sha256` 时沿用原校验结果，否则记为 `not_checkable`（V-P07，标记，不拒绝）。
+- **片段总量上限**（只计算保存了原文的片段，即 `full` 模式）：同一来源所有已保存片段的总长度，不超过该来源文本长度的 50%，并且不超过 20000 字符；非文本来源（`not_checkable`）总计不超过 5000 字符。超出时，提交被拒绝（V-P11）。这样可以防止通过片段逐段保存来源全文（C0）。
 - 校验只证明一件事：片段确实出现在来源中、路径确实存在。它**不证明**语义正确或覆盖完整。界面上必须如实说明这一点。
 
 ### 4.6 `proposals` 与 `proposal_items`
@@ -528,7 +532,7 @@ stateDiagram-v2
 
 手动 AC 和例外验收**永远不沿用**。沿用不产生新的决定记录，只是推导结果。
 
-`D = waived` 与快照无关：只要 revision 没变、父需求适用性没有失效，就一直适用。
+`D = waived` 与快照无关：只要 revision 没变、父需求适用性没有失效，就一直适用。豁免按 §5.4 绑定 AC 的 revision：AC 实质修订后，它不再是当前决定，需要人重新决定；父需求实质修订后，AC 先成为 `parent_revised`（§6.3 第 2 条先于第 3 条）。重新确认范围时，已有豁免必须逐条展示，由人确认继续适用（§7.1，V-T01；PD-21）。
 
 ### 6.3 AC 交付状态决策表
 
@@ -646,7 +650,7 @@ stateDiagram-v2
 - `observed`：至少一个是观测级；
 - `none`：没有任何由执行支撑的自动化验收（只有手动、例外或豁免）。
 
-**MVP 中这个值只可能是 `observed` 或 `none`。** 交付状态 `ready` 本身不变，但凡是展示 `ready` 的地方，都必须同时展示证据等级。等级为 `observed` 时，不得称为"快照已验证"，只能称为"观测级：检查开始和结束时与快照一致"。
+**MVP 中这个值只可能是 `observed` 或 `none`。** 交付状态 `ready` 本身不变，但凡是展示 `ready` 的地方，都必须同时展示证据等级。等级为 `observed` 时，不得称为"快照已验证"，只能称为"观测级：检查开始和结束时与快照一致"。等级为 `none` 时，只能称为"没有自动化执行证据（依据手动、例外或豁免）"，不得称为已通过自动化验证（PD-17、FR-PRV-09）。证据等级只反映验收所依据的执行：例外验收之后在 `S` 上记录的执行照常输出（`status.v1` 的 `snapshot_run`），不会被删除或隐藏，也不会把这次例外验收的等级改为 `observed`；人可以基于这条执行重新作出 `normal` 验收。
 
 `BLOCKING_QUESTION` 计算三类 `open` 且 `blocking` 的问题：关联到 `RS` 中需求的；关联到 `AS` 中 AC 的；没有关联任何条目的项目级问题。关联条目已被拒绝的问题（§4.8）不计入。
 
@@ -763,7 +767,7 @@ stateDiagram-v2
 | 提案审核（人） | 审核者看到的 `seen_base_version`；冲突条目需要明确确认 | 当前版本 ≠ `seen_base_version` |
 | Claim 批次 | `base_version`；每条 Claim 的 `target_revision` | 任一不一致 |
 | 验收决定（人） | `target_id`、`snapshot`、`criterion_revision`、`requirement_revision`、`evidence_id`、**`seen_decision_id`** | 目标已不是 `active`；目标 ref 已不指向 `snapshot`；任一 revision 已变；`S` 上最新的合格执行已不是 `evidence_id`；**该 AC 当前修订下最新决定的 ID 已不是 `seen_decision_id`**（两者都为空时视为一致）。`waived` 只校验 `target_id`、两个 revision 和 `seen_decision_id`，因为它与代码无关，所以不校验 `snapshot` 和 `evidence_id`。 |
-| 范围确认（人） | `target_id`、`baseline_version`、`source_set_hash`、`attestations.pending_items_excluded` | 任一不一致。`pending_items_excluded` 必须等于当前 `pending` 和 `conflict` 条目的总数。附带在审核中时，以审核完成后的数量为准，`baseline_version` 取审核完成后的版本（§5.5 第 11 步）。 |
+| 范围确认（人） | `target_id`、`baseline_version`、`source_set_hash`、`attestations.pending_items_excluded`、`acknowledged_waivers`、**`seen_scope_confirmation_id`** | 任一不一致。`pending_items_excluded` 必须等于当前 `pending` 和 `conflict` 条目的总数。`acknowledged_waivers` 必须恰好等于**有效豁免集合**：确认的需求下、`active` AC 的当前决定（§5.4）为 `waived`，并且父需求适用性没有失效；已失效的历史豁免（AC 已修订或退役、父需求已修订、已被更新的决定取代、需求不在范围内）不得列入（V-T01）。`seen_scope_confirmation_id` 必须等于该目标当前的范围确认，首次确认时为 NULL（V-T02），用来防止旧页面覆盖刚写入的确认。AC 的 revision 由两处保证：任何 revision 变化都会产生新的基准版本，所以 `baseline_version` 不再一致；每条豁免绑定 AC 的 revision，所以豁免集合也不再一致。附带在审核中时，以上各项都以审核完成后的状态为准，`baseline_version` 取审核完成后的版本（§5.5 第 11 步）。要停止某项豁免，先对该 AC 作出新的决定。 |
 | 来源确认（人） | `observed_sha256` | 磁盘上的当前哈希 ≠ `observed_sha256` |
 | 回答问题（人） | 问题仍为 `open` | 已被回答或驳回 |
 | 检查执行 | 由执行器自己在开始时读取并固定（§7.4） | — |
@@ -780,7 +784,7 @@ stateDiagram-v2
 | 规则 | 说明 |
 |---|---|
 | 强制 `material` | AC 的 `verification`、`check_command`、`check_workdir`、`check_shell`、`check_inputs` |
-| 其他字段 | 由审核者选择 `material` 或 `editorial`；`check_timeout_sec` 和 `check_rationale` 可以是 `editorial` |
+| 其他字段 | 由审核者选择 `material` 或 `editorial`；`check_timeout_sec` 和 `check_rationale` 可以是 `editorial`。审核时接受 `update` 条目必须明确选择（V-R01）；提案中的 `change_class` 只是建议（人工编辑见 V-P09） |
 | AC 从 `r` 修订到 `r+1` | 针对 `r` 的 Claim、执行和决定都不再参与推导 |
 | **需求 `material` 修订** | 父需求的 revision 加 1，它的所有 `active` AC 立即成为 `parent_revised`。审核者应在同一次审核中，对每个 AC 选择 `reaffirm`（仍然适用，保留已有的执行与决定）、`retire`，或 `defer`（暂不处理，保持 `parent_revised`，之后再通过人工编辑修订）。同一次审核中被接受的 AC 更新，也会刷新它的 `requirement_revision`（§5.5 第 5 步）。 |
 | `reaffirm` | 把 AC 的 `requirement_revision` 设为父需求当前的 revision，AC 自身的 revision 不变。Agent 可以提议，由人接受。 |
@@ -795,8 +799,10 @@ stateDiagram-v2
 |---|---|---|---|
 | `accepted` / `normal` | 自动化 AC；`V = pass`；`evidence_id` 是 `runs(S)` 中最新的一条；父需求适用性没有失效。允许人在自己拒收之后、重新读取后，于同一快照上明确改判。 | 依据的执行是观测级 → `observed_evidence`；`runs(S)` 结果不一致 → `inconsistent_results` | `S`；只有依据隔离级证据时，才可能按 §6.2 沿用 |
 | `accepted` / `manual` | 手动 AC；`S` 可解析；父需求适用性没有失效 | 无 | 只适用于 `S` |
-| `accepted` / `exception` | 自动化 AC；`V = none`（`S` 上没有任何等级的合格执行，并且不是失败）；必须填写理由 | `no_automated_evidence` | 只适用于 `S`；永不沿用；带 `EXCEPTION_ACCEPTANCE` 警告；计入 `exception_acceptances` |
+| `accepted` / `exception` | 自动化 AC；`V = none`（`S` 上没有任何等级的合格执行，并且不是失败）；必须填写理由 | `no_automated_evidence` | 只适用于 `S`；永不沿用；带 `EXCEPTION_ACCEPTANCE` 警告；计入 `exception_acceptances`。状态输出和界面必须显示：例外验收、理由、适用的快照、证据等级 `none`（PD-17） |
 | 任何 `accepted` | 不允许在 `V = fail` 时作出（必须先修复、修改检查，或豁免） | — | — |
+| `rejected` | 必须填写理由 | — | 直到代码变化后（`S ≠` 拒收时的快照）出现新的合格 `pass`（手动 AC：新的 `done` 自述），或者人作出新的决定（§6.3 第 5 条） |
+| `waived` | 必须填写理由；父需求适用性没有失效 | — | 与快照无关，修订后失效：绑定 AC 的 revision；重新确认范围时须由人确认继续适用（V-T01） |
 
 **风险确认（V-D01）**：`acknowledged_risks` 必须**恰好等于**服务端根据该决定推导出的风险集合，多一项、少一项都返回 `invalid_input`。这保证界面确实展示过这些风险。界面必须展示的文字：
 
@@ -805,8 +811,6 @@ stateDiagram-v2
 - `no_automated_evidence`："该快照上没有任何合格的自动化证据。这次验收只适用于当前快照，不会沿用，并会在交付判定中单独列出。"
 
 例外验收不能用来把观测级证据"升级"为隔离级，也不能在检查失败时使用。
-| `rejected` | 必须填写理由 | 直到代码变化后（`S ≠` 拒收时的快照）出现新的合格 `pass`（手动 AC：新的 `done` 自述），或者人作出新的决定（§6.3 第 5 条） |
-| `waived` | 必须填写理由；父需求适用性没有失效 | 与快照无关，修订后失效 |
 
 ### 7.4 检查执行的上下文绑定
 
@@ -845,17 +849,26 @@ stateDiagram-v2
 | `scope.v1` | 范围确认 | 人 → CLI / API |
 | `source-ack.v1` | 来源变化确认 | 人 → CLI / API |
 | `question-answer.v1` | 回答或驳回问题 | 人 → CLI / API |
+| `source-list.v1` | `source list --json`：来源、观测哈希、引用与片段保存情况 | CLI → Agent 或人 |
+| `source-add.v1` | `source add --json` 的结果 | CLI → Agent |
+| `proposal-receipt.v1` | `propose --json` 的结果（条目 ID、校验标记；不回显片段） | CLI → Agent 或人 |
+| `proposal-list.v1` | `proposal list --json` | CLI → Agent 或人 |
+| `proposal-show.v1` | `proposal show --json`：条目、审核状态、冲突条目的三方对比（`base` / `current` / `proposed`） | CLI → Agent 或人 |
+| `baseline-show.v1` | `baseline show --json`：已确认的基准（含 revision，供提案携带） | CLI → Agent 或人 |
+| `baseline-history.v1` | `baseline history --json`：每个版本及其全部变更 | CLI → Agent 或人 |
+| `question-list.v1` | `question list --json` | CLI → Agent 或人 |
+| `target-scope.v1` | `target show --json` 与 `scope show --json`：交付目标、当前范围、新确认需要携带的值（含有效豁免） | CLI → Agent 或人 |
 | `error.v1` | 错误信封 | CLI / API → 调用者 |
 | `spool-event.v1` | Hook 落盘记录（采集白名单的规范定义） | Hook → spool |
 
 示例与 schema 层面的反例：
 
 - `schemas/examples/valid/`：每种文档的合法示例；
-- `schemas/examples/invalid-cases.json`：SCH-01 ~ SCH-64，每条都是对合法示例打的 JSON Patch，打补丁后必须校验失败。
+- `schemas/examples/invalid-cases.json`：SCH-01 ~ SCH-97，每条都是对合法示例打的 JSON Patch，打补丁后必须校验失败。
 
 M0 的 CI 会校验这两者（WP0.4）。凡是需要数据库状态才能判断的拒绝（版本过期、编号不存在、命中密钥规则），都由 acceptance-criteria 覆盖。
 
-**尚未定义 schema 的读取模型**：`proposal show`、`baseline show/history`、`source list`、`doctor` 的 JSON 输出，以及 Dashboard 专用的 GET 接口，都面向人，Agent 的流程不依赖它们。它们的 schema 在对应模块开工前补齐（[implementation-plan.md §3](implementation-plan.md#3-设计细化截止点)），并由 OpenAPI 引用。
+**读取模型的 schema**：M1 需要的已经补齐（上表 `source-list.v1` 至 `target-scope.v1`，2026-10-14）。`doctor --json` 的 schema 在 M3 开工前补齐；Dashboard 专用的 GET 接口在 M5 开工前补齐，并由 OpenAPI 引用（[implementation-plan.md §3](implementation-plan.md#3-设计细化截止点)）。
 
 ### 8.1 示例：提案
 
@@ -943,6 +956,9 @@ M0 的 CI 会校验这两者（WP0.4）。凡是需要数据库状态才能判�
 | V-C06 | 文件路径是否存在、提交能否被 git 解析 | 标记 |
 | V-D01 | 验收决定的 `acknowledged_risks` 恰好等于服务端推导的风险集合（§7.3） | 拒绝 |
 | V-D02 | 验收决定的全部读取版本（含 `seen_decision_id`）都是当前值（§7.1） | 过期 |
+| V-R01 | 审核中被接受（`accepted`、`accepted_with_edits`，包括冲突条目）的 `update` 条目必须带 `change_class`；强制 `material` 的字段一律按 `material` 处理；提案中建议的类别不能代替审核者的选择（PD-04 方案 A） | 拒绝 |
+| V-T01 | 范围确认的 `acknowledged_waivers` 恰好等于服务端计算的有效豁免集合；已失效的历史豁免不得列入（§7.1；PD-21） | 过期 |
+| V-T02 | 范围确认的 `seen_scope_confirmation_id` 等于该目标当前的范围确认（首次确认为 NULL）（§7.1） | 过期 |
 
 ## 9. 数据分级、保留与删除
 
@@ -959,4 +975,4 @@ M0 的 CI 会校验这两者（WP0.4）。凡是需要数据库状态才能判�
 
 ## 10. 相关待决策事项
 
-PD-02、PD-03、PD-04、PD-12、PD-16 ~ PD-22（[prd.md §9](prd.md#9-产品待决策事项)）；TD-01、TD-14、TD-17、TD-18、TD-21、TD-24（[architecture.md §16](architecture.md#16-技术待决策事项)）。
+已确认：PD-03、PD-04、PD-12、PD-16 ~ PD-22、PD-24；待确认：PD-02（[prd.md §9](prd.md#9-产品待决策事项)）。技术：TD-01、TD-14、TD-18、TD-20、TD-21 已确认；TD-17、TD-24 待确认（[architecture.md §16](architecture.md#16-技术待决策事项)）。

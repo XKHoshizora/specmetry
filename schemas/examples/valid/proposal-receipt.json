@@ -1,0 +1,56 @@
+{
+  "schema": "specmetry.proposal-receipt/v1",
+  "proposal_id": "01J9Z3K5Q8R2T4V6W8X0Y2Z4A6",
+  "seq": 20,
+  "origin": "skill_init",
+  "base_version": 0,
+  "applied_version": null,
+  "items": [
+    {
+      "item_id": "01J9Z3K5Q8R2T4V6W8X0Y2Z4A7",
+      "item_index": 0,
+      "op": "add",
+      "type": "requirement",
+      "ref": "r1",
+      "target": null,
+      "review_state": "pending",
+      "assigned_key": null,
+      "sources": [
+        {
+          "source_id": "01J9Z3K5Q8R2T4V6W8X0Y2Z4E0",
+          "verification": "verified"
+        }
+      ],
+      "code_refs": []
+    },
+    {
+      "item_id": "01J9Z3K5Q8R2T4V6W8X0Y2Z4A8",
+      "item_index": 1,
+      "op": "add",
+      "type": "criterion",
+      "ref": "r1c1",
+      "target": null,
+      "review_state": "pending",
+      "assigned_key": null,
+      "sources": [
+        {
+          "source_id": "01J9Z3K5Q8R2T4V6W8X0Y2Z4E0",
+          "verification": "not_found"
+        }
+      ],
+      "code_refs": [
+        {
+          "path": "internal/orders/query.go",
+          "exists": true
+        }
+      ]
+    }
+  ],
+  "questions": [
+    {
+      "key": "Q-001",
+      "about": "r1",
+      "blocking": true
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "schema": "specmetry.source-add/v1",
+  "created": true,
+  "source": {
+    "id": "01J9Z3K5Q8R2T4V6W8X0Y2Z4E0",
+    "path": "docs/client-brief.md",
+    "location": "in_repo",
+    "kind": "client_requirement",
+    "acked_sha256": "9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b",
+    "current_sha256": "9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b",
+    "state": "unchanged",
+    "size_bytes": 5120,
+    "registered_seq": 12,
+    "removed_seq": null
+  },
+  "source_set_hash": "3b5d9f0c1e2a4b6c8d0e1f2a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e"
+}

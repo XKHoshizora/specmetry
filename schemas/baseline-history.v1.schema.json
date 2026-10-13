@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/XKHoshizora/specmetry/schemas/baseline-history.v1.schema.json",
+  "title": "Specmetry baseline history v1",
+  "description": "Output of `specmetry baseline history --json`: every baseline version with every change it made, oldest first (FR-BL-06). --since <version> lists only later versions.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "baseline_version", "versions"],
+  "properties": {
+    "schema": { "const": "specmetry.baseline-history/v1" },
+    "baseline_version": { "$ref": "common.v1.schema.json#/$defs/baselineVersion" },
+    "versions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["number", "seq", "summary", "actor", "channel", "proposal_id", "changes"],
+        "properties": {
+          "number": { "type": "integer", "minimum": 1 },
+          "seq": { "$ref": "common.v1.schema.json#/$defs/seq" },
+          "summary": { "oneOf": [{ "$ref": "common.v1.schema.json#/$defs/shortSummary" }, { "type": "null" }] },
+          "actor": { "$ref": "proposal-list.v1.schema.json#/$defs/actor" },
+          "channel": { "enum": ["human_cli", "dashboard"] },
+          "proposal_id": { "oneOf": [{ "$ref": "common.v1.schema.json#/$defs/ulid" }, { "type": "null" }] },
+          "changes": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "$ref": "#/$defs/change" }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "change": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entity_type", "key", "op", "change_class", "before", "after", "proposal_item_id"],
+      "properties": {
+        "entity_type": { "enum": ["goal", "requirement", "criterion"] },
+        "key": { "type": "string", "maxLength": 32 },
+        "op": { "enum": ["add", "update", "retire", "reaffirm"] },
+        "change_class": {
+          "description": "Recorded class for updates (forced material fields already applied); null for other operations.",
+          "enum": ["material", "editorial", null]
+        },
+        "before": {
+          "description": "The entity before the change; null for add.",
+          "oneOf": [{ "$ref": "#/$defs/snapshot" }, { "type": "null" }]
+        },
+        "after": { "$ref": "#/$defs/snapshot" },
+        "proposal_item_id": {
+          "description": "The reviewed item that caused the change; null for cascades (e.g. criteria retired with their requirement).",
+          "oneOf": [{ "$ref": "common.v1.schema.json#/$defs/ulid" }, { "type": "null" }]
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "op": { "const": "add" } } },
+          "then": { "properties": { "before": { "const": null } } },
+          "else": { "properties": { "before": { "type": "object" } } }
+        },
+        {
+          "if": { "properties": { "op": { "const": "update" } } },
+          "then": { "properties": { "change_class": { "enum": ["material", "editorial"] } } },
+          "else": { "properties": { "change_class": { "const": null } } }
+        }
+      ]
+    },
+    "snapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["revision", "status", "values"],
+      "properties": {
+        "revision": { "$ref": "common.v1.schema.json#/$defs/revision" },
+        "status": { "enum": ["active", "retired"] },
+        "requirement_revision": {
+          "description": "Criteria only.",
+          "$ref": "common.v1.schema.json#/$defs/revision"
+        },
+        "values": { "$ref": "proposal-show.v1.schema.json#/$defs/values" }
+      }
+    }
+  }
+}

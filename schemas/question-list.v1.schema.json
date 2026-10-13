@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/XKHoshizora/specmetry/schemas/question-list.v1.schema.json",
+  "title": "Specmetry question list v1",
+  "description": "Output of `specmetry question list --json`. Open questions by default; answered and dismissed ones with --all. Only a human can answer or dismiss (PD-14, question-answer.v1).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "questions"],
+  "properties": {
+    "schema": { "const": "specmetry.question-list/v1" },
+    "questions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["key", "text", "context", "status", "blocking", "about", "proposal_id", "created_seq", "answer"],
+        "properties": {
+          "key": { "$ref": "common.v1.schema.json#/$defs/questionKey" },
+          "text": { "$ref": "common.v1.schema.json#/$defs/plainText1000" },
+          "context": { "oneOf": [{ "$ref": "common.v1.schema.json#/$defs/longText" }, { "type": "null" }] },
+          "status": { "enum": ["open", "answered", "dismissed"] },
+          "blocking": { "type": "boolean" },
+          "about": {
+            "description": "Related requirement or criterion key, the proposal-local ref while its item is pending, or null for a project-level question.",
+            "type": ["string", "null"],
+            "maxLength": 64
+          },
+          "proposal_id": { "$ref": "common.v1.schema.json#/$defs/ulid" },
+          "created_seq": { "$ref": "common.v1.schema.json#/$defs/seq" },
+          "answer": {
+            "description": "null while open.",
+            "oneOf": [
+              { "type": "null" },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["action", "text", "by", "channel", "seq"],
+                "properties": {
+                  "action": { "enum": ["answer", "dismiss"] },
+                  "text": {
+                    "description": "The answer (question-answer.v1 answer), or the dismissal rationale.",
+                    "$ref": "common.v1.schema.json#/$defs/longText"
+                  },
+                  "by": { "$ref": "proposal-list.v1.schema.json#/$defs/actor" },
+                  "channel": { "enum": ["human_cli", "dashboard"] },
+                  "seq": { "$ref": "common.v1.schema.json#/$defs/seq" }
+                }
+              }
+            ]
+          }
+        },
+        "if": { "properties": { "status": { "const": "open" } } },
+        "then": { "properties": { "answer": { "const": null } } },
+        "else": { "properties": { "answer": { "type": "object" } } }
+      }
+    }
+  }
+}
