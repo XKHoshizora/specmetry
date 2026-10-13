@@ -1,0 +1,16 @@
+# Build output
+/specmetry
+/specmetry.exe
+/dist/
+*.test
+*.out
+
+# Frontend
+web/node_modules/
+web/dist/
+
+# Editors and OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

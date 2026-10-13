@@ -8,9 +8,9 @@
 
 ## 当前阶段
 
-**设计阶段（Draft v0.3，已处理 Codex 审查 001 和 002）。仓库中还没有业务代码。**
+**MVP 开发阶段。设计已通过 Codex 审查 003（GO）；M0（工程骨架与存储基础）已实现，等待 Codex 独立审查。**
 
-除非用户明确要求开始某个里程碑，否则不要编写业务代码。开工条件见 `docs/implementation-plan.md §2`。
+除非用户明确要求开始某个里程碑，否则不要开始后续里程碑。开工条件见 `docs/implementation-plan.md §2`；开发环境与工程约定见 `docs/development.md`。
 
 ## 文档地图
 
@@ -26,6 +26,7 @@
 | `docs/implementation-plan.md` | 开工门槛、设计细化截止点、里程碑与依赖 |
 | `docs/review-resolution.md` | 审查意见的处理记录 |
 | `docs/reviews/` | 外部审查原文（只读） |
+| `docs/development.md` | 开发环境、目录结构、常用命令、工程约定 |
 
 ## 不可违背的设计约束
 
@@ -66,4 +67,15 @@ Go（单一二进制）、SQLite（WAL，候选驱动 `modernc.org/sqlite`）、
 
 ## 常用命令
 
-暂无。M0 建立后，在这里补充构建、测试和 lint 命令。
+详见 `docs/development.md`。
+
+```bash
+sh scripts/check.sh                 # 与 CI 相同的全部检查
+go test -tags nowebui ./...         # Go 测试（不含前端）
+go vet -tags nowebui ./...
+golangci-lint run ./...             # v2.14.0，配置见 .golangci.yml
+golangci-lint fmt ./...
+cd web && npm ci && npm run check   # 前端：格式、lint、类型检查、测试、构建
+```
+
+没有构建 `web/dist` 时，Go 命令需要 `-tags nowebui`。

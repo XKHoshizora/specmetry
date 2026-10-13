@@ -86,6 +86,7 @@ flowchart LR
 
 **退出条件（P0）**：MVP-PLT-01、MVP-PRV-05、MVP-PRV-06、MVP-STO-01 ~ 04。
 **交付物**：可以运行的 `specmetry version`、`specmetry doctor`；空库的迁移 v1；CI 通过。
+**状态（2026-10-13）**：已实现。PRV-05、PRV-06、STO-01 ~ 04 已在本地验证（Windows 原生；Linux 通过 WSL 运行交叉编译的测试）；MVP-PLT-01 以 GitHub Actions 三平台首次运行的结果为准（macOS 只在 CI 中验证）。等待 Codex 独立审查后再进入 M1。
 
 ### M1 基准、来源、交付目标与范围
 
