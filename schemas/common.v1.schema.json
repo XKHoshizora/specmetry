@@ -110,6 +110,10 @@
       "description": "observed: start and end states of the executing worktree matched the snapshot; changes during the run are NOT ruled out. snapshot_isolated: run in a private materialization of the snapshot under a read-only enforcement the check cannot undo, verified before and after the run. The MVP only produces observed.",
       "enum": ["observed", "snapshot_isolated"]
     },
+    "deliveryEvidenceGrade": {
+      "description": "Weakest grade among the runs supporting accepted automated criteria in scope: snapshot_isolated only if every such acceptance is backed by an isolated run on the snapshot; observed if any relies on observed evidence; none if no accepted automated criterion is backed by a run (manual, exception or waived only). Must be shown wherever delivery status is shown; observed must never be described as snapshot-verified.",
+      "enum": ["snapshot_isolated", "observed", "none"]
+    },
     "acknowledgedRisk": {
       "enum": ["observed_evidence", "inconsistent_results", "no_automated_evidence"]
     },

@@ -2,16 +2,17 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/XKHoshizora/specmetry/schemas/gaps.v1.schema.json",
   "title": "Specmetry gaps v1",
-  "description": "Output of `specmetry gaps --json`: the gap list of status.v1 with its evaluation context. Invariant: delivery_status is 'ready' if and only if no gap has blocking=true.",
+  "description": "Output of `specmetry gaps --json`: the gap list of status.v1 with its evaluation context. Invariant: delivery_status is 'ready' if and only if no gap has blocking=true. evidence_grade is always present so that a ready judgement is never shown without its evidence grade.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema", "as_of_seq", "snapshot", "baseline_version", "delivery_status", "gaps"],
+  "required": ["schema", "as_of_seq", "snapshot", "baseline_version", "delivery_status", "evidence_grade", "gaps"],
   "properties": {
     "schema": { "const": "specmetry.gaps/v1" },
     "as_of_seq": { "type": "integer", "minimum": 0 },
     "snapshot": { "oneOf": [{ "$ref": "common.v1.schema.json#/$defs/commitSha" }, { "type": "null" }] },
     "baseline_version": { "$ref": "common.v1.schema.json#/$defs/baselineVersion" },
     "delivery_status": { "$ref": "common.v1.schema.json#/$defs/targetDeliveryStatus" },
+    "evidence_grade": { "$ref": "common.v1.schema.json#/$defs/deliveryEvidenceGrade" },
     "gaps": {
       "type": "array",
       "items": { "$ref": "common.v1.schema.json#/$defs/gap" }

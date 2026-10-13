@@ -93,10 +93,7 @@
       "required": ["status", "evidence_grade", "blocking_gaps"],
       "properties": {
         "status": { "$ref": "common.v1.schema.json#/$defs/targetDeliveryStatus" },
-        "evidence_grade": {
-          "description": "Weakest grade among the runs supporting accepted automated criteria in scope: snapshot_isolated only if every such acceptance is backed by an isolated run on the snapshot; observed if any relies on observed evidence; none if no accepted automated criterion is backed by a run (manual, exception or waived only). Clients must not describe observed as snapshot-verified.",
-          "enum": ["snapshot_isolated", "observed", "none"]
-        },
+        "evidence_grade": { "$ref": "common.v1.schema.json#/$defs/deliveryEvidenceGrade" },
         "blocking_gaps": {
           "type": "array",
           "items": { "$ref": "common.v1.schema.json#/$defs/gap" }

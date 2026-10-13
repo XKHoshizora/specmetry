@@ -238,7 +238,7 @@ CLI 或 Hook 第一次在某个 worktree 中出现时，系统会自动登记它
 
 | 表 | 字段 |
 |---|---|
-| `source_refs` | `id`、`seq`、`project_id`、`source_id`、`entity_type`（`goal` / `requirement` / `criterion` / `question`）、`entity_id`、`entity_revision`、`locator`、`excerpt`（≤ 500 字符）、`verification`（`verified` / `not_found` / `source_missing` / `not_checkable`）、`source_sha256` |
+| `source_refs` | `id`、`seq`、`project_id`、`source_id`、`entity_type`（`goal` / `requirement` / `criterion` / `question`）、`entity_id`、`entity_revision`、`locator`、`excerpt` NULL（≤ 500 字符；`hash_only` 模式下或被擦除后为 NULL）、`excerpt_sha256`、`excerpt_erased_seq` NULL、`verification`（`verified` / `not_found` / `source_missing` / `not_checkable`）、`source_sha256` |
 | `code_refs` | `id`、`seq`、`project_id`、`entity_type`、`entity_id`、`entity_revision`、`path`（仓库相对路径）、`lines` NULL、`checked_head`、`exists`（BOOLEAN） |
 
 规则：
@@ -246,6 +246,7 @@ CLI 或 Hook 第一次在某个 worktree 中出现时，系统会自动登记它
 - 一条条目"当前的引用"，是 `entity_revision` 等于其当前 revision 的那些引用。
 - `material` 更新时，如果没有提供新引用，系统会沿用上一修订的引用，**重新校验**后写成新行。旧行保留，作为历史。
 - `code_refs` 只保存路径和行号，**不保存代码内容**。
+- 片段的保存与擦除遵循 [architecture.md §10.7](architecture.md#107-来源片段的采集策略保护与用户控制)：`excerpt_storage = hash_only` 时只保存 `excerpt_sha256`；`source remove --erase-excerpts` 在维护模式下把 `excerpt` 置为 NULL 并写入 `excerpt_erased_seq`。这是 `source_refs` 只追加约束的唯一受控例外（另一个例外是 `purge`）。
 - **片段总量上限**：同一来源所有已保存片段的总长度，不超过该来源文本长度的 50%，并且不超过 20000 字符；非文本来源（`not_checkable`）总计不超过 5000 字符。超出时，提交被拒绝（V-P11）。这样可以防止通过片段逐段保存来源全文（C0）。
 - 校验只证明一件事：片段确实出现在来源中、路径确实存在。它**不证明**语义正确或覆盖完整。界面上必须如实说明这一点。
 
@@ -762,7 +763,7 @@ stateDiagram-v2
 **验收决定的并发保护**：
 
 - 读取接口（`status.v1` 中每个 AC 的 `current_decision_id`，以及 Dashboard 的需求详情）返回该 AC 当前修订下最新决定的 ID。
-- 写入时，在**同一个写事务**中读取最新决定并与 `seen_decision_id` 比较；比较和插入之间不会有其他决定插入（SQLite 写事务是串行的）。
+- 写入时，写事务必须以 **`BEGIN IMMEDIATE`** 开始，**先取得写锁，再**读取最新决定并与 `seen_decision_id` 比较，然后插入。普通的延迟事务先读后写，可能基于旧快照比较，然后在升级为写事务时失败，不能视为已经实现了并发保护。验证方法：用两个独立的数据库连接，同时竞争同一个决定版本（MVP-ACC-11）。
 - 不一致就整体拒绝：CLI 返回退出码 5，API 返回 409，并在 `error.current` 中给出最新决定的 ID、类型、操作者和时间。
 - **客户端不得自动重试**：CLI 和 Dashboard 收到 409 后，必须重新读取并展示新的决定，由人重新作出明确的操作。重新读取后，携带新的 `seen_decision_id` 明确改判，是允许的。
 
@@ -842,7 +843,7 @@ stateDiagram-v2
 示例与 schema 层面的反例：
 
 - `schemas/examples/valid/`：每种文档的合法示例；
-- `schemas/examples/invalid-cases.json`：SCH-01 ~ SCH-53，每条都是对合法示例打的 JSON Patch，打补丁后必须校验失败。
+- `schemas/examples/invalid-cases.json`：SCH-01 ~ SCH-64，每条都是对合法示例打的 JSON Patch，打补丁后必须校验失败。
 
 M0 的 CI 会校验这两者（WP0.4）。凡是需要数据库状态才能判断的拒绝（版本过期、编号不存在、命中密钥规则），都由 acceptance-criteria 覆盖。
 

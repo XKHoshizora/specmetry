@@ -15,13 +15,13 @@
 
 ## 2. 开工前提条件
 
-| 门槛 | 内容 | 阻塞哪个里程碑 |
-|---|---|---|
-| G0 技术决策 | 确认 TD-02（数据目录）、TD-04（SQLite 驱动；需要先做一个 spike，验证 `VACUUM INTO` 和 WAL 检查点）、TD-10（CLI 框架）、TD-16（迁移策略）、TD-22（Windows ACL 授权对象） | M0 |
-| G1 隐私契约 | 确认 PD-20（C1 允许的内容） | M0 中的存储部分 |
-| G2 交付模型 | 确认 PD-16（沿用，仅限隔离级证据）、PD-17（例外验收）、PD-19（交付目标形态）、PD-21（范围粒度）；确认 PD-03、PD-04、PD-12 的建议默认 | M1（因为它们会冻结 `decision`、`scope` 和 `proposal` 的契约） |
-| G2b 证据等级 | 确认 PD-22（MVP 只提供观测级证据，交付判定标为观测级，人验收时确认风险）；codex 对 B1、B2 的复审通过 | M2（Check Runner 与人工决定的契约在此冻结） |
-| G3 许可证 | PD-10 | 接受外部贡献之前（不阻塞内部编码） |
+| 门槛 | 内容 | 阻塞哪个里程碑 | 状态 |
+|---|---|---|---|
+| G0 技术决策 | 确认 TD-02（数据目录）、TD-04（SQLite 驱动；需要先做一个 spike，验证 `VACUUM INTO` 和 WAL 检查点）、TD-10（CLI 框架）、TD-16（迁移策略）、TD-22（Windows ACL 授权对象） | M0 | **已满足**（2026-10-13；spike 通过；TD-22 选择当前用户 + SYSTEM） |
+| G1 隐私契约 | 确认 PD-20（C1 允许的内容） | M0 中的存储部分 | **已满足**（2026-10-13；附加的采集策略与用户控制见 architecture §10.7） |
+| G2 交付模型 | 确认 PD-16（沿用，仅限隔离级证据）、PD-17（例外验收）、PD-19（交付目标形态）、PD-21（范围粒度）；确认 PD-03、PD-04、PD-12 的建议默认 | M1（因为它们会冻结 `decision`、`scope` 和 `proposal` 的契约） | **未满足**，M1 开工前需要确认 |
+| G2b 证据等级 | 确认 PD-22（MVP 只提供观测级证据，交付判定标为观测级，人验收时确认风险）；codex 对 B1、B2 的复审通过 | M2（Check Runner 与人工决定的契约在此冻结） | **已满足**（PD-22 已确认；codex-review-003 结论为 GO） |
+| G3 许可证 | PD-10 | 接受外部贡献之前（不阻塞内部编码） | 未满足 |
 
 ## 3. 设计细化截止点
 
@@ -80,7 +80,7 @@ flowchart LR
 | WP0.1 | Go module、cobra CLI 骨架、`version` 与 `doctor`（框架）、lint、三平台 CI |
 | WP0.2 | 数据目录与权限：Unix `0700` / `0600`，Windows 受保护的 DACL；`SPECMETRY_HOME`；`config.toml` |
 | WP0.3 | SQLite 存储：WAL、`busy_timeout`、单一写连接；迁移框架（`.migrate.lock`、`BEGIN EXCLUSIVE`、`VACUUM INTO` 备份、`schema_version` / `min_binary_version`）；`seq` 计数器；只追加触发器辅助；墓碑检查的挂载点 |
-| WP0.4 | 内嵌 `schemas/`，选定 JSON Schema 2020-12 校验库；CI 校验所有 schema 本身，`schemas/examples/valid/` 全部通过，`invalid-cases.json`（SCH-01 ~ 53）全部失败；`error.v1` 输出。设计阶段只用一个精简的自制校验器做过自检，正式校验库的结果以 M0 为准。 |
+| WP0.4 | 内嵌 `schemas/`，选定 JSON Schema 2020-12 校验库；CI 校验所有 schema 本身，`schemas/examples/valid/` 全部通过，`invalid-cases.json`（SCH-01 ~ 64）全部失败；`error.v1` 输出。设计阶段只用一个精简的自制校验器做过自检，正式校验库的结果以 M0 为准。 |
 | WP0.5 | 测试基座：临时 HOME、夹具仓库构造器（用脚本创建 git 仓库、分支、worktree）、golden 工具、伪终端辅助、canary 搜索工具 |
 | WP0.6 | 前端工程骨架（Vite + React + TS），通过 `go:embed` 内嵌，并提供跳过前端的构建标签 |
 
@@ -96,7 +96,7 @@ flowchart LR
 | WP1.1 | 项目与 worktree 的解析和登记（git 公共目录）、marker、`init`（输出 `init.v1`，包括 `init_progress` 和 `baseline_version`）、阶段检测、候选来源、默认交付目标 |
 | WP1.2 | 通道识别：TTY、已知的 Agent 环境变量、交互式确认组件 |
 | WP1.3 | 密钥规则与自由文本校验（拒绝写入） |
-| WP1.4 | 来源：`add` / `list` / `remove` / `ack`，哈希，来源集合哈希，变化检测 |
+| WP1.4 | 来源：`add` / `list` / `remove`（含 `--erase-excerpts`）/ `ack`，哈希，来源集合哈希，变化检测；项目设置 `excerpt_storage`（architecture §10.7） |
 | WP1.5 | 提案：schema 校验、版本前置条件、引用片段校验、代码引用、编号分配（AC 按需求的作用域分配） |
 | WP1.6 | 审核：逐条决定、冲突检测与三方对比、版本与变更记录、级联、父需求修订与 AC 后续处理、`reaffirm`、`propose --apply` |
 | WP1.7 | 待澄清问题（只能由人回答） |
@@ -194,16 +194,16 @@ flowchart LR
 
 ## 6. 审查问题的关闭计划
 
-| 审查问题 | 设计状态 | 实现验证（里程碑；目前均未开始） | 验证依据 |
+| 审查问题 | 设计状态（codex-review-003 GO 后全部冻结） | 实现验证（里程碑；目前均未开始） | 验证依据 |
 |---|---|---|---|
 | #1 隐私 | 本轮 | M2（检查）、M3（Hook）、M6（综合） | EV-05、EV-11、COL-05、PRV-02 |
 | #2 交付代码绑定 | 主体：v0.2；剩余部分见 B1 | M2 | CX-01、CX-02、CX-19 ~ 22 |
-| codex-002 B1 证据与快照一致性 | v0.3 设计已解决（分级证据；MVP 只有观测级，并收窄保证）；**待复审冻结** | M2（观测级、不沿用、风险确认）；M7（隔离级） | EV-13、ACC-09 ~ 10、CX-26 ~ 28 |
+| codex-002 B1 证据与快照一致性 | 已冻结（codex-review-003 GO；分级证据，MVP 只有观测级） | M2（观测级、不沿用、风险确认）；M7（隔离级） | EV-13、ACC-09 ~ 10、CX-26 ~ 28 |
 | #3 worktree | 本轮 | M1（登记）、M2（执行与扫描） | WT-*、CX-03、CX-04 |
 | #4 交付范围 | 本轮 | M1（确认）、M2（推导） | TGT-*、CX-05、CX-06、CX-18 |
 | #5 父需求依赖 | 本轮 | M1（后续处理）、M2（推导） | BL-18 ~ 20、CX-07 |
 | #6 前置条件与 `seq` | 主体：v0.2；剩余部分见 B2 | M0（`seq`）、M1（写入侧）、M2（Claim、决定、检查） | STO-04、BL-03、BL-10、CX-08、CX-09、CX-13 ~ 15 |
-| codex-002 B2 旧页面覆盖拒收 | v0.3 设计已解决（`seen_decision_id`）；**待复审冻结** | M2（CLI）、M5（API 与界面） | ACC-11、CX-08 (e)(f) |
+| codex-002 B2 旧页面覆盖拒收 | 已冻结（codex-review-003 GO；`seen_decision_id`） | M2（CLI）、M5（API 与界面） | ACC-11、CX-08 (e)(f) |
 | #7 检查语义 | 本轮 | M2 | ACC-04 ~ 06、CX-19 ~ 21 |
 | #8 来源确认 | 本轮 | M1 | SRC-03、SRC-04、CX-17 |
 | #9 盘点 | 本轮 | M2（模型）、M4（Skill） | INV-*、CX-10、SK-06 |

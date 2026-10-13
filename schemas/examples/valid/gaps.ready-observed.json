@@ -1,0 +1,17 @@
+{
+  "schema": "specmetry.gaps/v1",
+  "as_of_seq": 530,
+  "snapshot": "8f3c2a1b9d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a",
+  "baseline_version": 4,
+  "delivery_status": "ready",
+  "evidence_grade": "observed",
+  "gaps": [
+    {
+      "type": "PENDING_REVIEW",
+      "blocking": false,
+      "target_key": null,
+      "reason": null,
+      "next_action": "审核提案"
+    }
+  ]
+}
