@@ -33,7 +33,7 @@
 | 录制的 Agent 输出 | 每个项目夹具都有 `proposal.json`、`claims-audit.json`、`claims-sync.json`。夹具的事实序列是确定的，所以其中的版本号和修订号也是固定的。 |
 | 期望结果（oracle） | `expected-status.json`（必须符合 `status.v1`）、`expected-gaps.json`、`expected-requirements.json` |
 
-夹具是普通文件加构造脚本：测试在临时目录中用夹具仓库构造器（WP0.5）建立 git 仓库、分支和 worktree，仓库中不提交嵌套的 `.git`。M1 需要 `fx-docs-only`（含录制的 `proposal.json`；另含 `README.md`、`CHANGELOG.md`、`node_modules/x/README.md` 和空的 `docs/empty.md`，用于候选来源的排除规则）、`fx-in-dev` 的文件与分支脚本、`fx-incomplete`（implementation-plan WP1.0）。`fx-in-dev` 的失败测试和录制的 Claim、其余夹具和 oracle，按各自的里程碑补齐（WP2.9 等）。
+夹具是普通文件加构造脚本：测试在临时目录中用夹具仓库构造器（WP0.5）建立 git 仓库、分支和 worktree，仓库中不提交嵌套的 `.git`。M1 需要 `fx-docs-only`（含录制的 `proposal.json`；另含 `README.md`、`CHANGELOG.md`、`node_modules/x/README.md` 和空的 `docs/empty.md`，用于候选来源的排除规则）、`fx-in-dev` 的文件与分支脚本、`fx-incomplete`（implementation-plan WP1.0）。`fx-in-dev` 的失败测试和录制的 Claim、其余夹具和 oracle，按各自的里程碑补齐（WP2.9 等）。构造器是 `testutil.BuildFixture`，目录约定见 [testdata/fixtures/README.md](../testdata/fixtures/README.md)：每个夹具的 `fixture.json` 列出提交和分支，提交时间与身份固定、git 配置与本机隔离，所以三个平台构造出的提交 ID 相同，并固定在 `expected_refs` 中。
 
 ## 2. 常规验收项
 

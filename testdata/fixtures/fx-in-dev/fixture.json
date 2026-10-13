@@ -1,0 +1,49 @@
+{
+  "description": "A project in development: the client brief and a partially implemented order service (R1-R5 on main); feature/x adds R6. The deliberately failing test and the recorded claims come with WP2.9 (MVP-INIT-03, WT-01, E2E-2, E2E-4).",
+  "stage": "in_development",
+  "default_branch": "main",
+  "brief": {
+    "without_acceptance": [],
+    "ambiguities": {}
+  },
+  "commits": [
+    {
+      "message": "docs: add the client brief",
+      "date": "2026-01-05T10:00:00Z",
+      "paths": ["README.md", "docs/client-brief.md"]
+    },
+    {
+      "message": "feat: lock an account after five failed logins (R1)",
+      "date": "2026-01-12T09:00:00Z",
+      "paths": ["go.mod", "orders/auth.go", "orders/auth_test.go"]
+    },
+    {
+      "message": "feat: create, list and isolate orders (R2-R4)",
+      "date": "2026-01-14T09:00:00Z",
+      "paths": ["orders/orders.go", "orders/orders_test.go"]
+    },
+    {
+      "message": "feat: cancel orders that have not shipped (R5)",
+      "date": "2026-01-16T09:00:00Z",
+      "paths": ["orders/cancel.go", "orders/cancel_test.go"]
+    }
+  ],
+  "branches": [
+    {
+      "name": "feature/x",
+      "from": "main",
+      "commits": [
+        {
+          "message": "feat: export orders as CSV (R6)",
+          "date": "2026-01-19T09:00:00Z",
+          "from": "branches/feature-x",
+          "paths": ["orders/export.go", "orders/export_test.go"]
+        }
+      ]
+    }
+  ],
+  "expected_refs": {
+    "main": "5b0f5b27adb66a9c8755aa6e70a5dcc15eb485c0",
+    "feature/x": "b62e43a10fa3600efb3e1a01f18e146e6f0cdb1a"
+  }
+}

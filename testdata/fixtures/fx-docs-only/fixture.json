@@ -1,0 +1,28 @@
+{
+  "description": "A project with requirement and project documents only, no code (MVP-INIT-03, INIT-04, BL-01, E2E-1).",
+  "stage": "docs_only",
+  "default_branch": "main",
+  "brief": {
+    "without_acceptance": ["R8"],
+    "ambiguities": { "R3": "合适数量", "R7": "尽快" }
+  },
+  "commits": [
+    {
+      "message": "chore: initialize repository",
+      "date": "2026-01-05T09:00:00Z",
+      "paths": ["README.md", "CHANGELOG.md"]
+    },
+    {
+      "message": "docs: add the client brief",
+      "date": "2026-01-05T10:00:00Z",
+      "paths": ["docs/client-brief.md", "docs/empty.md"]
+    },
+    {
+      "message": "chore: add the x package",
+      "date": "2026-01-06T09:00:00Z",
+      "paths": ["node_modules/x/README.md"]
+    }
+  ],
+  "branches": [],
+  "expected_refs": { "main": "c2f350656dbe4bbdc9bd067fb090a662ab79f347" }
+}
