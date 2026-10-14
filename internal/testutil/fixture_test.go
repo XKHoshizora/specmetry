@@ -2,7 +2,6 @@ package testutil
 
 import (
 	"bytes"
-	"encoding/json"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -14,7 +13,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/XKHoshizora/specmetry/internal/contract"
 	"github.com/XKHoshizora/specmetry/internal/secrets"
 )
 
@@ -160,6 +158,10 @@ func checkClientBrief(t *testing.T, docs, inDev *Fixture) {
 		t.Fatalf("brief has %d requirements, want 8", len(sections))
 	}
 	b := docs.Manifest.Brief
+	// codex-review-012 N2: the same brief carries the same notes.
+	if !reflect.DeepEqual(inDev.Manifest.Brief, b) {
+		t.Errorf("fx-in-dev's brief notes %+v differ from fx-docs-only's %+v for the same brief", inDev.Manifest.Brief, b)
+	}
 	if len(b.WithoutAcceptance) != 1 || len(b.Ambiguities) != 2 {
 		t.Fatalf("manifest brief notes = %+v", b)
 	}
@@ -182,80 +184,13 @@ func checkClientBrief(t *testing.T, docs, inDev *Fixture) {
 }
 
 // MVP-BL-01 submits fx-docs-only/proposal.json: it must be a valid
-// proposal.v1 from a fresh project, cite only text that is in the brief,
-// and give every requirement but the one without acceptance criteria an AC.
+// proposal.v1 from a fresh project whose content matches the brief
+// (proposal_check_test.go).
 func checkRecordedProposal(t *testing.T, f *Fixture) {
 	raw := readFile(t, f.Recorded("proposal.json"))
-	v, err := contract.New()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := v.ValidateJSON("proposal.v1", raw); err != nil {
-		t.Fatalf("proposal.json: %v", err)
-	}
-	var p struct {
-		Origin      string `json:"origin"`
-		BaseVersion int    `json:"base_version"`
-		Items       []struct {
-			Op   string `json:"op"`
-			Type string `json:"type"`
-			Ref  string `json:"ref"`
-			Data struct {
-				Requirement string `json:"requirement"`
-			} `json:"data"`
-			Sources []struct {
-				Source  string `json:"source"`
-				Excerpt string `json:"excerpt"`
-			} `json:"sources"`
-		} `json:"items"`
-		Questions []struct {
-			Blocking bool `json:"blocking"`
-			Sources  []struct {
-				Source  string `json:"source"`
-				Excerpt string `json:"excerpt"`
-			} `json:"sources"`
-		} `json:"questions"`
-	}
-	if err := json.Unmarshal(raw, &p); err != nil {
-		t.Fatal(err)
-	}
-	if p.Origin != "skill_init" || p.BaseVersion != 0 {
-		t.Errorf("origin %q, base_version %d", p.Origin, p.BaseVersion)
-	}
-	brief := normalizeSpace(string(readFile(t, filepath.Join(f.Repo.Dir, "docs", "client-brief.md"))))
-	checkExcerpt := func(where, source, excerpt string) {
-		if source != "docs/client-brief.md" {
-			t.Errorf("%s cites %q", where, source)
-		}
-		if !strings.Contains(brief, normalizeSpace(excerpt)) {
-			t.Errorf("%s: excerpt %q is not in the brief", where, excerpt)
-		}
-	}
-	requirements := map[string]bool{}
-	withCriteria := map[string]bool{}
-	for i, it := range p.Items {
-		if it.Op != "add" {
-			t.Errorf("item %d: op %q in an initial proposal", i, it.Op)
-		}
-		switch it.Type {
-		case "requirement":
-			requirements[it.Ref] = true
-		case "criterion":
-			withCriteria[it.Data.Requirement] = true
-		}
-		for _, s := range it.Sources {
-			checkExcerpt("item "+strconv.Itoa(i), s.Source, s.Excerpt)
-		}
-	}
-	blocking := false
-	for i, q := range p.Questions {
-		blocking = blocking || q.Blocking
-		for _, s := range q.Sources {
-			checkExcerpt("question "+strconv.Itoa(i), s.Source, s.Excerpt)
-		}
-	}
-	if len(requirements) != 8 || len(withCriteria) != 7 || !blocking {
-		t.Errorf("%d requirements, %d with criteria, blocking question: %v", len(requirements), len(withCriteria), blocking)
+	brief := string(readFile(t, filepath.Join(f.Repo.Dir, "docs", "client-brief.md")))
+	for _, p := range proposalProblems(t, raw, brief) {
+		t.Error(p)
 	}
 }
 

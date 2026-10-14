@@ -3,8 +3,8 @@
   "stage": "in_development",
   "default_branch": "main",
   "brief": {
-    "without_acceptance": [],
-    "ambiguities": {}
+    "without_acceptance": ["R8"],
+    "ambiguities": { "R3": "合适数量", "R7": "尽快" }
   },
   "commits": [
     {

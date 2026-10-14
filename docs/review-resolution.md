@@ -1,7 +1,7 @@
 # Codex 审查意见处理记录
 
 > 状态：2026-10-14 · 对应设计版本 Draft v0.3
-> 原始审查：[reviews/codex-review-001.md](reviews/codex-review-001.md)（第一轮，§1 ~ §4）、[reviews/codex-review-002.md](reviews/codex-review-002.md)（冻结审查，§5）、[reviews/codex-review-003.md](reviews/codex-review-003.md)（最终设计审查，§6）、[reviews/codex-review-004.md](reviews/codex-review-004.md)（M0 代码审查，§7）、[reviews/codex-review-005.md](reviews/codex-review-005.md)（M0 第二次代码审查，§8）、[reviews/codex-review-006.md](reviews/codex-review-006.md)（M0 第三次代码审查，§9）、[reviews/codex-review-007.md](reviews/codex-review-007.md)（M0 最终定向复审，§10）、[reviews/codex-review-008.md](reviews/codex-review-008.md)（M0 代码审查 GO，§11）、[reviews/codex-review-009.md](reviews/codex-review-009.md)（M1 设计审查 GO，§14）、[reviews/codex-review-010.md](reviews/codex-review-010.md)（WP1.3 代码审查，§15）、[reviews/codex-review-011.md](reviews/codex-review-011.md)（WP1.3 最终复审 GO，§16）
+> 原始审查：[reviews/codex-review-001.md](reviews/codex-review-001.md)（第一轮，§1 ~ §4）、[reviews/codex-review-002.md](reviews/codex-review-002.md)（冻结审查，§5）、[reviews/codex-review-003.md](reviews/codex-review-003.md)（最终设计审查，§6）、[reviews/codex-review-004.md](reviews/codex-review-004.md)（M0 代码审查，§7）、[reviews/codex-review-005.md](reviews/codex-review-005.md)（M0 第二次代码审查，§8）、[reviews/codex-review-006.md](reviews/codex-review-006.md)（M0 第三次代码审查，§9）、[reviews/codex-review-007.md](reviews/codex-review-007.md)（M0 最终定向复审，§10）、[reviews/codex-review-008.md](reviews/codex-review-008.md)（M0 代码审查 GO，§11）、[reviews/codex-review-009.md](reviews/codex-review-009.md)（M1 设计审查 GO，§14）、[reviews/codex-review-010.md](reviews/codex-review-010.md)（WP1.3 代码审查，§15）、[reviews/codex-review-011.md](reviews/codex-review-011.md)（WP1.3 最终复审 GO，§16）、[reviews/codex-review-012.md](reviews/codex-review-012.md)（WP1.0 代码审查，§17）
 > 处理原则：逐条分析，不默认全盘接受；只要会改变核心模型或交换协议，就在本轮设计清楚；只涉及实现细节的，安排在对应模块开工前关闭。不用"开发时再说"来掩盖当前的数据模型矛盾。
 
 **状态术语**（本文和 implementation-plan 统一使用）：
@@ -925,3 +925,49 @@ PR：<https://github.com/XKHoshizora/specmetry/pull/1>（`feat/m0-foundation` �
 
 - MVP-PRV-07 的 CLI 写入层：写入被拒绝时退出码 2、不写入任何数据、输出和日志中没有命中的文本，并覆盖全部写入入口。这部分从 WP1.5 开始，随各写入命令验证。
 - MVP-BL-21、MVP-BL-02 在 WP1.5 验证，MVP-CLM-03 在 M2 验证。
+
+## 17. WP1.0 代码审查（codex-review-012）的处理
+
+**审查结论**：NO-GO，1 项 BLOCKER、2 项 NON-BLOCKER。审查目标 `0e58c62`（PR #4）。审查确认三个夹具的内容符合 WP1.0，三平台 CI 的固定提交 ID 一致，录制的提案与需求说明一致。产品负责人决定一次修复全部三项，不扩大工作包范围。
+
+### B1：继承的 git 环境变量能把夹具操作重定向到其他仓库
+
+**根因**：`NewGitRepo` 继承整个 `os.Environ()`，只覆盖了部分变量。`GIT_DIR`、`GIT_WORK_TREE` 等定位变量不受 `cmd.Dir` 影响；`GIT_DEFAULT_HASH`、`GIT_CONFIG_*`、`GIT_TEMPLATE_DIR` 等也能改变提交 ID 或执行钩子。
+
+**修复**（`internal/testutil/git.go`）：
+
+- 测试用 git 子进程不继承任何 `GIT_*` 变量，也不继承 `HOME`、`XDG_CONFIG_HOME`（变量名不区分大小写）。
+- 只设置受控的变量：关闭系统配置；空的全局配置；隔离的 HOME 和 XDG 目录；空的模板目录（不复制钩子等文件）；`GIT_CEILING_DIRECTORIES`（不会向上找到别的仓库）；固定身份；禁止交互提示。提交日期仍由 `CommitAt` 单独传入。
+- `git init` 固定 `--object-format=sha1`。
+- 第一次修改仓库配置之前，以及每次提交之前，确认 git 解析出的仓库目录就是本仓库的 `.git`，否则测试立即终止。
+
+**回归测试**（全部经过公开的 `BuildFixture` 路径；另建一个临时的"外部"仓库，注入的变量都指向它）：
+
+| 注入 | 修复前（Windows 与 Linux 相同） | 修复后 |
+|---|---|---|
+| `GIT_DIR` + `GIT_WORK_TREE` | 外部仓库被修改，夹具没有自己的 `.git` | 外部仓库完全不变（快照比对 HEAD、索引、配置、对象和文件）；夹具建在自己的目录中；提交 ID 等于清单中的值 |
+| `GIT_COMMON_DIR` | 外部仓库被修改 | 同上 |
+| `GIT_INDEX_FILE` | 外部仓库被修改 | 同上 |
+| `GIT_OBJECT_DIRECTORY` | 外部仓库被修改 | 同上 |
+| `GIT_DEFAULT_HASH=sha256` | 生成 64 位的提交 ID | 提交 ID 等于清单中的值 |
+| `GIT_CONFIG_COUNT`（`core.hooksPath`） | 注入的钩子被执行 | 钩子没有执行 |
+| `GIT_CONFIG_PARAMETERS`（`core.hooksPath`） | 注入的钩子被执行 | 钩子没有执行 |
+| `GIT_TEMPLATE_DIR`（模板中的钩子） | 注入的钩子被执行 | 钩子没有执行 |
+| 以上全部，加上 `GIT_AUTHOR_DATE`、`GIT_COMMITTER_NAME` | 外部仓库被修改 | 全部满足 |
+
+另有一个直接测试：把测试仓库的 `.git` 换成指向外部仓库的 gitfile，提交在写入之前被拦下，外部仓库不变。去掉这项检查后测试失败。
+
+### N1：录制提案的检查不够严格
+
+**修复**：检查改为对照一个独立的 Oracle。Oracle 直接根据需求说明写下预期，不从提案推导：
+
+- 1 个目标、8 条需求、9 条 AC，每个需求小节应有的 AC 数（R8 为 0）；
+- 4 个问题：R3、R7 的歧义问题必须引用歧义原文，R8 的验收方式问题，以及"待确认"小节中唯一的项目级阻塞问题。
+
+每个条目引用的片段在需求说明中的位置，决定它属于哪个小节；AC 必须挂在同一小节的需求上，问题的 `about` 必须指向对应小节的需求。审查提出的三种变异作为自动化测试：删除 `c3`、删除三个非阻塞问题、把 `c9` 挂到 R8。修复前三种都检测不到，修复后都被检出，并且各自是因为正确的原因。
+
+### N2：`fx-in-dev` 的需求说明注记为空
+
+**修复**：注记与需求说明一致（R8 没有可判定的验收描述，R3、R7 各有一处歧义）。新增检查：需求说明字节相同的夹具，清单中的注记也必须相同（修复前失败）。清单不属于被构造的仓库，三个夹具的固定提交 ID 不变。
+
+审查原文按原样入库（它本来就是仓库内的相对链接）。
