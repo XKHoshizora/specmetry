@@ -331,6 +331,11 @@ func TestProposeRefuses(t *testing.T) {
 		return map[string]any{"op": "update", "type": typ, "target": target, "target_revision": 1, "data": map[string]any{"title": "x"}}
 	}
 	check := func(c map[string]any) any { return patched(t, base, "/items/2/data/check", c) }
+	withLines := func(lines string) any {
+		inferred := patched(t, patched(t, base, "/items/1/origin", "inferred_from_code"), "/items/1/rationale", "seen in the code")
+		return patched(t, inferred, "/items/1/code_refs", []any{map[string]any{"path": "docs/client-brief.md", "lines": lines}})
+	}
+	nines := strings.Repeat("9", 30)
 	cases := []struct {
 		name    string
 		doc     any
@@ -375,9 +380,16 @@ func TestProposeRefuses(t *testing.T) {
 		{"an excerpt of whitespace only", patched(t, base, "/items/0/sources/0/excerpt", " \r\n\t　"), "/items/0/sources/0/excerpt"},
 		{"inferred_from_code without code references", patched(t, patched(t, base, "/items/1/origin", "inferred_from_code"),
 			"/items/1/rationale", "seen in the code"), "/items/1"},
-		{"a reversed line range", patched(t, patched(t, patched(t, base, "/items/1/origin", "inferred_from_code"),
-			"/items/1/rationale", "seen in the code"), "/items/1/code_refs", []any{map[string]any{"path": "docs/client-brief.md", "lines": "9-3"}}),
-			"/items/1/code_refs/0/lines"},
+		{"a reversed line range", withLines("9-3"), "/items/1/code_refs/0/lines"},
+		// codex-review-020 B4: a number too large is a malformed range,
+		// never "no range". Lines are numbered up to 2147483647 (32 bits).
+		{"a line number of 30 digits", withLines(nines), "/items/1/code_refs/0/lines"},
+		{"a range starting past the limit", withLines(nines + "-1"), "/items/1/code_refs/0/lines"},
+		{"a range ending past the limit", withLines("1-" + nines), "/items/1/code_refs/0/lines"},
+		{"a line past the 32-bit limit", withLines("2147483648"), "/items/1/code_refs/0/lines"},
+		{"a range ending past the 32-bit limit", withLines("1-2147483648"), "/items/1/code_refs/0/lines"},
+		{"the 64-bit limit", withLines("9223372036854775807"), "/items/1/code_refs/0/lines"},
+		{"past the 64-bit limit", withLines("9223372036854775808"), "/items/1/code_refs/0/lines"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -566,6 +578,36 @@ func TestProposeStale(t *testing.T) {
 	}
 }
 
+// codex-review-020 B3: a requirement without a goal ("goal": null) is
+// accepted, both added and when an update clears its goal; the null stays
+// in the payload for the review to apply. Goal keys are still checked.
+func TestProposeGoalNull(t *testing.T) {
+	home, f, _ := proposalsProject(t)
+	seedBaseline(t, home, 1)
+	doc := map[string]any{"schema": "specmetry.proposal/v1", "origin": "skill_goals", "base_version": 1, "summary": "no goal",
+		"items": []any{
+			map[string]any{"op": "add", "type": "requirement", "ref": "r1", "origin": "manual",
+				"data": map[string]any{"title": "export orders", "kind": "functional", "priority": "could", "goal": nil}},
+			map[string]any{"op": "update", "type": "requirement", "target": "REQ-001", "target_revision": 2,
+				"data": map[string]any{"goal": nil}},
+		}}
+	proposeRefused(t, home, f.Repo.Dir, patched(t, doc, "/items/0/data/goal", "GOAL-9"), apperr.ExitInvalidInput, "/items/0/data/goal")
+	proposeRefused(t, home, f.Repo.Dir, patched(t, doc, "/items/1/data/goal", "REQ-001"), apperr.ExitInvalidInput, "/items/1/data/goal")
+	r := proposeOK(t, f.Repo.Dir, doc)
+	if len(r.Items) != 2 || r.Items[0].ReviewState != "pending" || r.Items[1].Target == nil || *r.Items[1].Target != "REQ-001" {
+		t.Fatalf("receipt items %+v", r.Items)
+	}
+	for _, row := range rows(t, home, `SELECT payload_json FROM proposal_items ORDER BY item_index`) {
+		var data map[string]any
+		if err := json.Unmarshal([]byte(row[0]), &data); err != nil {
+			t.Fatal(err)
+		}
+		if goal, ok := data["goal"]; !ok || goal != nil {
+			t.Errorf("payload %s does not keep \"goal\": null", row[0])
+		}
+	}
+}
+
 // MVP-BL-04: an excerpt that differs from the source only in whitespace or
 // line breaks (CRLF too) verifies; one changed character is not_found; a
 // PDF is not_checkable; a deleted file is source_missing. The results are
@@ -636,6 +678,7 @@ func TestProposeChecksExcerpts(t *testing.T) {
 func TestProposeChecksCodeRefs(t *testing.T) {
 	home, f, _ := proposalsProject(t)
 	f.Repo.WriteFile("internal/auth/login.go", "package auth\n\nfunc Login() {}\n")
+	f.Repo.WriteFile("internal/auth/empty.go", "")
 	head := f.Repo.Commit("add login")
 	f.Repo.WriteFile("internal/auth/later.go", "package auth\n")
 	codeRefs := []any{
@@ -646,13 +689,22 @@ func TestProposeChecksCodeRefs(t *testing.T) {
 		map[string]any{"path": "internal/auth/missing.go"},
 		map[string]any{"path": "internal/auth/later.go"},
 		map[string]any{"path": "internal/auth"},
+		// Valid at the 32-bit limit, but past the end of the file.
+		map[string]any{"path": "internal/auth/login.go", "lines": "2147483647"},
+		map[string]any{"path": "internal/auth/login.go", "lines": "1-2147483647"},
+		// An empty file is there, with no line in it.
+		map[string]any{"path": "internal/auth/empty.go"},
+		map[string]any{"path": "internal/auth/empty.go", "lines": "1"},
 	}
 	doc := map[string]any{"schema": "specmetry.proposal/v1", "origin": "skill_init", "base_version": 0, "summary": "inferred",
 		"items": []any{map[string]any{"op": "add", "type": "requirement", "ref": "r1", "origin": "inferred_from_code",
 			"rationale": "the login handler locks accounts", "code_refs": codeRefs,
 			"data": map[string]any{"title": "log in", "kind": "functional", "priority": "must"}}}}
 	r := proposeOK(t, f.Repo.Dir, doc)
-	want := []bool{true, true, true, false, false, false, false}
+	want := []bool{true, true, true, false, false, false, false, false, false, true, false}
+	if len(r.Items[0].CodeRefs) != len(want) {
+		t.Fatalf("%d code references", len(r.Items[0].CodeRefs))
+	}
 	for i, w := range want {
 		if c := r.Items[0].CodeRefs[i]; c.Exists != w {
 			t.Errorf("code reference %d: %+v, want exists %v", i, c, w)
@@ -669,6 +721,56 @@ func TestProposeChecksCodeRefs(t *testing.T) {
 	}
 	if got := rows(t, home, `SELECT origin FROM proposal_items`); got[0][0] != "inferred_from_code" {
 		t.Fatalf("origin %v", got)
+	}
+}
+
+// codex-review-020 B1: in a partial clone, reading the objects behind code
+// references would make git fetch what it lacks from the promisor remote
+// (a stand-in upload-pack here, which only leaves a marker). propose
+// refuses (exit 6) before reading any object: the stand-in never runs,
+// the repository is left as it was and nothing is written. A proposal
+// without code references reads no object and is stored.
+func TestProposeCodeRefsInAPartialClone(t *testing.T) {
+	home, f, _ := proposalsProject(t)
+	repo := f.Repo
+	repo.WriteFile("internal/auth/login.go", "package auth\n\nfunc Login() {}\n")
+	head := repo.Commit("add login")
+	blob := repo.Git("rev-parse", head+":internal/auth/login.go")
+	dir := t.TempDir()
+	ran := filepath.Join(dir, "upload-pack-ran")
+	script := filepath.Join(dir, "upload-pack.sh")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\necho ran >> '"+filepath.ToSlash(ran)+"'\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if strings.ContainsAny(script, " '") {
+		t.Skipf("temporary path %q needs quoting", script)
+	}
+	repo.Git("config", "core.repositoryformatversion", "1")
+	repo.Git("config", "extensions.partialClone", "origin")
+	repo.Git("config", "remote.origin.url", filepath.ToSlash(t.TempDir()))
+	repo.Git("config", "remote.origin.promisor", "true")
+	repo.Git("config", "remote.origin.uploadpack", "sh "+filepath.ToSlash(script))
+	if err := os.Remove(filepath.Join(repo.Dir, ".git", "objects", blob[:2], blob[2:])); err != nil {
+		t.Fatal(err)
+	}
+	doc := map[string]any{"schema": "specmetry.proposal/v1", "origin": "skill_init", "base_version": 0, "summary": "inferred",
+		"items": []any{map[string]any{"op": "add", "type": "requirement", "ref": "r1", "origin": "inferred_from_code",
+			"rationale": "the login handler locks accounts",
+			"code_refs": []any{map[string]any{"path": "internal/auth/login.go", "lines": "1-3"}},
+			"data":      map[string]any{"title": "log in", "kind": "functional", "priority": "must"}}}}
+	gitDir := filepath.Join(repo.Dir, ".git")
+	before := testutil.SettledSnapshot(t, gitDir)
+	env := proposeRefused(t, home, repo.Dir, doc, apperr.ExitEnvironment, "")
+	if env.Error.Code != "environment" || !strings.Contains(env.Error.Message, "partial clone") {
+		t.Errorf("error %+v", env.Error)
+	}
+	if _, err := os.Stat(ran); err == nil {
+		t.Fatal("the promisor remote's upload-pack ran")
+	}
+	testutil.AssertTreeUnchanged(t, gitDir, before)
+	proposeOK(t, repo.Dir, recorded(t, f))
+	if _, err := os.Stat(ran); err == nil {
+		t.Fatal("the promisor remote's upload-pack ran")
 	}
 }
 
@@ -743,6 +845,92 @@ func TestProposeNeverStoresExcerpts(t *testing.T) {
 	}
 	if n := count(t, home, `SELECT count(*) FROM source_refs WHERE excerpt IS NOT NULL`); n != 0 {
 		t.Fatalf("%d stored excerpts", n)
+	}
+}
+
+// codex-review-020 B2: the database refuses excerpt text in a stored
+// proposal item under hash_only, through any write: a final payload
+// holding an excerpt, inserted or updated in an ordinary write transaction,
+// is refused and rolled back, and the text reaches neither the database
+// nor its WAL. A review result without excerpt text is still written.
+func TestHashOnlyDefendsStoredItems(t *testing.T) {
+	home, f, _ := proposalsProject(t)
+	canary := testutil.NewCanary(t)
+	if err := os.WriteFile(filepath.Join(f.Repo.Dir, "docs", "private.md"), []byte("规则："+canary+"。\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	private := sourceAdd(t, f.Repo.Dir, "docs/private.md").Source.ID
+	excerpt := "规则：" + canary
+	doc := map[string]any{"schema": "specmetry.proposal/v1", "origin": "skill_init", "base_version": 0, "summary": "private",
+		"items": []any{map[string]any{"op": "add", "type": "goal", "ref": "g1", "data": map[string]any{"title": "rules"},
+			"origin": "extracted", "sources": []any{map[string]any{"source": "docs/private.md", "excerpt": excerpt}}}}}
+	if r := proposeOK(t, f.Repo.Dir, doc); r.Items[0].Sources[0].Verification != "verified" {
+		t.Fatalf("receipt %+v", r.Items[0])
+	}
+	if hits := testutil.FindInTree(t, home.Path, canary); len(hits) != 0 {
+		t.Fatalf("the submission stored the excerpt: %v", hits)
+	}
+
+	db, _, err := sqlite.Open(context.Background(), home, sqlite.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	var proposalID, project string
+	if err := db.WriteTx(context.Background(), func(tx *sql.Tx) error {
+		return tx.QueryRow(`SELECT proposal_id, project_id FROM proposal_items`).Scan(&proposalID, &project)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	payload, err := json.Marshal(map[string]any{"title": "rules",
+		"sources": []any{map[string]any{"source_id": private, "excerpt_sha256": digest(excerpt), "excerpt": excerpt}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := written(t, home)
+	for name, query := range map[string]string{
+		"an update of the pending item": `UPDATE proposal_items SET final_payload_json = ?1`,
+		"a review with the excerpt": `UPDATE proposal_items SET final_payload_json = ?1, review_state = 'accepted_with_edits',
+    change_class = 'material', reviewed_by = 'human:me', reviewed_channel = 'human_cli', reviewed_seq = 999`,
+		"an inserted item": `INSERT INTO proposal_items (id, proposal_id, project_id, item_index, op, entity_type, ref, payload_json,
+    sources_json, code_refs_json, final_payload_json)
+VALUES ('01J9Z3K5Q8R2T4V6W8X0Y2Z4J8', ?2, ?3, 1, 'add', 'goal', 'g2', '{}', '[]', '[]', ?1)`,
+	} {
+		err := db.WriteTx(context.Background(), func(tx *sql.Tx) error {
+			_, err := tx.Exec(query, string(payload), proposalID, project)
+			return err
+		})
+		if err == nil || !strings.Contains(err.Error(), "excerpt text is not stored under hash_only") {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	if after := written(t, home); after != before {
+		t.Fatalf("written %s -> %s", before, after)
+	}
+	_ = db.Close()
+	if hits := testutil.FindInTree(t, home.Path, canary); len(hits) != 0 {
+		t.Fatalf("the excerpt reached the data directory: %v", hits)
+	}
+
+	// A review result without excerpt text is written.
+	db, _, err = sqlite.Open(context.Background(), home, sqlite.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	clean, _ := json.Marshal(map[string]any{"title": "rules",
+		"sources": []any{map[string]any{"source_id": private, "excerpt_sha256": digest(excerpt), "excerpt": nil}}})
+	if err := db.WriteTx(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.Exec(`UPDATE proposal_items SET final_payload_json = ?, review_state = 'accepted_with_edits',
+    change_class = 'material', reviewed_by = 'human:me', reviewed_channel = 'human_cli', reviewed_seq = 999`, string(clean))
+		return err
+	}); err != nil {
+		t.Fatalf("a review without excerpt text: %v", err)
+	}
+	_ = db.Close()
+	if got := rows(t, home, `SELECT review_state, final_payload_json FROM proposal_items`); got[0][0] != "accepted_with_edits" ||
+		strings.Contains(got[0][1], canary) {
+		t.Fatalf("review %v", got)
 	}
 }
 

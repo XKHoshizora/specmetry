@@ -6,13 +6,13 @@ import (
 	"encoding/hex"
 	"errors"
 	"io"
-	"os"
 	"path/filepath"
 	"strings"
 	"unicode"
 	"unicode/utf8"
 
 	"github.com/XKHoshizora/specmetry/internal/apperr"
+	"github.com/XKHoshizora/specmetry/internal/source"
 )
 
 // Verification is what checking an excerpt against its source showed
@@ -66,14 +66,13 @@ func CheckExcerpts(ctx context.Context, file string, excerpts []string) (string,
 	if err := ctx.Err(); err != nil {
 		return "", nil, interrupted(err)
 	}
-	f, err := os.Open(file)
+	// A FIFO or a device is not a source and must not block the check:
+	// it is refused from its open descriptor (codex-review-020 B5).
+	f, err := source.OpenRegular(file)
 	if err != nil {
 		return missing()
 	}
 	defer func() { _ = f.Close() }()
-	if fi, err := f.Stat(); err != nil || !fi.Mode().IsRegular() {
-		return missing()
-	}
 
 	text := !nonText[strings.ToLower(filepath.Ext(file))]
 	matchers := make([]*matcher, len(excerpts))

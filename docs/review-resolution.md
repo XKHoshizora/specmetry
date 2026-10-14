@@ -1244,3 +1244,77 @@ PR：<https://github.com/XKHoshizora/specmetry/pull/1>（`feat/m0-foundation` �
 两个诊断分支 `diag/macos-before`、`diag/macos-after` 已于验收后删除；运行记录仍在 Actions 中。
 
 审查原文按原样入库。
+
+## 25. WP1.5 代码审查（codex-review-020）的处理
+
+**审查结论**：NO-GO，5 项 BLOCKER、2 项 NON-BLOCKER。审查目标 `2abca00`（PR #8）。审查确认 V-P01 ~ V-P08 的主要校验、`propose` 的原文剥离与输出脱敏、事务与并发、版本前置条件、`proposal-receipt.v1` 的条件与反例，以及六项实现细化。产品负责人决定一次关闭全部五项，不扩大范围，不开始 WP1.6。
+
+### B1：读取对象可能触发按需抓取
+
+**根因**：部分克隆缺少的对象，git 在读取时会从 promisor remote 抓取（启动 `git fetch`，运行远端的 upload-pack）。受控环境没有禁止这一点。
+
+**修复**（`internal/gitx`，architecture §6.1.2）：
+
+- 受控环境增加 `GIT_NO_LAZY_FETCH=1` 和禁止所有传输的 `GIT_ALLOW_PROTOCOL`。
+- 版本检查时探测一次 git 是否支持 `--no-lazy-fetch`。不支持时，`CommitOf`、`TreeFiles`、`CountLines` 在读取对象之前识别部分克隆（只读配置），是部分克隆就返回退出码 6。
+- 代码引用检查在任何 git 版本下都先识别部分克隆并拒绝（退出码 6），提示改用完整克隆。
+- 最低版本仍为 2.32。
+
+**为什么旧版 git 需要"识别后拒绝"**：用真实的 git 2.32.0 验证，`GIT_ALLOW_PROTOCOL` 确实让 upload-pack 不再运行，但 git 仍会启动 `git fetch --filter=blob:none`，它在因传输被禁止而失败之前，向仓库配置写入 `remote.origin.partialclonefilter`。只靠环境变量不能保证只读，所以对不支持 `--no-lazy-fetch` 的 git 一律拒绝部分克隆中的对象读取。
+
+**回归测试**（upload-pack 替身只向仓库外的标记文件追加一行，不连接网络；每个用例先用普通 git 做对照，证明替身确实会被执行）：
+
+| 场景 | git 2.56（Windows） | git 2.43（Linux） | git 2.32.0（Linux，官方源码构建） |
+|---|---|---|---|
+| 修复前：缺失 blob、树、提交 | 替身执行，`.git` 改变 | 同左 | 同左 |
+| 修复后：缺失 blob（`CountLines`）、树（`TreeFiles`）、提交（`CommitOf`） | 替身不执行，`.git` 逐文件不变，不报告为存在 | 同左 | 同左（经由识别后拒绝） |
+| 强制走旧版路径（任何 git） | 三种读取都返回退出码 6，替身不执行，`.git` 不变；完整克隆照常读取 | 同左 | 同左 |
+| 公开 `propose` 带代码引用（部分克隆） | 修复前：替身执行后才退出 6；修复后：退出 6，替身不执行，`.git` 不变，不写入、不分配 `seq`；不带代码引用的提案照常保存 | 通过 | 通过 |
+
+另外在 git 2.32.0 上运行了全部 18 个 `propose` / `source` 相关的 CLI 测试，全部通过。macOS 与 Windows、Ubuntu 的其他版本由 CI 验证。
+
+### B2：`final_payload_json` 缺少 `hash_only` 防线
+
+**根因**：触发器只在插入时检查 `sources_json`。
+
+**修复**（修改尚未合并的迁移 0004）：`proposal_items` 在插入和更新时，用 `json_tree` 检查 `sources_json` 与 `final_payload_json` 中任何层级、取值不为 null 的 `excerpt` 键；`source_refs` 在插入之外也检查更新；这些触发器在维护模式下同样生效。
+
+**回归测试**：
+
+- 数据层：插入、更新待审条目、更深层级、审核时带原文，都被拒绝且原因正确；维护模式下给引用写入原文同样被拒绝；不含原文的审核结果（`excerpt` 为 null）照常写入。
+- 公开路径：`propose` 提交含 canary 的片段之后，用普通 `WriteTx` 尝试更新与插入。修复前三次都成功、并新增一行；修复后都被拒绝，业务记录与 `seq` 不变，数据目录（数据库与 WAL）中找不到 canary；不含原文的审核结果更新成功。
+
+### B3：`goal: null` 被当作空编号
+
+**根因**：`json.Unmarshal` 把 null 解码为空字符串且不报错。
+
+**修复**：读取字符串字段时，缺失与 null 都表示"没有编号"；null 原样保留在 payload 中。
+
+**回归测试**（公开 CLI）：新增需求 `goal: null`、更新需求清除 `goal`。修复前退出码 2；修复后保存为待审条目，payload 中保留 `"goal": null`。不存在的目标编号、类型不对的编号仍为退出码 2。
+
+### B4：行号溢出被当作"没有行号"
+
+**根因**：`strconv.Atoi` 溢出时返回 `ok = false`，调用方把它解释为未填写行号，因而 `exists = true`。
+
+**修复**：静态检查与代码引用检查共用一个解析函数，区分"未填写"与"无效"。行号范围为 1 ~ 2147483647（32 位上限），超出或倒置都返回退出码 2；即使绕过静态检查，无效范围也只会得到 `exists = false`。
+
+**回归测试**：公开 CLI 中 30 位数字、溢出的起点或终点、2147483648、`1-2147483648`、64 位上限与溢出，修复前都以退出码 0 写入（`exists = true`），修复后都返回退出码 2、指针正确、不写入；2147483647、`1-2147483647`、空文件（有、无行号）给出正确的 `exists`；单元测试覆盖边界。
+
+### B5：特殊文件使提案阻塞
+
+**根因**：先 `os.Open` 再检查类型；没有写端的 FIFO 会让打开本身阻塞，取消无从生效。WP1.4 的 `source.HashFile` 有同样的问题。
+
+**修复**：共用的 `source.OpenRegular`。Unix 以 `O_NONBLOCK|O_NOCTTY` 打开，再对描述符 `fstat`，不是普通文件就关闭并拒绝，普通文件恢复阻塞模式；Windows 打开设备或管道本身不等待，再通过句柄确认类型。`HashFile`、片段校验和非 git 项目的代码引用都改用它。
+
+**回归测试**：Linux 上，`HashFile`、`CheckExcerpts`（含 25 ms 超时）、公开 `propose` 与 `source list` 遇到 FIFO 都立即返回（修复前四项都阻塞）；普通文件与 FIFO 在检查期间反复互换，2 秒内 10692 次检查全部立即返回，结果只有 `verified` 或 `source_missing`；提案照常保存，只使用一个 `seq`。Windows 上，`NUL` 设备和目录被拒绝。macOS 由 CI 验证。
+
+### NON-BLOCKER
+
+- **N1**：增加真正超过 1 MiB 的测试文件：跨块边界的多字节字符、匹配之后出现的 NUL、文件末尾截断的字符、读取过程中（两块之间）取消；随机对照测试中每三轮有一轮超过 1 MiB，并断言这一点。
+- **N2**：符号链接与子模块测试改为直接提交索引，不再经过 `git add -A`，并在检查前断言提交树中确实有 `120000`、`160000`、`100755` 条目。
+
+### 接受的风险
+
+与审查原文一致：引用结果绑定读取时的 `source_sha256` 与 `checked_head`；正式审核与编号分配属于 WP1.6；`verified` 与 `exists` 只是标记。新增的平台限制：部分克隆中不能检查代码引用；不支持 `--no-lazy-fetch` 的 git 在部分克隆中不读取任何对象（例如 `init` 读取 HEAD 提交时返回退出码 6）。
+
+审查原文按原样入库。

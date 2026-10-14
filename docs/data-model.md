@@ -261,7 +261,7 @@ CLI 或 Hook 第一次在某个 worktree 中出现时，系统会自动登记它
 - `material` 更新时，如果没有提供新引用，系统会沿用上一修订的引用，**重新校验**后写成新行。旧行保留，作为历史。
 - `code_refs` 只保存路径和行号，**不保存代码内容**。
 - 片段的保存与擦除遵循 [architecture.md §10.7](architecture.md#107-来源片段的采集策略保护与用户控制)：`excerpt_storage = hash_only` 时只保存 `excerpt_sha256`；`source remove --erase-excerpts` 在维护模式下把 `excerpt` 置为 NULL 并写入 `excerpt_erased_seq`。这是 `source_refs` 只追加约束的唯一受控例外（另一个例外是 `purge`）。
-- **`hash_only` 模式下，片段原文不写入任何位置**：`source_refs.excerpt` 为 NULL；`proposal_items` 的 `sources_json` 和 `final_payload_json` 中，每个引用只保存 `locator` 和 `excerpt_sha256`；输出（`proposal-receipt.v1`、`proposal-show.v1`、`source-list.v1`）、错误信息和程序日志都不回显原文。
+- **`hash_only` 模式下，片段原文不写入任何位置**：`source_refs.excerpt` 为 NULL；`proposal_items` 的 `sources_json` 和 `final_payload_json` 中，每个引用只保存 `locator` 和 `excerpt_sha256`；输出（`proposal-receipt.v1`、`proposal-show.v1`、`source-list.v1`）、错误信息和程序日志都不回显原文。数据库触发器在插入和更新时都拒绝这些位置出现片段原文（[architecture.md §6.1.4](architecture.md#614-提案的提交m1-实现)）。
 - **沿用引用的重新校验**：`material` 更新沿用上一修订的引用时，`full` 引用照常逐字重新校验；`hash_only` 引用没有原文，无法逐字校验——来源的当前哈希仍等于该引用的 `source_sha256` 时沿用原校验结果，否则记为 `not_checkable`（V-P07，标记，不拒绝）。
 - **片段总量上限**（只计算保存了原文的片段，即 `full` 模式）：同一来源所有已保存片段的总长度，不超过该来源文本长度的 50%，并且不超过 20000 字符；非文本来源（`not_checkable`）总计不超过 5000 字符。超出时，提交被拒绝（V-P11）。这样可以防止通过片段逐段保存来源全文（C0）。
 - 校验只证明一件事：片段确实出现在来源中、路径确实存在。它**不证明**语义正确或覆盖完整。界面上必须如实说明这一点。

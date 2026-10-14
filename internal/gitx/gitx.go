@@ -176,6 +176,9 @@ func HeadBranch(ctx context.Context, worktree string) (string, error) {
 // CommitOf resolves ref to the full ID of a commit, or "" when the ref does
 // not exist or has no commit yet.
 func CommitOf(ctx context.Context, dir, ref string) (string, error) {
+	if err := objectsReadable(ctx, dir); err != nil {
+		return "", err
+	}
 	out, code, err := runCode(ctx, dir, "rev-parse", "-q", "--verify", ref+"^{commit}")
 	if err != nil {
 		return "", err
@@ -217,6 +220,9 @@ func TreeFiles(ctx context.Context, worktree, commit string) (map[string]string,
 	if !objectID.MatchString(commit) {
 		return nil, apperr.New(apperr.Internal, "TreeFiles needs a full commit ID")
 	}
+	if err := objectsReadable(ctx, worktree); err != nil {
+		return nil, err
+	}
 	out, err := run(ctx, worktree, "ls-tree", "-r", "-z", "--full-tree", commit)
 	if err != nil {
 		return nil, err
@@ -244,7 +250,7 @@ func CountLines(ctx context.Context, worktree, object string) (int, error) {
 	if !objectID.MatchString(object) {
 		return 0, apperr.New(apperr.Internal, "CountLines needs a full object ID")
 	}
-	if err := checkVersion(ctx); err != nil {
+	if err := objectsReadable(ctx, worktree); err != nil {
 		return 0, err
 	}
 	var c lineCounter
@@ -319,8 +325,16 @@ func Canonical(p string) string {
 // a git too old for GIT_CONFIG_GLOBAL would otherwise enable from the
 // user's global configuration while it only prints its version
 // (codex-review-016 B1; the variables override trace2.*Target); no optional
-// locks, so reading never writes the index; no prompts; and the .git entry
-// that findDotGit found by walking up without a filesystem limit.
+// locks, so reading never writes the index; no prompts; the .git entry
+// that findDotGit found by walking up without a filesystem limit; and no
+// object is ever fetched (codex-review-020 B1). A partial clone fetches a
+// missing object from its promisor remote on demand, which could reach a
+// network or run the remote's upload-pack. git 2.44 and later stop that
+// with GIT_NO_LAZY_FETCH; for every version from 2.32 on, a
+// GIT_ALLOW_PROTOCOL that names no real protocol forbids all transports,
+// overriding any protocol.* configuration, so the fetch git starts fails
+// before it connects or runs anything. Code references, which read
+// objects, also refuse a partial clone up front (PartialClone).
 var controlledEnv = []string{
 	"GIT_CONFIG_NOSYSTEM=1",
 	"GIT_CONFIG_SYSTEM=/dev/null",
@@ -331,6 +345,8 @@ var controlledEnv = []string{
 	"GIT_OPTIONAL_LOCKS=0",
 	"GIT_TERMINAL_PROMPT=0",
 	"GIT_DISCOVERY_ACROSS_FILESYSTEM=1",
+	"GIT_NO_LAZY_FETCH=1",
+	"GIT_ALLOW_PROTOCOL=specmetry-no-transport",
 }
 
 // globalArgs come before every git command. An empty core.fsmonitor turns
@@ -373,10 +389,16 @@ func supportedVersion(out string) bool {
 var (
 	versionMu sync.Mutex
 	versionOK bool
+	// lazyFetchOff: git honours GIT_NO_LAZY_FETCH, so it never starts a
+	// fetch for a missing object (objectsReadable).
+	lazyFetchOff bool
 )
 
-// checkVersion refuses a git too old to be isolated. Only a successful
-// check is remembered, so a cancelled one is repeated.
+// checkVersion refuses a git too old to be isolated, and finds out whether
+// git can be told never to fetch a missing object: --no-lazy-fetch and
+// GIT_NO_LAZY_FETCH came together, so a git that knows the option honours
+// the variable. Only a successful check is remembered, so a cancelled one
+// is repeated.
 func checkVersion(ctx context.Context) error {
 	versionMu.Lock()
 	defer versionMu.Unlock()
@@ -390,7 +412,53 @@ func checkVersion(ctx context.Context) error {
 	if code != 0 || !supportedVersion(string(out)) {
 		return apperr.New(apperr.Environment, "git "+minimumVersion+" or newer is required")
 	}
-	versionOK = true
+	_, code, err = exec1(ctx, "", "--no-lazy-fetch", "version")
+	if err != nil {
+		return err
+	}
+	lazyFetchOff, versionOK = code == 0, true
+	return nil
+}
+
+var (
+	partialMu     sync.Mutex
+	partialClones = map[string]bool{}
+)
+
+// objectsReadable lets git read objects in the repository of dir only
+// where that never fetches one (codex-review-020 B1). A git that honours
+// GIT_NO_LAZY_FETCH never does. An older git, in a partial clone, starts a
+// fetch for any missing object; GIT_ALLOW_PROTOCOL makes that fetch fail
+// before it connects or runs the remote's upload-pack, but it may write
+// the repository's configuration first (git 2.32 records the remote's
+// filter). So with an older git a partial clone is refused before any
+// object is read, and the answer is kept for each directory.
+func objectsReadable(ctx context.Context, dir string) error {
+	if err := checkVersion(ctx); err != nil {
+		return err
+	}
+	versionMu.Lock()
+	off := lazyFetchOff
+	versionMu.Unlock()
+	if off {
+		return nil
+	}
+	partialMu.Lock()
+	partial, known := partialClones[dir]
+	partialMu.Unlock()
+	if !known {
+		var err error
+		if partial, err = PartialClone(ctx, dir); err != nil {
+			return err
+		}
+		partialMu.Lock()
+		partialClones[dir] = partial
+		partialMu.Unlock()
+	}
+	if partial {
+		return apperr.New(apperr.Environment,
+			"this repository is a partial clone, and this git cannot read its objects without fetching the ones it lacks, which Specmetry never does; use a git that supports --no-lazy-fetch, or a full clone")
+	}
 	return nil
 }
 
@@ -469,4 +537,32 @@ func osProblem(err error) string {
 		return pe.Err.Error()
 	}
 	return "file system error"
+}
+
+// PartialClone reports whether the repository of worktree is a partial
+// clone: one with a promisor remote (extensions.partialClone, or a remote
+// whose promisor setting is true), from which git fetches the objects it
+// lacks on demand. Only the configuration is read, never an object.
+func PartialClone(ctx context.Context, worktree string) (bool, error) {
+	out, code, err := runCode(ctx, worktree, "config", "--get-regexp", `^(extensions\.partialclone|remote\..*\.promisor)$`)
+	if err != nil {
+		return false, err
+	}
+	if code == 1 {
+		return false, nil // no such setting
+	}
+	for _, line := range strings.Split(strings.ReplaceAll(string(out), "\r\n", "\n"), "\n") {
+		key, value, _ := strings.Cut(line, " ")
+		switch {
+		case key == "extensions.partialclone":
+			return true, nil
+		case strings.HasPrefix(key, "remote.") && strings.HasSuffix(key, ".promisor"):
+			// git's booleans: a key without a value is true.
+			switch strings.ToLower(value) {
+			case "", "true", "yes", "on", "1":
+				return true, nil
+			}
+		}
+	}
+	return false, nil
 }

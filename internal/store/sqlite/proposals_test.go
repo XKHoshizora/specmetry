@@ -263,9 +263,30 @@ func TestProposalTablesConstraints(t *testing.T) {
 	})
 	refused("changing what was submitted", "a submitted proposal item does not change",
 		stmt(`UPDATE proposal_items SET payload_json = '{}' WHERE id = ?`, itemA))
+	// codex-review-020 B2: no excerpt text in final_payload_json either,
+	// whether inserted or updated, and wherever in it a reference holds one.
+	const withExcerpt = `{"title":"t","sources":[{"source_id":"` + sourceA + `","excerpt":"text"}]}`
+	refused("an excerpt in a final payload, inserted", "excerpt text is not stored under hash_only", func(tx *sql.Tx) error {
+		if err := insertItem(tx, item{id: "01J9Z3K5Q8R2T4V6W8X0Y2Z4J9", index: 9, op: "add", entityType: "goal", ref: "g9"}); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, `UPDATE proposal_items SET final_payload_json = ? WHERE id = '01J9Z3K5Q8R2T4V6W8X0Y2Z4J9'`, withExcerpt)
+		return err
+	})
+	refused("an excerpt in an inserted final payload", "excerpt text is not stored under hash_only", stmt(`
+INSERT INTO proposal_items (id, proposal_id, project_id, item_index, op, entity_type, ref, payload_json, sources_json, code_refs_json, final_payload_json)
+VALUES ('01J9Z3K5Q8R2T4V6W8X0Y2Z4J8', ?, ?, 8, 'add', 'goal', 'g8', '{}', '[]', '[]', ?)`, proposalA, projectA, withExcerpt))
+	refused("an excerpt in a pending item's final payload", "excerpt text is not stored under hash_only",
+		stmt(`UPDATE proposal_items SET final_payload_json = ? WHERE id = ?`, withExcerpt, itemA))
+	refused("an excerpt nested deeper", "excerpt text is not stored under hash_only",
+		stmt(`UPDATE proposal_items SET final_payload_json = '{"a":{"b":[{"c":{"excerpt":"text"}}]}}' WHERE id = ?`, itemA))
+	refused("a review whose final payload holds an excerpt", "excerpt text is not stored under hash_only",
+		stmt(`UPDATE proposal_items SET review_state = 'accepted_with_edits', final_payload_json = ?, change_class = 'material',
+    reviewed_by = 'human:me', reviewed_channel = 'human_cli', reviewed_seq = 98 WHERE id = ?`, withExcerpt, itemA))
 	refused("a review without a reviewer", check, stmt(`UPDATE proposal_items SET review_state = 'rejected' WHERE id = ?`, itemA))
-	ok("the review", stmt(`UPDATE proposal_items SET review_state = 'rejected', reviewed_by = 'human:me', reviewed_channel = 'human_cli',
-    reviewed_seq = 99 WHERE id = ?`, itemA))
+	ok("the review", stmt(`UPDATE proposal_items SET review_state = 'accepted_with_edits', reviewed_by = 'human:me', reviewed_channel = 'human_cli',
+    reviewed_seq = 99, change_class = 'material',
+    final_payload_json = '{"title":"t","sources":[{"source_id":"`+sourceA+`","excerpt_sha256":"`+shaA+`","excerpt":null}]}' WHERE id = ?`, itemA))
 	refused("reviewing again", "a reviewed proposal item does not change",
 		stmt(`UPDATE proposal_items SET review_note = 'x' WHERE id = ?`, itemA))
 	refused("deleting an item", "proposal items are never deleted", stmt(`DELETE FROM proposal_items`))
@@ -301,6 +322,11 @@ func TestProposalTablesConstraints(t *testing.T) {
 		return insertSourceRef(tx, ids.next(), sourceB, nil, "verified", shaB)
 	})
 	refused("changing a reference", "append-only table source_refs", stmt(`UPDATE source_refs SET locator = 'x'`))
+	// Even in maintenance mode (erasing excerpts, purge), an update never
+	// writes excerpt text under hash_only.
+	refused("excerpt text written in maintenance mode", "excerpt text is not stored under hash_only", func(tx *sql.Tx) error {
+		return withMaintenance(ctx, tx, func() error { return stmt(`UPDATE source_refs SET excerpt = 'text'`)(tx) })
+	})
 	refused("deleting a reference", "append-only table source_refs", stmt(`DELETE FROM source_refs`))
 	ok("full mode", stmt(`UPDATE projects SET settings_json = json_set(settings_json, '$.excerpt_storage', 'full') WHERE id = ?`, projectA))
 	ok("excerpt text under full", func(tx *sql.Tx) error {

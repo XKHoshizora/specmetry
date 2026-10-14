@@ -254,9 +254,13 @@ sequenceDiagram
 - 所有路径都先规范化，再保存和比较：绝对路径，解析符号链接；Windows 上还统一短文件名和大小写。经由符号链接或不同大小写的路径进入同一目录，得到的是同一个项目和同一个 worktree。
 - **git 的执行环境**（codex-review-015 B1）：`init` 只运行读取类 git 命令（`rev-parse`、`worktree list`、`symbolic-ref`、`ls-files`）。这些命令不应执行其他程序、写入文件或修改提交、引用、索引和配置；为此：
   - 不传递任何继承的 `GIT_*` 变量（不区分大小写），包括配置注入（`GIT_CONFIG_COUNT` / `KEY` / `VALUE`、`GIT_CONFIG_PARAMETERS`、`GIT_CONFIG_GLOBAL`）、跟踪（`GIT_TRACE*`）、仓库定位（`GIT_DIR`、`GIT_WORK_TREE`、`GIT_CEILING_DIRECTORIES` 等）和 `GIT_EXEC_PATH`。仓库只由目录决定，与 Hook 一致。
-  - 只重新设置受控的变量：`GIT_CONFIG_NOSYSTEM=1`、`GIT_CONFIG_SYSTEM` 与 `GIT_CONFIG_GLOBAL` 指向空文件（不读取系统和用户的全局配置，也不修改它们；`trace2.*` 等只在这两处生效的设置因此不起作用）、`GIT_TRACE2=0`、`GIT_TRACE2_EVENT=0`、`GIT_TRACE2_PERF=0`、`GIT_OPTIONAL_LOCKS=0`（读取不写索引）、`GIT_TERMINAL_PROMPT=0`。
+  - 只重新设置受控的变量：`GIT_CONFIG_NOSYSTEM=1`、`GIT_CONFIG_SYSTEM` 与 `GIT_CONFIG_GLOBAL` 指向空文件（不读取系统和用户的全局配置，也不修改它们；`trace2.*` 等只在这两处生效的设置因此不起作用）、`GIT_TRACE2=0`、`GIT_TRACE2_EVENT=0`、`GIT_TRACE2_PERF=0`、`GIT_OPTIONAL_LOCKS=0`（读取不写索引）、`GIT_TERMINAL_PROMPT=0`，以及禁止按需抓取对象的 `GIT_NO_LAZY_FETCH=1` 和 `GIT_ALLOW_PROTOCOL`（取值不对应任何真实协议，即禁止所有传输，并覆盖仓库中的 `protocol.*` 配置）。
   - 这些变量对 Specmetry 启动的**每一个** git 进程都生效，包括第一个运行的版本探测 `git --version`。探测在版本未知时运行，而低于 2.32 的 git 不认识 `GIT_CONFIG_GLOBAL`，会在打印版本之前就按用户全局配置中的 `trace2.*Target` 开启跟踪，连同 `trace2.envVars` 指定的环境变量值写入文件；三个 `GIT_TRACE2*=0` 的优先级高于这些配置，所以旧版 git 在被拒绝之前也不会写出任何内容（codex-review-016 B1）。已用从官方源码构建的 git 2.31.1 和 2.32.0 验证：在版本探测阶段，用户全局配置中只有 trace2 会产生副作用（`core.fsmonitor`、`core.pager`、`core.hooksPath`、经 `include` 引入的设置都不会）。
   - 仓库自己的配置照常生效（例如 `core.worktree`），只有其中会让读取命令执行程序的 `core.fsmonitor` 在命令行上被关闭（`-c core.fsmonitor=`，空值在各个 git 版本中都表示关闭）。命令还带 `--no-pager` 和 `--no-replace-objects`。这些命令不触发 Hook。
+  - **不按需抓取对象**（codex-review-020 B1）：部分克隆（有 promisor remote 的仓库）缺少的对象，git 会在读取时从远端抓取，这可能发起网络请求或运行远端的 upload-pack。分两层防护：
+    - 支持 `--no-lazy-fetch` 的 git（版本检查时探测一次）遵守 `GIT_NO_LAZY_FETCH`，读取缺失对象时直接失败，不启动抓取；
+    - 更旧的 git（2.32 起）不认识它，读取缺失对象时仍会启动 `git fetch`；`GIT_ALLOW_PROTOCOL` 让它在连接或运行 upload-pack 之前失败，但已用真实的 git 2.32.0 验证，它在失败之前可能改写仓库配置（记录远端的过滤条件）。因此对这类 git，读取提交、树或 blob 之前先识别部分克隆（只读配置 `extensions.partialClone` 和 `remote.<name>.promisor`，不读对象），是部分克隆就返回退出码 6，不读取任何对象。
+    - 缺失的对象一律不会被当作存在。
   - 需要 git 2.32 或更高版本（第一个支持 `GIT_CONFIG_GLOBAL` / `GIT_CONFIG_SYSTEM` 的版本）；更旧的 git 无法隔离用户配置，返回退出码 6。
   - 用户全局排除文件的默认位置（`$XDG_CONFIG_HOME/git/ignore`）仍然生效，因为 `HOME` 照常传递；`core.excludesFile` 指向别处时，那里的规则不生效（候选来源可能多出这些文件，不影响正确性）。
 - **git 的错误**（codex-review-015 B3）：git 自己的错误信息（可能引用配置值或路径）一律丢弃，不进入输出、`error.v1` 或日志，也不保存。错误只说明是哪个 git 子命令、退出状态是多少（退出码 6）；找不到仓库等错误也不包含当前目录。
@@ -374,12 +378,13 @@ sequenceDiagram
    - 所有字符串值都不能包含代码围栏（V-P05）；
    - `ref` 在提案内唯一；`goal`、`requirement`、`about` 指向本提案内的 `ref` 时，被指向的条目类型必须正确（需求的 `goal` 指向目标，AC 的 `requirement` 指向需求，问题的 `about` 指向需求或 AC）；同一 `target` 至多出现一次，并且编号的类型与条目的 `type` 一致（V-P03）；
    - `workdir`、`inputs` 和代码引用的路径，统一分隔符并按字面规范化之后，不得越出仓库根（V-P04；schema 已拒绝绝对路径和 `..` 段，这里是第二道防线）；
-   - 代码引用的行号范围不能倒置；片段去掉空白之后不能为空（否则在任何来源中都能"找到"）。
+   - 代码引用的行号：可以不填；填写时为 `a` 或 `a-b`，`1 ≤ a ≤ b ≤ 2147483647`（32 位上限，32 位与 64 位构建的解释一致）。超出上限（包括 schema 允许、但无法表示的超长数字）或倒置的范围都拒绝，绝不当作"没有行号"（codex-review-020 B4）；静态检查与代码引用检查使用同一个解析函数。片段去掉空白之后不能为空（否则在任何来源中都能"找到"）。
+   - 需求的 `goal` 可以为 `null`（不关联目标；更新时表示清除关联），不作为编号查找，并原样保留在 payload 中（codex-review-020 B3）。
 4. 密钥扫描（V-P05，§10.8）：提案中的**每个**字符串值（包括片段、路径和检查命令），以及可能被登记的当前 worktree 路径和 git 目录。
 5. 解析来源（V-P06）：`source` 按登记时保存的路径或来源 ID 精确匹配；已移除或未登记的来源都拒绝，错误指向每个这样的引用。
 6. 在事务之外读取来源与代码：
-   - **片段校验**（V-P07，标记）：每个来源文件只流式读取一次，同时计算 sha256，读完即丢弃。规范化方式：去掉所有 Unicode 空白字符（空格、制表符、换行，包括 CRLF 和全角空格），再做子串匹配，因此只有空白或换行不同的片段为 `verified`，改动任何一个字为 `not_found`。`.pdf`、`.docx`、`.doc`、`.odt`、`.rtf`，以及不是有效 UTF-8 或含有 NUL 字节的文件，为 `not_checkable`；文件无法读取时为 `source_missing`。其他类型逐字匹配文件原文，不解析 HTML 或邮件编码。`verified` 只说明片段出现在来源中，**不说明**条目语义正确或覆盖完整（data-model §4.5），文本输出中如实说明这一点。
-   - **代码引用**（V-P08，标记）：git 项目中，对照**当前 worktree 的 HEAD 提交**检查：路径必须是该提交树中的普通文件（目录、符号链接和子模块都不算），有行号时行号必须在文件的行数之内。未提交的文件、没有任何提交的 worktree，都记为不存在。非 git 项目对照项目根目录下的文件，解析链接之后仍须在根目录之内。只读取行数，不保存任何代码内容。代码引用只说明文件位置存在，**不是**验收证据。git 调用沿用 `internal/gitx` 的受控环境，只接受完整的对象 ID。
+   - **片段校验**（V-P07，标记）：每个来源文件只流式读取一次，同时计算 sha256，读完即丢弃。规范化方式：去掉所有 Unicode 空白字符（空格、制表符、换行，包括 CRLF 和全角空格），再做子串匹配，因此只有空白或换行不同的片段为 `verified`，改动任何一个字为 `not_found`。`.pdf`、`.docx`、`.doc`、`.odt`、`.rtf`，以及不是有效 UTF-8 或含有 NUL 字节的文件，为 `not_checkable`；文件无法读取、或不是普通文件时为 `source_missing`：来源文件以不会因 FIFO、设备等特殊文件而阻塞的方式打开（Unix 用 `O_NONBLOCK`，Windows 打开设备或管道本身不等待），再通过已打开的描述符或句柄确认是普通文件，所以检查与打开之间不会被替换；取消在每块读取之前生效，不产生部分结果（codex-review-020 B5）。来源登记与观测的哈希计算（§6.1.3）使用同一种打开方式。其他类型逐字匹配文件原文，不解析 HTML 或邮件编码。`verified` 只说明片段出现在来源中，**不说明**条目语义正确或覆盖完整（data-model §4.5），文本输出中如实说明这一点。
+   - **代码引用**（V-P08，标记）：git 项目中，对照**当前 worktree 的 HEAD 提交**检查：路径必须是该提交树中的普通文件（目录、符号链接和子模块都不算），有行号时行号必须在文件的行数之内。未提交的文件、没有任何提交的 worktree，都记为不存在。非 git 项目对照项目根目录下的文件，解析链接之后仍须在根目录之内。只读取行数，不保存任何代码内容。代码引用只说明文件位置存在，**不是**验收证据。git 调用沿用 `internal/gitx` 的受控环境，只接受完整的对象 ID。部分克隆中不检查代码引用：读取对象之前识别出部分克隆时返回退出码 6，提示改用完整克隆或不带代码引用提交（§6.1.2 的"不按需抓取对象"；codex-review-020 B1）。
 7. 写事务（`BEGIN IMMEDIATE`）：
    - `base_version` 不等于当前基准版本（不存在版本时为 0）时返回退出码 5，`error.current` 给出 `base_version`（V-P02）；
    - 编号必须指向未退役、类型正确的条目，否则退出码 2（V-P03）；
@@ -392,7 +397,7 @@ sequenceDiagram
 **保存的内容**（`hash_only`，M1 唯一的模式）：
 
 - `proposal_items.payload_json` 为提交的 `data`（`retire`、`reaffirm` 为 null）；提议者对 `update` 建议的修订类别单独保存在 `suggested_change_class`，不会代替审核者的选择（V-R01）。
-- `sources_json` 的每一项为 `source_id`、`locator`、`excerpt_sha256`（提交的片段原文的 sha256）、`verification` 和 `source_sha256`（校验时来源文件的哈希，无法读取时为 null），**不含片段原文**；`code_refs_json` 的每一项为 `path`、`lines`、`exists` 和 `checked_head`。数据库触发器拒绝在 `hash_only` 项目中保存片段原文（第二道防线）。
+- `sources_json` 的每一项为 `source_id`、`locator`、`excerpt_sha256`（提交的片段原文的 sha256）、`verification` 和 `source_sha256`（校验时来源文件的哈希，无法读取时为 null），**不含片段原文**；`code_refs_json` 的每一项为 `path`、`lines`、`exists` 和 `checked_head`。数据库触发器拒绝在 `hash_only` 项目中保存片段原文（第二道防线）：`proposal_items` 在插入和更新时检查 `sources_json` 与 `final_payload_json` 中任何层级、取值不为 null 的 `excerpt` 键（用 SQLite 的 `json_tree`），`source_refs` 在插入和更新时检查 `excerpt` 列；这些触发器在维护模式下同样生效，擦除只会去掉原文（codex-review-020 B2）。
 - 问题指向已有编号时，立即关联到该条目；指向本提案内的 `ref` 时，记录 `proposal_item_id`，审核接受该条目时再回填（WP1.6，data-model §4.8）。问题的来源引用立即写入 `source_refs`（`entity_type = question`，`entity_revision = 1`，`excerpt` 为 NULL），因此会出现在 `source list --refs` 中；条目的来源引用在审核接受时才写入 `source_refs`（WP1.6）。
 
 **输出**：`propose --json` 输出 `proposal-receipt.v1`，输出前按 schema 校验：待审提案 `applied_version = null`，每个条目有 `item_id`、`review_state = pending`、`assigned_key = null`，来源引用只给出 `source_id` 和校验结果，代码引用给出 `exists`，**不回显片段**。schema 的字段间条件见 MVP-BL-28。文本输出给出各类校验结果的数量和有问题的引用位置，同样不包含片段。

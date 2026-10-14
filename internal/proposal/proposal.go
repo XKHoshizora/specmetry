@@ -6,8 +6,10 @@
 package proposal
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"math"
 	"path"
 	"regexp"
 	"slices"
@@ -79,11 +81,13 @@ var localRef = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,31}$`)
 // IsLocalRef reports whether s is a proposal-local ref rather than a key.
 func IsLocalRef(s string) bool { return localRef.MatchString(s) }
 
-// stringData returns the string at key in data, and whether it is one
-// (absent and null are not).
+// stringData returns the string at key in data, and whether it is one.
+// An absent key and JSON null are not: "goal": null leaves a requirement
+// without a goal and names no key (codex-review-020 B3); json.Unmarshal
+// would decode null into "" without an error.
 func stringData(data map[string]json.RawMessage, key string) (string, bool) {
 	raw, ok := data[key]
-	if !ok {
+	if !ok || string(bytes.TrimSpace(raw)) == "null" {
 		return "", false
 	}
 	var s string
@@ -201,8 +205,9 @@ func CheckStatic(doc any, p *Proposal) error {
 			if !insideRepository(c.Path) {
 				ps.add(itemPointer(i, "code_refs", strconv.Itoa(k), "path"), "leaves the repository")
 			}
-			if from, to, ok := lineRange(c.Lines); ok && from > to {
-				ps.add(itemPointer(i, "code_refs", strconv.Itoa(k), "lines"), "ends before it starts")
+			if _, ok := parseLines(c.Lines); !ok {
+				ps.add(itemPointer(i, "code_refs", strconv.Itoa(k), "lines"),
+					"is not a valid line range: lines are numbered from 1 to 2147483647, and a range does not end before it starts")
 			}
 		}
 		excerpts(it.Sources, itemPointer(i, "sources"), &ps)
@@ -256,21 +261,33 @@ func pointerOrRoot(p string) string {
 	return p
 }
 
-// lineRange parses "a" or "a-b".
-func lineRange(lines string) (from, to int, ok bool) {
+// maxLine is the highest line number a code reference may name: the
+// 32-bit limit, so that 32- and 64-bit builds read a reference alike.
+const maxLine = math.MaxInt32
+
+// lineSpan is a code reference's line range: none, or from..to.
+type lineSpan struct {
+	set      bool
+	from, to int
+}
+
+// parseLines parses a code reference's lines: "" (no range), "a" or
+// "a-b" with 1 <= a <= b <= maxLine. ok is false for anything else, a
+// number too large to read or a reversed range included, so that a
+// malformed range is never taken for no range (codex-review-020 B4). The
+// static check and the code reference check both read lines through it.
+func parseLines(lines string) (lineSpan, bool) {
 	if lines == "" {
-		return 0, 0, false
+		return lineSpan{}, true
 	}
 	a, b, isRange := strings.Cut(lines, "-")
-	from, err := strconv.Atoi(a)
-	if err != nil {
-		return 0, 0, false
+	if !isRange {
+		b = a
 	}
-	to = from
-	if isRange {
-		if to, err = strconv.Atoi(b); err != nil {
-			return 0, 0, false
-		}
+	from, err1 := strconv.ParseInt(a, 10, 64)
+	to, err2 := strconv.ParseInt(b, 10, 64)
+	if err1 != nil || err2 != nil || from < 1 || to > maxLine || from > to {
+		return lineSpan{}, false
 	}
-	return from, to, true
+	return lineSpan{set: true, from: int(from), to: int(to)}, true
 }

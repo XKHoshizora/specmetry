@@ -131,11 +131,17 @@ func TestCheckExcerptsAgreesWithTheOracle(t *testing.T) {
 	alphabet := []rune("ab订单账号锁定，。 \t\r\n　xyz数量")
 	for round := range 30 {
 		n := 1 + r.IntN(300_000)
+		if round%3 == 0 {
+			n = 600_000 + r.IntN(200_000) // several chunks
+		}
 		text := make([]rune, n)
 		for i := range text {
 			text[i] = alphabet[r.IntN(len(alphabet))]
 		}
 		content := []byte(string(text))
+		if round%3 == 0 && len(content) <= chunk {
+			t.Fatalf("round %d: %d bytes do not reach a second chunk", round, len(content))
+		}
 		file := writeSource(t, "doc.md", content)
 		var excerpts []string
 		for range 20 {
@@ -163,6 +169,86 @@ func TestCheckExcerptsAgreesWithTheOracle(t *testing.T) {
 				t.Fatalf("round %d: excerpt %q: %s, oracle %s", round, e, got[i], want)
 			}
 		}
+	}
+}
+
+// chunk is the size CheckExcerpts reads at a time (1 MiB).
+const chunk = 1 << 20
+
+// codex-review-020 N1: files larger than one chunk. A character split
+// across the chunk boundary is matched whole; a NUL byte or a broken
+// character after a match still makes the file not_checkable.
+func TestCheckExcerptsAcrossChunks(t *testing.T) {
+	pad := strings.Repeat("a", chunk-1)
+	// "订" is three bytes: one in the first chunk, two in the second.
+	split := []byte(pad + "订单编号" + strings.Repeat("b", 100))
+	if len(split) <= chunk || split[chunk-1] != "订"[0] {
+		t.Fatalf("the character does not straddle the chunk boundary")
+	}
+	_, got, err := CheckExcerptsAt(t, split, "a订单编号b", "订单 编号", "订x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []proposal.Verification{proposal.Verified, proposal.Verified, proposal.NotFound}; !equal(got, want) {
+		t.Errorf("split character: %v, want %v", got, want)
+	}
+	for name, content := range map[string][]byte{
+		"a NUL byte in the second chunk":         append([]byte("订单编号"+pad), 0, 'z'),
+		"a character cut short at the end":       append([]byte("订单编号"+pad), "订"[:2]...),
+		"bytes that are not UTF-8 after a match": append([]byte("订单编号"+pad), 0xff, 0xfe),
+	} {
+		_, got, err := CheckExcerptsAt(t, content, "订单编号")
+		if err != nil || got[0] != proposal.NotCheckable {
+			t.Errorf("%s: %v, %v; want not_checkable", name, got, err)
+		}
+	}
+}
+
+// CheckExcerptsAt writes content to a file and checks the excerpts.
+func CheckExcerptsAt(t *testing.T, content []byte, excerpts ...string) (string, []proposal.Verification, error) {
+	t.Helper()
+	return proposal.CheckExcerpts(ctx, writeSource(t, "big.md", content), excerpts)
+}
+
+func equal(a, b []proposal.Verification) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// cancelAfter is a context cancelled from its (n+1)-th Err call on.
+// CheckExcerpts asks before it opens the file and before each chunk, so
+// n = 2 cancels it after the first chunk of a file, while it reads.
+type cancelAfter struct {
+	context.Context
+	calls, n int
+}
+
+func (c *cancelAfter) Err() error {
+	c.calls++
+	if c.calls > c.n {
+		return context.Canceled
+	}
+	return nil
+}
+
+// codex-review-020 N1: cancelled while it reads, between two chunks, the
+// check stops with an error and no result.
+func TestCheckExcerptsCanceledWhileReading(t *testing.T) {
+	file := writeSource(t, "big.md", []byte(strings.Repeat("订单 ", chunk)))
+	c := &cancelAfter{Context: ctx, n: 2}
+	sum, got, err := proposal.CheckExcerpts(c, file, []string{"订单"})
+	if err == nil || sum != "" || got != nil {
+		t.Fatalf("a check cancelled while reading returned %q %v %v", sum, got, err)
+	}
+	if c.calls != 3 {
+		t.Fatalf("Err was asked %d times; the cancellation did not fall between chunks", c.calls)
 	}
 }
 

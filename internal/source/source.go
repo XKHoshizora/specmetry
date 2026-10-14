@@ -50,15 +50,12 @@ func HashFile(ctx context.Context, path string) (string, int64, error) {
 	if err := ctx.Err(); err != nil {
 		return "", 0, interrupted(err)
 	}
-	f, err := os.Open(path)
+	// A FIFO or a device must not block the hash (OpenRegular).
+	f, err := OpenRegular(path)
 	if err != nil {
 		return "", 0, ErrMissing
 	}
 	defer func() { _ = f.Close() }()
-	fi, err := f.Stat()
-	if err != nil || !fi.Mode().IsRegular() {
-		return "", 0, ErrMissing
-	}
 	h := sha256.New()
 	buf := make([]byte, chunkSize)
 	var size int64

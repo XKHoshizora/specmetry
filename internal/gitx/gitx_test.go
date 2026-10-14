@@ -122,6 +122,7 @@ func TestFilterEnv(t *testing.T) {
 		"GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=core.fsmonitor", "GIT_CONFIG_VALUE_0=x", "GIT_CONFIG_PARAMETERS='a'='b'",
 		"GIT_CONFIG_GLOBAL=/g", "GIT_CONFIG_SYSTEM=/s", "GIT_CONFIG_NOSYSTEM=0", "GIT_TRACE=/t", "GIT_TRACE2_EVENT=/e",
 		"GIT_EXEC_PATH=/p", "GIT_OPTIONAL_LOCKS=1", "Git_Trace_Setup=/u",
+		"GIT_ALLOW_PROTOCOL=file:ext", "GIT_NO_LAZY_FETCH=0",
 	}
 	got := filterEnv(in)
 	want := []string{
@@ -129,6 +130,7 @@ func TestFilterEnv(t *testing.T) {
 		"GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_SYSTEM=/dev/null", "GIT_CONFIG_GLOBAL=/dev/null",
 		"GIT_TRACE2=0", "GIT_TRACE2_EVENT=0", "GIT_TRACE2_PERF=0",
 		"GIT_OPTIONAL_LOCKS=0", "GIT_TERMINAL_PROMPT=0", "GIT_DISCOVERY_ACROSS_FILESYSTEM=1",
+		"GIT_NO_LAZY_FETCH=1", "GIT_ALLOW_PROTOCOL=specmetry-no-transport",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("filterEnv =\n%q\nwant\n%q", got, want)
@@ -288,11 +290,23 @@ func TestTreeFilesAndLines(t *testing.T) {
 	repo.WriteFile("docs/客户 需求.md", "第一行\r\n第二行\r\n第三行")
 	repo.WriteFile("empty.txt", "")
 	repo.WriteFile("run.sh", "#!/bin/sh\necho hi\n")
-	repo.Git("update-index", "--add", "--chmod=+x", "run.sh")
 	repo.WriteFile("link-target.txt", "internal/auth/login.go")
+	repo.Git("add", "-A")
+	repo.Git("update-index", "--chmod=+x", "run.sh")
+	// A symbolic link and a submodule exist only in the index; committing
+	// without add -A keeps them (codex-review-020 N2).
 	object := repo.Git("hash-object", "-w", "link-target.txt")
 	repo.Git("update-index", "--add", "--cacheinfo", "120000,"+object+",link.go")
-	head := repo.Commit("init")
+	repo.Git("update-index", "--add", "--cacheinfo", "160000,"+strings.Repeat("1", 40)+",vendor/sub")
+	repo.Git("commit", "-q", "-m", "init")
+	head := repo.Git("rev-parse", "HEAD")
+	tree := repo.Git("ls-tree", "-r", head)
+	for _, entry := range []string{"120000 blob " + object + "\tlink.go", "160000 commit " + strings.Repeat("1", 40) + "\tvendor/sub",
+		"100755 blob"} {
+		if !strings.Contains(tree, entry) {
+			t.Fatalf("the commit's tree lacks %q:\n%s", entry, tree)
+		}
+	}
 	repo.WriteFile("later.go", "package later\n")
 
 	files, err := TreeFiles(ctx, repo.Dir, head)

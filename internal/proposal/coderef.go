@@ -4,13 +4,14 @@ import (
 	"bytes"
 	"context"
 	"io"
-	"os"
 	"path"
 	"path/filepath"
 	"strings"
 
+	"github.com/XKHoshizora/specmetry/internal/apperr"
 	"github.com/XKHoshizora/specmetry/internal/gitx"
 	"github.com/XKHoshizora/specmetry/internal/project"
+	"github.com/XKHoshizora/specmetry/internal/source"
 )
 
 // CheckedCodeRef is a code reference as checked and stored (V-P08). Exists
@@ -62,9 +63,10 @@ func CheckCodeRefs(ctx context.Context, w project.Where, refs [][]CodeRef) ([][]
 			if err != nil {
 				return nil, err
 			}
-			if ok {
-				_, to, ranged := lineRange(r.Lines)
-				c.Exists = !ranged || to <= lines
+			// A malformed range is refused before this (CheckStatic); here
+			// it is never taken for no range either.
+			if span, valid := parseLines(r.Lines); ok && valid {
+				c.Exists = !span.set || span.to <= lines
 			}
 			out[i][k] = c
 		}
@@ -93,17 +95,25 @@ func fileChecker(ctx context.Context, w project.Where) (*files, error) {
 			if rel, err := filepath.Rel(root, real); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 				return 0, false, nil
 			}
-			f, err := os.Open(real)
+			f, err := source.OpenRegular(real)
 			if err != nil {
 				return 0, false, nil
 			}
 			defer func() { _ = f.Close() }()
-			if fi, err := f.Stat(); err != nil || !fi.Mode().IsRegular() {
-				return 0, false, nil
-			}
 			n, err := countLines(ctx, f)
 			return n, err == nil, err
 		}}, nil
+	}
+	// git would fetch the objects a partial clone lacks, from its promisor
+	// remote; Specmetry never does (codex-review-020 B1), so it reads no
+	// object there at all.
+	partial, err := gitx.PartialClone(ctx, w.Current)
+	if err != nil {
+		return nil, err
+	}
+	if partial {
+		return nil, apperr.New(apperr.Environment,
+			"this repository is a partial clone: git would fetch the objects it lacks from the promisor remote, which Specmetry never does, so code references cannot be checked here; check them in a full clone, or submit the proposal without code references")
 	}
 	head, err := gitx.CommitOf(ctx, w.Current, "HEAD")
 	if err != nil {

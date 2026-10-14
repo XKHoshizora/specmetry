@@ -119,6 +119,17 @@ func (r *GitRepo) GitIn(dir string, args ...string) string {
 	return r.gitEnvIn(dir, nil, args...)
 }
 
+// GitResult runs git in the repository like Git, but returns a failure
+// instead of failing the test, for commands that are expected to fail.
+func (r *GitRepo) GitResult(args ...string) (string, error) {
+	r.t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = r.Dir
+	cmd.Env = slices.Clip(r.env)
+	out, err := cmd.Output()
+	return strings.TrimSpace(string(out)), err
+}
+
 // gitEnvIn runs git in dir with the repo's environment plus extra
 // variables, which take precedence.
 func (r *GitRepo) gitEnvIn(dir string, extra []string, args ...string) string {

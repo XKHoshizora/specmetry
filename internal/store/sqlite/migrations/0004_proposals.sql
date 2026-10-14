@@ -217,9 +217,19 @@ BEGIN SELECT RAISE(ABORT, 'a reviewed proposal item does not change'); END;
 CREATE TRIGGER proposal_items_never_deleted BEFORE DELETE ON proposal_items
 WHEN (SELECT active FROM maintenance WHERE id = 1) = 0
 BEGIN SELECT RAISE(ABORT, 'proposal items are never deleted'); END;
--- hash_only (the default): no excerpt text in a stored reference (PD-24).
-CREATE TRIGGER proposal_items_hash_only BEFORE INSERT ON proposal_items
-WHEN EXISTS (SELECT 1 FROM json_each(NEW.sources_json) WHERE json_type(value, '$.excerpt') IS NOT NULL)
+-- hash_only (the default): no excerpt text in a stored reference (PD-24),
+-- neither in the checked references nor in a review's final values, on
+-- insert or update (codex-review-020 B2). Any "excerpt" key holding a
+-- value, at any depth of either document, is excerpt text. These hold in
+-- maintenance mode too: erasing only ever removes text.
+CREATE TRIGGER proposal_items_hash_only_insert BEFORE INSERT ON proposal_items
+WHEN (EXISTS (SELECT 1 FROM json_tree(NEW.sources_json) WHERE key = 'excerpt' AND type <> 'null')
+      OR EXISTS (SELECT 1 FROM json_tree(NEW.final_payload_json) WHERE key = 'excerpt' AND type <> 'null'))
+    AND coalesce((SELECT json_extract(settings_json, '$.excerpt_storage') FROM projects WHERE id = NEW.project_id), 'hash_only') <> 'full'
+BEGIN SELECT RAISE(ABORT, 'excerpt text is not stored under hash_only'); END;
+CREATE TRIGGER proposal_items_hash_only_update BEFORE UPDATE ON proposal_items
+WHEN (EXISTS (SELECT 1 FROM json_tree(NEW.sources_json) WHERE key = 'excerpt' AND type <> 'null')
+      OR EXISTS (SELECT 1 FROM json_tree(NEW.final_payload_json) WHERE key = 'excerpt' AND type <> 'null'))
     AND coalesce((SELECT json_extract(settings_json, '$.excerpt_storage') FROM projects WHERE id = NEW.project_id), 'hash_only') <> 'full'
 BEGIN SELECT RAISE(ABORT, 'excerpt text is not stored under hash_only'); END;
 
@@ -288,7 +298,13 @@ BEGIN SELECT RAISE(ABORT, 'append-only table source_refs'); END;
 CREATE TRIGGER source_refs_append_only_delete BEFORE DELETE ON source_refs
 WHEN (SELECT active FROM maintenance WHERE id = 1) = 0
 BEGIN SELECT RAISE(ABORT, 'append-only table source_refs'); END;
-CREATE TRIGGER source_refs_hash_only BEFORE INSERT ON source_refs
+CREATE TRIGGER source_refs_hash_only_insert BEFORE INSERT ON source_refs
+WHEN NEW.excerpt IS NOT NULL
+    AND coalesce((SELECT json_extract(settings_json, '$.excerpt_storage') FROM projects WHERE id = NEW.project_id), 'hash_only') <> 'full'
+BEGIN SELECT RAISE(ABORT, 'excerpt text is not stored under hash_only'); END;
+-- Also in maintenance mode, where the append-only triggers let erasing
+-- through: an update never writes excerpt text under hash_only.
+CREATE TRIGGER source_refs_hash_only_update BEFORE UPDATE ON source_refs
 WHEN NEW.excerpt IS NOT NULL
     AND coalesce((SELECT json_extract(settings_json, '$.excerpt_storage') FROM projects WHERE id = NEW.project_id), 'hash_only') <> 'full'
 BEGIN SELECT RAISE(ABORT, 'excerpt text is not stored under hash_only'); END;
