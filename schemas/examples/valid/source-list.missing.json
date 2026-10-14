@@ -1,0 +1,19 @@
+{
+  "schema": "specmetry.source-list/v1",
+  "excerpt_storage": "hash_only",
+  "source_set_hash": "3b5d9f0c1e2a4b6c8d0e1f2a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e",
+  "sources": [
+    {
+      "id": "01J9Z3K5Q8R2T4V6W8X0Y2Z4E2",
+      "path": "/home/me/客户 资料/补充 需求.md",
+      "location": "external",
+      "kind": "other",
+      "acked_sha256": "9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b",
+      "current_sha256": null,
+      "state": "missing",
+      "size_bytes": 32,
+      "registered_seq": 14,
+      "removed_seq": null
+    }
+  ]
+}

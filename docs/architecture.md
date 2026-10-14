@@ -291,6 +291,69 @@ sequenceDiagram
 - `data_dir_permissions_loose` 警告不会出现：数据目录的权限不满足要求时，写入方直接拒绝（§11.1，退出码 6）。
 - P1 的 `git` 字段（提交数、最近提交时间）暂不输出。
 
+### 6.1.3 来源的登记与确认（M1 实现）
+
+命令：`source add <path> [--kind] [--allow-any-type] [--json]`、`source list [--include-removed] [--refs] [--json]`、`source ack <path|ID> --observed <sha256> -m <理由>`（也可以用 `--file` 传入 `source-ack.v1`）、`source remove <path|ID> [--erase-excerpts]`。
+
+所在项目按 §6.1.2 的方式由当前目录确定，只读。数据目录中还没有数据库，或者目录不属于已登记的项目时，返回退出码 4，不创建任何文件。
+
+**路径**：
+
+- 相对路径按当前目录解析；符号链接会被解析，来源就是内容所在的位置。
+- 文件位于项目根目录（主 worktree）之内时为 `in_repo`，保存相对路径（`/` 分隔）；否则为 `external`，保存规范化的绝对路径。路径可以含空格和非 ASCII 字符。
+- 以下情况返回退出码 2：
+  - 文件位于主 worktree 以外的关联 worktree 中：来源总在主 worktree 中观测，应在那里登记；
+  - git 目录中的文件；
+  - 目录；
+  - 不存在的路径。
+- `kind` 默认为 `other`。
+
+**类型白名单**（V-S01）：按扩展名判断，不区分大小写。`--allow-any-type` 只能由人在 `human_cli` 中使用，并且需要交互式确认；Agent 通道使用时返回退出码 3。
+
+**重复登记**：
+
+- 同一路径已有未移除的来源时，返回该来源（`created = false`）。不写入、不分配 `seq`，也不更新 `acked_sha256`，即使文件已经变化。
+- 数据库约束保证每个项目的每个路径只有一个未移除的来源，所以并发登记同一路径只会产生一个来源。
+- 已移除的路径再次登记时，创建新的来源（新 ID）。
+
+**哈希与观测**：
+
+- 文件只为计算 sha256 而读取，每次读 1 MiB，读完即丢弃。每读一块之前检查是否已取消；取消时返回退出码 6，不返回部分结果，也不写入。不设文件大小上限。
+- `source list`、`source add`、`source ack` 每次都重新读取磁盘，得到三种状态：`unchanged`（当前哈希等于已确认的哈希）、`changed`、`missing`。
+- 文件不存在、不是常规文件或无法读取（例如没有读权限），都报告为 `missing`，`current_sha256 = null`。
+- 观测结果不保存，也不会改变已确认的哈希；变化只能由人通过 `source ack` 确认。
+- 已移除的来源不再观测，`state` 和 `current_sha256` 都为 null。
+
+**`source ack`（仅限人）**：
+
+1. 先检查通道，`agent_cli` 返回退出码 3。输入按 `source-ack.v1` 校验，理由做密钥扫描。
+2. 来源没有变化时，提示无需确认，不写入。
+3. `--observed` 与磁盘上的当前哈希不一致时，不显示确认提示，直接返回退出码 5；`error.current` 中给出 `source` 和 `current_sha256`。
+4. 交互式确认。要输入的确认内容：仓库内的来源为路径，外部来源为 ID（外部的绝对路径较长，可能需要输入法）。
+5. 确认之后**再次**读取磁盘并比较，仍然一致才写入：
+   - 写入一条只追加的 `source_acks`，包括 `previous_sha256`、`acked_sha256`、理由、actor 和 `channel = human_cli`；
+   - 把来源的 `acked_sha256` 改为观测到的哈希。
+
+   确认期间文件发生变化时，返回退出码 5，不写入。
+6. actor 为 `human:<显示名>`：取 `config.toml` 中 `[user]` 的 `display_name`，未设置时取操作系统用户名。显示名同样做密钥扫描。
+
+**`source remove`（仅限人）**：
+
+- 交互式确认之后写入 `removed_seq`。已移除的来源不会再改变，来源行也不会被删除（`purge` 与墓碑除外），两者都由数据库触发器保护。引用保留。
+- `--erase-excerpts`：M1 中项目只能是 `hash_only`，没有保存任何片段原文，所以没有内容需要擦除，确认提示中会说明这一点。`full` 模式下的擦除与整理在 WP2.11 实现；在那之前，遇到不是 `hash_only` 的项目时拒绝（退出码 6），不改动任何内容。
+
+**引用**：`source_refs` 由 WP1.5 的提案写入，在此之前没有任何引用，`--refs` 输出空列表。MVP-SRC-04 中"已有引用显示为 `source_removed`"和 MVP-SRC-08 中的 `excerpt_state`，随 WP1.5 和 M2 验证。
+
+**来源集合哈希**：按 data-model §4.3 计算，在写事务中从数据库读取未移除的来源。它只随登记、确认和移除改变，观测不影响它。关于 MVP-SRC-06 的含义，见 PD-25。
+
+**输出**：`source add --json` 输出 `source-add.v1`，`source list --json` 输出 `source-list.v1`，输出前都按 schema 校验。
+
+- `state` 与 `current_sha256` 的关系由 schema 约束：`missing` 没有当前哈希，`unchanged` 和 `changed` 有。
+- "`unchanged` 当且仅当当前哈希等于已确认的哈希"，以及来源集合哈希与列出的来源一致，schema 无法表达，由输出一致性测试验证。
+- `source ack`、`source remove` 是人类专属命令，只输出文本；出错时，带 `--json` 输出 `error.v1`。
+
+**隐私**：来源原文不进入数据库、输出或日志。路径（原始参数和要保存的路径）、理由和显示名，在写入之前做密钥扫描；命中时返回退出码 2，错误中只给出字段和规则。
+
 ### 6.2 Hook 采集与入库
 
 ```mermaid

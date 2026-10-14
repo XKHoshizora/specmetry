@@ -44,7 +44,7 @@
 | MVP-INIT-01 | 未初始化的 git 仓库 → `init --name demo --json` → 退出码 0；生成 marker，`project_id` 是合法的 ULID；`init_progress = initialized` | 集成 | FR-INIT-01 | M1 |
 | MVP-INIT-02 | 已初始化 → 再次执行 `init` → `project_id` 不变，仍然只有 1 个项目 | 集成 | FR-INIT-01 | M1 |
 | MVP-INIT-03 | 三个项目夹具 → `init --json` → `stage_detected` 依次为 `docs_only`、`in_development`、`incomplete_docs`（规则见 [architecture.md §6.1.1](architecture.md#611-阶段识别与候选来源发现m1-实现)）；`--stage` 覆盖后 `stage` 改变，`stage_detected` 保持识别结果；识别过程不读取文件内容（在文件中埋入 canary，数据目录中找不到） | 集成 | FR-INIT-02 | M1 |
-| MVP-INIT-04 | `fx-docs-only` → `init --json` → 候选来源中有 `docs/client-brief.md`，并排在 `README.md` 之前；`CHANGELOG.md`、`node_modules/x/README.md` 和空文件 `docs/empty.md` 不在其中；`source list --json`（`source-list.v1`）的 `sources` 为空。WP1.1 验证候选来源的内容与顺序，以及 `init` 不登记来源（`init_progress` 仍为 `initialized`）；`source list` 一项随 WP1.4 验证 | 集成 | FR-INIT-03 | M1 |
+| MVP-INIT-04 | `fx-docs-only` → `init --json` → 候选来源中有 `docs/client-brief.md`，并排在 `README.md` 之前；`CHANGELOG.md`、`node_modules/x/README.md` 和空文件 `docs/empty.md` 不在其中；`source list --json`（`source-list.v1`）的 `sources` 为空。WP1.1 验证候选来源的内容与顺序，以及 `init` 不登记来源（`init_progress` 仍为 `initialized`）；`source list` 一项已在 WP1.4 验证 | 集成 | FR-INIT-03 | M1 |
 | MVP-INIT-05 | 在伪终端中执行 `setup` → 先展示改动：拒绝时，文件逐字节不变；接受时写入；再次执行不产生重复条目；`setup --uninstall` 后语义上恢复原样 | 集成 | FR-INIT-04 | M3 |
 | MVP-INIT-06 | 非 TTY 环境执行 `setup` → 退出码 3，不修改任何文件 | 集成 | FR-INIT-04 | M3 |
 | MVP-INIT-07 | 按流程推进 → 每一步之后 `init_progress` 都符合 [data-model.md §6.12](data-model.md#612-初始化进度)；没有基准版本时执行 `init --skip-inventory`，进度不会越过 `baseline_proposed` 之前的步骤 | 集成 | FR-INIT-05 | M2 |
@@ -60,11 +60,11 @@
 | MVP-SRC-01 | 登记一个仓库内的文件，和一个仓库外、路径含空格和中文的文件 → 都记录了路径、类型、`acked_sha256` 和大小 | 集成 | FR-SRC-01 | M1 |
 | MVP-SRC-02 | 修改已登记的来源 → `source list --json`（`source-list.v1`）显示 `changed`，`current_sha256` 为新哈希；删除文件 → 显示 `missing`，`current_sha256 = null` | 集成 | FR-SRC-02 | M1 |
 | MVP-SRC-03 | 非 TTY 执行 `source ack` → 退出码 3；在 TTY 中执行，但 `observed_sha256` 与磁盘不一致 → 退出码 5；一致时 → 写入 `source_acks`（包括理由），`acked_sha256` 更新，来源集合哈希改变 | 集成 | FR-SRC-03 | M1 |
-| MVP-SRC-04 | 非 TTY 执行 `source remove` → 退出码 3；在 TTY 中执行 → 写入 `removed_seq`，已有引用显示为 `source_removed`，来源集合哈希改变 | 集成 | FR-SRC-04 | M1 |
+| MVP-SRC-04 | 非 TTY 执行 `source remove` → 退出码 3；在 TTY 中执行 → 写入 `removed_seq`，已有引用显示为 `source_removed`，来源集合哈希改变。M1 中还没有引用（WP1.5 才写入），"已有引用显示为 `source_removed`"随 WP1.5 / M2 验证；WP1.4 验证其余部分 | 集成 | FR-SRC-04 | M1 |
 | MVP-SRC-05 | `source add` 一个不存在的路径 → 退出码 2，不写入 | 集成 | FR-SRC-01 | M1 |
-| MVP-SRC-06 | 同一组来源，以不同顺序登记 → 来源集合哈希相同 | 单元 | FR-SRC-05 | M1 |
+| MVP-SRC-06 | 同一组来源，以不同顺序登记 → 来源集合哈希相同。"同一组来源"的含义见 PD-25（待确认）：WP1.4 按"相同的 `source_id` 与 `acked_sha256`，输入顺序不同"验证 | 单元 | FR-SRC-05 | M1 |
 | MVP-SRC-07 | `source add internal/auth/login.go`（非文档类型）→ 退出码 2；在 TTY 中加上 `--allow-any-type` → 成功；修改已登记的来源后，Agent 再次 `source add` 同一路径 → 什么都不做，`acked_sha256` 不变，`SOURCE_CHANGED` 仍然存在。审查确认 Specmetry 只为引用校验读取文本，不解析文档语义。 | 集成 + 审查 | FR-SRC-01、FR-SRC-06 | M1 |
-| MVP-SRC-08 | **M1**（`hash_only` 项目）：在 TTY 中执行 `source remove --erase-excerpts` → 来源被移除，引用的 `locator` 和 `excerpt_sha256` 保留，`excerpt` 仍为 NULL，`source list --include-removed --refs --json` 中为 `excerpt_state = not_stored`；非 TTY 执行 → 退出码 3，不写入。**M2**（`full` 模式与 N1 修复之后）：该来源所有已保存的片段变为 NULL，`excerpt_erased_seq` 已写入，`excerpt_state = erased`；整理完成后，对数据库文件和 WAL 做字节搜索，找不到原片段；整理被其他连接的读事务阻塞时，保留 `.compaction-pending` 并报告"整理未完成"，之后的打开会完成整理 | 集成 | FR-SRC-07 | M1 / M2 |
+| MVP-SRC-08 | **M1**（`hash_only` 项目）：在 TTY 中执行 `source remove --erase-excerpts` → 来源被移除，引用的 `locator` 和 `excerpt_sha256` 保留，`excerpt` 仍为 NULL，`source list --include-removed --refs --json` 中为 `excerpt_state = not_stored`；非 TTY 执行 → 退出码 3，不写入。**M2**（`full` 模式与 N1 修复之后）：该来源所有已保存的片段变为 NULL，`excerpt_erased_seq` 已写入，`excerpt_state = erased`；整理完成后，对数据库文件和 WAL 做字节搜索，找不到原片段；整理被其他连接的读事务阻塞时，保留 `.compaction-pending` 并报告"整理未完成"，之后的打开会完成整理。WP1.4 验证 M1 中移除、非 TTY 拒绝，以及 `hash_only` 下不擦除任何内容；引用的 `locator`、`excerpt_sha256` 与 `excerpt_state = not_stored` 需要 WP1.5 写入的引用，随 WP1.5 验证 | 集成 | FR-SRC-07 | M1 / M2 |
 
 ### 2.3 基准（BL）
 
@@ -289,8 +289,8 @@
 
 | ID | 前置 → 操作 → 期望 | 验证 | 需求 | 里程碑 |
 |---|---|---|---|---|
-| MVP-CH-01 | 在伪终端中执行人类专属命令（`review`、`source ack`、`scope confirm`），同时设置 `CLAUDECODE` 或 `CLAUDE_CODE_ENTRYPOINT`（值为 canary）→ 退出码 3，不写入；不设置时进入交互式确认，拒绝确认则不写入；数据目录、输出和日志中都找不到这个 canary。WP1.2 用只在测试中存在的替身命令验证通道识别、拦截、确认、取消和 canary（真实终端，三个平台）；`source ack`、`review`、`scope confirm` 本身的验证分别随 WP1.4、WP1.6、WP1.8 完成 | 集成 | FR-BL-04、FR-SRC-03、FR-TGT-04 | M1 |
-| MVP-CH-02 | stdin 是终端但 stdout 被重定向，或者 stdin 不是终端 → `agent_cli`，人类专属命令返回退出码 3；加上 `--json` 不改变识别结果；只读命令在任何通道中都可以执行。WP1.2 已用替身命令和只读命令 `version`、`doctor` 验证；各人类专属命令随其工作包验证 | 集成 | FR-BL-04、FR-SRC-03 | M1 |
+| MVP-CH-01 | 在伪终端中执行人类专属命令（`review`、`source ack`、`scope confirm`），同时设置 `CLAUDECODE` 或 `CLAUDE_CODE_ENTRYPOINT`（值为 canary）→ 退出码 3，不写入；不设置时进入交互式确认，拒绝确认则不写入；数据目录、输出和日志中都找不到这个 canary。WP1.2 用只在测试中存在的替身命令验证通道识别、拦截、确认、取消和 canary（真实终端，三个平台）；`source ack`、`source remove`（以及 `source add --allow-any-type`）已在 WP1.4 用真实命令验证；`review`、`scope confirm` 随 WP1.6、WP1.8 完成 | 集成 | FR-BL-04、FR-SRC-03、FR-TGT-04 | M1 |
+| MVP-CH-02 | stdin 是终端但 stdout 被重定向，或者 stdin 不是终端 → `agent_cli`，人类专属命令返回退出码 3；加上 `--json` 不改变识别结果；只读命令在任何通道中都可以执行。WP1.2 已用替身命令和只读命令 `version`、`doctor` 验证；`source ack`、`source remove` 已在 WP1.4 验证（stdout 重定向、stdin 非终端、带 `--json`）；其余人类专属命令随其工作包验证 | 集成 | FR-BL-04、FR-SRC-03 | M1 |
 
 ## 3. 关键不变量
 

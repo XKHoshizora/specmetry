@@ -391,7 +391,7 @@ func lockHolderHelper() int {
 // and then fails with an environment error (exit 6), touching nothing.
 func TestOpenLockTimeout(t *testing.T) {
 	dir := testutil.TempHome(t)
-	db, _ := open(t, dir, Options{})
+	db, _ := open(t, dir, Options{Migrations: foundation(t)})
 	_ = db.Close()
 	ready := filepath.Join(testdir.New(t), "ready")
 	stop := filepath.Join(testdir.New(t), "stop")

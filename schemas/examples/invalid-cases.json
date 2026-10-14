@@ -108,6 +108,10 @@
     { "id": "SCH-105", "schema": "init.v1", "base": "valid/init.json", "patch": [{ "op": "replace", "path": "/test_hints", "value": ["go test ./...", "go test ./..."] }], "why": "a test hint is listed once" },
     { "id": "SCH-106", "schema": "init.v1", "base": "valid/init.json", "patch": [{ "op": "replace", "path": "/baseline_version", "value": 1 }], "why": "a project created by this run has no baseline version yet" },
     { "id": "SCH-107", "schema": "init.v1", "base": "valid/init.json", "patch": [{ "op": "replace", "path": "/init_progress", "value": "baseline_proposed" }], "why": "a project created by this run has no proposal yet (data-model §6.12)" },
-    { "id": "SCH-108", "schema": "init.v1", "base": "valid/init.detached.json", "patch": [{ "op": "replace", "path": "/baseline_version", "value": 0 }], "why": "baseline_confirmed needs a baseline version (data-model §6.12)" }
+    { "id": "SCH-108", "schema": "init.v1", "base": "valid/init.detached.json", "patch": [{ "op": "replace", "path": "/baseline_version", "value": 0 }], "why": "baseline_confirmed needs a baseline version (data-model §6.12)" },
+    { "id": "SCH-109", "schema": "source-list.v1", "base": "valid/source-list.with-refs.json", "patch": [{ "op": "replace", "path": "/sources/0/state", "value": "missing" }], "why": "a missing source has no current hash (data-model §4.3)" },
+    { "id": "SCH-110", "schema": "source-list.v1", "base": "valid/source-list.with-refs.json", "patch": [{ "op": "replace", "path": "/sources/0/current_sha256", "value": null }], "why": "a changed source was read, so it has a current hash" },
+    { "id": "SCH-111", "schema": "source-list.v1", "base": "valid/source-list.missing.json", "patch": [{ "op": "replace", "path": "/sources/0/current_sha256", "value": "9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b" }], "why": "missing means the file could not be read: no current hash" },
+    { "id": "SCH-112", "schema": "source-add.v1", "base": "valid/source-add.json", "patch": [{ "op": "replace", "path": "/source/current_sha256", "value": null }], "why": "an unchanged source was read, so it has a current hash" }
   ]
 }
