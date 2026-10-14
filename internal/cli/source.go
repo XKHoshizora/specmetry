@@ -225,10 +225,12 @@ nothing, not even its acknowledged hash: only source ack does that.`,
 			if err := secrets.Reject(w.scanner.Fields(secrets.Field{Pointer: "path", Value: r.Path})); err != nil {
 				return err
 			}
-			if !allowAny && !project.IsDocumentType(r.File) {
-				return apperr.Newf(apperr.InvalidInput,
-					"%s is not a document type (data-model §4.3, V-S01); only a person at a terminal can register it, with --allow-any-type", r.Path)
-			}
+			// The whitelist decides whether a source may be created. An
+			// active source, which a person may have registered with
+			// --allow-any-type, is returned whatever its type (MVP-SRC-07).
+			mayCreate := allowAny || project.IsDocumentType(r.File)
+			notDocument := apperr.Newf(apperr.InvalidInput,
+				"%s is not a document type (data-model §4.3, V-S01); only a person at a terminal can register it, with --allow-any-type", r.Path)
 			if err := w.open(ctx); err != nil {
 				return err
 			}
@@ -241,6 +243,9 @@ nothing, not even its acknowledged hash: only source ack does that.`,
 				return err
 			}); err != nil {
 				return err
+			}
+			if existing == nil && !mayCreate {
+				return notDocument
 			}
 			if allowAny && existing == nil {
 				op := channel.Operation{
@@ -267,6 +272,14 @@ nothing, not even its acknowledged hash: only source ack does that.`,
 			}
 			var out sourceAddDoc
 			err = w.tx(ctx, func(tx *sql.Tx, p project.Registered) error {
+				// Checked again in the write transaction: the source may have
+				// been removed meanwhile.
+				if _, found, err := source.FindActive(ctx, tx, p.ID, r.Path); err != nil || (!found && !mayCreate) {
+					if err == nil {
+						err = notDocument
+					}
+					return err
+				}
 				s, created, err := source.Register(ctx, tx, p.ID, r, kind, sum, size)
 				if err != nil {
 					return err
@@ -430,11 +443,12 @@ it, the rationale and who made it.`,
 			if err != nil {
 				return err
 			}
-			if obs.State == source.Unchanged {
-				return printf(cmd.OutOrStdout(), "%s matches its acknowledged hash; nothing to acknowledge\n", s.Path)
-			}
+			// A stale observed hash is stale whatever the state (MVP-SRC-03).
 			if err := ackPrecondition(s, obs, input.ObservedSHA256); err != nil {
 				return err
+			}
+			if obs.State == source.Unchanged {
+				return printf(cmd.OutOrStdout(), "%s matches its acknowledged hash; nothing to acknowledge\n", s.Path)
 			}
 			op := channel.Operation{
 				Name: "source ack",
@@ -523,21 +537,31 @@ func ackInput(cmd *cobra.Command, args []string, observed, rationale, file strin
 	return in, nil
 }
 
-// readSmallFile reads an input document of at most 1 MiB.
+// readSmallFile reads an input document of at most 1 MiB. Errors do not
+// name the file: its path has not been scanned for secrets.
 func readSmallFile(path string) ([]byte, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, apperr.Newf(apperr.InvalidInput, "cannot read %s", path)
+		return nil, apperr.New(apperr.InvalidInput, "cannot read the --file input ("+osProblem(err)+")")
 	}
 	defer func() { _ = f.Close() }()
 	b, err := io.ReadAll(io.LimitReader(f, 1<<20+1))
 	if err != nil {
-		return nil, apperr.Newf(apperr.InvalidInput, "cannot read %s", path)
+		return nil, apperr.New(apperr.InvalidInput, "cannot read the --file input ("+osProblem(err)+")")
 	}
 	if len(b) > 1<<20 {
-		return nil, apperr.Newf(apperr.InvalidInput, "%s is larger than 1 MiB", path)
+		return nil, apperr.New(apperr.InvalidInput, "the --file input is larger than 1 MiB")
 	}
 	return b, nil
+}
+
+// osProblem describes a file system error without its path.
+func osProblem(err error) string {
+	var pe *fs.PathError
+	if errors.As(err, &pe) {
+		return pe.Err.Error()
+	}
+	return "read error"
 }
 
 // ackPrecondition checks that observed is the hash on disk (data-model

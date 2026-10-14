@@ -62,7 +62,7 @@
 | MVP-SRC-03 | 非 TTY 执行 `source ack` → 退出码 3；在 TTY 中执行，但 `observed_sha256` 与磁盘不一致 → 退出码 5；一致时 → 写入 `source_acks`（包括理由），`acked_sha256` 更新，来源集合哈希改变 | 集成 | FR-SRC-03 | M1 |
 | MVP-SRC-04 | 非 TTY 执行 `source remove` → 退出码 3；在 TTY 中执行 → 写入 `removed_seq`，已有引用显示为 `source_removed`，来源集合哈希改变。M1 中还没有引用（WP1.5 才写入），"已有引用显示为 `source_removed`"随 WP1.5 / M2 验证；WP1.4 验证其余部分 | 集成 | FR-SRC-04 | M1 |
 | MVP-SRC-05 | `source add` 一个不存在的路径 → 退出码 2，不写入 | 集成 | FR-SRC-01 | M1 |
-| MVP-SRC-06 | 同一组来源，以不同顺序登记 → 来源集合哈希相同。"同一组来源"的含义见 PD-25（待确认）：WP1.4 按"相同的 `source_id` 与 `acked_sha256`，输入顺序不同"验证 | 单元 | FR-SRC-05 | M1 |
+| MVP-SRC-06 | 同一组来源记录（`source_id` 与 `acked_sha256` 均相同）以不同顺序输入 → 来源集合哈希相同；`source_id` 改变（移除后重新登记），或人工 `ack` 更新了 `acked_sha256` → 哈希改变；文件发生变化、但尚未经人工确认 → 哈希不变（PD-25） | 单元 + 集成 | FR-SRC-05 | M1 |
 | MVP-SRC-07 | `source add internal/auth/login.go`（非文档类型）→ 退出码 2；在 TTY 中加上 `--allow-any-type` → 成功；修改已登记的来源后，Agent 再次 `source add` 同一路径 → 什么都不做，`acked_sha256` 不变，`SOURCE_CHANGED` 仍然存在。审查确认 Specmetry 只为引用校验读取文本，不解析文档语义。 | 集成 + 审查 | FR-SRC-01、FR-SRC-06 | M1 |
 | MVP-SRC-08 | **M1**（`hash_only` 项目）：在 TTY 中执行 `source remove --erase-excerpts` → 来源被移除，引用的 `locator` 和 `excerpt_sha256` 保留，`excerpt` 仍为 NULL，`source list --include-removed --refs --json` 中为 `excerpt_state = not_stored`；非 TTY 执行 → 退出码 3，不写入。**M2**（`full` 模式与 N1 修复之后）：该来源所有已保存的片段变为 NULL，`excerpt_erased_seq` 已写入，`excerpt_state = erased`；整理完成后，对数据库文件和 WAL 做字节搜索，找不到原片段；整理被其他连接的读事务阻塞时，保留 `.compaction-pending` 并报告"整理未完成"，之后的打开会完成整理。WP1.4 验证 M1 中移除、非 TTY 拒绝，以及 `hash_only` 下不擦除任何内容；引用的 `locator`、`excerpt_sha256` 与 `excerpt_state = not_stored` 需要 WP1.5 写入的引用，随 WP1.5 验证 | 集成 | FR-SRC-07 | M1 / M2 |
 

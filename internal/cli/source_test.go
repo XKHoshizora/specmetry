@@ -261,6 +261,10 @@ func TestSourceAddAgainChangesNothing(t *testing.T) {
 	if third.Created || third.Source.AckedSHA256 != first.Source.AckedSHA256 || *third.Source.State != "changed" {
 		t.Fatalf("add after a change = %+v", third.Source)
 	}
+	// PD-25: a change not yet acknowledged by a person leaves the set hash.
+	if third.SourceSetHash != first.SourceSetHash || sourceList(t, repo).SourceSetHash != first.SourceSetHash {
+		t.Fatal("an unacknowledged change moved the source set hash")
+	}
 	if after := seq(t, home); after != before {
 		t.Fatalf("seq moved from %s to %s", before, after)
 	}
@@ -707,5 +711,101 @@ func TestSourceCommandsStopWhenCanceled(t *testing.T) {
 	}
 	if after := seq(t, home); after != before {
 		t.Fatal("written")
+	}
+}
+
+// Pre-review check A (MVP-SRC-03): an observed hash that is not the one on
+// disk is stale even when the file is unchanged: exit 5, nothing written,
+// no seq. "Nothing to acknowledge" is only for a correct observed hash.
+func TestSourceAckStaleObservedOnUnchangedSource(t *testing.T) {
+	home, repo, _ := sourcesProject(t)
+	a := sourceAdd(t, repo, "docs/client-brief.md")
+	before := seq(t, home)
+	out := inTerminal(t, repo, []string{"source", "ack", "docs/client-brief.md", "--observed", strings.Repeat("0", 64), "-m", "typo"}, noPrompt)
+	if !strings.Contains(out, "exit=5") || !strings.Contains(out, a.Source.AckedSHA256) {
+		t.Fatalf("stale observed hash on an unchanged source:\n%s", out)
+	}
+	if after := seq(t, home); after != before {
+		t.Fatalf("seq moved from %s to %s", before, after)
+	}
+	out = inTerminal(t, repo, []string{"source", "ack", "docs/client-brief.md", "--observed", a.Source.AckedSHA256, "-m", "typo"}, noPrompt)
+	if !strings.Contains(out, "exit=0") || !strings.Contains(out, "nothing to acknowledge") {
+		t.Fatalf("correct observed hash on an unchanged source:\n%s", out)
+	}
+	if n := count(t, home, `SELECT count(*) FROM source_acks`); n != 0 {
+		t.Fatalf("%d acknowledgements", n)
+	}
+}
+
+// Pre-review check B (MVP-SRC-07): a non-document source a person
+// registered with --allow-any-type is an active source like any other: the
+// Agent adding the same path again gets it back unchanged. The Agent still
+// cannot register a non-document file that is not a source yet.
+func TestSourceAddAgainOfApprovedNonDocument(t *testing.T) {
+	home, repo, _ := sourcesProject(t)
+	for _, f := range []string{"internal/auth/login.go", "internal/auth/logout.go"} {
+		p := filepath.Join(repo, filepath.FromSlash(f))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte("package auth\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out := inTerminal(t, repo, []string{"source", "add", "internal/auth/login.go", "--allow-any-type"}, "internal/auth/login.go")
+	if !strings.Contains(out, "exit=0") {
+		t.Fatalf("registered by a person:\n%s", out)
+	}
+	acked := rows(t, home, `SELECT id, acked_sha256 FROM sources`)[0]
+	if err := os.WriteFile(filepath.Join(repo, "internal", "auth", "login.go"), []byte("package auth // changed\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	before := seq(t, home)
+	again := sourceAdd(t, repo, "internal/auth/login.go")
+	if again.Created || again.Source.ID != acked[0] || again.Source.AckedSHA256 != acked[1] || *again.Source.State != "changed" {
+		t.Fatalf("Agent adds the approved source again: %+v", again)
+	}
+	code, stdout, stderr := specmetry(t, repo, "source-add.v1", "source", "add", "--json", "internal/auth/logout.go")
+	if code != apperr.ExitInvalidInput {
+		t.Fatalf("Agent registers a new non-document file: exit %d\n%s%s", code, stdout, stderr)
+	}
+	if after := seq(t, home); after != before {
+		t.Fatalf("seq moved from %s to %s", before, after)
+	}
+	if n := count(t, home, `SELECT count(*) FROM sources`); n != 1 {
+		t.Fatalf("%d sources", n)
+	}
+}
+
+// Pre-review check C: an input file named with --file that cannot be read
+// is reported without its path, which may hold a secret; in text and in
+// error.v1. A readable file is still validated against source-ack.v1.
+func TestSourceAckFileErrorsDoNotEchoThePath(t *testing.T) {
+	home, repo, _ := sourcesProject(t)
+	sourceAdd(t, repo, "docs/client-brief.md")
+	secret := "ghp_" + strings.Repeat("A1b2", 9)
+	missing := filepath.Join(t.TempDir(), "ack-"+secret+".json")
+	before := seq(t, home)
+	for _, args := range [][]string{
+		{"source", "ack", "--file", missing},
+		{"source", "ack", "--file", missing, "--json"},
+	} {
+		out := inTerminal(t, repo, args, noPrompt)
+		if !strings.Contains(out, "exit=2") || strings.Contains(out, secret) {
+			t.Fatalf("%v:\n%s", args[3:], out)
+		}
+		if len(args) == 5 && !strings.Contains(out, `"code": "invalid_input"`) {
+			t.Fatalf("--json did not print error.v1:\n%s", out)
+		}
+	}
+	invalid := filepath.Join(t.TempDir(), "ack.json")
+	if err := os.WriteFile(invalid, []byte(`{"schema":"specmetry.source-ack/v1","source":"docs/client-brief.md","observed_sha256":"`+strings.Repeat("a", 64)+`"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if out := inTerminal(t, repo, []string{"source", "ack", "--file", invalid}, noPrompt); !strings.Contains(out, "exit=2") || !strings.Contains(out, "rationale") {
+		t.Fatalf("a file without a rationale:\n%s", out)
+	}
+	if after := seq(t, home); after != before {
+		t.Fatalf("seq moved from %s to %s", before, after)
 	}
 }
