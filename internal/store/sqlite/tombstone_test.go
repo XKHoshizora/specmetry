@@ -69,7 +69,7 @@ INSERT INTO b_child (project_id, parent_id, payload) VALUES (?1, last_insert_row
 // registry row (projects.id) as well as every project_id row.
 func TestTombstonesRespectForeignKeysAndRegistry(t *testing.T) {
 	dir := testutil.TempHome(t)
-	migs := append(embedded(t), relatedTables(t))
+	migs := append(foundation(t), relatedTables(t))
 	canaryPurged, canaryKept := testutil.NewCanary(t), testutil.NewCanary(t)
 	db, _ := open(t, dir, Options{Migrations: migs})
 	insertRelated(t, db, purgedProject, canaryPurged)
@@ -128,7 +128,7 @@ func TestEveryTableHasProjectID(t *testing.T) {
 // to delete by then.
 func TestTombstoneCompactionResumesAfterCrash(t *testing.T) {
 	dir := testutil.TempHome(t)
-	migs := append(embedded(t), factsMigration(t))
+	migs := append(foundation(t), factsMigration(t))
 	canary := testutil.NewCanary(t)
 	db, _ := open(t, dir, Options{Migrations: migs})
 	insertFact(t, db, purgedProject, canary)

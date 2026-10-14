@@ -52,7 +52,7 @@ func upgraderHelper() int {
 // blocked (codex-review-006 N3), so the test does not depend on timing.
 func TestOpenAndConcurrentUpgradeDoNotInterleave(t *testing.T) {
 	dir := testutil.TempHome(t)
-	migs := append(embedded(t), factsMigration(t))
+	migs := append(foundation(t), factsMigration(t))
 	db, _ := open(t, dir, Options{Migrations: migs})
 	insertFact(t, db, "01J9Z3K5Q8R2T4V6W8X0Y2Z4A6", "before")
 	_ = db.Close()

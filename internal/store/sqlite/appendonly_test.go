@@ -32,7 +32,7 @@ func factsContent(t *testing.T, db *DB) string {
 // primary-key and UNIQUE conflicts alike, and the original fact must survive.
 func TestAppendOnlyRejectsReplace(t *testing.T) {
 	dir := testutil.TempHome(t)
-	db, _ := open(t, dir, Options{Migrations: append(embedded(t), factsMigration(t))})
+	db, _ := open(t, dir, Options{Migrations: append(foundation(t), factsMigration(t))})
 	insertFact(t, db, "01J9Z3K5Q8R2T4V6W8X0Y2Z4A6", "original")
 	original := factsContent(t, db)
 	cases := map[string]string{
@@ -64,7 +64,7 @@ func TestAppendOnlyRejectsDeclaredReplaceConflict(t *testing.T) {
 	m := Migration{Version: 2, Name: "declared", SQL: `
 CREATE TABLE declared (id INTEGER PRIMARY KEY, k TEXT UNIQUE ON CONFLICT REPLACE, v TEXT);
 ` + ddl}
-	db, _ := open(t, dir, Options{Migrations: append(embedded(t), m)})
+	db, _ := open(t, dir, Options{Migrations: append(foundation(t), m)})
 	if _, err := db.sql.ExecContext(ctx, `INSERT INTO declared (k, v) VALUES ('a', 'original')`); err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +99,7 @@ func TestEveryPoolConnectionEnablesRecursiveTriggers(t *testing.T) {
 // codex-review-004 B4: a connection that lost the setting cannot write.
 func TestWriteTxRefusesConnectionWithoutRecursiveTriggers(t *testing.T) {
 	dir := testutil.TempHome(t)
-	db, _ := open(t, dir, Options{Migrations: append(embedded(t), factsMigration(t))})
+	db, _ := open(t, dir, Options{Migrations: append(foundation(t), factsMigration(t))})
 	if _, err := db.sql.ExecContext(ctx, `PRAGMA recursive_triggers = 0`); err != nil {
 		t.Fatal(err)
 	}

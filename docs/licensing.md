@@ -53,7 +53,7 @@
 | `dustin/go-humanize` | MIT | 链接 | `LICENSE` |
 | `ncruces/go-strftime`、`mattn/go-isatty` | MIT | 链接（Windows、macOS） | `LICENSE` |
 | `google/uuid` | BSD-3-Clause | 链接（Linux、macOS） | `LICENSE` |
-| `santhosh-tekuri/jsonschema/v6` | Apache-2.0 | `internal/contract` 接入命令之后链接（M1 起） | `LICENSE`；它内嵌的 json-schema.org 元模式的许可证需要另行核实 |
+| `santhosh-tekuri/jsonschema/v6` | Apache-2.0 | 链接（自 WP1.1 起，校验 `--json` 输出） | `LICENSE`；它内嵌的 json-schema.org 元模式的许可证需要另行核实 |
 | `dlclark/regexp2` | MIT | 同上 | `LICENSE`、`ATTRIB`（移植自 dotnet/corefx，MIT） |
 | `golang.org/x/text` | BSD-3-Clause | 同上 | `LICENSE`、`PATENTS` |
 | React、React DOM、scheduler | MIT | 内嵌的前端产物（`web/dist`） | 各自的 `LICENSE` |

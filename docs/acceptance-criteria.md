@@ -44,14 +44,14 @@
 | MVP-INIT-01 | 未初始化的 git 仓库 → `init --name demo --json` → 退出码 0；生成 marker，`project_id` 是合法的 ULID；`init_progress = initialized` | 集成 | FR-INIT-01 | M1 |
 | MVP-INIT-02 | 已初始化 → 再次执行 `init` → `project_id` 不变，仍然只有 1 个项目 | 集成 | FR-INIT-01 | M1 |
 | MVP-INIT-03 | 三个项目夹具 → `init --json` → `stage_detected` 依次为 `docs_only`、`in_development`、`incomplete_docs`（规则见 [architecture.md §6.1.1](architecture.md#611-阶段识别与候选来源发现m1-实现)）；`--stage` 覆盖后 `stage` 改变，`stage_detected` 保持识别结果；识别过程不读取文件内容（在文件中埋入 canary，数据目录中找不到） | 集成 | FR-INIT-02 | M1 |
-| MVP-INIT-04 | `fx-docs-only` → `init --json` → 候选来源中有 `docs/client-brief.md`，并排在 `README.md` 之前；`CHANGELOG.md`、`node_modules/x/README.md` 和空文件 `docs/empty.md` 不在其中；`source list --json`（`source-list.v1`）的 `sources` 为空 | 集成 | FR-INIT-03 | M1 |
+| MVP-INIT-04 | `fx-docs-only` → `init --json` → 候选来源中有 `docs/client-brief.md`，并排在 `README.md` 之前；`CHANGELOG.md`、`node_modules/x/README.md` 和空文件 `docs/empty.md` 不在其中；`source list --json`（`source-list.v1`）的 `sources` 为空。WP1.1 验证候选来源的内容与顺序，以及 `init` 不登记来源（`init_progress` 仍为 `initialized`）；`source list` 一项随 WP1.4 验证 | 集成 | FR-INIT-03 | M1 |
 | MVP-INIT-05 | 在伪终端中执行 `setup` → 先展示改动：拒绝时，文件逐字节不变；接受时写入；再次执行不产生重复条目；`setup --uninstall` 后语义上恢复原样 | 集成 | FR-INIT-04 | M3 |
 | MVP-INIT-06 | 非 TTY 环境执行 `setup` → 退出码 3，不修改任何文件 | 集成 | FR-INIT-04 | M3 |
 | MVP-INIT-07 | 按流程推进 → 每一步之后 `init_progress` 都符合 [data-model.md §6.12](data-model.md#612-初始化进度)；没有基准版本时执行 `init --skip-inventory`，进度不会越过 `baseline_proposed` 之前的步骤 | 集成 | FR-INIT-05 | M2 |
 | MVP-INIT-08 | `[P1]` 写入 `.git/info/exclude`；把该文件设为只读后再执行 `init` → 退出码 0，并给出警告 | 集成 | FR-INIT-06 | M1 |
-| MVP-INIT-09 | 非 git 目录 → `init` 成功，`target = null`；交付状态为 `not_assessed`（`NO_TARGET`）；检查可以运行，但 `qualifying = false` | 集成 | FR-INIT-09、FR-TGT-03 | M2 |
+| MVP-INIT-09 | 非 git 目录 → `init` 成功，`target = null`；交付状态为 `not_assessed`（`NO_TARGET`）；检查可以运行，但 `qualifying = false`。`init` 一侧（成功、`target = null`、`not_a_git_repository` 警告、从子目录再次执行仍是同一项目）已在 WP1.1 验证 | 集成 | FR-INIT-09、FR-TGT-03 | M2 |
 | MVP-INIT-10 | `[P1]` 有 `go.mod`、`package.json`、`pytest.ini` 的夹具 → 给出测试命令提示 | 集成 | FR-INIT-08 | M1 |
-| MVP-INIT-11 | 主 worktree 在 `main` 分支 → `init --json` 中默认交付目标的 `ref = refs/heads/main`；主 worktree 处于分离 HEAD → `target = null`，并给出 `detached_head_no_target` 警告（M1）；差距中有 `NO_TARGET`（M2） | 集成 | FR-INIT-10 | M1 / M2 |
+| MVP-INIT-11 | 主 worktree 在 `main` 分支 → `init --json` 中默认交付目标的 `ref = refs/heads/main`；主 worktree 处于分离 HEAD → `target = null`，并给出 `detached_head_no_target` 警告（M1）；差距中有 `NO_TARGET`（M2）。M1 还验证：在关联 worktree 中首次执行时，目标仍是主 worktree 的分支；分支还没有提交时，目标的 `snapshot = null` | 集成 | FR-INIT-10 | M1 / M2 |
 
 ### 2.2 来源（SRC）
 

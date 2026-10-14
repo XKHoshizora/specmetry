@@ -152,24 +152,15 @@ func TestGuardNeedsConfirmationText(t *testing.T) {
 	}
 }
 
-// failingWriter fails its write number failAt (counting from 1): with an
-// error, or with short set by writing less than asked and reporting no
-// error. failed records whether that happened.
-type failingWriter struct {
-	failAt, writes int
-	short, failed  bool
+// faultyWriter answers every write with write; writes counts the calls.
+type faultyWriter struct {
+	write  func(p []byte) (int, error)
+	writes int
 }
 
-func (w *failingWriter) Write(p []byte) (int, error) {
+func (w *faultyWriter) Write(p []byte) (int, error) {
 	w.writes++
-	if w.writes < w.failAt {
-		return len(p), nil
-	}
-	w.failed = true
-	if w.short {
-		return len(p) / 2, nil
-	}
-	return 0, errors.New("output closed")
+	return w.write(p)
 }
 
 // readCounter counts the reads made from it.
@@ -183,30 +174,36 @@ func (c *readCounter) Read(p []byte) (int, error) {
 	return c.r.Read(p)
 }
 
-// When the operation's summary or the prompt cannot be shown in full, the
-// guard fails with exit code 6 before reading anything, and the operation
-// does not go ahead even though the confirmation text is waiting: whichever
-// write fails or falls short.
+// When the operation, its summary or the prompt cannot be shown in full,
+// the guard fails with exit code 6 before reading anything, and the
+// operation does not go ahead even though the confirmation text is
+// waiting. Every write fails, so the fault is certain to happen.
 func TestGuardFailsWhenThePromptCannotBeShown(t *testing.T) {
-	human := channel.Decide(true, true, env(nil))
-	for failAt := 1; failAt <= 4; failAt++ {
-		for _, short := range []bool{false, true} {
-			w := &failingWriter{failAt: failAt, short: short}
+	errOutput := errors.New("output closed")
+	cases := []struct {
+		name  string
+		write func(p []byte) (int, error)
+	}{
+		{"write error", func([]byte) (int, error) { return 0, errOutput }},
+		{"write error after writing everything", func(p []byte) (int, error) { return len(p), errOutput }},
+		{"short write", func(p []byte) (int, error) { return len(p) / 2, nil }},
+		{"nothing written", func([]byte) (int, error) { return 0, nil }},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			out := &faultyWriter{write: c.write}
 			in := &readCounter{r: strings.NewReader("REQ-001\n")}
-			err := channel.Guard(human, in, w, op)
-			if failAt == 1 && !w.failed {
-				t.Fatalf("Guard wrote nothing")
-			}
-			if !w.failed {
-				continue
+			err := channel.Guard(channel.Decide(true, true, env(nil)), in, out, op)
+			if out.writes == 0 {
+				t.Fatal("Guard wrote nothing, so the fault did not happen")
 			}
 			if apperr.ExitCode(err) != apperr.ExitEnvironment {
-				t.Errorf("write %d failed (short=%v): Guard = %v, want exit code %d", failAt, short, err, apperr.ExitEnvironment)
+				t.Errorf("Guard = %v, want exit code %d", err, apperr.ExitEnvironment)
 			}
 			if in.reads != 0 {
-				t.Errorf("write %d failed (short=%v): Guard read the confirmation", failAt, short)
+				t.Errorf("Guard read the confirmation %d times", in.reads)
 			}
-		}
+		})
 	}
 }
 

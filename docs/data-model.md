@@ -145,6 +145,8 @@ erDiagram
 
 CLI 或 Hook 第一次在某个 worktree 中出现时，系统会自动登记它：从 cwd 解析出 `git_common_dir`，匹配到对应项目，再登记该 worktree。目录已不存在的 worktree 在读取时标记为 `missing`，历史事实保留。
 
+`init` 的登记规则（项目的识别、marker 与数据库不一致时的处理、再次执行的行为）见 [architecture.md §6.1.2](architecture.md#612-init-的登记规则m1-实现)。`settings_json` 由 `init` 创建：`sources_skipped`、`inventory_skipped`（`--skip-sources`、`--skip-inventory`，只会被设置，不会被清除），以及 `excerpt_storage = hash_only`；`commit_ref_mode` 在 TD-17 确定后加入。
+
 ### 4.2 `delivery_targets`、`scope_confirmations`、`scope_items`
 
 `delivery_targets`（受控可变，只能由人修改）：
@@ -158,7 +160,7 @@ CLI 或 Hook 第一次在某个 worktree 中出现时，系统会自动登记它
 | created_seq, archived_seq | INTEGER | 更换 ref 时，先归档旧目标，再新建目标 |
 | actor, channel | TEXT | `init` 自动创建的默认目标记为 `system` |
 
-`init` 会创建一个默认目标，它的 ref 是主 worktree 当前所在的分支。如果主 worktree 处于分离 HEAD，或者项目不是 git 项目，就不创建目标（差距 `NO_TARGET`）。
+`init` 会创建一个默认目标，它的 ref 是主 worktree 当前所在的分支。如果主 worktree 处于分离 HEAD，或者项目不是 git 项目，就不创建目标（差距 `NO_TARGET`）。默认目标只在首次登记项目时创建（名称为 `default`）；再次执行 `init` 不会补建，之后的目标只能由人设置（architecture §6.1.2）。
 
 **快照**（Snapshot）不入库：每次推导时把目标的 `ref` 解析为提交 `S`（`git rev-parse --verify <ref>^{commit}`）。refs 由所有 worktree 共享，所以在任何 worktree 中解析，结果都相同。
 
@@ -975,4 +977,4 @@ M0 的 CI 会校验这两者（WP0.4）。凡是需要数据库状态才能判�
 
 ## 10. 相关待决策事项
 
-已确认：PD-03、PD-04、PD-12、PD-16 ~ PD-22、PD-24；待确认：PD-02（[prd.md §9](prd.md#9-产品待决策事项)）。技术：TD-01、TD-14、TD-18、TD-20、TD-21 已确认；TD-17、TD-24 待确认（[architecture.md §16](architecture.md#16-技术待决策事项)）。
+已确认：PD-03、PD-04、PD-12、PD-16 ~ PD-22、PD-24；待确认：PD-02（[prd.md §9](prd.md#9-产品待决策事项)）。技术：TD-01、TD-14、TD-18、TD-20、TD-21 已确认；TD-17、TD-24、TD-25 待确认（[architecture.md §16](architecture.md#16-技术待决策事项)）。

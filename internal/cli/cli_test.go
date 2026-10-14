@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"database/sql"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -48,7 +49,7 @@ func TestVersion(t *testing.T) {
 	if code != apperr.ExitOK || errOut != "" {
 		t.Fatalf("exit %d, stderr %q", code, errOut)
 	}
-	for _, want := range []string{"specmetry ", "database schema: v1", "dashboard:"} {
+	for _, want := range []string{"specmetry ", fmt.Sprintf("database schema: v%d", sqlite.SchemaVersion()), "dashboard:"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("version output missing %q:\n%s", want, out)
 		}
@@ -91,7 +92,7 @@ func TestDoctorHealthyHomeLeavesDatabaseUntouched(t *testing.T) {
 	if code != apperr.ExitOK {
 		t.Fatalf("exit %d\n%s%s", code, out, errOut)
 	}
-	for _, want := range []string{"[ok]   permissions", "[ok]   database        schema v1", "[ok]   git"} {
+	for _, want := range []string{"[ok]   permissions", fmt.Sprintf("[ok]   database        schema v%d", sqlite.SchemaVersion()), "[ok]   git"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output missing %q:\n%s", want, out)
 		}
@@ -221,6 +222,7 @@ func TestDoctorReportsLoosenedPermissions(t *testing.T) {
 }
 
 func TestMain(m *testing.M) {
+	testutil.DispatchFakeGit()
 	testutil.DispatchHelper(map[string]func() int{
 		"crash":          crashHelper,
 		"cli":            cliHelper,
@@ -264,7 +266,7 @@ func TestDoctorLeavesCrashedDatabaseUntouched(t *testing.T) {
 	}
 	before := testutil.SnapshotTree(t, home.Path)
 	code, out, errOut := execute(t, "doctor")
-	if code != apperr.ExitOK || !strings.Contains(out, "schema v1") {
+	if code != apperr.ExitOK || !strings.Contains(out, fmt.Sprintf("schema v%d", sqlite.SchemaVersion())) {
 		t.Fatalf("exit %d\n%s%s", code, out, errOut)
 	}
 	testutil.AssertTreeUnchanged(t, home.Path, before)

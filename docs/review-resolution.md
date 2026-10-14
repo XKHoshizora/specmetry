@@ -984,3 +984,143 @@ PR：<https://github.com/XKHoshizora/specmetry/pull/1>（`feat/m0-foundation` �
 
 - `fx-in-dev` 中故意失败的测试和录制的 Claim、其余夹具和期望结果（WP2.9）。
 - 使用这些夹具的验收项随对应工作包验证：MVP-INIT-03、INIT-04 和 WT-01 的 M1 部分在 WP1.1，MVP-BL-01 在 WP1.5。
+
+## 19. WP1.2 代码审查（codex-review-014）与验收
+
+**审查前的修正**：CI 首轮通过之后、送审之前，产品负责人指出 `Guard` 的两处问题，以独立提交 `6d6d1ab` 修正（architecture §5.1 同步更新）：
+
+- 输入在确认内容之后直接结束（没有回车）时，原实现会放行。现在只有以回车结束的完整一行、且内容匹配才继续；输入结束一律视为取消，退出码 3。
+- 原实现忽略了提示输出的错误。现在操作名称、摘要和确认提示一次写出；写入出错或只写入一部分时，不读取输入，返回退出码 6（`environment`）。
+
+**审查结论**：**GO**，BLOCKER 为 0，1 项 NON-BLOCKER。审查目标 `6d6d1ab`。审查方用独立探针确认：通道识别符合 §5.1；Agent 变量的值不出现在结果、错误和 JSON 错误响应中；预先放入 context 的 `human_cli` 会被实际识别结果覆盖；确认、取消、输入结束、输出失败和读取错误的退出码都符合规定。目标提交的三平台 CI 8/8 通过。
+
+**验收**：产品负责人于 2026-10-14 验收 WP1.2，PR #5 已合并（合并提交 `4c5a038`）。
+
+**N1：提示输出失败的测试有六次没有触发故障**。`Guard` 只写一次，`failAt=2..4` 的六次运行根本没有触发故障，而是被 `continue` 跳过了断言，不能算作已验证的失败分支。实际有效的只有第一次写入出错和短写两次。这不影响实现，按产品负责人的安排在下一个开发分支（`feat/m1-init`）中以单独提交修正测试，不改动 `Guard`。
+
+**N1 的修正**：删除 `failAt` 循环，改为四个明确的子测试：写入出错、写出全部内容但同时报告错误、短写、什么也没写入。测试用的 Writer 每次写入都失败，所以故障必然发生；每个子测试都断言 Writer 确实被调用、退出码为 6、确认输入一次也没有读取。检验：换回送审前的 `Guard`（`2a9bd59`），四个子测试全部失败；把 `Guard` 改成不检查写入字节数，短写和什么也没写入两个子测试失败。
+
+**已接受的风险**（与 §5.1 一致）：
+
+- 通道识别是防误操作措施，不能证明操作者身份。
+- 目前只核实了 Claude Code 的两个变量，其他 Agent 在 M4 核实后加入。
+- Windows 上没有控制台的终端按设计识别为 `agent_cli`。
+
+**仍未完成、随后续工作包验证**：MVP-CH-01、CH-02 对真实人类专属命令的验证：`source ack`、`source remove` 在 WP1.4，`review`、`propose --apply` 在 WP1.6，`target set`、`scope confirm` 在 WP1.8。WP1.2 只用测试中的替身命令验证了拦截与确认组件和 CLI 的共同路径。
+
+审查原文按原样入库（它本来就是仓库内的相对链接）。
+
+## 20. WP1.1 代码审查（codex-review-015）的处理
+
+**审查结论**：NO-GO，3 项 BLOCKER、2 项 NON-BLOCKER。审查目标 `86ac50d`（PR #6）。审查确认项目身份、Worktree 归属、幂等、并发登记和失败恢复正常；问题集中在安全边界。产品负责人决定一次修复全部五项，不改变已批准的架构，不扩大工作包范围。
+
+### B1：git 读取命令能执行外部程序并修改 Ref
+
+**根因**：`gitx` 只过滤了仓库定位变量。配置注入变量（`GIT_CONFIG_COUNT`、`GIT_CONFIG_PARAMETERS`、`GIT_CONFIG_GLOBAL`）、跟踪变量、用户的全局配置和仓库的本地配置都照常生效；而 `ls-files` 读取索引时会运行 `core.fsmonitor` 指定的程序。`GIT_OPTIONAL_LOCKS=0` 挡不住这些。
+
+**修复**（`internal/gitx`，architecture §6.1.2）：
+
+- 不传递任何继承的 `GIT_*` 变量（按前缀，不区分大小写），而不是只列出已知的几个。
+- 只重新设置受控变量：系统和全局配置指向空文件（`GIT_CONFIG_NOSYSTEM`、`GIT_CONFIG_SYSTEM`、`GIT_CONFIG_GLOBAL`），`GIT_OPTIONAL_LOCKS=0`，`GIT_TERMINAL_PROMPT=0`。用户的配置文件不读取，也不修改。
+- 仓库本地配置中唯一会让读取命令执行程序的 `core.fsmonitor`，在命令行上用空值关闭（2.32 以来的各个版本都把空值当作关闭）；另加 `--no-pager`、`--no-replace-objects`。
+- 要求 git 2.32 或更高（第一个支持 `GIT_CONFIG_GLOBAL` / `GIT_CONFIG_SYSTEM` 的版本；Ubuntu 22.04 为 2.34）；更旧时返回退出码 6，而不是在无法隔离的情况下继续运行。
+
+**回归测试**（全部经过公开的 `init --json --no-exclude`；每种注入先用普通 git 确认确实生效，避免测试本身无效）：
+
+| 注入 | 修复前（Windows） | 修复后（Windows、Linux） |
+|---|---|---|
+| 仓库本地配置 `core.fsmonitor` | 外部文件被写入，新 Ref 被创建，`.git` 改变 | 都不发生 |
+| `GIT_CONFIG_COUNT` 注入 `core.fsmonitor` | 同上 | 同上 |
+| `GIT_CONFIG_PARAMETERS` 注入 `core.fsmonitor` | 同上 | 同上 |
+| 全局配置中的 `core.fsmonitor` 和 `trace2.normalTarget` | 同上，并写入 trace2 文件 | 同上 |
+| `GIT_CONFIG_GLOBAL` 指向的配置 | 同上 | 同上 |
+| `GIT_TRACE`、`GIT_TRACE2`、`GIT_TRACE2_EVENT`、`GIT_TRACE_SETUP`、`GIT_TRACE_PERFORMANCE` | 五个跟踪文件都被写入 | 都不写入 |
+| 仓库通过 `core.hooksPath` 配置的 Hook | 未执行（读取命令不触发 Hook） | 未执行（回归防护） |
+
+每种情况都比较 `.git` 下的全部文件及内容，以及全部 Ref。
+
+**保证边界**：隔离针对 Specmetry 自己运行的 git 命令。仓库本地配置仍然生效（除 `core.fsmonitor` 外），所以仍依赖"这些读取命令本身不执行程序、不触发 Hook"这一 git 行为；已用 Hook 和 FSMonitor 反例验证。`doctor` 的 `git --version` 检查不属于本轮范围。
+
+### B2：默认交付目标的 Ref 绕过密钥扫描
+
+**根因**：主 worktree 的分支在扫描之后才读取，随后直接写入 `delivery_targets.ref` 并进入输出。
+
+**修复**：读取分支后立即按 WP1.3 的规则扫描，命中时返回退出码 2，错误只给出字段（`default delivery target ref`）和规则编号。扫描在打开数据库之前完成，不论这次是否会新建目标（打开数据库之前无法知道）。
+
+**回归测试**：分支名含合成的 GitHub token（运行时拼接）→ 退出码 2；`error.v1` 中只有字段与 `secret_detected: github_token`；stdout、stderr 中都没有该 token；数据目录（数据库与日志）未创建，没有 marker，没有分配 `seq`。修复前：退出码 0，token 写入数据库和输出。
+
+### B3：git 错误原文泄露
+
+**根因**：git stderr 的第一行和运行目录被拼进错误信息，并进入 `error.v1`；`Locate` 在路径扫描之前运行，所以错误中的目录也未经扫描。
+
+**修复**：git 的 stderr 直接丢弃，不保存。错误只包含 git 子命令名和退出状态（退出码 6）；查找仓库时的错误也不包含目录，只描述错误类别。
+
+**回归测试**（公开 CLI，canary）：
+
+- 环境变量注入无效的 `core.bare`：修复前退出码 6，`error.v1` 中出现 canary；修复后该变量不再传给 git（B1），`init` 成功，输出、数据目录和 marker 中都没有 canary。
+- 仓库本地配置中写入无效的 `core.bare`（不依赖 B1）：修复前 `error.v1` 中出现 canary 与仓库路径；修复后退出码 6，`--json` 与文本输出中都没有 canary 和仓库路径，数据目录未创建。
+- 单元测试：`rev-parse` 失败时，错误中没有 git 的信息和目录。
+
+### N1：marker 冲突时的文件副作用
+
+**修复**：数据目录中还没有数据库、却有 marker 时，在创建数据库之前拒绝。错误改为"No project was registered and the marker was left as it is"，与实际一致。数据库已登记项目但 marker 缺失时，仍然补写 marker。
+
+**回归测试**：没有数据目录时，拒绝后数据目录仍不存在；有数据目录（只有 `config.toml`）时，拒绝前后数据目录的文件与内容完全相同；marker 逐字节不变。修复前（在审查目标上复现）：退出码 6，数据库已被创建，错误却声称 "Nothing was changed"。原有冲突测试改为在任何查询之前检查数据目录。
+
+### N2：非 git 扫描不响应取消
+
+**修复**：文件列举在开始前、遍历每个条目时，以及 git 列举结果的处理循环中检查取消；取消时返回退出码 6，不返回部分结果，不登记任何内容。没有引入扫描数量限制。
+
+**回归测试**：调用前已取消 → 立即返回错误；遍历中途取消（第 10 次检查时）→ 立即停止，不再检查；git 列举在已取消时返回错误；公开 CLI 在已取消的 context 下，非 git 和 git 项目都返回错误，不创建数据目录和 marker。修复前：已取消时仍返回完整列表，公开路径登记了项目。
+
+审查原文按原样入库（它本来就是仓库内的相对链接）。
+
+## 21. WP1.1 定向复审（codex-review-016）的处理
+
+**审查结论**：NO-GO，只剩 1 项 BLOCKER。审查目标 `66d5948`。B2、B3、N1、N2 经独立复审关闭（N1、N2 修复有效），本轮不再改动。目标提交的三平台 CI 8/8 通过。
+
+### B1（剩余部分）：旧版 git 的版本探测会泄露环境变量
+
+**根因**：`checkVersion` 先运行 `git --version`，再判断是否达到 2.32。探测本身在受控环境中运行，但低于 2.32 的 git 不认识 `GIT_CONFIG_GLOBAL`，仍读取 `HOME` 中的全局配置；而 trace2 在处理命令之前就按全局配置的 `trace2.*Target` 初始化，于是在 Specmetry 以退出码 6 拒绝之前，跟踪文件已经写出，其中包含 `trace2.envVars` 指定的环境变量值。审查方用真实的 git 2.31.1 复现。
+
+**修复**（最小修改）：在每个 git 进程都使用的受控环境中加入 `GIT_TRACE2=0`、`GIT_TRACE2_EVENT=0`、`GIT_TRACE2_PERF=0`。第一个 git 进程（版本探测）启动时就已生效。继承的 `GIT_*` 变量照旧全部过滤；2.32 的最低版本要求不变；旧版 git 仍以退出码 6 拒绝。gitx 没有其他改动。
+
+**是否还有其他探测阶段的副作用**：用从官方源码构建的 git 2.31.1 和 2.32.0 验证。全局配置中同时设置 trace2 的三个目标、`trace2.envVars`、`trace2.configParams`、`core.fsmonitor`、`core.pager`、`core.hooksPath`（含 Hook），以及经 `include.path` 引入的 `core.sshCommand`，各自指向哨兵文件。不加控制时，`git --version` 只写出三个 trace2 文件，其中含有环境变量的值；其余设置都不生效。使用受控环境时，什么都不写，HOME 和当前目录中也没有新文件。因此只需关闭 trace2。
+
+**回归测试**：
+
+| 测试 | 修复前 | 修复后 |
+|---|---|---|
+| `TestFilterEnv`（受控环境的完整列表） | 缺少三个 trace2 变量 | 通过 |
+| `TestVersionProbeRunsInTheControlledEnvironment`（gitx；**替身**：报告 2.31.1 并记录调用的假 git） | 探测时没有 trace2 变量 | 只运行一次 `--version`，环境中的 `GIT_*` 恰好是受控集合，注入的 `GIT_TRACE2*` 被替换；随后以退出码 6 拒绝 |
+| `TestInitRefusesOldGitBeforeAnythingElse`（公开 `init --json --no-exclude`，新进程，**替身**） | 同上 | 退出码 6，提示需要 2.32；版本探测是唯一运行的 git；没有数据目录和 marker |
+| `TestInitRefusesRealOldGit`（**真实 git 2.31.1**，由 `SPECMETRY_TEST_GIT_2_31` 指定，CI 中跳过） | 写出 3 个 trace 文件 | 退出码 6；没有 trace 文件；stdout、stderr 中没有 canary；没有数据目录和 marker；`.git` 下的文件与 Ref 不变 |
+
+真实版本测试在 WSL（Ubuntu 24.04）中运行，git 2.31.1 和 2.32.0 从 kernel.org 的官方源码包构建，并对照同一目录的 `sha256sums.asc` 核对了哈希（未验证 GPG 签名）。测试先用这个 git 2.31.1 证明全局配置确实会写出含 canary 的跟踪文件，避免测试本身无效。CI 中没有旧版 git，只运行替身测试。替身测试不能代替真实旧版验证，报告中两者分开列出。
+
+**2.32 及更新版本仍正常工作**：gitx、project、cli、testutil 四个包的全部测试，分别在 git 2.32.0（自行构建）、2.43.0（WSL）和 2.56.0（Windows）下通过；其中包括 codex-review-015 的全部反例。
+
+### NON-BLOCKER
+
+1. **`doctor` 的跟踪写入**：未修改，作为独立的安全修复任务保留。它违反 `doctor` "非破坏性诊断" 的承诺，不是已接受的产品限制，已列入 implementation-plan M6 "发布前必须关闭的遗留安全问题"。
+2. **两处安全测试可以收紧**：按产品负责人的要求，本轮只修复剩余的 BLOCKER，保留现有回归测试不变，留作后续改进：
+   - Trace 用例的前置检查只要求至少一个变量生效（审查方已逐项验证五个变量都生效）；
+   - `TestInitRefusalsRegisterNothing` 中，Token 位于 worktree 路径，会先触发路径扫描，不能单独证明 Ref 扫描（审查方已用安全路径和敏感主分支另行验证）。
+
+### Linux SQLite 偶发失败
+
+推送 `ef8cad3` 之后，CI 的 Linux 测试（带 race detector）失败了一次，这次留下了测试名：M0 的 `TestOpenLockTimeout`。另一个进程持有打开锁时，`Open` 本应等待超时，却直接成功了。
+
+**根因（测试辅助进程的缺陷，不在产品代码中）**：
+
+- `lockHolderHelper` 调用 `acquireOpenLock` 后丢弃了返回的锁对象，锁文件的 `*os.File` 因此不再被引用。Go 的 finalizer 会在下一次垃圾回收时关闭这个文件，flock（Windows 上是 LockFileEx）随之释放。
+- 所以只有在测试等待期间恰好发生垃圾回收时，这个测试才会失败；race detector 增加了内存分配，让这种情况更容易出现。
+- 产品代码不受影响：`Open` 持有锁时一直以 `defer lock.release()` 保持引用，`acquireOpenLock` 的其他调用方只有这个辅助进程。
+
+**证实**：在辅助进程的等待循环中强制垃圾回收，同时仍然丢弃锁。Windows 上 3/3 失败，Linux 上 3/3 失败，锁都在测试检查之前就被释放了。
+
+**修复**：辅助进程保留锁的引用（`defer lock.release()`，放在模拟崩溃的分支之后）。等待循环中保留强制垃圾回收：以后如果再丢掉引用，测试会立刻失败，而不是偶发失败。修复后在 Windows 和 Linux 上都通过，Linux 上整个存储包又连续运行了 8 次，全部通过。
+
+**仍然不能确定的部分**：本会话本地那一次失败（37 次中的 1 次）丢失了测试名，它与这个机制相符，但不能断定就是同一个测试。审查方保存的 80 次运行日志中没有复现。
+
+审查原文按原样入库（它本来就是仓库内的相对链接）。

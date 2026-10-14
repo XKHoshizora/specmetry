@@ -28,7 +28,7 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 func executeRoot(ctx context.Context, root *cobra.Command, args []string, stderr io.Writer) int {
 	ctx = channel.NewContext(ctx, channel.Detect(os.Stdin, os.Stdout))
 	root.SetArgs(args)
-	err := root.ExecuteContext(ctx)
+	cmd, err := root.ExecuteContextC(ctx)
 	if err == nil {
 		return apperr.ExitOK
 	}
@@ -38,7 +38,13 @@ func executeRoot(ctx context.Context, root *cobra.Command, args []string, stderr
 		// and flag parsing: unknown command, unknown flag, wrong arity.
 		e = apperr.Wrap(apperr.InvalidInput, err, "invalid command line")
 	}
-	printError(stderr, e)
+	// With --json the error is the error.v1 document on stdout
+	// (architecture §9.1).
+	if wantsJSON(cmd) {
+		printErrorJSON(root.OutOrStdout(), stderr, e)
+	} else {
+		printError(stderr, e)
+	}
 	return apperr.ExitCode(e)
 }
 
@@ -53,7 +59,7 @@ func newRoot(stdout, stderr io.Writer) *cobra.Command {
 	root.SetOut(stdout)
 	root.SetErr(stderr)
 	root.CompletionOptions.DisableDefaultCmd = true
-	root.AddCommand(newVersionCmd(), newDoctorCmd())
+	root.AddCommand(newVersionCmd(), newDoctorCmd(), newInitCmd())
 	return root
 }
 
@@ -68,8 +74,8 @@ func run(fn func(cmd *cobra.Command, args []string) error) func(*cobra.Command, 
 	}
 }
 
-// printError writes a human-readable error. Commands with --json output
-// (from M1 on) print the error.v1 envelope to stdout instead.
+// printError writes a human-readable error. Commands run with --json print
+// the error.v1 envelope to stdout instead (printErrorJSON).
 func printError(w io.Writer, e *apperr.Error) {
 	_, _ = fmt.Fprintf(w, "error: %s\n", e.Error())
 	for _, d := range e.Details {

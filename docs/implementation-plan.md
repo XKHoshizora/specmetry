@@ -93,7 +93,7 @@ flowchart LR
 
 **目标**：审查 #4、#5、#8 和中-1 的实现；#3、#6 中属于写入侧的部分。
 
-**状态（2026-10-14）**：设计收尾完成，G2 已满足（[review-resolution.md §13](review-resolution.md#13-m1-开工准备产品决策与设计收尾2026-10-14)）。产品负责人已授权开发（codex-review-009 GO 之后）。**WP1.3 已验收**（codex-review-011 GO，PR #3，合并提交 `cee87b4`；MVP-PRV-07 的 CLI 写入集成随 WP1.5 验证，见 [review-resolution.md §16](review-resolution.md#16-wp13-最终复审codex-review-011与验收)）；**WP1.0 已验收**（codex-review-013 GO，PR #4，合并提交 `84e6e70`，见 [review-resolution.md §18](review-resolution.md#18-wp10-最终复审codex-review-013与验收)）；**WP1.2 已实现**，等待 Codex 审查；其他工作包尚未开始。
+**状态（2026-10-14）**：设计收尾完成，G2 已满足（[review-resolution.md §13](review-resolution.md#13-m1-开工准备产品决策与设计收尾2026-10-14)）。产品负责人已授权开发（codex-review-009 GO 之后）。**WP1.3 已验收**（codex-review-011 GO，PR #3，合并提交 `cee87b4`；MVP-PRV-07 的 CLI 写入集成随 WP1.5 验证，见 [review-resolution.md §16](review-resolution.md#16-wp13-最终复审codex-review-011与验收)）；**WP1.0 已验收**（codex-review-013 GO，PR #4，合并提交 `84e6e70`，见 [review-resolution.md §18](review-resolution.md#18-wp10-最终复审codex-review-013与验收)）；**WP1.2 已验收**（codex-review-014 GO，PR #5，合并提交 `4c5a038`；真实人类专属命令的 MVP-CH-01、CH-02 验证随 WP1.4、WP1.6、WP1.8 完成，见 [review-resolution.md §19](review-resolution.md#19-wp12-代码审查codex-review-014与验收)）；**WP1.1 已实现**，已按 codex-review-015、016（均为 NO-GO）修复，等待复审（见 [review-resolution.md §20](review-resolution.md#20-wp11-代码审查codex-review-015的处理)；`init` 的登记规则见 [architecture.md §6.1.2](architecture.md#612-init-的登记规则m1-实现)）；其他工作包尚未开始。
 
 | 工作包 | 内容 |
 |---|---|
@@ -191,6 +191,10 @@ SRC-08、TGT-10 的 M2 部分，以及 PRV-10，也在本里程碑验收。
 | WP6.5 | 3 个真实项目试用，并输出 dogfooding 报告 |
 
 **退出条件**：[mvp.md §7](mvp.md#7-mvp-完成定义) 中的全部条件；发布 v0.1.0。
+
+**发布前必须关闭的遗留安全问题**：
+
+- `doctor` 的 git 版本查询（`git --version`）仍继承完整环境：设置 `GIT_TRACE` 等变量时会在外部写入跟踪文件，违反 `doctor` "非破坏性诊断" 的承诺（codex-review-016 NON-BLOCKER 1）。修复方向：改用 `internal/gitx` 的受控环境运行，并对低于 2.32 的 git 报告失败。已作为独立的安全修复任务登记，不属于 WP1.1，但**不是已接受的产品限制**，最晚在 v0.1.0 发布之前关闭。
 
 ### M7 隔离执行器（MVP 之后，不属于 v0.1.0）
 
