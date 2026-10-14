@@ -38,13 +38,17 @@ func TestMain(m *testing.M) {
 
 var ctx = context.Background()
 
-func embedded(t *testing.T) []Migration {
+// foundation returns the storage foundation migration (0001) only. The
+// synthetic migrations of these tests are numbered from 2 on top of it and
+// create tables of their own, so they must not follow the business tables
+// that later embedded migrations add.
+func foundation(t *testing.T) []Migration {
 	t.Helper()
 	ms, err := Migrations()
 	if err != nil {
 		t.Fatal(err)
 	}
-	return ms
+	return ms[:1]
 }
 
 // factsMigration creates an append-only table with a project_id column, the
@@ -79,6 +83,7 @@ func helperMigrations(slow bool) ([]Migration, error) {
 	if err != nil {
 		return nil, err
 	}
+	migs = migs[:1] // the foundation, as foundation(t) returns
 	facts, err := newFactsMigration()
 	if err != nil {
 		return nil, err
@@ -149,7 +154,10 @@ func backups(t *testing.T, dir datadir.Dir) []string {
 }
 
 func TestEmbeddedMigrations(t *testing.T) {
-	ms := embedded(t)
+	ms, err := Migrations()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(ms) == 0 || ms[0].Version != 1 || SchemaVersion() != len(ms) {
 		t.Fatalf("embedded migrations = %+v", ms)
 	}
@@ -192,7 +200,7 @@ func TestOpenPathWithSpacesAndCJK(t *testing.T) {
 // SHM, backups, lock — is private to the current user.
 func TestStoreFilesArePrivate(t *testing.T) {
 	dir := testutil.TempHome(t)
-	migs := append(embedded(t), factsMigration(t))
+	migs := append(foundation(t), factsMigration(t))
 	db, _ := open(t, dir, Options{Migrations: migs[:1]})
 	_ = db.Close()
 	db, res := open(t, dir, Options{Migrations: migs})
@@ -213,7 +221,7 @@ func TestStoreFilesArePrivate(t *testing.T) {
 // consistent, openable VACUUM INTO backup.
 func TestMigrationWritesConsistentBackup(t *testing.T) {
 	dir := testutil.TempHome(t)
-	migs := append(embedded(t), factsMigration(t))
+	migs := append(foundation(t), factsMigration(t))
 	db, _ := open(t, dir, Options{Migrations: migs})
 	for i := 0; i < 50; i++ {
 		insertFact(t, db, "01J9Z3K5Q8R2T4V6W8X0Y2Z4A6", fmt.Sprint(i))
@@ -249,7 +257,7 @@ func TestMigrationWritesConsistentBackup(t *testing.T) {
 // it holds the pre-migration content.
 func TestConcurrentMigrationIsCoordinated(t *testing.T) {
 	dir := testutil.TempHome(t)
-	db, _ := open(t, dir, Options{Migrations: append(embedded(t), factsMigration(t))})
+	db, _ := open(t, dir, Options{Migrations: append(foundation(t), factsMigration(t))})
 	insertFact(t, db, "01J9Z3K5Q8R2T4V6W8X0Y2Z4A6", "before")
 	_ = db.Close()
 
@@ -391,7 +399,7 @@ func TestOpenLockTimeout(t *testing.T) {
 	if in, err := Inspect(ctx, dir); err != nil || !in.Locked {
 		t.Fatalf("Inspect = %+v, %v; want the lock reported as held", in, err)
 	}
-	migs := append(embedded(t), factsMigration(t))
+	migs := append(foundation(t), factsMigration(t))
 	before := testutil.SnapshotTree(t, dir.Path)
 	_, _, err := Open(ctx, dir, Options{Migrations: migs, LockTimeout: 200 * time.Millisecond})
 	if apperr.ExitCode(err) != apperr.ExitEnvironment || !strings.Contains(err.Error(), "another specmetry process") {
@@ -430,17 +438,17 @@ func TestCrashedLockHolderDoesNotBlock(t *testing.T) {
 // nothing.
 func TestOlderBinaryRefusesNewerSchema(t *testing.T) {
 	dir := testutil.TempHome(t)
-	db, _ := open(t, dir, Options{Migrations: append(embedded(t), factsMigration(t))})
+	db, _ := open(t, dir, Options{Migrations: append(foundation(t), factsMigration(t))})
 	_ = db.Close()
 	before := testutil.SnapshotTree(t, dir.Path)
-	openRefused(t, dir, Options{Migrations: embedded(t)}, "upgrade specmetry")
+	openRefused(t, dir, Options{Migrations: foundation(t)}, "upgrade specmetry")
 	testutil.AssertTreeUnchanged(t, dir.Path, before)
 }
 
 func TestMinBinaryVersionGuard(t *testing.T) {
 	dir := testutil.TempHome(t)
 	requires := Migration{Version: 2, Name: "requires_new", SQL: `UPDATE meta SET min_binary_version = '9.9.9' WHERE id = 1;`}
-	migs := append(embedded(t), requires)
+	migs := append(foundation(t), requires)
 	db, _ := open(t, dir, Options{Migrations: migs, BinaryVersion: "9.9.9"})
 	_ = db.Close()
 	before := testutil.SnapshotTree(t, dir.Path)
@@ -453,16 +461,16 @@ func TestMinBinaryVersionGuard(t *testing.T) {
 // MVP-STO-03: a migration that fails part-way rolls back completely.
 func TestFailingMigrationRollsBack(t *testing.T) {
 	dir := testutil.TempHome(t)
-	db, _ := open(t, dir, Options{})
+	db, _ := open(t, dir, Options{Migrations: foundation(t)})
 	_ = db.Close()
 	bad := Migration{Version: 2, Name: "bad", SQL: `
 CREATE TABLE half_done (id INTEGER PRIMARY KEY);
 INSERT INTO table_that_does_not_exist VALUES (1);`}
-	_, _, err := Open(ctx, dir, Options{Migrations: append(embedded(t), bad)})
+	_, _, err := Open(ctx, dir, Options{Migrations: append(foundation(t), bad)})
 	if apperr.ExitCode(err) != apperr.ExitEnvironment || !strings.Contains(err.Error(), "rolled back") {
 		t.Fatalf("err = %v", err)
 	}
-	db, _ = open(t, dir, Options{})
+	db, _ = open(t, dir, Options{Migrations: foundation(t)})
 	if v, _ := db.SchemaVersion(ctx); v != 1 {
 		t.Fatalf("schema v%d after failed migration, want v1", v)
 	}
@@ -476,7 +484,7 @@ INSERT INTO table_that_does_not_exist VALUES (1);`}
 
 func TestBackupRetentionKeepsNewest(t *testing.T) {
 	dir := testutil.TempHome(t)
-	migs := embedded(t)
+	migs := foundation(t)
 	clock := time.Date(2026, 10, 13, 0, 0, 0, 0, time.UTC)
 	db, _ := open(t, dir, Options{Migrations: migs})
 	_ = db.Close()
@@ -502,7 +510,7 @@ func TestBackupRetentionKeepsNewest(t *testing.T) {
 // increasing, gap-free seq values.
 func TestSeqIsUniqueAcrossConnections(t *testing.T) {
 	dir := testutil.TempHome(t)
-	migs := append(embedded(t), factsMigration(t))
+	migs := append(foundation(t), factsMigration(t))
 	a, _ := open(t, dir, Options{Migrations: migs})
 	b, _ := open(t, dir, Options{Migrations: migs})
 	var wg sync.WaitGroup
@@ -529,7 +537,7 @@ func TestSeqIsUniqueAcrossConnections(t *testing.T) {
 // MVP-STO-04: the same across operating-system processes.
 func TestSeqIsUniqueAcrossProcesses(t *testing.T) {
 	dir := testutil.TempHome(t)
-	migs := append(embedded(t), factsMigration(t))
+	migs := append(foundation(t), factsMigration(t))
 	db, _ := open(t, dir, Options{Migrations: migs})
 	const perProcess = 100
 	procs := make([]chan error, 3)
@@ -596,7 +604,7 @@ func assertContiguousSeq(t *testing.T, db *DB, want int) {
 
 func TestAppendOnlyTriggersAndMaintenance(t *testing.T) {
 	dir := testutil.TempHome(t)
-	db, _ := open(t, dir, Options{Migrations: append(embedded(t), factsMigration(t))})
+	db, _ := open(t, dir, Options{Migrations: append(foundation(t), factsMigration(t))})
 	insertFact(t, db, "01J9Z3K5Q8R2T4V6W8X0Y2Z4A6", "keep")
 	for _, stmt := range []string{`UPDATE facts SET payload = 'changed'`, `DELETE FROM facts`} {
 		if _, err := db.sql.ExecContext(ctx, stmt); err == nil || !strings.Contains(err.Error(), "append-only") {
@@ -634,7 +642,7 @@ func TestTombstonesAppliedBeforeMigrationBackup(t *testing.T) {
 	dir := testutil.TempHome(t)
 	const purged, kept = "01J9Z3K5Q8R2T4V6W8X0Y2Z4A6", "01J9Z3K5Q8R2T4V6W8X0Y2Z4A7"
 	canaryPurged, canaryKept := testutil.NewCanary(t), testutil.NewCanary(t)
-	migs := append(embedded(t), factsMigration(t))
+	migs := append(foundation(t), factsMigration(t))
 	db, _ := open(t, dir, Options{Migrations: migs})
 	insertFact(t, db, purged, canaryPurged)
 	insertFact(t, db, kept, canaryKept)
@@ -668,7 +676,7 @@ func TestTombstonesAppliedBeforeMigrationBackup(t *testing.T) {
 // from tombstone validation rather than from the version guard.
 func TestInvalidTombstonesFileIsAnError(t *testing.T) {
 	dir := testutil.TempHome(t)
-	migs := append(embedded(t), factsMigration(t))
+	migs := append(foundation(t), factsMigration(t))
 	db, _ := open(t, dir, Options{Migrations: migs})
 	insertFact(t, db, "01J9Z3K5Q8R2T4V6W8X0Y2Z4A6", "kept")
 	_ = db.Close()
@@ -685,7 +693,7 @@ func TestInvalidTombstonesFileIsAnError(t *testing.T) {
 
 func TestMigrationsMustBeContiguous(t *testing.T) {
 	dir := testutil.TempHome(t)
-	gap := []Migration{embedded(t)[0], {Version: 3, Name: "gap", SQL: `SELECT 1;`}}
+	gap := []Migration{foundation(t)[0], {Version: 3, Name: "gap", SQL: `SELECT 1;`}}
 	if _, _, err := Open(ctx, dir, Options{Migrations: gap}); apperr.ExitCode(err) != apperr.ExitInternal {
 		t.Fatalf("err = %v", err)
 	}

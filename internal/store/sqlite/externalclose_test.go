@@ -51,7 +51,7 @@ func plainCloseHelper() int {
 //   - the committed data is intact.
 func TestInspectDuringExternalCloseReportsUnknown(t *testing.T) {
 	dir := testutil.TempHome(t)
-	db, _ := open(t, dir, Options{Migrations: append(embedded(t), factsMigration(t))})
+	db, _ := open(t, dir, Options{Migrations: append(foundation(t), factsMigration(t))})
 	insertFact(t, db, "01J9Z3K5Q8R2T4V6W8X0Y2Z4A6", "committed")
 	insertFact(t, db, "01J9Z3K5Q8R2T4V6W8X0Y2Z4A6", "committed")
 	_ = db.Close() // persistent WAL: -wal and -shm stay
@@ -144,7 +144,7 @@ func requireOnlyEmptyAuxiliaryFiles(t *testing.T, dir datadir.Dir, afterExternal
 func TestOpenDuringExternalCloseOnlyAddsEmptyAuxiliaryFiles(t *testing.T) {
 	setup := func(t *testing.T) (datadir.Dir, []Migration, string) {
 		dir := testutil.TempHome(t)
-		migs := append(embedded(t), factsMigration(t))
+		migs := append(foundation(t), factsMigration(t))
 		db, _ := open(t, dir, Options{Migrations: migs})
 		insertFact(t, db, "01J9Z3K5Q8R2T4V6W8X0Y2Z4A6", "committed")
 		insertFact(t, db, "01J9Z3K5Q8R2T4V6W8X0Y2Z4A6", "committed")
@@ -155,7 +155,7 @@ func TestOpenDuringExternalCloseOnlyAddsEmptyAuxiliaryFiles(t *testing.T) {
 	t.Run("incompatible database is still refused", func(t *testing.T) {
 		dir, _, want := setup(t)
 		afterExternal := externalCloseDuringCheck(t, dir)
-		db, _, err := Open(ctx, dir, Options{Migrations: embedded(t)}) // knows schema v1 only
+		db, _, err := Open(ctx, dir, Options{Migrations: foundation(t)}) // knows schema v1 only
 		if err == nil {
 			_ = db.Close()
 			t.Fatal("a binary that knows schema v1 opened a schema v2 database")
@@ -230,7 +230,7 @@ func TestOpenRefusesWhenVersionIsUnknown(t *testing.T) {
 			t.Fatal(err)
 		}
 		before := testutil.SnapshotTree(t, dir.Path)
-		openRefused(t, dir, Options{Migrations: append(embedded(t), factsMigration(t))}, "cannot confirm")
+		openRefused(t, dir, Options{Migrations: append(foundation(t), factsMigration(t))}, "cannot confirm")
 		testutil.AssertTreeUnchanged(t, dir.Path, before)
 	})
 }
@@ -276,7 +276,7 @@ func armExternalClose(t *testing.T, dir datadir.Dir) *armedClose {
 // uncontended check reports the version again.
 func TestInspectRepeatedExternalCloseReportsUnknown(t *testing.T) {
 	dir := testutil.TempHome(t)
-	migs := append(embedded(t), factsMigration(t))
+	migs := append(foundation(t), factsMigration(t))
 	db, _ := open(t, dir, Options{Migrations: migs})
 	insertFact(t, db, "01J9Z3K5Q8R2T4V6W8X0Y2Z4A6", "committed")
 	insertFact(t, db, "01J9Z3K5Q8R2T4V6W8X0Y2Z4A6", "committed")

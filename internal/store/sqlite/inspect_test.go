@@ -92,7 +92,7 @@ func TestInspectLeavesLiveDatabaseUntouched(t *testing.T) {
 // without the -wal and -shm a specmetry connection left behind.
 func TestInspectLeavesRestoredBackupUntouched(t *testing.T) {
 	dir := testutil.TempHome(t)
-	migs := append(embedded(t), factsMigration(t))
+	migs := append(foundation(t), factsMigration(t))
 	db, _ := open(t, dir, Options{Migrations: migs[:1]})
 	_ = db.Close()
 	db, res := open(t, dir, Options{Migrations: migs})
@@ -164,7 +164,7 @@ func TestInspectMissingDatabase(t *testing.T) {
 func TestCompatibleBinaryRecoversCrashedDatabase(t *testing.T) {
 	dir := testutil.TempHome(t)
 	crashWithWAL(t, "CRASH_FACTS=4", "CRASH_PAYLOAD=x")
-	db, _ := open(t, dir, Options{Migrations: append(embedded(t), factsMigration(t))})
+	db, _ := open(t, dir, Options{Migrations: append(foundation(t), factsMigration(t))})
 	if n := countRows(t, db, `SELECT count(*) FROM facts`); n != 4 {
 		t.Fatalf("%d facts after recovery, want 4", n)
 	}
@@ -189,7 +189,7 @@ func TestReadOnlyConnectionByFileState(t *testing.T) {
 			crashWithWAL(t, "CRASH_FACTS=3", "CRASH_PAYLOAD=x")
 		}, true},
 		{"rollback journal mode, no -wal or -shm", func(t *testing.T, dir datadir.Dir) {
-			migs := append(embedded(t), factsMigration(t))
+			migs := append(foundation(t), factsMigration(t))
 			db, _ := open(t, dir, Options{Migrations: migs[:1]})
 			_ = db.Close()
 			db, res := open(t, dir, Options{Migrations: migs})

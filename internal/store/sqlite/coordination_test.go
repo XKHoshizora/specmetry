@@ -126,20 +126,20 @@ func TestIncompatibleRefusalMayOnlyCreateCoordinationFile(t *testing.T) {
 	}{
 		{"newer schema", func(t *testing.T) datadir.Dir {
 			src := datadir.Dir{Path: filepath.Join(testdir.New(t), "src")}
-			db, _ := open(t, src, Options{Migrations: append(embedded(t), factsMigration(t))})
+			db, _ := open(t, src, Options{Migrations: append(foundation(t), factsMigration(t))})
 			insertFact(t, db, "01J9Z3K5Q8R2T4V6W8X0Y2Z4A6", "kept")
 			insertFact(t, db, "01J9Z3K5Q8R2T4V6W8X0Y2Z4A6", "kept")
 			_ = db.Close()
 			return src
-		}, func(t *testing.T) Options { return Options{Migrations: embedded(t)} }, "upgrade specmetry"},
+		}, func(t *testing.T) Options { return Options{Migrations: foundation(t)} }, "upgrade specmetry"},
 		{"min_binary_version", func(t *testing.T) datadir.Dir {
 			src := datadir.Dir{Path: filepath.Join(testdir.New(t), "src")}
-			db, _ := open(t, src, Options{Migrations: append(embedded(t), requires), BinaryVersion: "9.9.9"})
+			db, _ := open(t, src, Options{Migrations: append(foundation(t), requires), BinaryVersion: "9.9.9"})
 			_ = db.Close()
 			return src
 		}, func(t *testing.T) Options {
 			// Knows the same schema, but is older than min_binary_version.
-			return Options{Migrations: append(embedded(t), requires), BinaryVersion: "0.1.0"}
+			return Options{Migrations: append(foundation(t), requires), BinaryVersion: "0.1.0"}
 		}, "9.9.9"},
 	}
 	for _, c := range cases {

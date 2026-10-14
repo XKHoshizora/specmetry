@@ -101,7 +101,7 @@ func startUncommittedWriter(t *testing.T, journal string) {
 // restored VACUUM INTO backup) in dir.
 func restoredRollbackDatabase(t *testing.T, dir datadir.Dir) {
 	t.Helper()
-	migs := append(embedded(t), factsMigration(t))
+	migs := append(foundation(t), factsMigration(t))
 	db, _ := open(t, dir, Options{Migrations: migs})
 	insertFact(t, db, "01J9Z3K5Q8R2T4V6W8X0Y2Z4A6", "committed")
 	_ = db.Close()
@@ -135,7 +135,7 @@ func TestInspectNeverReportsUncommittedRollbackWrite(t *testing.T) {
 // WAL: only the committed version may be reported.
 func TestInspectNeverReportsUncommittedWALWrite(t *testing.T) {
 	dir := testutil.TempHome(t)
-	db, _ := open(t, dir, Options{Migrations: append(embedded(t), factsMigration(t))})
+	db, _ := open(t, dir, Options{Migrations: append(foundation(t), factsMigration(t))})
 	_ = db.Close()
 	startUncommittedWriter(t, "WAL")
 	in, err := Inspect(ctx, dir)

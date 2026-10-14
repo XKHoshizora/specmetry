@@ -59,12 +59,14 @@
       "description": "Document-like files found in the repository; never registered automatically.",
       "type": "array",
       "maxItems": 200,
+      "uniqueItems": true,
       "items": { "$ref": "common.v1.schema.json#/$defs/relPath" }
     },
     "test_hints": {
       "description": "P1: detected test commands, e.g. 'go test ./...'.",
       "type": "array",
       "maxItems": 20,
+      "uniqueItems": true,
       "items": { "type": "string", "maxLength": 200 }
     },
     "git": {
@@ -84,6 +86,7 @@
     },
     "warnings": {
       "type": "array",
+      "uniqueItems": true,
       "items": {
         "enum": [
           "not_a_git_repository",
@@ -93,5 +96,38 @@
         ]
       }
     }
-  }
+  },
+  "allOf": [
+    {
+      "description": "Outside git there is no delivery target, no HEAD, no exclude file and no git facts (FR-INIT-09).",
+      "if": { "required": ["warnings"], "properties": { "warnings": { "contains": { "const": "not_a_git_repository" } } } },
+      "then": {
+        "properties": {
+          "target": { "type": "null" },
+          "git": { "type": "null" },
+          "warnings": { "not": { "contains": { "enum": ["detached_head_no_target", "exclude_not_writable"] } } }
+        }
+      }
+    },
+    {
+      "description": "detached_head_no_target reports that no delivery target exists (FR-INIT-10).",
+      "if": { "required": ["warnings"], "properties": { "warnings": { "contains": { "const": "detached_head_no_target" } } } },
+      "then": { "properties": { "target": { "type": "null" } } }
+    },
+    {
+      "description": "A project created by this run has no proposal or baseline version yet.",
+      "if": { "required": ["created"], "properties": { "created": { "const": true } } },
+      "then": {
+        "properties": {
+          "baseline_version": { "const": 0 },
+          "init_progress": { "enum": ["initialized", "sources_registered"] }
+        }
+      }
+    },
+    {
+      "description": "Without a baseline version the progress cannot have reached baseline_confirmed (data-model §6.12).",
+      "if": { "required": ["baseline_version"], "properties": { "baseline_version": { "const": 0 } } },
+      "then": { "properties": { "init_progress": { "enum": ["initialized", "sources_registered", "baseline_proposed"] } } }
+    }
+  ]
 }

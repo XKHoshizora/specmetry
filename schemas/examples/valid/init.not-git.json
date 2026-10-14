@@ -1,0 +1,16 @@
+{
+  "schema": "specmetry.init/v1",
+  "project": {
+    "id": "01J9Z3K5Q8R2T4V6W8X0Y2Z4C2",
+    "name": "plain",
+    "stage": "docs_only",
+    "stage_detected": "docs_only"
+  },
+  "created": true,
+  "init_progress": "sources_registered",
+  "baseline_version": 0,
+  "target": null,
+  "candidate_sources": ["docs/brief.md"],
+  "test_hints": [],
+  "warnings": ["not_a_git_repository"]
+}

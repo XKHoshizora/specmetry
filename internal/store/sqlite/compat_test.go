@@ -46,7 +46,7 @@ func restoreBackup(t *testing.T, dir datadir.Dir, backupPath string) {
 // file.
 func TestOlderBinaryLeavesRestoredNewerBackupUntouched(t *testing.T) {
 	dir := testutil.TempHome(t)
-	migs := append(embedded(t), factsMigration(t))
+	migs := append(foundation(t), factsMigration(t))
 	v3 := Migration{Version: 3, Name: "extra", SQL: `CREATE TABLE extra (id INTEGER PRIMARY KEY);`}
 	v4 := Migration{Version: 4, Name: "more", SQL: `CREATE TABLE more (id INTEGER PRIMARY KEY);`}
 	db, _ := open(t, dir, Options{Migrations: append(slices.Clone(migs), v3)})
@@ -72,7 +72,7 @@ func TestOlderBinaryLeavesCrashedNewerDatabaseUntouched(t *testing.T) {
 	dir := testutil.TempHome(t)
 	crashWithWAL(t, "CRASH_FACTS=3", "CRASH_PAYLOAD=newer")
 	before := testutil.SnapshotTree(t, dir.Path)
-	openRefused(t, dir, Options{Migrations: embedded(t)}, "upgrade specmetry")
+	openRefused(t, dir, Options{Migrations: foundation(t)}, "upgrade specmetry")
 	testutil.AssertTreeUnchanged(t, dir.Path, before)
 }
 
@@ -81,7 +81,7 @@ func TestOlderBinaryLeavesCrashedNewerDatabaseUntouched(t *testing.T) {
 // write lock and before running the callback.
 func TestWriteTxRefusesAfterConcurrentSchemaUpgrade(t *testing.T) {
 	dir := testutil.TempHome(t)
-	migs := append(embedded(t), factsMigration(t))
+	migs := append(foundation(t), factsMigration(t))
 	old, _ := open(t, dir, Options{Migrations: migs})
 	insertFact(t, old, "01J9Z3K5Q8R2T4V6W8X0Y2Z4A6", "before")
 
@@ -96,7 +96,7 @@ func TestWriteTxRefusesAfterConcurrentSchemaUpgrade(t *testing.T) {
 // min_binary_version without changing the schema version.
 func TestWriteTxRefusesAfterMinBinaryVersionRaised(t *testing.T) {
 	dir := testutil.TempHome(t)
-	old, _ := open(t, dir, Options{Migrations: append(embedded(t), factsMigration(t)), BinaryVersion: "0.1.0"})
+	old, _ := open(t, dir, Options{Migrations: append(foundation(t), factsMigration(t)), BinaryVersion: "0.1.0"})
 	insertFact(t, old, "01J9Z3K5Q8R2T4V6W8X0Y2Z4A6", "before")
 
 	other, err := sql.Open("sqlite", dsn(dir.Join(datadir.DatabaseFile)))
@@ -148,7 +148,7 @@ func contains(err error, s string) bool {
 func TestUnreadableMinBinaryVersionIsRefused(t *testing.T) {
 	dir := testutil.TempHome(t)
 	bad := Migration{Version: 2, Name: "bad_min", SQL: `UPDATE meta SET min_binary_version = 'next' WHERE id = 1;`}
-	migs := append(embedded(t), bad)
+	migs := append(foundation(t), bad)
 	db, _ := open(t, dir, Options{Migrations: migs})
 	_ = db.Close()
 	before := testutil.SnapshotTree(t, dir.Path)

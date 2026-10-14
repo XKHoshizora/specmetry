@@ -173,12 +173,12 @@ func TestOpenRefusesInsecureExistingDirectory(t *testing.T) {
 // refused; neither it nor the directory changes.
 func TestOpenRefusesInsecureExistingDatabase(t *testing.T) {
 	dir := testutil.TempHome(t)
-	db, _ := open(t, dir, Options{Migrations: append(embedded(t), factsMigration(t))})
+	db, _ := open(t, dir, Options{Migrations: append(foundation(t), factsMigration(t))})
 	insertFact(t, db, "01J9Z3K5Q8R2T4V6W8X0Y2Z4A6", "secret")
 	_ = db.Close()
 	testutil.LoosenPermissions(t, dir.Join(datadir.DatabaseFile))
 	before := testutil.SnapshotTree(t, dir.Path)
-	openRefused(t, dir, Options{Migrations: append(embedded(t), factsMigration(t))}, datadir.DatabaseFile)
+	openRefused(t, dir, Options{Migrations: append(foundation(t), factsMigration(t))}, datadir.DatabaseFile)
 	testutil.AssertTreeUnchanged(t, dir.Path, before)
 }
 
@@ -189,7 +189,7 @@ func TestOpenRefusesInsecureLeftoverWAL(t *testing.T) {
 	crashWithWAL(t, "CRASH_FACTS=3", "CRASH_PAYLOAD=secret")
 	testutil.LoosenPermissions(t, dir.Join(datadir.DatabaseFile)+"-wal")
 	before := testutil.SnapshotTree(t, dir.Path)
-	openRefused(t, dir, Options{Migrations: append(embedded(t), factsMigration(t))}, datadir.DatabaseFile+"-wal")
+	openRefused(t, dir, Options{Migrations: append(foundation(t), factsMigration(t))}, datadir.DatabaseFile+"-wal")
 	testutil.AssertTreeUnchanged(t, dir.Path, before)
 }
 

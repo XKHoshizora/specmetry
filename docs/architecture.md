@@ -232,6 +232,58 @@ sequenceDiagram
 | 有代码文件，并且至少有 1 份实质文档 | `in_development` |
 | 有代码文件，但没有实质文档（例如只有 README） | `incomplete_docs` |
 
+**实现细化（WP1.1）**：
+
+- 关键词匹配不区分大小写。英文的"完整单词"指连续的 ASCII 字母：数字、`-`、`_`、`.` 等字符，以及小写字母后接大写字母的位置（`ClientBrief`），都是单词边界。文件名和路径上每一级目录的名称都参与匹配（`old/specs/x.md` 属于第 1 级）。
+- 第 2 级的目录指仓库根目录下的第一级目录，名称比较不区分大小写（`Docs/` 同样计入）。同一级内按路径的字节序排列。
+- 项目清单文件（阶段识别中所列，例如 `requirements.txt`）不作为候选来源：它们属于代码，不是需求文档。
+- 排除目录的名称区分大小写；文件类型白名单和代码扩展名按小写比较；代码文件和清单文件在任何目录层级都计入（排除目录中的除外），`*.csproj`、`*.sln` 按后缀匹配。
+- 无法作为 `relPath` 输出的路径（含换行等字符，或超过 1024 个字符）不列为候选。
+- 实质文档在全部候选中判断，不受"最多 200 个"的截断影响。
+- 测试命令提示（P1，`test_hints`）只看根目录的 `go.mod`、`package.json`、`pytest.ini`、`Cargo.toml`，同样只看文件名。
+
+### 6.1.2 `init` 的登记规则（M1 实现）
+
+`init` 可以在任何通道执行，可以重复执行。
+
+**项目的位置与身份**：
+
+- **git 项目**：从当前目录向上查找 `.git`（与 Hook 的查找方式相同，§12.2），再用 `git rev-parse` 取得当前 worktree、它的 git 目录和公共目录，用 `git worktree list` 取得主 worktree。项目由**公共目录**识别（`projects.git_common_dir`，唯一），所以同一仓库的所有 worktree 都属于同一个项目（FR-WT-01）。
+- 当前目录位于 git 目录内部或裸仓库中时，没有可以登记的 worktree，返回退出码 6；不会把它当作非 git 项目。
+- **非 git 项目**：项目目录是从当前目录向上最近的、含有 marker 的目录，没有时就是当前目录；项目由这个目录（主 worktree 的路径）识别。返回 `not_a_git_repository` 警告，`target = null`（FR-INIT-09）。
+- 所有路径都先规范化，再保存和比较：绝对路径，解析符号链接；Windows 上还统一短文件名和大小写。经由符号链接或不同大小写的路径进入同一目录，得到的是同一个项目和同一个 worktree。
+- 调用 git 时，不传递会让 git 改用其他仓库、worktree、索引或对象库的环境变量（`GIT_DIR`、`GIT_WORK_TREE`、`GIT_COMMON_DIR`、`GIT_INDEX_FILE`、`GIT_CEILING_DIRECTORIES` 等）：仓库只由目录决定，与 Hook 一致。同时设置 `GIT_OPTIONAL_LOCKS=0`。`init` 运行的 git 命令都是只读的，不修改提交、引用、索引和配置。
+
+**marker 与数据库**：数据库是项目身份的唯一依据；marker（§8）只是指向它的指针，供不访问数据库的 Hook 使用。
+
+- 数据库中有这个项目，但 marker 不存在：补写 marker。
+- marker 中的 `project_id` 与数据库中的项目不同，或者数据库中没有 marker 所指的项目（例如该项目已被 `purge`，或登记在另一个 `SPECMETRY_HOME` 中，或者目录是从其他项目复制或移动来的）：返回退出码 6，**不写入任何内容**，提示人检查。人确认后删除 marker 再执行 `init`，目录就会登记为新项目。marker 中的 ID 从不被沿用，所以已删除的项目不会因此复活。仓库移动或复制后如何继承原项目，见 TD-25。
+- marker 无法解析、不是常规文件，或者 `.specmetry` 不是目录（包括符号链接）：返回退出码 6，不写入。
+
+**首次执行**（数据库中没有这个项目）：在一个写事务中登记项目、主 worktree，以及当前 worktree（如果与主 worktree 不同）；并按 FR-INIT-10 创建默认交付目标：名称为 `default`，ref 是主 worktree 当前所在的分支（即使 `init` 在关联 worktree 中执行），`actor` 和 `channel` 为 `system`。分支还没有提交时也创建目标，快照为 `null`；主 worktree 处于分离 HEAD 时不创建，并返回 `detached_head_no_target`。阶段取 `--stage`，否则取识别结果；名称取 `--name`，否则取主 worktree 的目录名。
+
+**再次执行**：
+
+- 返回 `created = false` 和已有的项目。`stage_detected` 每次重新识别；`stage` 保持已保存的值，只有 `--stage` 会修改它。
+- 第一次出现的 worktree 被登记（MVP-WT-01）；已登记的只更新 `last_seen_at`，不分配 `seq`。
+- **不创建交付目标**：项目创建之后，交付目标只能由人设置（`target set`）。首次执行时主 worktree 处于分离 HEAD 的项目，之后即使回到分支上也没有目标（差距 `NO_TARGET`）。
+- **不改名**：`--name` 与已登记的名称不同时，返回退出码 2，不写入。
+- `--skip-sources`、`--skip-inventory` 只会设置 `settings_json` 中对应的标记，不会清除它。
+
+**写入顺序与失败**：
+
+1. 参数和路径的校验都在打开数据库之前完成；校验失败时，连数据目录都不会创建。
+2. 数据库写入在一个写事务中完成（`BEGIN IMMEDIATE`），所以并发执行的 `init` 只会登记一个项目；`git_common_dir` 的唯一约束是第二道防线。事务中的任何失败都会回滚，不留下数据。
+3. 事务提交之后写 marker（先写临时文件，再原子替换），最后写 exclude 条目（§10.6）。marker 写入失败时返回退出码 6；项目已经登记，再次执行 `init` 会补写 marker。
+
+**密钥扫描**（§10.8）：项目名（`--name` 或目录名），以及要保存的路径（主 worktree、当前 worktree、git 目录、公共目录），都在写入之前扫描；命中时返回退出码 2，错误中只给出字段和规则，不回显内容。项目名还必须非空、单行、不含控制字符，并且不超过 200 个字符。
+
+**输出**：`--json` 输出 `init.v1`，输出前按 schema 校验；失败时输出 `error.v1`。
+
+- `init_progress` 按 data-model §6.12 推导。来源、提案、基准和范围随 WP1.4 ~ WP1.8 加入；在此之前这些事实都不存在，所以只有 `--skip-sources` 能让进度越过 `initialized`。基准版本表出现之前，`baseline_version` 恒为 0。
+- `data_dir_permissions_loose` 警告不会出现：数据目录的权限不满足要求时，写入方直接拒绝（§11.1，退出码 6）。
+- P1 的 `git` 字段（提交数、最近提交时间）暂不输出。
+
 ### 6.2 Hook 采集与入库
 
 ```mermaid
@@ -479,8 +531,8 @@ Agent 侧的安装位置（TD-03）：
 
 Specmetry 对项目仓库的写入仅限于：
 
-- `.specmetry/project.json`；
-- `.git/info/exclude`（默认写入，可用 `--no-exclude` 关闭；不可写时只给出警告）；
+- `.specmetry/project.json`（只在主 worktree 中；先写临时文件，再原子替换）；
+- `.git/info/exclude`（默认写入，可用 `--no-exclude` 关闭；不可写时只给出警告）。写入的条目是 `/.specmetry/`，写进 `git rev-parse --git-path info/exclude` 所指的文件（在公共目录中，所有 worktree 共用）。只追加，原有内容逐字节保留；已有等价条目（`/.specmetry/`、`/.specmetry`、`.specmetry/`、`.specmetry`）时不再写入。
 - 用户选择项目级安装时，经确认写入的 `.claude/settings.local.json`。前提是这个路径已被 git 忽略（用 `git check-ignore` 检查）；否则拒绝项目级安装，并建议改用用户级安装。
 
 Specmetry 从不修改代码和 git 历史。
@@ -705,7 +757,7 @@ M3 开工前要对照官方文档核实，并固定一个经过测试的版本�
    - 如果它是目录，就在它所在的目录读取 marker。
 3. 都找不到（例如裸仓库或非标准布局），视为非 Specmetry 项目：不写 spool，直接以 0 退出。
 
-CLI 则通过 `git rev-parse --git-common-dir` 和数据库中的 `git_common_dir` 匹配项目，不依赖 marker 的位置。
+CLI 则通过 `git rev-parse --git-common-dir` 和数据库中的 `git_common_dir` 匹配项目，不依赖 marker 的位置。CLI 同样从目录出发：调用 git 时不传递 `GIT_DIR` 等定位变量，marker 必须与数据库一致（§6.1.2）。
 
 **会话起点 HEAD**：同样不启动子进程，只读文件：
 
@@ -844,3 +896,4 @@ schemas/  skill/  web/  testdata/fixtures/  docs/
 | TD-22 | Windows ACL 的具体授权对象 | **已确认**：当前用户 + SYSTEM，受保护的 DACL（关闭继承），子对象继承 | 已确认（2026-10-13） |
 | TD-23 | `check.inputs` 的对象 ID 粒度 | 文件取 blob ID，目录取 tree ID | M2 |
 | TD-24 | 隔离执行器的后端与验证方法：物化方式（`git worktree add --detach` 或 `git archive`）；各平台的只读强制机制（容器只读挂载、Linux 上的 bubblewrap / Landlock、macOS 沙箱、Windows 待评估）；执行前写入探测与执行后树比对的实现；子模块、LFS 和依赖缓存的处理 | 待定；约束：不能依赖文件权限位；无法验证时绝不标为隔离级；普通项目不强制安装 | 隔离执行器开工前（MVP 之后） |
+| TD-25 | 仓库移动或复制后的项目身份：marker 与数据库不一致时，如何判断是原项目换了位置（应继承原项目），还是复制出的新项目 | M1（WP1.1）采取保守做法：拒绝并说明原因，不写入；由人删除 marker 后，登记为新项目（§6.1.2）。是否提供人类专属的"迁移项目位置"命令，待定 | M4（自测之前） |

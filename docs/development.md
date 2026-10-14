@@ -28,7 +28,11 @@ export SPECMETRY_HOME="$(mktemp -d)/specmetry-home"
 | `internal/config/` | `config.toml` 读取（未知键视为错误；错误只给出行列位置，不回显文件内容）；`[secrets]` 追加规则 |
 | `internal/channel/` | CLI 通道识别（architecture §5.1）：`Detect`（stdin、stdout 是否为终端或 Windows 控制台，已核实的 Agent 环境变量只看是否存在且非空，值只用于这次判断，从不保存、记录或输出）、`Guard`（人类专属操作的拦截与交互式确认，没有跳过参数）。防止误操作，不是身份认证 |
 | `internal/secrets/` | 密钥识别（architecture §10.8）：14 条内置规则、追加规则校验、按字段扫描（JSON Pointer）、不回显命中文本的拒绝错误。只能降低泄露风险，不能保证检测出所有秘密 |
-| `internal/store/sqlite/` | SQLite 存储基础：打开顺序、迁移框架、备份、墓碑、`seq`、只追加触发器、只读检查 |
+| `internal/store/sqlite/` | SQLite 存储基础：打开顺序、迁移框架、备份、墓碑、`seq`、只追加触发器、只读检查；迁移 v2 起是业务表（`projects`、`worktrees`、`delivery_targets`） |
+| `internal/project/` | 项目登记与 `init`（architecture §6.1.1、§6.1.2）：阶段识别与候选来源（只看路径和大小，不读内容）、marker、exclude 条目、项目与 worktree 的登记、默认交付目标 |
+| `internal/gitx/` | 调用 git CLI（只读）：定位仓库与 worktree、分支与提交、文件列表；不传递 `GIT_DIR` 等定位变量 |
+| `internal/domain/derive/` | 推导规则（纯函数，data-model §6）；目前只有初始化进度（§6.12） |
+| `internal/ulid/` | ULID 生成（只用于标识，不用于排序） |
 | `internal/contract/` | 用内嵌的 `schemas/` 做 JSON Schema 2020-12 校验 |
 | `internal/testutil/` | 测试基座（见 §6） |
 | `internal/buildinfo/` | 版本与构建信息 |
