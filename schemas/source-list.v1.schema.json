@@ -67,7 +67,19 @@
       },
       "if": { "properties": { "removed_seq": { "type": "integer" } } },
       "then": { "properties": { "state": { "const": null }, "current_sha256": { "const": null } } },
-      "else": { "properties": { "state": { "type": "string" } } }
+      "else": { "properties": { "state": { "type": "string" } } },
+      "allOf": [
+        {
+          "description": "missing: the file could not be read, so there is no current hash.",
+          "if": { "required": ["state"], "properties": { "state": { "const": "missing" } } },
+          "then": { "properties": { "current_sha256": { "const": null } } }
+        },
+        {
+          "description": "unchanged or changed: the file was read and hashed. Whether current_sha256 equals acked_sha256 (unchanged) or not (changed) is checked by the output tests; the schema cannot compare two fields.",
+          "if": { "required": ["state"], "properties": { "state": { "enum": ["unchanged", "changed"] } } },
+          "then": { "properties": { "current_sha256": { "type": "string" } } }
+        }
+      ]
     },
     "ref": {
       "type": "object",

@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/XKHoshizora/specmetry/internal/apperr"
@@ -314,5 +316,192 @@ func TestListFilesStopsWhenCanceled(t *testing.T) {
 	repo.Commit("init")
 	if files, err := project.ListFiles(canceled, repo.Dir, true); err == nil || files != nil {
 		t.Fatalf("cancelled git listing: %d files, %v", len(files), err)
+	}
+}
+
+// Concurrent init runs may all find the marker missing and write it at
+// once (TestInitConcurrentRunsRegisterOneProject, seen failing on macOS
+// CI): creating the directory must not fail because another writer just
+// created it.
+func TestWriteMarkerConcurrently(t *testing.T) {
+	m := project.Marker{ProjectID: "01J9Z3K5Q8R2T4V6W8X0Y2Z4C1", Name: "demo"}
+	for round := range 20 {
+		root := t.TempDir()
+		var wg sync.WaitGroup
+		errs := make([]error, 8)
+		for i := range errs {
+			wg.Go(func() { errs[i] = project.WriteMarker(root, m) })
+		}
+		wg.Wait()
+		for i, err := range errs {
+			if err != nil {
+				t.Fatalf("round %d, writer %d: %v", round, i, err)
+			}
+		}
+		if got, found, err := project.ReadMarker(root); err != nil || !found || got.ProjectID != m.ProjectID {
+			t.Fatalf("round %d: ReadMarker = %+v, %v, %v", round, got, found, err)
+		}
+	}
+}
+
+// The marker is created, never replaced: an existing marker that holds the
+// same project counts as written; a different one is left alone and is an
+// error.
+func TestWriteMarkerNeverReplaces(t *testing.T) {
+	root := t.TempDir()
+	m := project.Marker{ProjectID: "01J9Z3K5Q8R2T4V6W8X0Y2Z4C1", Name: "demo"}
+	if err := project.WriteMarker(root, m); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(filepath.Join(root, ".specmetry", "project.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := project.WriteMarker(root, m); err != nil {
+		t.Fatalf("writing the same marker again: %v", err)
+	}
+	other := project.Marker{ProjectID: "01J9Z3K5Q8R2T4V6W8X0Y2Z4C2", Name: "demo"}
+	if err := project.WriteMarker(root, other); err == nil {
+		t.Fatal("a different marker was replaced")
+	}
+	after, err := os.ReadFile(filepath.Join(root, ".specmetry", "project.json"))
+	if err != nil || string(after) != string(before) {
+		t.Fatalf("marker changed: %q -> %q (%v)", before, after, err)
+	}
+	if entries, _ := os.ReadDir(filepath.Join(root, ".specmetry")); len(entries) != 1 {
+		t.Fatalf(".specmetry holds %d entries, want only the marker", len(entries))
+	}
+}
+
+// marker returns a marker of its own project for each i < 100.
+func marker(i int) project.Marker {
+	return project.Marker{ProjectID: fmt.Sprintf("01J9Z3K5Q8R2T4V6W8X0Y2Z4%02d", i), Name: "demo"}
+}
+
+func failingLink(err error) func(oldname, newname string) error {
+	return func(oldname, newname string) error {
+		return &os.LinkError{Op: "link", Old: oldname, New: newname, Err: err}
+	}
+}
+
+func markerEntries(t *testing.T, root string) []string {
+	t.Helper()
+	entries, err := os.ReadDir(filepath.Join(root, ".specmetry"))
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	return names
+}
+
+// Where the hard link fails (a file system without hard links, or one
+// that does not permit them; simulated), the marker cannot be put in place
+// without risking replacing one that another writer has just created, so
+// it is not created at all: there is no rename fallback (codex-review-018
+// B2). Concurrent writers of different markers all fail with exit 6, none
+// succeeds, and no marker or temporary file is left.
+func TestWriteMarkerWithoutHardLinks(t *testing.T) {
+	for _, cause := range []error{errors.ErrUnsupported, fs.ErrPermission} {
+		project.SetLink(t, failingLink(cause))
+		for round := range 10 {
+			root := t.TempDir()
+			errs := make([]error, 16)
+			var wg sync.WaitGroup
+			for i := range errs {
+				wg.Go(func() { errs[i] = project.WriteMarker(root, marker(i)) })
+			}
+			wg.Wait()
+			var succeeded []int
+			for i, err := range errs {
+				if err == nil {
+					succeeded = append(succeeded, i)
+				} else if apperr.ExitCode(err) != apperr.ExitEnvironment || !strings.Contains(apperr.From(err).Message, "hard link") {
+					t.Fatalf("%v, round %d, writer %d: %v (exit %d), want exit 6 naming the hard link", cause, round, i, err, apperr.ExitCode(err))
+				}
+			}
+			if len(succeeded) > 0 {
+				got, _, _ := project.ReadMarker(root)
+				t.Fatalf("%v, round %d: writers %v of different markers succeeded; the marker holds %s", cause, round, succeeded, got.ProjectID)
+			}
+			if names := markerEntries(t, root); len(names) != 0 {
+				t.Fatalf("%v, round %d: .specmetry holds %v, want nothing", cause, round, names)
+			}
+		}
+	}
+}
+
+// An existing marker is never touched when the hard link fails: writing
+// the same marker counts as done, a different one is refused (exit 6), and
+// the marker keeps its bytes.
+func TestWriteMarkerWithoutHardLinksKeepsTheMarker(t *testing.T) {
+	root := t.TempDir()
+	if err := project.WriteMarker(root, marker(0)); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, ".specmetry", "project.json")
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	project.SetLink(t, failingLink(errors.ErrUnsupported))
+	errs := make([]error, 16)
+	var wg sync.WaitGroup
+	for i := range errs {
+		wg.Go(func() { errs[i] = project.WriteMarker(root, marker(i%2)) })
+	}
+	wg.Wait()
+	for i, err := range errs {
+		switch {
+		case i%2 == 0 && err != nil:
+			t.Errorf("writer %d of the same marker: %v", i, err)
+		case i%2 == 1 && apperr.ExitCode(err) != apperr.ExitEnvironment:
+			t.Errorf("writer %d of a different marker: %v (exit %d), want exit 6", i, err, apperr.ExitCode(err))
+		}
+	}
+	after, err := os.ReadFile(path)
+	if err != nil || string(after) != string(before) {
+		t.Fatalf("marker changed: %q -> %q (%v)", before, after, err)
+	}
+	if names := markerEntries(t, root); len(names) != 1 {
+		t.Fatalf(".specmetry holds %v, want only the marker", names)
+	}
+}
+
+// With hard links, of concurrent writers of different markers exactly one
+// succeeds and the marker holds what it wrote; every other writer is
+// refused (exit 6) and nothing it wrote replaces the marker.
+func TestWriteMarkerConcurrentDifferentMarkers(t *testing.T) {
+	for round := range 20 {
+		root := t.TempDir()
+		errs := make([]error, 16)
+		var wg sync.WaitGroup
+		for i := range errs {
+			wg.Go(func() { errs[i] = project.WriteMarker(root, marker(i)) })
+		}
+		wg.Wait()
+		winner := -1
+		for i, err := range errs {
+			switch {
+			case err == nil && winner >= 0:
+				t.Fatalf("round %d: writers %d and %d of different markers both succeeded", round, winner, i)
+			case err == nil:
+				winner = i
+			case apperr.ExitCode(err) != apperr.ExitEnvironment:
+				t.Fatalf("round %d, writer %d: %v (exit %d), want exit 6", round, i, err, apperr.ExitCode(err))
+			}
+		}
+		if winner < 0 {
+			t.Fatalf("round %d: no writer succeeded", round)
+		}
+		got, found, err := project.ReadMarker(root)
+		if err != nil || !found || got.ProjectID != marker(winner).ProjectID {
+			t.Fatalf("round %d: marker %+v (%v, %v), want the one writer %d wrote", round, got, found, err, winner)
+		}
+		if names := markerEntries(t, root); len(names) != 1 {
+			t.Fatalf("round %d: .specmetry holds %v, want only the marker", round, names)
+		}
 	}
 }

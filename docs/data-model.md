@@ -208,7 +208,9 @@ CLI 或 Hook 第一次在某个 worktree 中出现时，系统会自动登记它
 - **类型白名单**：只接受文档类文件（`.md`、`.markdown`、`.txt`、`.rst`、`.adoc`、`.pdf`、`.docx`、`.doc`、`.odt`、`.rtf`、`.html`、`.htm`、`.eml`）。只有人在 `human_cli` 中加上 `--allow-any-type` 时，才能登记其他类型。这样可以防止源代码被登记为来源后，被片段引用逐段复制下来。
 - **重复登记**：对已登记、未移除的路径再次执行 `source add`，什么都不做，只返回已有的来源。它**不会**更新 `acked_sha256`，因为更新只能通过人工 `ack` 完成。对已移除的路径再次登记，会创建新的来源记录（新 ID）。
 
-**来源集合哈希**：取所有未移除的来源，按 `id` 排序，把 `"<source_id>:<acked_sha256>\n"` 拼接后计算 sha256。新增、移除或确认来源，都会改变这个哈希。
+**来源集合哈希**：取所有未移除的来源，按 `id` 排序，把 `"<source_id>:<acked_sha256>\n"` 拼接后计算 sha256。新增、移除或确认来源，都会改变这个哈希（MVP-SRC-06 的含义见 PD-25）。
+
+登记、观测、确认和移除的命令行为见 [architecture.md §6.1.3](architecture.md#613-来源的登记与确认m1-实现)。
 
 ### 4.4 基准条目：`goals` / `requirements` / `acceptance_criteria`
 
@@ -977,4 +979,4 @@ M0 的 CI 会校验这两者（WP0.4）。凡是需要数据库状态才能判�
 
 ## 10. 相关待决策事项
 
-已确认：PD-03、PD-04、PD-12、PD-16 ~ PD-22、PD-24；待确认：PD-02（[prd.md §9](prd.md#9-产品待决策事项)）。技术：TD-01、TD-14、TD-18、TD-20、TD-21 已确认；TD-17、TD-24、TD-25 待确认（[architecture.md §16](architecture.md#16-技术待决策事项)）。
+已确认：PD-03、PD-04、PD-12、PD-16 ~ PD-22、PD-24、PD-25；待确认：PD-02（[prd.md §9](prd.md#9-产品待决策事项)）。技术：TD-01、TD-14、TD-18、TD-20、TD-21 已确认；TD-17、TD-24、TD-25 待确认（[architecture.md §16](architecture.md#16-技术待决策事项)）。

@@ -16,11 +16,14 @@ type PTYResult struct {
 }
 
 // PTYStep is one answer typed into the terminal: once the output contains
-// Expect (after the previous step's match), Send is written as keystrokes.
-// End a line with "\r", as the Enter key does. ConPTY drops trailing
-// spaces from what it renders, so Expect should not end with a space.
+// Expect (after the previous step's match), Before runs if set (to change
+// something while the prompt is shown), then Send is written as
+// keystrokes. End a line with "\r", as the Enter key does. ConPTY drops
+// trailing spaces from what it renders, so Expect should not end with a
+// space.
 type PTYStep struct {
 	Expect string
+	Before func()
 	Send   string
 }
 
@@ -67,6 +70,9 @@ func RunInPTYSession(t testing.TB, timeout time.Duration, env []string, steps []
 						break
 					}
 					from += i + len(steps[next].Expect)
+					if steps[next].Before != nil {
+						steps[next].Before()
+					}
 					_, _ = p.Write([]byte(steps[next].Send))
 					next++
 				}

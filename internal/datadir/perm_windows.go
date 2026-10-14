@@ -91,7 +91,13 @@ func checkPermissions(root string) ([]string, error) {
 	var problems []string
 	err = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
+			if vanished(p, root, err) {
+				return nil
+			}
 			return err
+		}
+		if beforeEntryCheck != nil && p != root {
+			beforeEntryCheck(p)
 		}
 		if problem := entryProblem(p, d); problem != "" {
 			problems = append(problems, problem)
@@ -100,6 +106,9 @@ func checkPermissions(root string) ([]string, error) {
 		sd, err := windows.GetNamedSecurityInfo(p, windows.SE_FILE_OBJECT,
 			windows.DACL_SECURITY_INFORMATION|windows.OWNER_SECURITY_INFORMATION)
 		if err != nil {
+			if vanished(p, root, err) {
+				return nil
+			}
 			return err
 		}
 		owner, _, err := sd.Owner()

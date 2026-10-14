@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -180,9 +181,14 @@ func ReadMarker(root string) (Marker, bool, error) {
 	return m, true, nil
 }
 
-// WriteMarker writes the marker of the project rooted at root, replacing
-// the file atomically. It refuses to write through anything but a real
-// .specmetry directory.
+// WriteMarker creates the marker of the project rooted at root. It is
+// written to a temporary file first and then hard-linked into place, so a
+// reader never sees part of it, and it never replaces a marker that is
+// already there: concurrent init runs write the same marker at once; the
+// first link wins and the others find the marker holding what they meant
+// to write. A different marker there is an error, and so is a file system
+// on which the hard link fails (publishMarker). It refuses to write
+// through anything but a real .specmetry directory.
 func WriteMarker(root string, m Marker) error {
 	exists, err := markerDirExists(root)
 	if err != nil {
@@ -191,9 +197,13 @@ func WriteMarker(root string, m Marker) error {
 	dir := filepath.Join(root, markerDir)
 	if !exists {
 		// Repository files keep git's usual modes: the marker holds only the
-		// project ID and name.
-		if err := os.Mkdir(dir, 0o755); err != nil { //nolint:gosec // a directory in the user's repository
+		// project ID and name. Concurrent init runs may all create it; one
+		// that finds it created meanwhile checks it again.
+		if err := os.Mkdir(dir, 0o755); err != nil && !errors.Is(err, fs.ErrExist) { //nolint:gosec // a directory in the user's repository
 			return apperr.Wrap(apperr.Environment, err, "cannot create "+dir)
+		}
+		if _, err := markerDirExists(root); err != nil {
+			return err
 		}
 	}
 	m.Schema = MarkerSchema
@@ -218,13 +228,49 @@ func WriteMarker(root string, m Marker) error {
 		werr = cerr
 	}
 	if werr == nil {
-		werr = os.Rename(tmp.Name(), MarkerPath(root))
+		werr = publishMarker(tmp.Name(), root, m)
 	}
+	// After a link the marker is the other name of the file.
+	_ = os.Remove(tmp.Name())
 	if werr != nil {
-		_ = os.Remove(tmp.Name())
-		return apperr.Wrap(apperr.Environment, werr, "cannot write the marker "+MarkerPath(root))
+		// The reason is part of the message, which init passes on.
+		return apperr.Newf(apperr.Environment, "cannot write the marker %s: %v", MarkerPath(root), werr)
 	}
 	return nil
+}
+
+// linkFile is os.Link; a test replaces it to simulate a file system
+// without hard links.
+var linkFile = os.Link
+
+// publishMarker puts the complete file tmp in place as the marker without
+// ever replacing one: the hard link is created only if the marker does not
+// exist, atomically. A marker that exists must already hold m. Where the
+// link fails for another reason (a file system without hard links, FAT for
+// example, or one that does not permit them) the marker is not created:
+// renaming tmp into place after finding no marker could replace one that
+// another writer created in between (codex-review-018 B2), so there is no
+// such fallback. A marker already there that holds m still counts.
+func publishMarker(tmp, root string, m Marker) error {
+	err := linkFile(tmp, MarkerPath(root))
+	if err == nil {
+		return nil
+	}
+	got, found, rerr := ReadMarker(root)
+	switch {
+	case rerr != nil:
+		return rerr
+	case found && got == m:
+		return nil
+	case found || errors.Is(err, fs.ErrExist):
+		return errors.New("another marker is there already")
+	}
+	var le *os.LinkError
+	if errors.As(err, &le) {
+		err = le.Err
+	}
+	return fmt.Errorf("the marker is created with a hard link, which failed here (%w); "+
+		"Specmetry does not rename it into place instead, which could replace a marker written at the same time", err)
 }
 
 // FindMarker returns the nearest directory, from dir upwards, that holds a

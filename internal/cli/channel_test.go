@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -24,7 +25,30 @@ import (
 const (
 	argsEnv   = "SPECMETRY_TEST_ARGS"
 	markerEnv = "SPECMETRY_TEST_MARKER"
+	// argsJSONEnv, when set, holds the arguments as a JSON array (for
+	// arguments with spaces); dirEnv is the directory the helper runs in.
+	argsJSONEnv = "SPECMETRY_TEST_ARGS_JSON"
+	dirEnv      = "SPECMETRY_TEST_DIR"
 )
+
+// helperArgs returns the helper's arguments and moves to its directory.
+func helperArgs() []string {
+	if dir := os.Getenv(dirEnv); dir != "" {
+		if err := os.Chdir(dir); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+	}
+	if raw := os.Getenv(argsJSONEnv); raw != "" {
+		var args []string
+		if err := json.Unmarshal([]byte(raw), &args); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return args
+	}
+	return strings.Fields(os.Getenv(argsEnv))
+}
 
 // testHumanOnlyCommand is a stand-in for a human-only command: it writes
 // the marker file only after the guard lets it proceed.
@@ -49,7 +73,7 @@ func testHumanOnlyCommand() *cobra.Command {
 func cliHelper() int {
 	root := newRoot(os.Stdout, os.Stderr)
 	root.AddCommand(testHumanOnlyCommand())
-	code := executeRoot(context.Background(), root, strings.Fields(os.Getenv(argsEnv)), os.Stderr)
+	code := executeRoot(context.Background(), root, helperArgs(), os.Stderr)
 	fmt.Fprintf(os.Stderr, "\nexit=%d\n", code)
 	return code
 }
@@ -66,7 +90,7 @@ func cliRedirectedHelper() int {
 	os.Stdout = f
 	root := newRoot(f, terminal)
 	root.AddCommand(testHumanOnlyCommand())
-	code := executeRoot(context.Background(), root, strings.Fields(os.Getenv(argsEnv)), terminal)
+	code := executeRoot(context.Background(), root, helperArgs(), terminal)
 	fmt.Fprintf(terminal, "\nexit=%d\n", code)
 	return code
 }
