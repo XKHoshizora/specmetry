@@ -14,8 +14,6 @@ import (
 
 	"github.com/dlclark/regexp2"
 	"github.com/santhosh-tekuri/jsonschema/v6"
-	"golang.org/x/text/language"
-	"golang.org/x/text/message"
 
 	"github.com/XKHoshizora/specmetry/internal/apperr"
 	"github.com/XKHoshizora/specmetry/schemas"
@@ -24,6 +22,9 @@ import (
 // Validator holds the compiled schemas.
 type Validator struct {
 	schemas map[string]*jsonschema.Schema
+	// names are the property names the schemas declare: the only object
+	// keys an error's JSON Pointer may show (redact.go).
+	names map[string]bool
 }
 
 // New compiles every embedded schema. Each schema is itself checked against
@@ -41,6 +42,7 @@ func New() (*Validator, error) {
 		return nil, err
 	}
 	sort.Strings(names)
+	v := &Validator{schemas: map[string]*jsonschema.Schema{}, names: map[string]bool{}}
 	for _, file := range names {
 		b, err := schemas.FS.ReadFile(file)
 		if err != nil {
@@ -56,8 +58,8 @@ func New() (*Validator, error) {
 		if err := c.AddResource(schemas.BaseURL+file, doc); err != nil {
 			return nil, fmt.Errorf("%s: %w", file, err)
 		}
+		propertyNames(doc, v.names)
 	}
-	v := &Validator{schemas: map[string]*jsonschema.Schema{}}
 	for _, file := range names {
 		sch, err := c.Compile(schemas.BaseURL + file)
 		if err != nil {
@@ -79,10 +81,16 @@ func (v *Validator) Names() []string {
 }
 
 // ValidateJSON validates raw JSON against the named schema ("proposal.v1").
+// Errors never quote the input (redact.go).
 func (v *Validator) ValidateJSON(name string, data []byte) error {
 	doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(data))
 	if err != nil {
-		return apperr.Wrap(apperr.InvalidInput, err, "input is not valid JSON")
+		// The parser's message can quote the input.
+		var syntax *json.SyntaxError
+		if errors.As(err, &syntax) {
+			return apperr.Newf(apperr.InvalidInput, "input is not valid JSON (syntax error at byte %d)", syntax.Offset)
+		}
+		return apperr.New(apperr.InvalidInput, "input is not valid JSON")
 	}
 	return v.validate(name, doc)
 }
@@ -107,35 +115,10 @@ func (v *Validator) validate(name string, doc any) error {
 	}
 	var ve *jsonschema.ValidationError
 	if !errors.As(err, &ve) {
-		return apperr.Wrap(apperr.Internal, err, "schema validation failed to run")
+		return apperr.New(apperr.Internal, "schema validation failed to run")
 	}
 	return apperr.Newf(apperr.InvalidInput, "document does not conform to %s", name).
-		WithDetails(leafErrors(ve)...)
-}
-
-var printer = message.NewPrinter(language.English)
-
-// leafErrors flattens the validation error tree into pointer/problem pairs.
-func leafErrors(ve *jsonschema.ValidationError) []apperr.Detail {
-	if len(ve.Causes) == 0 {
-		return []apperr.Detail{{
-			Pointer: "/" + strings.Join(escapeTokens(ve.InstanceLocation), "/"),
-			Problem: ve.ErrorKind.LocalizedString(printer),
-		}}
-	}
-	var out []apperr.Detail
-	for _, c := range ve.Causes {
-		out = append(out, leafErrors(c)...)
-	}
-	return out
-}
-
-func escapeTokens(tokens []string) []string {
-	out := make([]string, len(tokens))
-	for i, t := range tokens {
-		out[i] = strings.NewReplacer("~", "~0", "/", "~1").Replace(t)
-	}
-	return out
+		WithDetails(v.details(ve)...)
 }
 
 type ecmaRE struct{ re *regexp2.Regexp }

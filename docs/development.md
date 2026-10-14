@@ -34,7 +34,7 @@ export SPECMETRY_HOME="$(mktemp -d)/specmetry-home"
 | `internal/gitx/` | 调用 git CLI（只读）：定位仓库与 worktree、分支与提交、文件列表；不传递 `GIT_DIR` 等定位变量 |
 | `internal/domain/derive/` | 推导规则（纯函数，data-model §6）；目前只有初始化进度（§6.12） |
 | `internal/ulid/` | ULID 生成（只用于标识，不用于排序） |
-| `internal/contract/` | 用内嵌的 `schemas/` 做 JSON Schema 2020-12 校验 |
+| `internal/contract/` | 用内嵌的 `schemas/` 做 JSON Schema 2020-12 校验；错误只给出字段指针和约束，不回显提交的值或意外的键（architecture §10.8） |
 | `internal/testutil/` | 测试基座（见 §6） |
 | `internal/buildinfo/` | 版本与构建信息 |
 | `schemas/` | 交换契约（规范来源）及示例；`schemas.go` 将其内嵌 |

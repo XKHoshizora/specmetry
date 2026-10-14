@@ -809,3 +809,38 @@ func TestSourceAckFileErrorsDoNotEchoThePath(t *testing.T) {
 		t.Fatalf("seq moved from %s to %s", before, after)
 	}
 }
+
+// WP1.4 pre-review finding: a value that fails schema validation is not
+// echoed — through the public source ack path, in error.v1 and in text —
+// and nothing is written. The field is still named.
+func TestSourceAckDoesNotEchoInvalidInput(t *testing.T) {
+	home, repo, _ := sourcesProject(t)
+	a := sourceAdd(t, repo, "docs/client-brief.md")
+	token := "ghp_" + strings.Repeat("A1b2", 9)
+	before := seq(t, home)
+	for _, c := range []struct {
+		args    []string
+		pointer string
+	}{
+		{[]string{"source", "ack", "docs/client-brief.md", "--observed", token, "-m", "test", "--json"}, `"pointer": "/observed_sha256"`},
+		{[]string{"source", "ack", "docs/client-brief.md", "--observed", token, "-m", "test"}, "/observed_sha256:"},
+	} {
+		out := inTerminal(t, repo, c.args, noPrompt)
+		if !strings.Contains(out, "exit=2") || !strings.Contains(out, c.pointer) {
+			t.Fatalf("%v:\n%s", c.args[len(c.args)-1], out)
+		}
+		// The terminal wraps at 80 columns, so look for a short piece too.
+		if strings.Contains(out, token) || strings.Contains(out, "ghp_A1b2") {
+			t.Fatalf("the token was echoed:\n%s", out)
+		}
+	}
+	if after := seq(t, home); after != before {
+		t.Fatalf("seq moved from %s to %s", before, after)
+	}
+	if n := count(t, home, `SELECT count(*) FROM source_acks`); n != 0 {
+		t.Fatalf("%d acknowledgements", n)
+	}
+	if got := rows(t, home, `SELECT acked_sha256 FROM sources`); got[0][0] != a.Source.AckedSHA256 {
+		t.Fatal("the acknowledged hash changed")
+	}
+}
