@@ -26,6 +26,7 @@ export SPECMETRY_HOME="$(mktemp -d)/specmetry-home"
 | `internal/apperr/` | 错误码、退出码、HTTP 状态码映射，以及 `error.v1` 信封（architecture §9.1） |
 | `internal/datadir/` | 数据目录解析（`SPECMETRY_HOME`）、私有权限（Unix `0700`/`0600`，Windows 受保护 DACL：当前用户 + SYSTEM）、权限检查 |
 | `internal/config/` | `config.toml` 读取（未知键视为错误；错误只给出行列位置，不回显文件内容）；`[secrets]` 追加规则 |
+| `internal/channel/` | CLI 通道识别（architecture §5.1）：`Detect`（stdin、stdout 是否为终端或 Windows 控制台，已核实的 Agent 环境变量只看是否存在且非空，值只用于这次判断，从不保存、记录或输出）、`Guard`（人类专属操作的拦截与交互式确认，没有跳过参数）。防止误操作，不是身份认证 |
 | `internal/secrets/` | 密钥识别（architecture §10.8）：14 条内置规则、追加规则校验、按字段扫描（JSON Pointer）、不回显命中文本的拒绝错误。只能降低泄露风险，不能保证检测出所有秘密 |
 | `internal/store/sqlite/` | SQLite 存储基础：打开顺序、迁移框架、备份、墓碑、`seq`、只追加触发器、只读检查 |
 | `internal/contract/` | 用内嵌的 `schemas/` 做 JSON Schema 2020-12 校验 |
@@ -110,7 +111,7 @@ go build -o dist/ ./cmd/specmetry
   - `NewGitRepo`：与本机 git 环境隔离的夹具仓库：不继承任何 `GIT_*` 变量和 `HOME`、`XDG_CONFIG_HOME`，没有系统或全局配置、模板和钩子，固定身份和 SHA-1 对象格式；修改配置和提交之前确认 git 用的是本仓库的 `.git`。支持提交、按固定时间提交（`CommitAt`）、`AddWorktree`（新分支）和 `WorktreeFor`（已有分支）。
   - `BuildFixture`：把 `testdata/fixtures/` 中的项目夹具构造成 git 仓库，提交 ID 在三个平台上相同（见 `testdata/fixtures/README.md`）。
   - `Golden`：golden 文件比较；设置 `SPECMETRY_UPDATE_GOLDEN=1` 重新生成。
-  - `RunInPTY`：在伪终端中运行命令（Windows 使用 ConPTY），用于通道识别测试。
+  - `RunInPTY` / `RunInPTYSession`：在伪终端中运行命令（Windows 使用 ConPTY），后者还能在提示出现后输入回答，用于通道识别和交互式确认测试。ConPTY 渲染时会去掉行尾空格，所以等待的提示文字不要以空格结尾。
   - `NewCanary` / `FindInTree`：隐私测试中的 canary 搜索。
   - `DispatchHelper` / `HelperCommand`：在 `TestMain` 中注册辅助子进程，用于多进程并发测试。
   - `LoosenPermissions`：放宽文件或目录的权限，用于检查拒绝写入和 `doctor` 的报告。

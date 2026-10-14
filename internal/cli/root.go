@@ -8,15 +8,25 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 
 	"github.com/spf13/cobra"
 
 	"github.com/XKHoshizora/specmetry/internal/apperr"
+	"github.com/XKHoshizora/specmetry/internal/channel"
 )
 
 // Execute runs the CLI with args and returns the process exit code.
 func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	root := newRoot(stdout, stderr)
+	return executeRoot(ctx, newRoot(stdout, stderr), args, stderr)
+}
+
+// executeRoot runs root with args. The channel (architecture §5.1) is
+// detected once per command, from the process's own stdin and stdout, and
+// handed to commands in the context; human-only commands pass it to
+// channel.Guard before writing anything.
+func executeRoot(ctx context.Context, root *cobra.Command, args []string, stderr io.Writer) int {
+	ctx = channel.NewContext(ctx, channel.Detect(os.Stdin, os.Stdout))
 	root.SetArgs(args)
 	err := root.ExecuteContext(ctx)
 	if err == nil {

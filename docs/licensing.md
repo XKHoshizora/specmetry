@@ -45,7 +45,7 @@
 | `spf13/pflag` | BSD-3-Clause | 链接 | `LICENSE` |
 | `inconshreveable/mousetrap` | Apache-2.0 | 链接（仅 Windows） | `LICENSE` |
 | `pelletier/go-toml/v2` | MIT | 链接 | `LICENSE` |
-| `golang.org/x/mod`、`golang.org/x/sys` | BSD-3-Clause | 链接 | `LICENSE`、`PATENTS` |
+| `golang.org/x/mod`、`golang.org/x/sys`、`golang.org/x/term` | BSD-3-Clause | 链接（`x/term` 自 WP1.2 起，用于通道识别） | `LICENSE`、`PATENTS` |
 | `modernc.org/sqlite` | BSD-3-Clause；内含 SQLite（公有领域） | 链接 | `LICENSE`、`LICENSE-SQLITE`、`LICENSE-3RD-PARTY.md` |
 | `modernc.org/libc` | BSD-3-Clause | 链接 | `LICENSE`、`LICENSE-3RD-PARTY.md`（musl 为 MIT，Go 为 BSD-3-Clause，go-netdb 与 NixOS/nixpkgs 为 MIT） |
 | `modernc.org/memory` | BSD-3-Clause | 链接 | `LICENSE`、`LICENSE-GO`、`LICENSE-MMAP-GO` |
@@ -59,7 +59,7 @@
 | React、React DOM、scheduler | MIT | 内嵌的前端产物（`web/dist`） | 各自的 `LICENSE` |
 | Vite 的运行时辅助代码 | MIT | 同上 | Vite 的 `LICENSE` |
 
-**不随发行物提供**：只在测试中使用的模块（`aymanbagabas/go-pty`、`creack/pty`、`u-root/u-root`、`golang.org/x/crypto`、`golang.org/x/term`），以及前端的构建工具链。
+**不随发行物提供**：只在测试中使用的模块（`aymanbagabas/go-pty`、`creack/pty`、`u-root/u-root`、`golang.org/x/crypto`），以及前端的构建工具链。
 
 **生成方式**（M6 发布流程中实现）：
 
