@@ -282,7 +282,9 @@ CLI 或 Hook 第一次在某个 worktree 中出现时，系统会自动登记它
 | target_id | ULID NULL | `update` / `retire` / `reaffirm` 的目标 |
 | **target_revision** | INTEGER NULL | 提交者读取到的目标 revision（来自输入） |
 | ref | TEXT NULL | `add` 条目在提案内的临时引用 |
-| payload_json, sources_json, code_refs_json | TEXT | |
+| payload_json | TEXT | 提交的 `data`；`retire`、`reaffirm` 为 null |
+| suggested_change_class | TEXT NULL | 提议者对 `update` 建议的修订类别；只是建议，审核者必须自己选择（V-R01） |
+| sources_json, code_refs_json | TEXT | 校验后的引用：来源为 `source_id`、`locator`、`excerpt_sha256`、`verification`、`source_sha256`（`hash_only` 下不含原文）；代码为 `path`、`lines`、`exists`、`checked_head`（[architecture.md §6.1.4](architecture.md#614-提案的提交m1-实现)） |
 | rationale, origin, confidence | | |
 | review_state | TEXT | `pending` / `accepted` / `accepted_with_edits` / `rejected` / `conflict` |
 | final_payload_json | TEXT NULL | |
@@ -301,7 +303,7 @@ CLI 或 Hook 第一次在某个 worktree 中出现时，系统会自动登记它
 
 字段：`id`、`project_id`、`key`、`text`、`context`、`related_type`、`related_id` NULL、`proposal_item_id` NULL、`blocking`、`status`（`open` / `answered` / `dismissed`）、`answer`、`answered_by`、`answered_channel`、`answered_seq`、`origin`、`proposal_id`、`created_seq`。
 
-Question 在提案提交时立即创建，只能由人回答或驳回（[`question-answer.v1`](../schemas/question-answer.v1.schema.json)）。
+Question 在提案提交时立即创建（编号按 TD-14 分配），只能由人回答或驳回（[`question-answer.v1`](../schemas/question-answer.v1.schema.json)）。它的来源引用同时写入 `source_refs`（`entity_type = question`，`entity_revision = 1`）。
 
 当 `about` 指向提案内的临时引用时，先记录 `proposal_item_id`：
 

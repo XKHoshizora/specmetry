@@ -22,6 +22,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -204,6 +205,83 @@ func ListFiles(ctx context.Context, worktree string) ([]string, error) {
 	return files, nil
 }
 
+// objectID matches a full object or commit ID (SHA-1 or SHA-256), the only
+// form TreeFiles and CountLines accept, so that no argument reaches git as
+// an option.
+var objectID = regexp.MustCompile(`^[0-9a-f]{40}([0-9a-f]{24})?$`)
+
+// TreeFiles lists the regular files of commit in the repository of
+// worktree: the blob of each, by its path from the top with forward
+// slashes. Symbolic links, submodules and directories are not files.
+func TreeFiles(ctx context.Context, worktree, commit string) (map[string]string, error) {
+	if !objectID.MatchString(commit) {
+		return nil, apperr.New(apperr.Internal, "TreeFiles needs a full commit ID")
+	}
+	out, err := run(ctx, worktree, "ls-tree", "-r", "-z", "--full-tree", commit)
+	if err != nil {
+		return nil, err
+	}
+	files := map[string]string{}
+	for _, entry := range strings.Split(string(out), "\x00") {
+		if entry == "" {
+			continue
+		}
+		meta, path, ok := strings.Cut(entry, "\t")
+		fields := strings.Fields(meta)
+		if !ok || len(fields) != 3 {
+			return nil, apperr.New(apperr.Environment, "cannot read the tree of the commit")
+		}
+		if fields[1] == "blob" && (fields[0] == "100644" || fields[0] == "100755") {
+			files[path] = fields[2]
+		}
+	}
+	return files, nil
+}
+
+// CountLines counts the lines of a blob without keeping its content: its
+// line breaks, and one more for a last line without one.
+func CountLines(ctx context.Context, worktree, object string) (int, error) {
+	if !objectID.MatchString(object) {
+		return 0, apperr.New(apperr.Internal, "CountLines needs a full object ID")
+	}
+	if err := checkVersion(ctx); err != nil {
+		return 0, err
+	}
+	var c lineCounter
+	code, err := execTo(ctx, worktree, &c, append(slices.Clone(globalArgs), "cat-file", "blob", object)...)
+	if err != nil {
+		return 0, err
+	}
+	if code != 0 {
+		return 0, failed("cat-file", code)
+	}
+	return c.lines(), nil
+}
+
+// lineCounter counts line breaks in what is written to it and keeps
+// nothing else.
+type lineCounter struct {
+	breaks int
+	last   byte
+	size   int64
+}
+
+func (c *lineCounter) Write(p []byte) (int, error) {
+	c.breaks += bytes.Count(p, []byte{'\n'})
+	if len(p) > 0 {
+		c.last = p[len(p)-1]
+	}
+	c.size += int64(len(p))
+	return len(p), nil
+}
+
+func (c *lineCounter) lines() int {
+	if c.size > 0 && c.last != '\n' {
+		return c.breaks + 1
+	}
+	return c.breaks
+}
+
 // GitPath resolves name inside the git directories of worktree, as
 // `git rev-parse --git-path` does: shared files such as info/exclude
 // resolve into the common directory.
@@ -347,24 +425,33 @@ func runCode(ctx context.Context, dir string, args ...string) ([]byte, int, erro
 // exec1 runs git once in the controlled environment. git's own messages
 // are discarded, not kept: they may quote configuration values.
 func exec1(ctx context.Context, dir string, args ...string) ([]byte, int, error) {
+	var stdout bytes.Buffer
+	code, err := execTo(ctx, dir, &stdout, args...)
+	if err != nil {
+		return nil, -1, err
+	}
+	return stdout.Bytes(), code, nil
+}
+
+// execTo is exec1 with git's output written to stdout as it comes.
+func execTo(ctx context.Context, dir string, stdout io.Writer, args ...string) (int, error) {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
 	cmd.Env = filterEnv(os.Environ())
-	var stdout bytes.Buffer
-	cmd.Stdout = &stdout
+	cmd.Stdout = stdout
 	err := cmd.Run()
 	var exit *exec.ExitError
 	switch {
 	case ctx.Err() != nil:
-		return nil, -1, apperr.Wrap(apperr.Environment, ctx.Err(), "git was interrupted")
+		return -1, apperr.Wrap(apperr.Environment, ctx.Err(), "git was interrupted")
 	case err == nil:
-		return stdout.Bytes(), 0, nil
+		return 0, nil
 	case errors.As(err, &exit):
-		return stdout.Bytes(), exit.ExitCode(), nil
+		return exit.ExitCode(), nil
 	case errors.Is(err, exec.ErrNotFound):
-		return nil, -1, apperr.New(apperr.Environment, "git is required but was not found on PATH")
+		return -1, apperr.New(apperr.Environment, "git is required but was not found on PATH")
 	default:
-		return nil, -1, apperr.New(apperr.Environment, "cannot run git")
+		return -1, apperr.New(apperr.Environment, "cannot run git")
 	}
 }
 

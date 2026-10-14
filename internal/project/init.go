@@ -514,6 +514,28 @@ func (p *Plan) gitDir(dir string) any {
 	return dir
 }
 
+// EnsureWorktree returns the ID of the worktree w.Current of a registered
+// project, registering it the first time any command runs there
+// (data-model §4.1); a known one only has last_seen_at updated, without a
+// seq. The caller has scanned its path and git directory for secrets.
+func EnsureWorktree(ctx context.Context, tx *sql.Tx, projectID string, w Where, now time.Time) (string, error) {
+	var id string
+	err := tx.QueryRowContext(ctx, `SELECT id FROM worktrees WHERE project_id = ? AND path = ?`, projectID, w.Current).Scan(&id)
+	if err == nil {
+		_, err = tx.ExecContext(ctx, `UPDATE worktrees SET last_seen_at = ? WHERE id = ?`, now.UnixMilli(), id)
+		return id, err
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return "", err
+	}
+	var gitDir any
+	if w.Git {
+		gitDir = w.GitDir
+	}
+	id = ulid.New()
+	return id, insertWorktree(ctx, tx, id, projectID, w.Current, gitDir, false, now)
+}
+
 func insertWorktree(ctx context.Context, tx *sql.Tx, id, projectID, path string, gitDir any, isMain bool, now time.Time) error {
 	seq, err := sqlite.NextSeq(ctx, tx)
 	if err != nil {

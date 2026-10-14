@@ -127,6 +127,76 @@ WHERE project_id = ? AND removed_seq IS NULL AND (path = ? OR id = ?)`, projectI
 	return s, err == nil, err
 }
 
+// Ref is a reference to a source as source-list.v1 shows it (--refs).
+// Under hash_only the excerpt is not stored (excerpt_state not_stored) and
+// Excerpt stays null.
+type Ref struct {
+	Seq            int64   `json:"seq"`
+	EntityType     string  `json:"entity_type"`
+	EntityKey      string  `json:"entity_key"`
+	EntityRevision int     `json:"entity_revision"`
+	Current        bool    `json:"current"`
+	Locator        *string `json:"locator"`
+	Verification   string  `json:"verification"`
+	ExcerptSHA256  string  `json:"excerpt_sha256"`
+	ExcerptState   string  `json:"excerpt_state"`
+	Excerpt        *string `json:"excerpt"`
+}
+
+// Refs returns every reference to the project's sources, current and
+// historical, by source ID, in the order they were written. A reference
+// is current when it is bound to its entity's current revision (a
+// question has only one).
+func Refs(ctx context.Context, tx *sql.Tx, projectID string) (map[string][]Ref, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT r.source_id, r.seq, r.entity_type, r.entity_revision, r.locator, r.verification,
+    r.excerpt_sha256, r.excerpt, r.excerpt_erased_seq IS NOT NULL,
+    coalesce(g.key, rq.key, ac.key, q.key, ''),
+    CASE r.entity_type WHEN 'goal' THEN g.revision WHEN 'requirement' THEN rq.revision
+        WHEN 'criterion' THEN ac.revision ELSE 1 END
+FROM source_refs r
+LEFT JOIN goals g ON r.entity_type = 'goal' AND g.id = r.entity_id
+LEFT JOIN requirements rq ON r.entity_type = 'requirement' AND rq.id = r.entity_id
+LEFT JOIN acceptance_criteria ac ON r.entity_type = 'criterion' AND ac.id = r.entity_id
+LEFT JOIN questions q ON r.entity_type = 'question' AND q.id = r.entity_id
+WHERE r.project_id = ?
+ORDER BY r.seq, r.rowid`, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[string][]Ref{}
+	for rows.Next() {
+		var sourceID string
+		var r Ref
+		var erased bool
+		var current sql.NullInt64
+		if err := rows.Scan(&sourceID, &r.Seq, &r.EntityType, &r.EntityRevision, &r.Locator, &r.Verification,
+			&r.ExcerptSHA256, &r.Excerpt, &erased, &r.EntityKey, &current); err != nil {
+			return nil, err
+		}
+		r.Current = current.Valid && int(current.Int64) == r.EntityRevision
+		switch {
+		case erased:
+			r.ExcerptState = "erased"
+		case r.Excerpt != nil:
+			r.ExcerptState = "stored"
+		default:
+			r.ExcerptState = "not_stored"
+		}
+		out[sourceID] = append(out[sourceID], r)
+	}
+	return out, rows.Err()
+}
+
+// FindRemoved reports whether ref is the stored path or the ID of a
+// removed source of the project.
+func FindRemoved(ctx context.Context, tx *sql.Tx, projectID, ref string) (bool, error) {
+	var n int
+	err := tx.QueryRowContext(ctx, `SELECT count(*) FROM sources
+WHERE project_id = ? AND removed_seq IS NOT NULL AND (path = ? OR id = ?)`, projectID, ref, ref).Scan(&n)
+	return n > 0, err
+}
+
 // Register adds the source unless its path is already an active source,
 // which is returned as it is: registering again changes nothing, not even
 // the acknowledged hash (data-model §4.3). It reports whether the source

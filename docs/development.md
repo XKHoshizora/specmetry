@@ -30,7 +30,9 @@ export SPECMETRY_HOME="$(mktemp -d)/specmetry-home"
 | `internal/secrets/` | 密钥识别（architecture §10.8）：14 条内置规则、追加规则校验、按字段扫描（JSON Pointer）、不回显命中文本的拒绝错误。只能降低泄露风险，不能保证检测出所有秘密 |
 | `internal/store/sqlite/` | SQLite 存储基础：打开顺序、迁移框架、备份、墓碑、`seq`、只追加触发器、只读检查；迁移 v2 起是业务表（`projects`、`worktrees`、`delivery_targets`） |
 | `internal/project/` | 项目登记与 `init`（architecture §6.1.1、§6.1.2）：阶段识别与候选来源（只看路径和大小，不读内容）、marker、exclude 条目、项目与 worktree 的登记、默认交付目标 |
-| `internal/source/` | 来源（architecture §6.1.3）：路径解析（`in_repo` / `external`）、分块计算 sha256（可取消，不保存内容）、磁盘观测、来源集合哈希、登记、确认与移除 |
+| `internal/source/` | 来源（architecture §6.1.3）：路径解析（`in_repo` / `external`）、分块计算 sha256（可取消，不保存内容）、磁盘观测、来源集合哈希、登记、确认与移除、引用列表 |
+| `internal/baseline/` | 读取已确认的基准（当前版本、按编号查找条目），按 TD-14 分配编号（`GOAL-n`、`REQ-nnn`、`AC-<需求号>-n`、`Q-nnn`，永不复用） |
+| `internal/proposal/` | 提案（architecture §6.1.4）：静态规则、来源解析、流式片段校验（不保存原文）、代码引用检查、在一个写事务中保存提案、条目、问题与问题的来源引用 |
 | `internal/gitx/` | 调用 git CLI（只读）：定位仓库与 worktree、分支与提交、文件列表；不传递 `GIT_DIR` 等定位变量 |
 | `internal/domain/derive/` | 推导规则（纯函数，data-model §6）；目前只有初始化进度（§6.12） |
 | `internal/ulid/` | ULID 生成（只用于标识，不用于排序） |

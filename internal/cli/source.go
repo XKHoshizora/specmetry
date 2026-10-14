@@ -153,7 +153,9 @@ func (w *workspace) actor() (string, error) {
 	return "human:" + name, nil
 }
 
-func doc(s source.Source, obs *source.Observation, refs bool) sourceDoc {
+// doc is a source as source-list.v1 and source-add.v1 show it; refs, when
+// not nil, are its references (--refs).
+func doc(s source.Source, obs *source.Observation, refs []source.Ref) sourceDoc {
 	d := sourceDoc{
 		ID: s.ID, Path: s.Path, Location: s.Location, Kind: s.Kind, AckedSHA256: s.AckedSHA256,
 		SizeBytes: s.Size, RegisteredSeq: s.RegisteredSeq, RemovedSeq: s.RemovedSeq,
@@ -166,11 +168,12 @@ func doc(s source.Source, obs *source.Observation, refs bool) sourceDoc {
 			d.CurrentSHA256 = &current
 		}
 	}
-	if refs {
-		// References are written by proposals (WP1.5); until then there
-		// are none to list.
-		none := []any{}
-		d.Refs = &none
+	if refs != nil {
+		list := make([]any, len(refs))
+		for i, r := range refs {
+			list[i] = r
+		}
+		d.Refs = &list
 	}
 	return d
 }
@@ -288,7 +291,7 @@ nothing, not even its acknowledged hash: only source ack does that.`,
 				if sum == s.AckedSHA256 {
 					obs.State = source.Unchanged
 				}
-				out = sourceAddDoc{Schema: "specmetry.source-add/v1", Created: created, Source: doc(s, &obs, false)}
+				out = sourceAddDoc{Schema: "specmetry.source-add/v1", Created: created, Source: doc(s, &obs, nil)}
 				out.SourceSetHash, err = source.ProjectSetHash(ctx, tx, p.ID)
 				return err
 			})
@@ -333,6 +336,7 @@ that.`,
 				return err
 			}
 			var list []source.Source
+			var refsOf map[string][]source.Ref
 			out := sourceListDoc{Schema: "specmetry.source-list/v1", Sources: []sourceDoc{}}
 			var root string
 			if err := w.tx(ctx, func(tx *sql.Tx, p project.Registered) error {
@@ -340,22 +344,36 @@ that.`,
 				if list, err = source.List(ctx, tx, p.ID, includeRemoved); err != nil {
 					return err
 				}
+				if refs {
+					if refsOf, err = source.Refs(ctx, tx, p.ID); err != nil {
+						return err
+					}
+				}
 				out.SourceSetHash, err = source.ProjectSetHash(ctx, tx, p.ID)
 				return err
 			}); err != nil {
 				return err
 			}
+			listed := func(s source.Source) []source.Ref {
+				if !refs {
+					return nil
+				}
+				if r := refsOf[s.ID]; r != nil {
+					return r
+				}
+				return []source.Ref{}
+			}
 			// The files are hashed outside the transaction.
 			for _, s := range list {
 				if s.RemovedSeq != nil {
-					out.Sources = append(out.Sources, doc(s, nil, refs))
+					out.Sources = append(out.Sources, doc(s, nil, listed(s)))
 					continue
 				}
 				obs, err := source.Observe(ctx, root, s)
 				if err != nil {
 					return err
 				}
-				out.Sources = append(out.Sources, doc(s, &obs, refs))
+				out.Sources = append(out.Sources, doc(s, &obs, listed(s)))
 			}
 			if asJSON {
 				return writeJSON(cmd.OutOrStdout(), "source-list.v1", out)
@@ -537,20 +555,24 @@ func ackInput(cmd *cobra.Command, args []string, observed, rationale, file strin
 	return in, nil
 }
 
-// readSmallFile reads an input document of at most 1 MiB. Errors do not
-// name the file: its path has not been scanned for secrets.
-func readSmallFile(path string) ([]byte, error) {
+// readSmallFile reads an input document of at most 1 MiB.
+func readSmallFile(path string) ([]byte, error) { return readInput(path, 1<<20) }
+
+// readInput reads an input document of at most limit bytes (a whole number
+// of MiB). Errors do not name the file: its path has not been scanned for
+// secrets.
+func readInput(path string, limit int64) ([]byte, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, apperr.New(apperr.InvalidInput, "cannot read the --file input ("+osProblem(err)+")")
 	}
 	defer func() { _ = f.Close() }()
-	b, err := io.ReadAll(io.LimitReader(f, 1<<20+1))
+	b, err := io.ReadAll(io.LimitReader(f, limit+1))
 	if err != nil {
 		return nil, apperr.New(apperr.InvalidInput, "cannot read the --file input ("+osProblem(err)+")")
 	}
-	if len(b) > 1<<20 {
-		return nil, apperr.New(apperr.InvalidInput, "the --file input is larger than 1 MiB")
+	if int64(len(b)) > limit {
+		return nil, apperr.Newf(apperr.InvalidInput, "the --file input is larger than %d MiB", limit>>20)
 	}
 	return b, nil
 }

@@ -344,7 +344,7 @@ sequenceDiagram
 - 交互式确认之后写入 `removed_seq`。已移除的来源不会再改变，来源行也不会被删除（`purge` 与墓碑除外），两者都由数据库触发器保护。引用保留。
 - `--erase-excerpts`：M1 中项目只能是 `hash_only`，没有保存任何片段原文，所以没有内容需要擦除，确认提示中会说明这一点。`full` 模式下的擦除与整理在 WP2.11 实现；在那之前，遇到不是 `hash_only` 的项目时拒绝（退出码 6），不改动任何内容。
 
-**引用**：`source_refs` 由 WP1.5 的提案写入，在此之前没有任何引用，`--refs` 输出空列表。MVP-SRC-04 中"已有引用显示为 `source_removed`"和 MVP-SRC-08 中的 `excerpt_state`，随 WP1.5 和 M2 验证。
+**引用**：`source_refs` 由提案写入（§6.1.4）：WP1.5 写入问题的来源引用，审核接受条目时写入条目的来源引用（WP1.6）。`--refs` 列出每个来源的全部引用（当前与历史），包括已移除来源的引用（加上 `--include-removed`）；`hash_only` 下 `excerpt_state = not_stored`、`excerpt` 为 null。MVP-SRC-04 中引用以 `source_removed` 的形式出现在状态与差距中，随 M2 验证。
 
 **来源集合哈希**：按 data-model §4.3 计算，在写事务中从数据库读取未移除的来源。它只随登记、确认和移除改变，观测不影响它。MVP-SRC-06 的含义见 PD-25（已确认）：文件发生变化、但尚未经人工确认时，集合哈希不变。
 
@@ -355,6 +355,47 @@ sequenceDiagram
 - `source ack`、`source remove` 是人类专属命令，只输出文本；出错时，带 `--json` 输出 `error.v1`。
 
 **隐私**：来源原文不进入数据库、输出或日志。路径（原始参数和要保存的路径）、理由和显示名，在写入之前做密钥扫描；命中时返回退出码 2，错误中只给出字段和规则。
+
+### 6.1.4 提案的提交（M1 实现）
+
+命令：`propose --file <path|-> [--json]`（`-` 表示从标准输入读取，最大 8 MiB）。任何通道都可以提交；提交**不改变基准**：条目以 `pending` 等待人审核（WP1.6），问题在提交时立即以 `open` 登记。不创建基准版本，不写入 `goals`、`requirements`、`acceptance_criteria`。
+
+**通道与人工编辑**（V-P01）：
+
+- `--apply`（人工编辑、立即应用）只能由人在 `human_cli` 中使用，Agent 通道返回退出码 3。应用机制在 WP1.6 实现；在那之前，人在终端中使用 `--apply` 也返回退出码 2，不写入。
+- `origin = human_edit`：Agent 通道返回退出码 3；人在终端中不带 `--apply` 提交时返回退出码 2（指向 `/origin`）。它永远不会被当作普通的待审提案保存。
+- actor：Agent 通道为 `agent:<agent>`，设置了 Claude Code 的环境变量时为 `agent:claude_code`，否则为 `agent:unknown`；人在终端中提交时为 `human:<显示名>`（同 §6.1.3）。
+
+**处理顺序**（拒绝为退出码 2，过期为退出码 5；两者都不写入任何数据，也不分配 `seq`）：
+
+1. 读取输入；所在项目按 §6.1.2 确定，没有数据库或项目未登记时返回退出码 4。
+2. 按 `proposal.v1` 严格校验（V-P01）；错误按 §10.8 脱敏，只给出 JSON Pointer 和约束。
+3. 不需要数据库的规则：
+   - 所有字符串值都不能包含代码围栏（V-P05）；
+   - `ref` 在提案内唯一；`goal`、`requirement`、`about` 指向本提案内的 `ref` 时，被指向的条目类型必须正确（需求的 `goal` 指向目标，AC 的 `requirement` 指向需求，问题的 `about` 指向需求或 AC）；同一 `target` 至多出现一次，并且编号的类型与条目的 `type` 一致（V-P03）；
+   - `workdir`、`inputs` 和代码引用的路径，统一分隔符并按字面规范化之后，不得越出仓库根（V-P04；schema 已拒绝绝对路径和 `..` 段，这里是第二道防线）；
+   - 代码引用的行号范围不能倒置；片段去掉空白之后不能为空（否则在任何来源中都能"找到"）。
+4. 密钥扫描（V-P05，§10.8）：提案中的**每个**字符串值（包括片段、路径和检查命令），以及可能被登记的当前 worktree 路径和 git 目录。
+5. 解析来源（V-P06）：`source` 按登记时保存的路径或来源 ID 精确匹配；已移除或未登记的来源都拒绝，错误指向每个这样的引用。
+6. 在事务之外读取来源与代码：
+   - **片段校验**（V-P07，标记）：每个来源文件只流式读取一次，同时计算 sha256，读完即丢弃。规范化方式：去掉所有 Unicode 空白字符（空格、制表符、换行，包括 CRLF 和全角空格），再做子串匹配，因此只有空白或换行不同的片段为 `verified`，改动任何一个字为 `not_found`。`.pdf`、`.docx`、`.doc`、`.odt`、`.rtf`，以及不是有效 UTF-8 或含有 NUL 字节的文件，为 `not_checkable`；文件无法读取时为 `source_missing`。其他类型逐字匹配文件原文，不解析 HTML 或邮件编码。`verified` 只说明片段出现在来源中，**不说明**条目语义正确或覆盖完整（data-model §4.5），文本输出中如实说明这一点。
+   - **代码引用**（V-P08，标记）：git 项目中，对照**当前 worktree 的 HEAD 提交**检查：路径必须是该提交树中的普通文件（目录、符号链接和子模块都不算），有行号时行号必须在文件的行数之内。未提交的文件、没有任何提交的 worktree，都记为不存在。非 git 项目对照项目根目录下的文件，解析链接之后仍须在根目录之内。只读取行数，不保存任何代码内容。代码引用只说明文件位置存在，**不是**验收证据。git 调用沿用 `internal/gitx` 的受控环境，只接受完整的对象 ID。
+7. 写事务（`BEGIN IMMEDIATE`）：
+   - `base_version` 不等于当前基准版本（不存在版本时为 0）时返回退出码 5，`error.current` 给出 `base_version`（V-P02）；
+   - 编号必须指向未退役、类型正确的条目，否则退出码 2（V-P03）；
+   - `target_revision` 不是目标当前的 revision 时返回退出码 5，`error.current.targets` 逐项给出 JSON Pointer、编号和当前 revision（V-P02）；
+   - 更新 AC 时，结果不能是"有检查但不是自动化"：设置检查需要 AC 是 `automated`，改为 `manual` 需要同时去掉检查（V-P04）；
+   - 引用的来源在此期间被移除时拒绝；
+   - 当前 worktree 第一次出现时自动登记（data-model §4.1）；
+   - 分配**一个** `seq`，写入提案、全部条目（`pending`）、问题（按 TD-14 分配 `Q-nnn`）和问题的来源引用。任何一步失败，整个事务回滚。
+
+**保存的内容**（`hash_only`，M1 唯一的模式）：
+
+- `proposal_items.payload_json` 为提交的 `data`（`retire`、`reaffirm` 为 null）；提议者对 `update` 建议的修订类别单独保存在 `suggested_change_class`，不会代替审核者的选择（V-R01）。
+- `sources_json` 的每一项为 `source_id`、`locator`、`excerpt_sha256`（提交的片段原文的 sha256）、`verification` 和 `source_sha256`（校验时来源文件的哈希，无法读取时为 null），**不含片段原文**；`code_refs_json` 的每一项为 `path`、`lines`、`exists` 和 `checked_head`。数据库触发器拒绝在 `hash_only` 项目中保存片段原文（第二道防线）。
+- 问题指向已有编号时，立即关联到该条目；指向本提案内的 `ref` 时，记录 `proposal_item_id`，审核接受该条目时再回填（WP1.6，data-model §4.8）。问题的来源引用立即写入 `source_refs`（`entity_type = question`，`entity_revision = 1`，`excerpt` 为 NULL），因此会出现在 `source list --refs` 中；条目的来源引用在审核接受时才写入 `source_refs`（WP1.6）。
+
+**输出**：`propose --json` 输出 `proposal-receipt.v1`，输出前按 schema 校验：待审提案 `applied_version = null`，每个条目有 `item_id`、`review_state = pending`、`assigned_key = null`，来源引用只给出 `source_id` 和校验结果，代码引用给出 `exists`，**不回显片段**。schema 的字段间条件见 MVP-BL-28。文本输出给出各类校验结果的数量和有问题的引用位置，同样不包含片段。
 
 ### 6.2 Hook 采集与入库
 

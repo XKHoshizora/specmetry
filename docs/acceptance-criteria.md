@@ -60,7 +60,7 @@
 | MVP-SRC-01 | 登记一个仓库内的文件，和一个仓库外、路径含空格和中文的文件 → 都记录了路径、类型、`acked_sha256` 和大小 | 集成 | FR-SRC-01 | M1 |
 | MVP-SRC-02 | 修改已登记的来源 → `source list --json`（`source-list.v1`）显示 `changed`，`current_sha256` 为新哈希；删除文件 → 显示 `missing`，`current_sha256 = null` | 集成 | FR-SRC-02 | M1 |
 | MVP-SRC-03 | 非 TTY 执行 `source ack` → 退出码 3；在 TTY 中执行，但 `observed_sha256` 与磁盘不一致 → 退出码 5；一致时 → 写入 `source_acks`（包括理由），`acked_sha256` 更新，来源集合哈希改变 | 集成 | FR-SRC-03 | M1 |
-| MVP-SRC-04 | 非 TTY 执行 `source remove` → 退出码 3；在 TTY 中执行 → 写入 `removed_seq`，已有引用显示为 `source_removed`，来源集合哈希改变。M1 中还没有引用（WP1.5 才写入），"已有引用显示为 `source_removed`"随 WP1.5 / M2 验证；WP1.4 验证其余部分 | 集成 | FR-SRC-04 | M1 |
+| MVP-SRC-04 | 非 TTY 执行 `source remove` → 退出码 3；在 TTY 中执行 → 写入 `removed_seq`，已有引用显示为 `source_removed`，来源集合哈希改变。WP1.4 验证其余部分；WP1.5 验证引用在移除后保留，并在 `source list --include-removed --refs` 中列在已移除的来源下；引用以 `source_removed` 的形式出现在状态与差距中，随 M2 验证 | 集成 | FR-SRC-04 | M1 |
 | MVP-SRC-05 | `source add` 一个不存在的路径 → 退出码 2，不写入 | 集成 | FR-SRC-01 | M1 |
 | MVP-SRC-06 | 同一组来源记录（`source_id` 与 `acked_sha256` 均相同）以不同顺序输入 → 来源集合哈希相同；`source_id` 改变（移除后重新登记），或人工 `ack` 更新了 `acked_sha256` → 哈希改变；文件发生变化、但尚未经人工确认 → 哈希不变（PD-25） | 单元 + 集成 | FR-SRC-05 | M1 |
 | MVP-SRC-07 | `source add internal/auth/login.go`（非文档类型）→ 退出码 2；在 TTY 中加上 `--allow-any-type` → 成功；修改已登记的来源后，Agent 再次 `source add` 同一路径 → 什么都不做，`acked_sha256` 不变，`SOURCE_CHANGED` 仍然存在。审查确认 Specmetry 只为引用校验读取文本，不解析文档语义。 | 集成 + 审查 | FR-SRC-01、FR-SRC-06 | M1 |
