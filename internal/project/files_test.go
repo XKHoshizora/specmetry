@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/XKHoshizora/specmetry/internal/apperr"
@@ -314,5 +315,30 @@ func TestListFilesStopsWhenCanceled(t *testing.T) {
 	repo.Commit("init")
 	if files, err := project.ListFiles(canceled, repo.Dir, true); err == nil || files != nil {
 		t.Fatalf("cancelled git listing: %d files, %v", len(files), err)
+	}
+}
+
+// Concurrent init runs may all find the marker missing and write it at
+// once (TestInitConcurrentRunsRegisterOneProject, seen failing on macOS
+// CI): creating the directory must not fail because another writer just
+// created it.
+func TestWriteMarkerConcurrently(t *testing.T) {
+	m := project.Marker{ProjectID: "01J9Z3K5Q8R2T4V6W8X0Y2Z4C1", Name: "demo"}
+	for round := range 20 {
+		root := t.TempDir()
+		var wg sync.WaitGroup
+		errs := make([]error, 8)
+		for i := range errs {
+			wg.Go(func() { errs[i] = project.WriteMarker(root, m) })
+		}
+		wg.Wait()
+		for i, err := range errs {
+			if err != nil {
+				t.Fatalf("round %d, writer %d: %v", round, i, err)
+			}
+		}
+		if got, found, err := project.ReadMarker(root); err != nil || !found || got.ProjectID != m.ProjectID {
+			t.Fatalf("round %d: ReadMarker = %+v, %v, %v", round, got, found, err)
+		}
 	}
 }

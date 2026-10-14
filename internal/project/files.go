@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/XKHoshizora/specmetry/internal/apperr"
 	"github.com/XKHoshizora/specmetry/internal/gitx"
@@ -191,9 +192,13 @@ func WriteMarker(root string, m Marker) error {
 	dir := filepath.Join(root, markerDir)
 	if !exists {
 		// Repository files keep git's usual modes: the marker holds only the
-		// project ID and name.
-		if err := os.Mkdir(dir, 0o755); err != nil { //nolint:gosec // a directory in the user's repository
+		// project ID and name. Concurrent init runs may all create it; one
+		// that finds it created meanwhile checks it again.
+		if err := os.Mkdir(dir, 0o755); err != nil && !errors.Is(err, fs.ErrExist) { //nolint:gosec // a directory in the user's repository
 			return apperr.Wrap(apperr.Environment, err, "cannot create "+dir)
+		}
+		if _, err := markerDirExists(root); err != nil {
+			return err
 		}
 	}
 	m.Schema = MarkerSchema
@@ -218,13 +223,33 @@ func WriteMarker(root string, m Marker) error {
 		werr = cerr
 	}
 	if werr == nil {
-		werr = os.Rename(tmp.Name(), MarkerPath(root))
+		werr = replaceMarker(tmp.Name(), root, m)
 	}
 	if werr != nil {
 		_ = os.Remove(tmp.Name())
 		return apperr.Wrap(apperr.Environment, werr, "cannot write the marker "+MarkerPath(root))
 	}
 	return nil
+}
+
+// replaceMarker renames tmp over the marker. Concurrent init runs write
+// the same marker at once; on Windows replacing a file that another
+// process is replacing fails for a moment. A marker that already holds m
+// is what this writer wanted, so that counts as done; otherwise the
+// rename is tried a few more times.
+func replaceMarker(tmp, root string, m Marker) error {
+	var err error
+	for attempt := range 10 {
+		if err = os.Rename(tmp, MarkerPath(root)); err == nil {
+			return nil
+		}
+		if got, found, rerr := ReadMarker(root); rerr == nil && found && got == m {
+			_ = os.Remove(tmp)
+			return nil
+		}
+		time.Sleep(time.Duration(attempt+1) * 10 * time.Millisecond)
+	}
+	return err
 }
 
 // FindMarker returns the nearest directory, from dir upwards, that holds a

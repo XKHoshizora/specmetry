@@ -235,11 +235,13 @@ func TestInitConcurrentRunsRegisterOneProject(t *testing.T) {
 	const n = 4
 	outs := make([]initOutput, n)
 	codes := make([]int, n)
+	raw := make([]string, n)
 	var wg sync.WaitGroup
 	for i := range n {
 		wg.Go(func() {
 			var stdout, stderr strings.Builder
 			codes[i] = Execute(context.Background(), []string{"init", "--json"}, &stdout, &stderr)
+			raw[i] = stdout.String() + stderr.String()
 			_ = json.Unmarshal([]byte(stdout.String()), &outs[i])
 		})
 	}
@@ -247,7 +249,7 @@ func TestInitConcurrentRunsRegisterOneProject(t *testing.T) {
 	created := 0
 	for i := range n {
 		if codes[i] != apperr.ExitOK || outs[i].Project.ID != outs[0].Project.ID {
-			t.Fatalf("run %d: exit %d, %+v", i, codes[i], outs[i])
+			t.Fatalf("run %d: exit %d\n%s", i, codes[i], raw[i])
 		}
 		if outs[i].Created {
 			created++
