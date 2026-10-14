@@ -20,9 +20,10 @@ import (
 // unexpected property names, so they are never passed on. Each problem is
 // written here from the schema side of the error only — the keyword and
 // what the schema expects — and an unknown kind gets a generic message.
-// JSON Pointers keep only array indexes and property names the schemas
-// declare; a pointer that would pass through any other key (a map key the
-// submitter chose) stops at that key's parent.
+// JSON Pointers follow the submitted document and keep only indexes into
+// arrays and, into objects, property names the schemas declare; a pointer
+// that would pass through any other key (a map key the submitter chose,
+// even one made of digits) stops at that key's parent.
 
 // propertyNames collects every property name the schemas declare.
 func propertyNames(doc any, into map[string]bool) {
@@ -43,9 +44,9 @@ func propertyNames(doc any, into map[string]bool) {
 	}
 }
 
-// details flattens the validation error tree into pointer/problem pairs,
-// without repeating one.
-func (v *Validator) details(ve *jsonschema.ValidationError) []apperr.Detail {
+// details flattens the validation error tree of doc into pointer/problem
+// pairs, without repeating one.
+func (v *Validator) details(ve *jsonschema.ValidationError, doc any) []apperr.Detail {
 	var out []apperr.Detail
 	seen := map[apperr.Detail]bool{}
 	var walk func(*jsonschema.ValidationError)
@@ -56,7 +57,7 @@ func (v *Validator) details(ve *jsonschema.ValidationError) []apperr.Detail {
 			}
 			return
 		}
-		d := apperr.Detail{Pointer: v.pointer(e.InstanceLocation), Problem: describe(e.ErrorKind)}
+		d := apperr.Detail{Pointer: v.pointer(doc, e.InstanceLocation), Problem: describe(e.ErrorKind)}
 		if !seen[d] {
 			seen[d] = true
 			out = append(out, d)
@@ -66,14 +67,28 @@ func (v *Validator) details(ve *jsonschema.ValidationError) []apperr.Detail {
 	return out
 }
 
-// pointer is the JSON Pointer of a location, cut short before the first
-// token that is neither an array index nor a declared property name. The
-// root is "/".
-func (v *Validator) pointer(location []string) string {
+// pointer is the JSON Pointer of a location in doc, cut short before the
+// first token that is not an index of the array it applies to or a
+// declared property name of the object it applies to. The root is "/".
+func (v *Validator) pointer(doc any, location []string) string {
 	var tokens []string
+	cur := doc
+walk:
 	for _, t := range location {
-		if _, err := strconv.Atoi(t); err != nil && !v.names[t] {
-			break
+		switch c := cur.(type) {
+		case []any:
+			i, err := strconv.Atoi(t)
+			if err != nil || i < 0 || i >= len(c) || strconv.Itoa(i) != t {
+				break walk
+			}
+			cur = c[i]
+		case map[string]any:
+			if !v.names[t] {
+				break walk
+			}
+			cur = c[t]
+		default:
+			break walk
 		}
 		tokens = append(tokens, strings.NewReplacer("~", "~0", "/", "~1").Replace(t))
 	}

@@ -119,6 +119,11 @@ func TestValidationErrorsDoNotEchoInput(t *testing.T) {
 		{"map key in the location", "status.v1",
 			patched(t, "status.minimal.json", patchOp{Op: "add", Path: "/metrics/ac_status_counts/" + secretLike, Value: value(t, -5)}),
 			"/metrics/ac_status_counts", []string{secretLike}},
+		// A map key made of digits is still a key the submitter chose, not
+		// an array index.
+		{"numeric map key in the location", "status.v1",
+			patched(t, "status.minimal.json", patchOp{Op: "add", Path: "/metrics/ac_status_counts/987654321", Value: value(t, -5)}),
+			"/metrics/ac_status_counts", []string{"987654321"}},
 	}
 	for _, c := range cases {
 		err := v.ValidateJSON(c.schema, c.doc)
@@ -132,6 +137,35 @@ func TestValidationErrorsDoNotEchoInput(t *testing.T) {
 		}
 		if !found {
 			t.Errorf("%s: no detail points at %q: %+v", c.name, c.pointer, env.Error.Details)
+		}
+	}
+}
+
+// A pointer follows the document: a token is kept as an index only into
+// an array, and into an object only as a declared property name, so a map
+// key made of digits is never taken for an index.
+func TestPointerFollowsTheDocument(t *testing.T) {
+	v := validator(t)
+	doc := map[string]any{
+		"sources": []any{map[string]any{"size_bytes": -1}},
+		"metrics": map[string]any{"ac_status_counts": map[string]any{"987654321": -5, "0": -5}},
+	}
+	for _, c := range []struct {
+		location []string
+		want     string
+	}{
+		{nil, "/"},
+		{[]string{"sources", "0", "size_bytes"}, "/sources/0/size_bytes"},
+		{[]string{"metrics", "ac_status_counts", "987654321"}, "/metrics/ac_status_counts"},
+		{[]string{"metrics", "ac_status_counts", "0"}, "/metrics/ac_status_counts"},
+		{[]string{"sources", "1"}, "/sources"},
+		{[]string{"sources", "00"}, "/sources"},
+		{[]string{"sources", "-1"}, "/sources"},
+		{[]string{"sources", "size_bytes"}, "/sources"},
+		{[]string{"987654321"}, "/"},
+	} {
+		if got := v.pointer(doc, c.location); got != c.want {
+			t.Errorf("pointer(%q) = %q, want %q", c.location, got, c.want)
 		}
 	}
 }

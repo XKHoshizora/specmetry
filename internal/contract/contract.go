@@ -118,7 +118,7 @@ func (v *Validator) validate(name string, doc any) error {
 		return apperr.New(apperr.Internal, "schema validation failed to run")
 	}
 	return apperr.Newf(apperr.InvalidInput, "document does not conform to %s", name).
-		WithDetails(v.details(ve)...)
+		WithDetails(v.details(ve, doc)...)
 }
 
 type ecmaRE struct{ re *regexp2.Regexp }
