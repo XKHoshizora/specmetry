@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -227,6 +228,25 @@ func TestInitIsIdempotent(t *testing.T) {
 	}
 }
 
+// describeRun tells an init.v1 result from an error.v1 envelope and keeps
+// stdout and stderr apart, for diagnosing a failed concurrent run.
+func describeRun(stdout, stderr string) string {
+	var head struct {
+		Schema string      `json:"schema"`
+		Error  apperr.Body `json:"error"`
+	}
+	kind := "unparsed stdout"
+	if json.Unmarshal([]byte(stdout), &head) == nil {
+		switch head.Schema {
+		case "specmetry.init/v1":
+			kind = "init.v1 result"
+		case "specmetry.error/v1":
+			kind = fmt.Sprintf("error.v1: code %s, message %q, details %+v", head.Error.Code, head.Error.Message, head.Error.Details)
+		}
+	}
+	return fmt.Sprintf("  %s\n  stdout: %q\n  stderr: %q", kind, stdout, stderr)
+}
+
 // Concurrent first runs register one project.
 func TestInitConcurrentRunsRegisterOneProject(t *testing.T) {
 	home := testutil.TempHome(t)
@@ -235,22 +255,30 @@ func TestInitConcurrentRunsRegisterOneProject(t *testing.T) {
 	const n = 4
 	outs := make([]initOutput, n)
 	codes := make([]int, n)
-	raw := make([]string, n)
+	stdouts, stderrs := make([]string, n), make([]string, n)
 	var wg sync.WaitGroup
 	for i := range n {
 		wg.Go(func() {
 			var stdout, stderr strings.Builder
 			codes[i] = Execute(context.Background(), []string{"init", "--json"}, &stdout, &stderr)
-			raw[i] = stdout.String() + stderr.String()
-			_ = json.Unmarshal([]byte(stdout.String()), &outs[i])
+			stdouts[i], stderrs[i] = stdout.String(), stderr.String()
+			_ = json.Unmarshal([]byte(stdouts[i]), &outs[i])
 		})
 	}
 	wg.Wait()
 	created := 0
 	for i := range n {
 		if codes[i] != apperr.ExitOK || outs[i].Project.ID != outs[0].Project.ID {
-			t.Fatalf("run %d: exit %d\n%s", i, codes[i], raw[i])
+			t.Errorf("run %d: exit %d\n%s", i, codes[i], describeRun(stdouts[i], stderrs[i]))
 		}
+	}
+	if t.Failed() {
+		for i := range n {
+			t.Logf("run %d: exit %d\n%s", i, codes[i], describeRun(stdouts[i], stderrs[i]))
+		}
+		t.FailNow()
+	}
+	for i := range n {
 		if outs[i].Created {
 			created++
 		}

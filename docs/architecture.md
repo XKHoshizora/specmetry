@@ -601,7 +601,7 @@ Agent 侧的安装位置（TD-03）：
 
 Specmetry 对项目仓库的写入仅限于：
 
-- `.specmetry/project.json`（只在主 worktree 中；先写临时文件，再原子替换）；
+- `.specmetry/project.json`（只在主 worktree 中；先写临时文件，再以硬链接放到位，读取方不会看到写了一半的文件。只创建、不替换：并发的 `init` 同时写入时，第一个成功，其余发现内容相同即视为已写入，内容不同则报错；不支持硬链接的文件系统改为检查后重命名）；
 - `.git/info/exclude`（默认写入，可用 `--no-exclude` 关闭；不可写时只给出警告）。写入的条目是 `/.specmetry/`，写进 `git rev-parse --git-path info/exclude` 所指的文件（在公共目录中，所有 worktree 共用）。只追加，原有内容逐字节保留；已有等价条目（`/.specmetry/`、`/.specmetry`、`.specmetry/`、`.specmetry`）时不再写入。
 - 用户选择项目级安装时，经确认写入的 `.claude/settings.local.json`。前提是这个路径已被 git 忽略（用 `git check-ignore` 检查）；否则拒绝项目级安装，并建议改用用户级安装。
 
@@ -725,6 +725,7 @@ extra_rules = [
   - Unix：属主是当前用户，没有 group 和 other 权限位。在 Linux 上这已足够：POSIX ACL 只能通过 group 类权限位（mask）授权，mask 为 0 时其他条目都不生效。macOS 的扩展 ACL 先于权限位生效，单独检查；有允许访问的条目即视为不满足。
   - Windows：只有当前用户和 SYSTEM 的允许条目；属主是当前用户、SYSTEM 或 Administrators 组；数据目录本身的 DACL 受保护；每个目录都有可继承给新文件的当前用户条目（否则 SQLite 新建的 WAL、SHM 会得到进程的默认 DACL）。
   - 两个平台都拒绝符号链接和联接（包括数据目录本身）：链接可能把写入引向不私有的位置。
+  - 检查期间消失的条目跳过：另一个进程可能正在使用数据目录（例如并发的首次 `init` 中，一个进程创建数据库时 SQLite 的 `-journal` 随即出现又删除；备份轮换、压缩标记也会删除文件）。已经不存在的条目不会暴露任何内容；仍然存在的条目照常检查，数据目录本身不存在仍是错误。
 - **路径上的目录**（codex-review-005 B1）：只检查数据目录本身不够。能写入某个上级目录的其他用户，可以在检查之后把数据目录改名移走，换成指向自己文件的链接，之后的写入就会落到他们手里。因此，从根目录到数据目录的每一级目录都必须**只能由当前用户或 root / 管理员改动**，否则在创建或写入任何内容之前拒绝（退出码 6）。MVP 对这类位置一律保守拒绝，不尝试防御：
   - Unix：按内核解析路径的方式逐级检查（跟随路径中的符号链接，链接经过的目录也检查）。每一级目录的属主必须是当前用户或 root；目录不能被 group 或 other 写入，除非它带 sticky 位（如 `/tmp`）且下一级条目属于当前用户或 root（此时只有条目的属主能改名或删除它）。macOS 上，路径目录带有允许访问的扩展 ACL 也视为不满足。
   - Windows：路径上的目录不能是联接或符号链接；属主必须是当前用户、SYSTEM、Administrators 或 TrustedInstaller；除这些主体外，任何人都不能对目录本身拥有 DELETE、WRITE_DAC、WRITE_OWNER、FILE_DELETE_CHILD 或完全控制权限。应用包和能力 SID（`S-1-15-…`）不算其他用户：AppContainer 进程只有在其用户本身也被授权时才能访问。

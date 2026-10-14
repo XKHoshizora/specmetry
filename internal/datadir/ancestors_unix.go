@@ -90,7 +90,7 @@ func checkAncestors(path string) ([]string, error) {
 		cur, curInfo = child, childInfo
 		dirs = append(dirs, cur)
 	}
-	aclProblems, err := extendedACLProblems(dirs)
+	aclProblems, err := extendedACLProblems(dirs, nil)
 	return append(problems, aclProblems...), err
 }
 

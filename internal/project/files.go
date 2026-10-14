@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"time"
 
 	"github.com/XKHoshizora/specmetry/internal/apperr"
 	"github.com/XKHoshizora/specmetry/internal/gitx"
@@ -181,9 +180,13 @@ func ReadMarker(root string) (Marker, bool, error) {
 	return m, true, nil
 }
 
-// WriteMarker writes the marker of the project rooted at root, replacing
-// the file atomically. It refuses to write through anything but a real
-// .specmetry directory.
+// WriteMarker creates the marker of the project rooted at root. It is
+// written to a temporary file first and then linked into place, so a
+// reader never sees part of it, and it never replaces a marker that is
+// already there: concurrent init runs write the same marker at once; the
+// first link wins and the others find the marker holding what they meant
+// to write. A different marker there is an error. It refuses to write
+// through anything but a real .specmetry directory.
 func WriteMarker(root string, m Marker) error {
 	exists, err := markerDirExists(root)
 	if err != nil {
@@ -223,33 +226,36 @@ func WriteMarker(root string, m Marker) error {
 		werr = cerr
 	}
 	if werr == nil {
-		werr = replaceMarker(tmp.Name(), root, m)
+		werr = publishMarker(tmp.Name(), root, m)
 	}
+	// After a link the marker is the other name of the file.
+	_ = os.Remove(tmp.Name())
 	if werr != nil {
-		_ = os.Remove(tmp.Name())
 		return apperr.Wrap(apperr.Environment, werr, "cannot write the marker "+MarkerPath(root))
 	}
 	return nil
 }
 
-// replaceMarker renames tmp over the marker. Concurrent init runs write
-// the same marker at once; on Windows replacing a file that another
-// process is replacing fails for a moment. A marker that already holds m
-// is what this writer wanted, so that counts as done; otherwise the
-// rename is tried a few more times.
-func replaceMarker(tmp, root string, m Marker) error {
-	var err error
-	for attempt := range 10 {
-		if err = os.Rename(tmp, MarkerPath(root)); err == nil {
-			return nil
-		}
-		if got, found, rerr := ReadMarker(root); rerr == nil && found && got == m {
-			_ = os.Remove(tmp)
-			return nil
-		}
-		time.Sleep(time.Duration(attempt+1) * 10 * time.Millisecond)
+// publishMarker puts the complete file tmp in place as the marker without
+// replacing one: a hard link fails if the marker exists, and then the
+// marker must already hold m. A file system without hard links (FAT, for
+// example) gets a rename instead, after the same check.
+func publishMarker(tmp, root string, m Marker) error {
+	final := MarkerPath(root)
+	err := os.Link(tmp, final)
+	if err == nil {
+		return nil
 	}
-	return err
+	if !errors.Is(err, fs.ErrExist) {
+		if _, lerr := os.Lstat(final); lerr != nil {
+			return os.Rename(tmp, final)
+		}
+	}
+	got, found, rerr := ReadMarker(root)
+	if rerr == nil && found && got == m {
+		return nil
+	}
+	return errors.New("another marker is there already")
 }
 
 // FindMarker returns the nearest directory, from dir upwards, that holds a

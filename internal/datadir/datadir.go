@@ -178,6 +178,17 @@ func Check(d Dir) ([]string, error) {
 	return append(problems, own...), err
 }
 
+// vanished reports whether err says that p, an entry inside the data
+// directory root, no longer exists. Another process may be using the
+// data directory during a check: SQLite's transient files (the rollback
+// journal that creating a database and switching it to WAL uses) come and
+// go, and so do backups and the compaction marker. An entry gone by the
+// time it is inspected cannot expose anything, so the check skips it; the
+// data directory itself missing is still an error.
+func vanished(p, root string, err error) bool {
+	return p != root && errors.Is(err, fs.ErrNotExist)
+}
+
 const linkProblem = "is a symbolic link or junction; Specmetry does not follow links in its data directory (set " +
 	EnvHome + " to the real location)"
 

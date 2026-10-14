@@ -342,3 +342,32 @@ func TestWriteMarkerConcurrently(t *testing.T) {
 		}
 	}
 }
+
+// The marker is created, never replaced: an existing marker that holds the
+// same project counts as written; a different one is left alone and is an
+// error.
+func TestWriteMarkerNeverReplaces(t *testing.T) {
+	root := t.TempDir()
+	m := project.Marker{ProjectID: "01J9Z3K5Q8R2T4V6W8X0Y2Z4C1", Name: "demo"}
+	if err := project.WriteMarker(root, m); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(filepath.Join(root, ".specmetry", "project.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := project.WriteMarker(root, m); err != nil {
+		t.Fatalf("writing the same marker again: %v", err)
+	}
+	other := project.Marker{ProjectID: "01J9Z3K5Q8R2T4V6W8X0Y2Z4C2", Name: "demo"}
+	if err := project.WriteMarker(root, other); err == nil {
+		t.Fatal("a different marker was replaced")
+	}
+	after, err := os.ReadFile(filepath.Join(root, ".specmetry", "project.json"))
+	if err != nil || string(after) != string(before) {
+		t.Fatalf("marker changed: %q -> %q (%v)", before, after, err)
+	}
+	if entries, _ := os.ReadDir(filepath.Join(root, ".specmetry")); len(entries) != 1 {
+		t.Fatalf(".specmetry holds %d entries, want only the marker", len(entries))
+	}
+}

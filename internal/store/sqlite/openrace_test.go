@@ -121,3 +121,39 @@ func TestOpenAndConcurrentUpgradeDoNotInterleave(t *testing.T) {
 		t.Fatalf("after the older binary closed: schema v%d, %d facts", v, countRows(t, newer, `SELECT count(*) FROM facts`))
 	}
 }
+
+// The data directory is checked by every open, before the open lock is
+// taken, so it may be checked while another process creates the database
+// in it (concurrent first init runs; an exit 6 seen on macOS and Windows):
+// SQLite's rollback journal comes and goes meanwhile, and the check must
+// not fail on it.
+func TestCheckWhileTheDatabaseIsCreated(t *testing.T) {
+	for round := range 20 {
+		dir := datadir.Dir{Path: filepath.Join(testdir.New(t), "specmetry-home")}
+		if err := dir.Ensure(); err != nil {
+			t.Fatal(err)
+		}
+		done := make(chan error, 1)
+		go func() {
+			db, _, err := Open(ctx, dir, Options{})
+			if err == nil {
+				err = db.Close()
+			}
+			done <- err
+		}()
+		checks := 0
+		for opening := true; opening; checks++ {
+			select {
+			case err := <-done:
+				if err != nil {
+					t.Fatalf("round %d: open: %v", round, err)
+				}
+				opening = false
+			default:
+			}
+			if problems, err := datadir.Check(dir); err != nil || len(problems) > 0 {
+				t.Fatalf("round %d, check %d while the database is created: %v, %v", round, checks, problems, err)
+			}
+		}
+	}
+}
