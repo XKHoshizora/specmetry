@@ -8,7 +8,7 @@
 |---|---|---|
 | Go | `go.mod` 中的 `go` 版本（当前 1.27） | 纯 Go 构建，不需要 cgo |
 | Node.js | ≥ 22.12（CI 使用 24） | 只用于构建内嵌的 Dashboard |
-| git | 任意近期版本 | 运行时和测试都需要 |
+| git | 2.32 或更高 | 运行时和测试都需要；`init` 用 `GIT_CONFIG_GLOBAL` / `GIT_CONFIG_SYSTEM` 隔离用户的 git 配置（architecture §6.1.2） |
 | golangci-lint | v2.14.0 | 与 CI 保持一致：`go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0` |
 
 开发时建议把 `SPECMETRY_HOME` 指向一个临时目录，避免改动 `~/.specmetry` 中的真实数据：

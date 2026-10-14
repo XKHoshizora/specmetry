@@ -20,7 +20,14 @@ import (
 // are the files git sees: tracked ones and untracked ones that are not
 // ignored. Otherwise the directory is walked. Symbolic links are not
 // followed, and the excluded directories are skipped.
+//
+// A cancelled context stops the listing as soon as it is noticed, with an
+// error: a listing cut short is never returned as if it were complete
+// (codex-review-015 N2).
 func ListFiles(ctx context.Context, root string, git bool) ([]File, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, interrupted(err)
+	}
 	if git {
 		names, err := gitx.ListFiles(ctx, root)
 		if err != nil {
@@ -28,6 +35,9 @@ func ListFiles(ctx context.Context, root string, git bool) ([]File, error) {
 		}
 		var out []File
 		for _, name := range names {
+			if err := ctx.Err(); err != nil {
+				return nil, interrupted(err)
+			}
 			if inExcludedDir(name) {
 				continue
 			}
@@ -42,6 +52,9 @@ func ListFiles(ctx context.Context, root string, git bool) ([]File, error) {
 	}
 	var out []File
 	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if cerr := ctx.Err(); cerr != nil {
+			return cerr
+		}
 		if p == root {
 			return err
 		}
@@ -72,10 +85,17 @@ func ListFiles(ctx context.Context, root string, git bool) ([]File, error) {
 		out = append(out, File{Path: filepath.ToSlash(rel), Size: fi.Size()})
 		return nil
 	})
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return nil, interrupted(err)
+	}
 	if err != nil {
 		return nil, apperr.Wrap(apperr.Environment, err, "cannot list the files of "+root)
 	}
 	return out, nil
+}
+
+func interrupted(err error) error {
+	return apperr.Wrap(apperr.Environment, err, "the file scan was interrupted before it finished; nothing was registered")
 }
 
 // The marker: <main worktree>/.specmetry/project.json (architecture §8).

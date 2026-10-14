@@ -1,8 +1,10 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"time"
 
@@ -111,6 +113,13 @@ func runInit(cmd *cobra.Command, opts project.InitOptions) (project.Result, erro
 	plan, err := project.Prepare(ctx, opts, scanner)
 	if err != nil {
 		return project.Result{}, err
+	}
+	// Opening creates the database. A marker cannot name a project of a
+	// database that does not exist yet, so it is refused first.
+	if _, err := os.Lstat(dir.Join(datadir.DatabaseFile)); errors.Is(err, fs.ErrNotExist) {
+		if err := plan.RefuseMarkerWithoutDatabase(); err != nil {
+			return project.Result{}, err
+		}
 	}
 	db, _, err := sqlite.Open(ctx, dir, sqlite.Options{})
 	if err != nil {

@@ -6,8 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"runtime"
-	"slices"
 	"strings"
 	"testing"
 
@@ -105,24 +103,82 @@ func TestLocateIgnoresRepositoryVariables(t *testing.T) {
 	}
 }
 
+// codex-review-015 B1: git gets none of the inherited GIT_* variables —
+// configuration injection (GIT_CONFIG_COUNT/KEY/VALUE, GIT_CONFIG_PARAMETERS,
+// GIT_CONFIG_GLOBAL), tracing, repository location, exec path — whatever
+// their letter case, and only the controlled ones are added back: system and
+// global configuration replaced by an empty file, no optional locks, no
+// prompts.
 func TestFilterEnv(t *testing.T) {
-	in := []string{"PATH=/bin", "GIT_DIR=/x", "git_work_tree=/y", "GIT_AUTHOR_NAME=a", "GIT_INDEX_FILE=/i", "HOME=/h", "GIT_CEILING_DIRECTORIES=/c"}
+	in := []string{
+		"PATH=/bin", "HOME=/h", "LANG=C",
+		"GIT_DIR=/x", "git_work_tree=/y", "GIT_AUTHOR_NAME=a", "GIT_INDEX_FILE=/i", "GIT_CEILING_DIRECTORIES=/c",
+		"GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=core.fsmonitor", "GIT_CONFIG_VALUE_0=x", "GIT_CONFIG_PARAMETERS='a'='b'",
+		"GIT_CONFIG_GLOBAL=/g", "GIT_CONFIG_SYSTEM=/s", "GIT_CONFIG_NOSYSTEM=0", "GIT_TRACE=/t", "GIT_TRACE2_EVENT=/e",
+		"GIT_EXEC_PATH=/p", "GIT_OPTIONAL_LOCKS=1", "Git_Trace_Setup=/u",
+	}
 	got := filterEnv(in)
-	for _, kept := range []string{"PATH=/bin", "GIT_AUTHOR_NAME=a", "HOME=/h", "GIT_OPTIONAL_LOCKS=0", "GIT_TERMINAL_PROMPT=0"} {
-		if !slices.Contains(got, kept) {
-			t.Errorf("%s missing from %q", kept, got)
+	want := []string{
+		"PATH=/bin", "HOME=/h", "LANG=C",
+		"GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_SYSTEM=/dev/null", "GIT_CONFIG_GLOBAL=/dev/null",
+		"GIT_OPTIONAL_LOCKS=0", "GIT_TERMINAL_PROMPT=0", "GIT_DISCOVERY_ACROSS_FILESYSTEM=1",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("filterEnv =\n%q\nwant\n%q", got, want)
+	}
+}
+
+// codex-review-015 B3: an error never carries git's own message, which can
+// quote configuration values, nor the directory git ran in.
+func TestErrorsDoNotQuoteGit(t *testing.T) {
+	repo := committedRepo(t)
+	canary := testutil.NewCanary(t)
+	_, err := run(ctx, repo.Dir, "rev-parse", "--verify", canary)
+	if err == nil || apperr.ExitCode(err) != apperr.ExitEnvironment {
+		t.Fatalf("run = %v", err)
+	}
+	if msg := err.Error(); strings.Contains(msg, canary) || strings.Contains(msg, repo.Dir) || !strings.Contains(msg, "rev-parse") {
+		t.Fatalf("error = %q", msg)
+	}
+
+	bad := testutil.NewGitRepo(t)
+	bad.Git("config", "core.bare", canary)
+	_, err = Locate(ctx, bad.Dir)
+	if err == nil || apperr.ExitCode(err) != apperr.ExitEnvironment {
+		t.Fatalf("Locate with an invalid configuration = %v", err)
+	}
+	if msg := err.Error(); strings.Contains(msg, canary) || strings.Contains(msg, bad.Dir) {
+		t.Fatalf("error = %q", msg)
+	}
+}
+
+// codex-review-015 B1: git 2.32 is the oldest that reads GIT_CONFIG_GLOBAL
+// and GIT_CONFIG_SYSTEM, without which the user's configuration cannot be
+// kept out.
+func TestParseGitVersion(t *testing.T) {
+	cases := map[string]bool{
+		"git version 2.32.0":                 true,
+		"git version 2.56.0.windows.2":       true,
+		"git version 2.39.5 (Apple Git-154)": true,
+		"git version 3.0.0":                  true,
+		"git version 2.31.8":                 false,
+		"git version 1.99.0":                 false,
+		"not git":                            false,
+	}
+	for out, want := range cases {
+		if got := supportedVersion(out); got != want {
+			t.Errorf("supportedVersion(%q) = %v, want %v", out, got, want)
 		}
 	}
-	for _, v := range got {
-		name, _, _ := strings.Cut(v, "=")
-		switch strings.ToUpper(name) {
-		case "GIT_DIR", "GIT_INDEX_FILE", "GIT_CEILING_DIRECTORIES":
-			t.Errorf("%s kept", v)
-		case "GIT_WORK_TREE":
-			if runtime.GOOS == "windows" {
-				t.Errorf("%s kept (variable names are case-insensitive on Windows)", v)
-			}
-		}
+}
+
+// codex-review-015 N2: a cancelled context stops git.
+func TestCanceledContextStopsGit(t *testing.T) {
+	repo := committedRepo(t)
+	canceled, cancel := context.WithCancel(ctx)
+	cancel()
+	if _, err := ListFiles(canceled, repo.Dir); err == nil {
+		t.Fatal("ListFiles ran with a cancelled context")
 	}
 }
 

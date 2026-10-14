@@ -2,6 +2,8 @@ package project_test
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -10,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/XKHoshizora/specmetry/internal/apperr"
 	"github.com/XKHoshizora/specmetry/internal/project"
 	"github.com/XKHoshizora/specmetry/internal/testutil"
 )
@@ -265,5 +268,51 @@ func TestEnsureExcludedReportsUnwritableFile(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "*.log") {
 		t.Fatalf("the error quotes the file: %v", err)
+	}
+}
+
+// cancelAfter is a context whose Err reports cancellation from its n-th
+// call on, as if it were cancelled while the walk runs.
+type cancelAfter struct {
+	context.Context
+	n, calls int
+}
+
+func (c *cancelAfter) Err() error {
+	c.calls++
+	if c.calls >= c.n {
+		return context.Canceled
+	}
+	return nil
+}
+
+// codex-review-015 N2: a cancelled scan stops, soon, and is reported as an
+// error, never as a complete list.
+func TestListFilesStopsWhenCanceled(t *testing.T) {
+	root := t.TempDir()
+	for i := range 50 {
+		write(t, root, fmt.Sprintf("d%02d/f.md", i), "x")
+	}
+	canceled, cancel := context.WithCancel(ctx)
+	cancel()
+	files, err := project.ListFiles(canceled, root, false)
+	if !errors.Is(err, context.Canceled) || files != nil || apperr.ExitCode(err) != apperr.ExitEnvironment {
+		t.Fatalf("cancelled before the walk: %d files, %v", len(files), err)
+	}
+
+	during := &cancelAfter{Context: ctx, n: 10}
+	files, err = project.ListFiles(during, root, false)
+	if !errors.Is(err, context.Canceled) || files != nil {
+		t.Fatalf("cancelled during the walk: %d files, %v", len(files), err)
+	}
+	if during.calls > during.n {
+		t.Fatalf("the walk went on after the cancellation (%d checks)", during.calls)
+	}
+
+	repo := testutil.NewGitRepo(t)
+	repo.WriteFile("README.md", "readme")
+	repo.Commit("init")
+	if files, err := project.ListFiles(canceled, repo.Dir, true); err == nil || files != nil {
+		t.Fatalf("cancelled git listing: %d files, %v", len(files), err)
 	}
 }

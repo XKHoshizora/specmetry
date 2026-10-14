@@ -736,8 +736,9 @@ func TestInitRefusesConflictingMarker(t *testing.T) {
 		if code != apperr.ExitEnvironment || !strings.Contains(text, other) {
 			t.Fatalf("exit %d\n%s", code, text)
 		}
-		if n := count(t, home, `SELECT count(*) FROM projects`); n != 0 {
-			t.Fatalf("%d projects", n)
+		// codex-review-015 N1: checked before anything opens the database.
+		if _, err := os.Stat(home.Path); !os.IsNotExist(err) {
+			t.Fatalf("data directory created (%v)", err)
 		}
 	})
 	t.Run("marker replaced after registration", func(t *testing.T) {

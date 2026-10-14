@@ -1009,3 +1009,68 @@ PR：<https://github.com/XKHoshizora/specmetry/pull/1>（`feat/m0-foundation` �
 **仍未完成、随后续工作包验证**：MVP-CH-01、CH-02 对真实人类专属命令的验证：`source ack`、`source remove` 在 WP1.4，`review`、`propose --apply` 在 WP1.6，`target set`、`scope confirm` 在 WP1.8。WP1.2 只用测试中的替身命令验证了拦截与确认组件和 CLI 的共同路径。
 
 审查原文按原样入库（它本来就是仓库内的相对链接）。
+
+## 20. WP1.1 代码审查（codex-review-015）的处理
+
+**审查结论**：NO-GO，3 项 BLOCKER、2 项 NON-BLOCKER。审查目标 `86ac50d`（PR #6）。审查确认项目身份、Worktree 归属、幂等、并发登记和失败恢复正常；问题集中在安全边界。产品负责人决定一次修复全部五项，不改变已批准的架构，不扩大工作包范围。
+
+### B1：git 读取命令能执行外部程序并修改 Ref
+
+**根因**：`gitx` 只过滤了仓库定位变量。配置注入变量（`GIT_CONFIG_COUNT`、`GIT_CONFIG_PARAMETERS`、`GIT_CONFIG_GLOBAL`）、跟踪变量、用户的全局配置和仓库的本地配置都照常生效；而 `ls-files` 读取索引时会运行 `core.fsmonitor` 指定的程序。`GIT_OPTIONAL_LOCKS=0` 挡不住这些。
+
+**修复**（`internal/gitx`，architecture §6.1.2）：
+
+- 不传递任何继承的 `GIT_*` 变量（按前缀，不区分大小写），而不是只列出已知的几个。
+- 只重新设置受控变量：系统和全局配置指向空文件（`GIT_CONFIG_NOSYSTEM`、`GIT_CONFIG_SYSTEM`、`GIT_CONFIG_GLOBAL`），`GIT_OPTIONAL_LOCKS=0`，`GIT_TERMINAL_PROMPT=0`。用户的配置文件不读取，也不修改。
+- 仓库本地配置中唯一会让读取命令执行程序的 `core.fsmonitor`，在命令行上用空值关闭（2.32 以来的各个版本都把空值当作关闭）；另加 `--no-pager`、`--no-replace-objects`。
+- 要求 git 2.32 或更高（第一个支持 `GIT_CONFIG_GLOBAL` / `GIT_CONFIG_SYSTEM` 的版本；Ubuntu 22.04 为 2.34）；更旧时返回退出码 6，而不是在无法隔离的情况下继续运行。
+
+**回归测试**（全部经过公开的 `init --json --no-exclude`；每种注入先用普通 git 确认确实生效，避免测试本身无效）：
+
+| 注入 | 修复前（Windows） | 修复后（Windows、Linux） |
+|---|---|---|
+| 仓库本地配置 `core.fsmonitor` | 外部文件被写入，新 Ref 被创建，`.git` 改变 | 都不发生 |
+| `GIT_CONFIG_COUNT` 注入 `core.fsmonitor` | 同上 | 同上 |
+| `GIT_CONFIG_PARAMETERS` 注入 `core.fsmonitor` | 同上 | 同上 |
+| 全局配置中的 `core.fsmonitor` 和 `trace2.normalTarget` | 同上，并写入 trace2 文件 | 同上 |
+| `GIT_CONFIG_GLOBAL` 指向的配置 | 同上 | 同上 |
+| `GIT_TRACE`、`GIT_TRACE2`、`GIT_TRACE2_EVENT`、`GIT_TRACE_SETUP`、`GIT_TRACE_PERFORMANCE` | 五个跟踪文件都被写入 | 都不写入 |
+| 仓库通过 `core.hooksPath` 配置的 Hook | 未执行（读取命令不触发 Hook） | 未执行（回归防护） |
+
+每种情况都比较 `.git` 下的全部文件及内容，以及全部 Ref。
+
+**保证边界**：隔离针对 Specmetry 自己运行的 git 命令。仓库本地配置仍然生效（除 `core.fsmonitor` 外），所以仍依赖"这些读取命令本身不执行程序、不触发 Hook"这一 git 行为；已用 Hook 和 FSMonitor 反例验证。`doctor` 的 `git --version` 检查不属于本轮范围。
+
+### B2：默认交付目标的 Ref 绕过密钥扫描
+
+**根因**：主 worktree 的分支在扫描之后才读取，随后直接写入 `delivery_targets.ref` 并进入输出。
+
+**修复**：读取分支后立即按 WP1.3 的规则扫描，命中时返回退出码 2，错误只给出字段（`default delivery target ref`）和规则编号。扫描在打开数据库之前完成，不论这次是否会新建目标（打开数据库之前无法知道）。
+
+**回归测试**：分支名含合成的 GitHub token（运行时拼接）→ 退出码 2；`error.v1` 中只有字段与 `secret_detected: github_token`；stdout、stderr 中都没有该 token；数据目录（数据库与日志）未创建，没有 marker，没有分配 `seq`。修复前：退出码 0，token 写入数据库和输出。
+
+### B3：git 错误原文泄露
+
+**根因**：git stderr 的第一行和运行目录被拼进错误信息，并进入 `error.v1`；`Locate` 在路径扫描之前运行，所以错误中的目录也未经扫描。
+
+**修复**：git 的 stderr 直接丢弃，不保存。错误只包含 git 子命令名和退出状态（退出码 6）；查找仓库时的错误也不包含目录，只描述错误类别。
+
+**回归测试**（公开 CLI，canary）：
+
+- 环境变量注入无效的 `core.bare`：修复前退出码 6，`error.v1` 中出现 canary；修复后该变量不再传给 git（B1），`init` 成功，输出、数据目录和 marker 中都没有 canary。
+- 仓库本地配置中写入无效的 `core.bare`（不依赖 B1）：修复前 `error.v1` 中出现 canary 与仓库路径；修复后退出码 6，`--json` 与文本输出中都没有 canary 和仓库路径，数据目录未创建。
+- 单元测试：`rev-parse` 失败时，错误中没有 git 的信息和目录。
+
+### N1：marker 冲突时的文件副作用
+
+**修复**：数据目录中还没有数据库、却有 marker 时，在创建数据库之前拒绝。错误改为"No project was registered and the marker was left as it is"，与实际一致。数据库已登记项目但 marker 缺失时，仍然补写 marker。
+
+**回归测试**：没有数据目录时，拒绝后数据目录仍不存在；有数据目录（只有 `config.toml`）时，拒绝前后数据目录的文件与内容完全相同；marker 逐字节不变。修复前（在审查目标上复现）：退出码 6，数据库已被创建，错误却声称 "Nothing was changed"。原有冲突测试改为在任何查询之前检查数据目录。
+
+### N2：非 git 扫描不响应取消
+
+**修复**：文件列举在开始前、遍历每个条目时，以及 git 列举结果的处理循环中检查取消；取消时返回退出码 6，不返回部分结果，不登记任何内容。没有引入扫描数量限制。
+
+**回归测试**：调用前已取消 → 立即返回错误；遍历中途取消（第 10 次检查时）→ 立即停止，不再检查；git 列举在已取消时返回错误；公开 CLI 在已取消的 context 下，非 git 和 git 项目都返回错误，不创建数据目录和 marker。修复前：已取消时仍返回完整列表，公开路径登记了项目。
+
+审查原文按原样入库（它本来就是仓库内的相对链接）。

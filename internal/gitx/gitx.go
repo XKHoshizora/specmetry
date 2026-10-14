@@ -1,23 +1,36 @@
 // Package gitx runs the git CLI for Specmetry (TD-05). It only reads: no
-// command it runs changes the repository, its index or its configuration.
+// command it runs changes the repository, its index or its configuration,
+// runs another program or writes a file (codex-review-015 B1):
 //
-// The repository is always found from the directory, as the Hook finds it
-// (architecture §12.2): variables that point git at another repository,
-// such as GIT_DIR, are not passed on.
+//   - git gets none of the inherited GIT_* variables, so neither the
+//     environment's configuration (GIT_CONFIG_COUNT, GIT_CONFIG_PARAMETERS,
+//     ...) nor tracing nor a repository named by GIT_DIR applies. The
+//     repository is found from the directory, as the Hook finds it
+//     (architecture §12.2).
+//   - The system and global configuration are replaced by an empty file, so
+//     only the repository's own configuration applies, and in it
+//     core.fsmonitor, the one setting that makes a read command run a
+//     program, is turned off on the command line.
+//   - The commands run are read commands that run no hooks, without
+//     optional locks, a pager or replace objects.
+//
+// Errors never carry git's own messages, which can quote configuration
+// values, nor the directory (codex-review-015 B3).
 package gitx
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
+	"regexp"
+	"slices"
+	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/XKHoshizora/specmetry/internal/apperr"
 )
@@ -82,11 +95,11 @@ func findDotGit(dir string) (bool, error) {
 		if _, err := os.Lstat(filepath.Join(d, ".git")); err == nil {
 			return true, nil
 		} else if !errors.Is(err, fs.ErrNotExist) {
-			return false, apperr.Wrap(apperr.Environment, err, "cannot look for a git repository")
+			return false, apperr.New(apperr.Environment, "cannot look for a git repository ("+osProblem(err)+")")
 		}
 		if isGitDir(d) {
-			return false, apperr.Newf(apperr.Environment,
-				"%s is inside a git directory or a bare repository, which has no worktree; run the command in a worktree", dir)
+			return false, apperr.New(apperr.Environment,
+				"the current directory is inside a git directory or a bare repository, which has no worktree; run the command in a worktree")
 		}
 		parent := filepath.Dir(d)
 		if parent == d {
@@ -222,37 +235,78 @@ func Canonical(p string) string {
 	return p
 }
 
-// locationVariables are the variables that make git use another
-// repository, worktree, index or object store than the directory's own, or
-// stop it from finding the repository above the directory.
-var locationVariables = map[string]bool{
-	"GIT_DIR": true, "GIT_WORK_TREE": true, "GIT_COMMON_DIR": true, "GIT_INDEX_FILE": true,
-	"GIT_OBJECT_DIRECTORY": true, "GIT_ALTERNATE_OBJECT_DIRECTORIES": true, "GIT_NAMESPACE": true,
-	"GIT_PREFIX": true, "GIT_IMPLICIT_WORK_TREE": true, "GIT_SHALLOW_FILE": true, "GIT_GRAFT_FILE": true,
-	"GIT_REPLACE_REF_BASE": true, "GIT_NO_REPLACE_OBJECTS": true, "GIT_CEILING_DIRECTORIES": true,
-	"GIT_DISCOVERY_ACROSS_FILESYSTEM": true, "GIT_OPTIONAL_LOCKS": true, "GIT_TERMINAL_PROMPT": true,
+// controlledEnv is the git environment Specmetry sets: no system or global
+// configuration (an empty file instead; git maps /dev/null on Windows too),
+// no optional locks, so reading never writes the index, no prompts, and the
+// .git entry that findDotGit found by walking up without a filesystem limit.
+var controlledEnv = []string{
+	"GIT_CONFIG_NOSYSTEM=1",
+	"GIT_CONFIG_SYSTEM=/dev/null",
+	"GIT_CONFIG_GLOBAL=/dev/null",
+	"GIT_OPTIONAL_LOCKS=0",
+	"GIT_TERMINAL_PROMPT=0",
+	"GIT_DISCOVERY_ACROSS_FILESYSTEM=1",
 }
 
-// filterEnv drops the location variables from env and adds settings that
-// keep git from taking optional locks (so reading never writes the index)
-// and from prompting. Variable names are case-insensitive on Windows.
+// globalArgs come before every git command. An empty core.fsmonitor turns
+// the file system monitor off in every git version: a hook command from the
+// repository's configuration is never run.
+var globalArgs = []string{"--no-pager", "--no-replace-objects", "-c", "core.fsmonitor="}
+
+// filterEnv drops every GIT_* variable from env, whatever its letter case,
+// and adds controlledEnv. Other variables, such as HOME (git still reads
+// the default global excludes file) and PATH, are kept.
 func filterEnv(env []string) []string {
-	out := make([]string, 0, len(env)+3)
+	out := make([]string, 0, len(env)+len(controlledEnv))
 	for _, kv := range env {
 		name, _, _ := strings.Cut(kv, "=")
-		if runtime.GOOS == "windows" {
-			name = strings.ToUpper(name)
-		}
-		if !locationVariables[name] {
+		if !strings.HasPrefix(strings.ToUpper(name), "GIT_") {
 			out = append(out, kv)
 		}
 	}
-	return append(out,
-		"GIT_OPTIONAL_LOCKS=0",
-		"GIT_TERMINAL_PROMPT=0",
-		// The .git entry was found by walking up without a filesystem
-		// limit; git must find the same one.
-		"GIT_DISCOVERY_ACROSS_FILESYSTEM=1")
+	return append(out, controlledEnv...)
+}
+
+// minimumVersion is the oldest git that reads GIT_CONFIG_GLOBAL and
+// GIT_CONFIG_SYSTEM; an older one would read the user's configuration.
+const minimumVersion = "2.32"
+
+var versionPattern = regexp.MustCompile(`^git version (\d+)\.(\d+)`)
+
+// supportedVersion reports whether `git --version` printed minimumVersion
+// or newer.
+func supportedVersion(out string) bool {
+	m := versionPattern.FindStringSubmatch(strings.TrimSpace(out))
+	if m == nil {
+		return false
+	}
+	major, _ := strconv.Atoi(m[1])
+	minor, _ := strconv.Atoi(m[2])
+	return major > 2 || major == 2 && minor >= 32
+}
+
+var (
+	versionMu sync.Mutex
+	versionOK bool
+)
+
+// checkVersion refuses a git too old to be isolated. Only a successful
+// check is remembered, so a cancelled one is repeated.
+func checkVersion(ctx context.Context) error {
+	versionMu.Lock()
+	defer versionMu.Unlock()
+	if versionOK {
+		return nil
+	}
+	out, code, err := exec1(ctx, "", "--version")
+	if err != nil {
+		return err
+	}
+	if code != 0 || !supportedVersion(string(out)) {
+		return apperr.New(apperr.Environment, "git "+minimumVersion+" or newer is required")
+	}
+	versionOK = true
+	return nil
 }
 
 func run(ctx context.Context, dir string, args ...string) ([]byte, error) {
@@ -261,40 +315,64 @@ func run(ctx context.Context, dir string, args ...string) ([]byte, error) {
 		return nil, err
 	}
 	if code != 0 {
-		return nil, apperr.Newf(apperr.Environment, "git %s failed in %s", args[0], dir)
+		return nil, failed(args[0], code)
 	}
 	return out, nil
 }
 
-// runCode runs git in dir. A non-zero exit status other than 1 is an
-// error that carries git's message; status 1 is returned for the caller to
+// runCode runs git in dir after checking its version. A non-zero exit
+// status other than 1 is an error; status 1 is returned for the caller to
 // interpret.
 func runCode(ctx context.Context, dir string, args ...string) ([]byte, int, error) {
+	if err := checkVersion(ctx); err != nil {
+		return nil, -1, err
+	}
+	out, code, err := exec1(ctx, dir, append(slices.Clone(globalArgs), args...)...)
+	if err != nil {
+		return nil, -1, err
+	}
+	if code != 0 && code != 1 {
+		return nil, code, failed(args[0], code)
+	}
+	return out, code, nil
+}
+
+// exec1 runs git once in the controlled environment. git's own messages
+// are discarded, not kept: they may quote configuration values.
+func exec1(ctx context.Context, dir string, args ...string) ([]byte, int, error) {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
 	cmd.Env = filterEnv(os.Environ())
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
 	err := cmd.Run()
 	var exit *exec.ExitError
 	switch {
+	case ctx.Err() != nil:
+		return nil, -1, apperr.Wrap(apperr.Environment, ctx.Err(), "git was interrupted")
 	case err == nil:
 		return stdout.Bytes(), 0, nil
-	case errors.As(err, &exit) && exit.ExitCode() == 1:
-		return stdout.Bytes(), 1, nil
 	case errors.As(err, &exit):
-		return nil, exit.ExitCode(), apperr.Newf(apperr.Environment, "git %s failed in %s: %s", args[0], dir, firstLine(stderr.Bytes()))
+		return stdout.Bytes(), exit.ExitCode(), nil
 	case errors.Is(err, exec.ErrNotFound):
 		return nil, -1, apperr.New(apperr.Environment, "git is required but was not found on PATH")
 	default:
-		return nil, -1, apperr.Wrap(apperr.Environment, err, fmt.Sprintf("cannot run git %s", args[0]))
+		return nil, -1, apperr.New(apperr.Environment, "cannot run git")
 	}
 }
 
-func firstLine(b []byte) string {
-	s := bufio.NewScanner(bytes.NewReader(b))
-	if s.Scan() {
-		return strings.TrimSpace(s.Text())
+// failed is the error of a git command that did not succeed: the command
+// and its exit status only, never git's message or the directory.
+func failed(command string, code int) error {
+	return apperr.Newf(apperr.Environment,
+		"git %s failed with exit status %d; run git in this directory (for example git status) to see why", command, code)
+}
+
+// osProblem describes a file system error without its path.
+func osProblem(err error) string {
+	var pe *fs.PathError
+	if errors.As(err, &pe) {
+		return pe.Err.Error()
 	}
-	return "(no message)"
+	return "file system error"
 }

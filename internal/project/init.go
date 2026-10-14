@@ -163,6 +163,12 @@ func Prepare(ctx context.Context, opts InitOptions, scanner *secrets.Scanner) (*
 		if p.branch, err = gitx.HeadBranch(ctx, p.root); err != nil {
 			return nil, err
 		}
+		// codex-review-015 B2: the branch is the ref a new project's default
+		// target stores. It is scanned whether or not a target will be
+		// created, since that is known only once the database is open.
+		if err := rejectSecretRef(scanner, p.branch); err != nil {
+			return nil, err
+		}
 		if !opts.NoExclude {
 			// Not resolving it only costs the exclude entry: a warning.
 			p.excludePath, _ = gitx.GitPath(ctx, p.root, "info/exclude")
@@ -215,6 +221,29 @@ func rejectSecretPaths(scanner *secrets.Scanner, p *Plan) error {
 	return apperr.New(apperr.InvalidInput,
 		"a path Specmetry would store looks like it contains a secret; rename the directory or move the project").
 		WithDetails(details...)
+}
+
+// rejectSecretRef scans the main worktree's branch (architecture §10.8).
+// The error names the field and the rule, never the ref.
+func rejectSecretRef(scanner *secrets.Scanner, ref string) error {
+	findings := scanner.Fields(secrets.Field{Pointer: "default delivery target ref (the main worktree's branch)", Value: ref})
+	if len(findings) == 0 {
+		return nil
+	}
+	return apperr.New(apperr.InvalidInput,
+		"the main worktree's branch name looks like it contains a secret, and Specmetry would store it as the default delivery target; rename the branch or check out another one").
+		WithDetails(apperr.Detail{Pointer: findings[0].Pointer, Problem: "secret_detected: " + findings[0].RuleID})
+}
+
+// RefuseMarkerWithoutDatabase refuses a marker when the data directory has
+// no database yet, so it cannot know the project the marker names: before
+// the database is created, so the refusal leaves the data directory as it
+// was (codex-review-015 N1).
+func (p *Plan) RefuseMarkerWithoutDatabase() error {
+	if !p.markerFound {
+		return nil
+	}
+	return p.markerConflict("")
 }
 
 // settings is projects.settings_json (data-model §4.1). Keys added later
@@ -340,13 +369,13 @@ WHERE p.git_common_dir IS NULL AND w.path = ?`, p.root).Scan(&proj.id, &proj.nam
 // that was purged, to another SPECMETRY_HOME, or to a copied or moved
 // repository, and only a person can tell which.
 func (p *Plan) markerConflict(registered string) error {
-	where := "this Specmetry database has no such project; it may have been purged, or registered with another " +
+	where := "which this Specmetry data directory does not have; it may have been purged, or registered with another " +
 		"SPECMETRY_HOME, or the directory may be a copy of another project"
 	if registered != "" {
 		where = "but this directory is registered as project " + registered
 	}
 	return apperr.Newf(apperr.Environment,
-		"the marker %s names project %s, %s. Nothing was changed. If the directory should be registered anew, remove the marker and run init again (TD-25)",
+		"the marker %s names project %s, %s. No project was registered and the marker was left as it is. If the directory should be registered anew, remove the marker and run init again (TD-25)",
 		MarkerPath(p.root), p.marker.ProjectID, where)
 }
 

@@ -252,12 +252,18 @@ sequenceDiagram
 - 当前目录位于 git 目录内部或裸仓库中时，没有可以登记的 worktree，返回退出码 6；不会把它当作非 git 项目。
 - **非 git 项目**：项目目录是从当前目录向上最近的、含有 marker 的目录，没有时就是当前目录；项目由这个目录（主 worktree 的路径）识别。返回 `not_a_git_repository` 警告，`target = null`（FR-INIT-09）。
 - 所有路径都先规范化，再保存和比较：绝对路径，解析符号链接；Windows 上还统一短文件名和大小写。经由符号链接或不同大小写的路径进入同一目录，得到的是同一个项目和同一个 worktree。
-- 调用 git 时，不传递会让 git 改用其他仓库、worktree、索引或对象库的环境变量（`GIT_DIR`、`GIT_WORK_TREE`、`GIT_COMMON_DIR`、`GIT_INDEX_FILE`、`GIT_CEILING_DIRECTORIES` 等）：仓库只由目录决定，与 Hook 一致。同时设置 `GIT_OPTIONAL_LOCKS=0`。`init` 运行的 git 命令都是只读的，不修改提交、引用、索引和配置。
+- **git 的执行环境**（codex-review-015 B1）：`init` 只运行读取类 git 命令（`rev-parse`、`worktree list`、`symbolic-ref`、`ls-files`）。这些命令不应执行其他程序、写入文件或修改提交、引用、索引和配置；为此：
+  - 不传递任何继承的 `GIT_*` 变量（不区分大小写），包括配置注入（`GIT_CONFIG_COUNT` / `KEY` / `VALUE`、`GIT_CONFIG_PARAMETERS`、`GIT_CONFIG_GLOBAL`）、跟踪（`GIT_TRACE*`）、仓库定位（`GIT_DIR`、`GIT_WORK_TREE`、`GIT_CEILING_DIRECTORIES` 等）和 `GIT_EXEC_PATH`。仓库只由目录决定，与 Hook 一致。
+  - 只重新设置受控的变量：`GIT_CONFIG_NOSYSTEM=1`、`GIT_CONFIG_SYSTEM` 与 `GIT_CONFIG_GLOBAL` 指向空文件（不读取系统和用户的全局配置，也不修改它们；`trace2.*` 等只在这两处生效的设置因此不起作用）、`GIT_OPTIONAL_LOCKS=0`（读取不写索引）、`GIT_TERMINAL_PROMPT=0`。
+  - 仓库自己的配置照常生效（例如 `core.worktree`），只有其中会让读取命令执行程序的 `core.fsmonitor` 在命令行上被关闭（`-c core.fsmonitor=`，空值在各个 git 版本中都表示关闭）。命令还带 `--no-pager` 和 `--no-replace-objects`。这些命令不触发 Hook。
+  - 需要 git 2.32 或更高版本（第一个支持 `GIT_CONFIG_GLOBAL` / `GIT_CONFIG_SYSTEM` 的版本）；更旧的 git 无法隔离用户配置，返回退出码 6。
+  - 用户全局排除文件的默认位置（`$XDG_CONFIG_HOME/git/ignore`）仍然生效，因为 `HOME` 照常传递；`core.excludesFile` 指向别处时，那里的规则不生效（候选来源可能多出这些文件，不影响正确性）。
+- **git 的错误**（codex-review-015 B3）：git 自己的错误信息（可能引用配置值或路径）一律丢弃，不进入输出、`error.v1` 或日志，也不保存。错误只说明是哪个 git 子命令、退出状态是多少（退出码 6）；找不到仓库等错误也不包含当前目录。
 
 **marker 与数据库**：数据库是项目身份的唯一依据；marker（§8）只是指向它的指针，供不访问数据库的 Hook 使用。
 
 - 数据库中有这个项目，但 marker 不存在：补写 marker。
-- marker 中的 `project_id` 与数据库中的项目不同，或者数据库中没有 marker 所指的项目（例如该项目已被 `purge`，或登记在另一个 `SPECMETRY_HOME` 中，或者目录是从其他项目复制或移动来的）：返回退出码 6，**不写入任何内容**，提示人检查。人确认后删除 marker 再执行 `init`，目录就会登记为新项目。marker 中的 ID 从不被沿用，所以已删除的项目不会因此复活。仓库移动或复制后如何继承原项目，见 TD-25。
+- marker 中的 `project_id` 与数据库中的项目不同，或者数据库中没有 marker 所指的项目（例如该项目已被 `purge`，或登记在另一个 `SPECMETRY_HOME` 中，或者目录是从其他项目复制或移动来的）：返回退出码 6，**不登记项目、不分配 `seq`，marker 保持原样**，提示人检查。数据目录中还没有数据库时，在创建数据库之前就拒绝，数据目录逐字节不变（codex-review-015 N1）。人确认后删除 marker 再执行 `init`，目录就会登记为新项目。marker 中的 ID 从不被沿用，所以已删除的项目不会因此复活。仓库移动或复制后如何继承原项目，见 TD-25。
 - marker 无法解析、不是常规文件，或者 `.specmetry` 不是目录（包括符号链接）：返回退出码 6，不写入。
 
 **首次执行**（数据库中没有这个项目）：在一个写事务中登记项目、主 worktree，以及当前 worktree（如果与主 worktree 不同）；并按 FR-INIT-10 创建默认交付目标：名称为 `default`，ref 是主 worktree 当前所在的分支（即使 `init` 在关联 worktree 中执行），`actor` 和 `channel` 为 `system`。分支还没有提交时也创建目标，快照为 `null`；主 worktree 处于分离 HEAD 时不创建，并返回 `detached_head_no_target`。阶段取 `--stage`，否则取识别结果；名称取 `--name`，否则取主 worktree 的目录名。
@@ -272,11 +278,11 @@ sequenceDiagram
 
 **写入顺序与失败**：
 
-1. 参数和路径的校验都在打开数据库之前完成；校验失败时，连数据目录都不会创建。
+1. 参数、路径和分支的校验都在打开数据库之前完成；校验失败时，连数据目录都不会创建。扫描被取消（例如按下 Ctrl-C）时，`init` 立即停止，返回退出码 6，不会把中断的扫描当作完整结果，也不登记任何内容（codex-review-015 N2）。
 2. 数据库写入在一个写事务中完成（`BEGIN IMMEDIATE`），所以并发执行的 `init` 只会登记一个项目；`git_common_dir` 的唯一约束是第二道防线。事务中的任何失败都会回滚，不留下数据。
 3. 事务提交之后写 marker（先写临时文件，再原子替换），最后写 exclude 条目（§10.6）。marker 写入失败时返回退出码 6；项目已经登记，再次执行 `init` 会补写 marker。
 
-**密钥扫描**（§10.8）：项目名（`--name` 或目录名），以及要保存的路径（主 worktree、当前 worktree、git 目录、公共目录），都在写入之前扫描；命中时返回退出码 2，错误中只给出字段和规则，不回显内容。项目名还必须非空、单行、不含控制字符，并且不超过 200 个字符。
+**密钥扫描**（§10.8）：项目名（`--name` 或目录名）、要保存的路径（主 worktree、当前 worktree、git 目录、公共目录），以及主 worktree 的分支（新项目默认交付目标的 ref；codex-review-015 B2），都在打开数据库之前扫描。分支在项目已经登记、不会新建目标时也扫描，因为打开数据库之前无法知道是否会新建；命中时返回退出码 2，错误中只给出字段和规则，不回显内容。项目名还必须非空、单行、不含控制字符，并且不超过 200 个字符。
 
 **输出**：`--json` 输出 `init.v1`，输出前按 schema 校验；失败时输出 `error.v1`。
 
