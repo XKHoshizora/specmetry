@@ -107,7 +107,8 @@ go build -o dist/ ./cmd/specmetry
 - 验收项编号写在测试函数的注释中（例如 `// MVP-STO-01`），便于追溯。
 - 测试基座 `internal/testutil`：
   - `TempHome`：为测试设置独立且尚未创建的 `SPECMETRY_HOME`。
-  - `NewGitRepo`：使用隔离 git 配置的夹具仓库，支持提交和 `AddWorktree`。
+  - `NewGitRepo`：与本机 git 环境隔离的夹具仓库：不继承任何 `GIT_*` 变量和 `HOME`、`XDG_CONFIG_HOME`，没有系统或全局配置、模板和钩子，固定身份和 SHA-1 对象格式；修改配置和提交之前确认 git 用的是本仓库的 `.git`。支持提交、按固定时间提交（`CommitAt`）、`AddWorktree`（新分支）和 `WorktreeFor`（已有分支）。
+  - `BuildFixture`：把 `testdata/fixtures/` 中的项目夹具构造成 git 仓库，提交 ID 在三个平台上相同（见 `testdata/fixtures/README.md`）。
   - `Golden`：golden 文件比较；设置 `SPECMETRY_UPDATE_GOLDEN=1` 重新生成。
   - `RunInPTY`：在伪终端中运行命令（Windows 使用 ConPTY），用于通道识别测试。
   - `NewCanary` / `FindInTree`：隐私测试中的 canary 搜索。

@@ -1,0 +1,406 @@
+{
+  "schema": "specmetry.proposal/v1",
+  "origin": "skill_init",
+  "base_version": 0,
+  "summary": "从客户需求说明提取的初始基准：1 个目标、8 条需求、9 条验收标准，以及 4 个待澄清问题",
+  "items": [
+    {
+      "op": "add",
+      "type": "goal",
+      "ref": "g1",
+      "data": {
+        "title": "上线门店订单管理系统（首期）",
+        "description": "替代表格登记订单；首期只覆盖下单和查询"
+      },
+      "origin": "extracted",
+      "confidence": "high",
+      "sources": [
+        {
+          "source": "docs/client-brief.md",
+          "locator": "背景",
+          "excerpt": "首期只覆盖下单和查询，不包括支付和物流对接。"
+        }
+      ]
+    },
+    {
+      "op": "add",
+      "type": "requirement",
+      "ref": "r1",
+      "data": {
+        "goal": "g1",
+        "title": "店员用账号和密码登录，连续输错后锁定",
+        "kind": "functional",
+        "priority": "must"
+      },
+      "origin": "extracted",
+      "confidence": "high",
+      "sources": [
+        {
+          "source": "docs/client-brief.md",
+          "locator": "R1",
+          "excerpt": "连续 5 次输错密码后，账号锁定 15 分钟。"
+        }
+      ]
+    },
+    {
+      "op": "add",
+      "type": "criterion",
+      "ref": "c1",
+      "data": {
+        "requirement": "r1",
+        "statement": "连续输错 5 次密码后，第 6 次登录被拒绝并提示账号已锁定；15 分钟后可以再次登录",
+        "verification": "automated"
+      },
+      "origin": "extracted",
+      "confidence": "high",
+      "sources": [
+        {
+          "source": "docs/client-brief.md",
+          "locator": "R1 验收",
+          "excerpt": "输错 5 次后，第 6 次登录被拒绝，并提示账号已锁定；15 分钟后可以再次登录。"
+        }
+      ]
+    },
+    {
+      "op": "add",
+      "type": "requirement",
+      "ref": "r2",
+      "data": {
+        "goal": "g1",
+        "title": "店员为顾客创建订单",
+        "kind": "functional",
+        "priority": "must"
+      },
+      "origin": "extracted",
+      "confidence": "high",
+      "sources": [
+        {
+          "source": "docs/client-brief.md",
+          "locator": "R2",
+          "excerpt": "订单创建后状态为\"待处理\"，并生成唯一的订单编号。"
+        }
+      ]
+    },
+    {
+      "op": "add",
+      "type": "criterion",
+      "ref": "c2",
+      "data": {
+        "requirement": "r2",
+        "statement": "提交合法的订单后返回订单编号，订单状态为“待处理”",
+        "verification": "automated"
+      },
+      "origin": "extracted",
+      "confidence": "high",
+      "sources": [
+        {
+          "source": "docs/client-brief.md",
+          "locator": "R2 验收",
+          "excerpt": "提交合法的订单后返回订单编号，订单状态为\"待处理\""
+        }
+      ]
+    },
+    {
+      "op": "add",
+      "type": "criterion",
+      "ref": "c3",
+      "data": {
+        "requirement": "r2",
+        "statement": "商品数量为 0 或负数时拒绝创建订单",
+        "verification": "automated"
+      },
+      "origin": "extracted",
+      "confidence": "high",
+      "sources": [
+        {
+          "source": "docs/client-brief.md",
+          "locator": "R2 验收",
+          "excerpt": "商品数量为 0 或负数时拒绝创建。"
+        }
+      ]
+    },
+    {
+      "op": "add",
+      "type": "requirement",
+      "ref": "r3",
+      "data": {
+        "goal": "g1",
+        "title": "店员分页查看自己创建的订单",
+        "kind": "functional",
+        "priority": "must"
+      },
+      "origin": "extracted",
+      "confidence": "high",
+      "sources": [
+        {
+          "source": "docs/client-brief.md",
+          "locator": "R3",
+          "excerpt": "店员可以查看自己创建的订单列表，按创建时间倒序排列"
+        }
+      ]
+    },
+    {
+      "op": "add",
+      "type": "criterion",
+      "ref": "c4",
+      "data": {
+        "requirement": "r3",
+        "statement": "订单列表按创建时间倒序，翻页时不重复、不遗漏订单",
+        "verification": "automated"
+      },
+      "origin": "extracted",
+      "confidence": "high",
+      "sources": [
+        {
+          "source": "docs/client-brief.md",
+          "locator": "R3 验收",
+          "excerpt": "列表按创建时间倒序；翻页时不重复、不遗漏订单。"
+        }
+      ]
+    },
+    {
+      "op": "add",
+      "type": "requirement",
+      "ref": "r4",
+      "data": {
+        "goal": "g1",
+        "title": "店员只能查看自己创建的订单",
+        "kind": "functional",
+        "priority": "must"
+      },
+      "origin": "extracted",
+      "confidence": "high",
+      "sources": [
+        {
+          "source": "docs/client-brief.md",
+          "locator": "R4",
+          "excerpt": "店员只能查看自己创建的订单；查看他人的订单时，系统应当表现为该订单不存在。"
+        }
+      ]
+    },
+    {
+      "op": "add",
+      "type": "criterion",
+      "ref": "c5",
+      "data": {
+        "requirement": "r4",
+        "statement": "店员 A 请求店员 B 的订单时返回“不存在”，不泄露该订单是否存在",
+        "verification": "automated"
+      },
+      "origin": "extracted",
+      "confidence": "high",
+      "sources": [
+        {
+          "source": "docs/client-brief.md",
+          "locator": "R4 验收",
+          "excerpt": "店员 A 请求店员 B 的订单时返回\"不存在\"，不泄露该订单是否存在。"
+        }
+      ]
+    },
+    {
+      "op": "add",
+      "type": "requirement",
+      "ref": "r5",
+      "data": {
+        "goal": "g1",
+        "title": "店员取消未发货的订单并填写原因",
+        "kind": "functional",
+        "priority": "must"
+      },
+      "origin": "extracted",
+      "confidence": "high",
+      "sources": [
+        {
+          "source": "docs/client-brief.md",
+          "locator": "R5",
+          "excerpt": "未发货的订单可以由创建它的店员取消，取消时必须填写原因。已发货的订单不能取消。"
+        }
+      ]
+    },
+    {
+      "op": "add",
+      "type": "criterion",
+      "ref": "c6",
+      "data": {
+        "requirement": "r5",
+        "statement": "未发货的订单取消后状态为“已取消”，并记录原因",
+        "verification": "automated"
+      },
+      "origin": "extracted",
+      "confidence": "high",
+      "sources": [
+        {
+          "source": "docs/client-brief.md",
+          "locator": "R5 验收",
+          "excerpt": "未发货的订单取消后状态为\"已取消\"，并记录原因"
+        }
+      ]
+    },
+    {
+      "op": "add",
+      "type": "criterion",
+      "ref": "c7",
+      "data": {
+        "requirement": "r5",
+        "statement": "已发货订单的取消请求被拒绝",
+        "verification": "automated"
+      },
+      "origin": "extracted",
+      "confidence": "high",
+      "sources": [
+        {
+          "source": "docs/client-brief.md",
+          "locator": "R5 验收",
+          "excerpt": "已发货订单的取消请求被拒绝。"
+        }
+      ]
+    },
+    {
+      "op": "add",
+      "type": "requirement",
+      "ref": "r6",
+      "data": {
+        "goal": "g1",
+        "title": "区域经理按日期范围导出订单 CSV",
+        "kind": "functional",
+        "priority": "should"
+      },
+      "origin": "extracted",
+      "confidence": "high",
+      "sources": [
+        {
+          "source": "docs/client-brief.md",
+          "locator": "R6",
+          "excerpt": "区域经理可以把指定日期范围内的订单导出为 CSV 文件，用于对账。"
+        }
+      ]
+    },
+    {
+      "op": "add",
+      "type": "criterion",
+      "ref": "c8",
+      "data": {
+        "requirement": "r6",
+        "statement": "导出的 CSV 只包含日期范围内的订单，包含订单编号、创建时间、顾客姓名、金额四列",
+        "verification": "automated"
+      },
+      "origin": "extracted",
+      "confidence": "high",
+      "sources": [
+        {
+          "source": "docs/client-brief.md",
+          "locator": "R6 验收",
+          "excerpt": "导出的 CSV 包含订单编号、创建时间、顾客姓名、金额四列，只包含日期范围内的订单。"
+        }
+      ]
+    },
+    {
+      "op": "add",
+      "type": "requirement",
+      "ref": "r7",
+      "data": {
+        "goal": "g1",
+        "title": "订单状态变化后通知创建订单的店员",
+        "kind": "functional",
+        "priority": "should"
+      },
+      "origin": "extracted",
+      "confidence": "high",
+      "sources": [
+        {
+          "source": "docs/client-brief.md",
+          "locator": "R7",
+          "excerpt": "订单状态变化后，系统应尽快通知创建订单的店员。"
+        }
+      ]
+    },
+    {
+      "op": "add",
+      "type": "criterion",
+      "ref": "c9",
+      "data": {
+        "requirement": "r7",
+        "statement": "订单状态变为“已发货”或“已取消”后，店员能在通知列表中看到这条通知",
+        "verification": "automated"
+      },
+      "origin": "extracted",
+      "confidence": "medium",
+      "sources": [
+        {
+          "source": "docs/client-brief.md",
+          "locator": "R7 验收",
+          "excerpt": "订单状态变为\"已发货\"或\"已取消\"后，店员能在通知列表中看到这条通知。"
+        }
+      ]
+    },
+    {
+      "op": "add",
+      "type": "requirement",
+      "ref": "r8",
+      "data": {
+        "goal": "g1",
+        "title": "系统简单易用，店员无需培训即可上手",
+        "kind": "non_functional",
+        "priority": "should"
+      },
+      "origin": "extracted",
+      "confidence": "high",
+      "sources": [
+        {
+          "source": "docs/client-brief.md",
+          "locator": "R8",
+          "excerpt": "系统应当简单易用，店员无需培训即可上手。"
+        }
+      ]
+    }
+  ],
+  "questions": [
+    {
+      "text": "R3 的每页显示多少条订单？需求只写了“合适数量”。",
+      "about": "r3",
+      "blocking": false,
+      "sources": [
+        {
+          "source": "docs/client-brief.md",
+          "locator": "R3",
+          "excerpt": "每页显示合适数量的订单"
+        }
+      ]
+    },
+    {
+      "text": "R7 的通知最晚应在多长时间内送达？需求只写了“尽快”。",
+      "about": "r7",
+      "blocking": false,
+      "sources": [
+        {
+          "source": "docs/client-brief.md",
+          "locator": "R7",
+          "excerpt": "系统应尽快通知创建订单的店员"
+        }
+      ]
+    },
+    {
+      "text": "区域经理是否也可以创建订单？这会影响 R2 的权限设计。",
+      "blocking": true,
+      "sources": [
+        {
+          "source": "docs/client-brief.md",
+          "locator": "待确认",
+          "excerpt": "区域经理是否也可以创建订单，目前还没有结论。"
+        }
+      ]
+    },
+    {
+      "text": "R8 没有可以判定的验收描述，“无需培训即可上手”应当如何验收？",
+      "about": "r8",
+      "blocking": false,
+      "sources": [
+        {
+          "source": "docs/client-brief.md",
+          "locator": "R8",
+          "excerpt": "店员无需培训即可上手"
+        }
+      ]
+    }
+  ]
+}

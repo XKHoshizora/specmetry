@@ -1,0 +1,23 @@
+{
+  "description": "A project whose requirements are not written down: a two-paragraph README and code that implements six features (add, get, list, delete, search and tag notes) (MVP-INIT-03, E2E-3).",
+  "stage": "incomplete_docs",
+  "default_branch": "main",
+  "brief": {
+    "without_acceptance": [],
+    "ambiguities": {}
+  },
+  "commits": [
+    {
+      "message": "feat: add, get, list and delete notes",
+      "date": "2026-02-02T09:00:00Z",
+      "paths": ["README.md", "go.mod", "notes/notes.go", "notes/notes_test.go"]
+    },
+    {
+      "message": "feat: search and tag notes",
+      "date": "2026-02-04T09:00:00Z",
+      "paths": ["notes/search.go", "notes/search_test.go"]
+    }
+  ],
+  "branches": [],
+  "expected_refs": { "main": "84db9de016992909ac54249680e4e39eadb5da10" }
+}
