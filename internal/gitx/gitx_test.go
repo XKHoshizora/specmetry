@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -14,6 +15,11 @@ import (
 )
 
 var ctx = context.Background()
+
+func TestMain(m *testing.M) {
+	testutil.DispatchFakeGit()
+	os.Exit(m.Run())
+}
 
 func committedRepo(t *testing.T) *testutil.GitRepo {
 	t.Helper()
@@ -121,6 +127,7 @@ func TestFilterEnv(t *testing.T) {
 	want := []string{
 		"PATH=/bin", "HOME=/h", "LANG=C",
 		"GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_SYSTEM=/dev/null", "GIT_CONFIG_GLOBAL=/dev/null",
+		"GIT_TRACE2=0", "GIT_TRACE2_EVENT=0", "GIT_TRACE2_PERF=0",
 		"GIT_OPTIONAL_LOCKS=0", "GIT_TERMINAL_PROMPT=0", "GIT_DISCOVERY_ACROSS_FILESYSTEM=1",
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -168,6 +175,62 @@ func TestParseGitVersion(t *testing.T) {
 	for out, want := range cases {
 		if got := supportedVersion(out); got != want {
 			t.Errorf("supportedVersion(%q) = %v, want %v", out, got, want)
+		}
+	}
+}
+
+// gitVariables returns the GIT_* entries of env, sorted.
+func gitVariables(env []string) []string {
+	var out []string
+	for _, kv := range env {
+		if name, _, _ := strings.Cut(kv, "="); strings.HasPrefix(strings.ToUpper(name), "GIT_") {
+			out = append(out, kv)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
+// codex-review-016 B1: the version probe is the first git that runs, and
+// runs before the version is known, so it must already run in the
+// controlled environment: with trace2 off, which git 2.31 would otherwise
+// enable from the user's global configuration before it even prints its
+// version. A git older than 2.32 is refused after the probe, before any
+// other command. (A stand-in for git 2.31.1 records how it was run; the
+// real git 2.31.1 is the cli package's TestInitRefusesRealOldGit.)
+func TestVersionProbeRunsInTheControlledEnvironment(t *testing.T) {
+	versionMu.Lock()
+	was := versionOK
+	versionOK = false
+	versionMu.Unlock()
+	t.Cleanup(func() { versionMu.Lock(); versionOK = was; versionMu.Unlock() })
+
+	dir, env, calls := testutil.FakeGit(t, "git version 2.31.1")
+	for _, kv := range env {
+		name, value, _ := strings.Cut(kv, "=")
+		t.Setenv(name, value)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("GIT_TRACE2_EVENT", filepath.Join(t.TempDir(), "event"))
+	t.Setenv("GIT_TRACE2", "1")
+	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(t.TempDir(), "gitconfig"))
+
+	err := checkVersion(ctx)
+	if apperr.ExitCode(err) != apperr.ExitEnvironment || !strings.Contains(err.Error(), "2.32 or newer") {
+		t.Fatalf("checkVersion = %v", err)
+	}
+	got := calls()
+	if len(got) != 1 || !reflect.DeepEqual(got[0].Args, []string{"--version"}) {
+		t.Fatalf("git ran %d times: %+v", len(got), got)
+	}
+	want := slices.Clone(controlledEnv)
+	slices.Sort(want)
+	if vars := gitVariables(got[0].Env); !reflect.DeepEqual(vars, want) {
+		t.Fatalf("the probe ran with\n%q\nwant\n%q", vars, want)
+	}
+	for _, kv := range []string{"GIT_TRACE2=0", "GIT_TRACE2_EVENT=0", "GIT_TRACE2_PERF=0"} {
+		if !slices.Contains(got[0].Env, kv) {
+			t.Errorf("the probe ran without %s", kv)
 		}
 	}
 }

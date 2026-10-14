@@ -222,6 +222,7 @@ func TestDoctorReportsLoosenedPermissions(t *testing.T) {
 }
 
 func TestMain(m *testing.M) {
+	testutil.DispatchFakeGit()
 	testutil.DispatchHelper(map[string]func() int{
 		"crash":          crashHelper,
 		"cli":            cliHelper,

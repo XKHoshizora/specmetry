@@ -254,7 +254,8 @@ sequenceDiagram
 - 所有路径都先规范化，再保存和比较：绝对路径，解析符号链接；Windows 上还统一短文件名和大小写。经由符号链接或不同大小写的路径进入同一目录，得到的是同一个项目和同一个 worktree。
 - **git 的执行环境**（codex-review-015 B1）：`init` 只运行读取类 git 命令（`rev-parse`、`worktree list`、`symbolic-ref`、`ls-files`）。这些命令不应执行其他程序、写入文件或修改提交、引用、索引和配置；为此：
   - 不传递任何继承的 `GIT_*` 变量（不区分大小写），包括配置注入（`GIT_CONFIG_COUNT` / `KEY` / `VALUE`、`GIT_CONFIG_PARAMETERS`、`GIT_CONFIG_GLOBAL`）、跟踪（`GIT_TRACE*`）、仓库定位（`GIT_DIR`、`GIT_WORK_TREE`、`GIT_CEILING_DIRECTORIES` 等）和 `GIT_EXEC_PATH`。仓库只由目录决定，与 Hook 一致。
-  - 只重新设置受控的变量：`GIT_CONFIG_NOSYSTEM=1`、`GIT_CONFIG_SYSTEM` 与 `GIT_CONFIG_GLOBAL` 指向空文件（不读取系统和用户的全局配置，也不修改它们；`trace2.*` 等只在这两处生效的设置因此不起作用）、`GIT_OPTIONAL_LOCKS=0`（读取不写索引）、`GIT_TERMINAL_PROMPT=0`。
+  - 只重新设置受控的变量：`GIT_CONFIG_NOSYSTEM=1`、`GIT_CONFIG_SYSTEM` 与 `GIT_CONFIG_GLOBAL` 指向空文件（不读取系统和用户的全局配置，也不修改它们；`trace2.*` 等只在这两处生效的设置因此不起作用）、`GIT_TRACE2=0`、`GIT_TRACE2_EVENT=0`、`GIT_TRACE2_PERF=0`、`GIT_OPTIONAL_LOCKS=0`（读取不写索引）、`GIT_TERMINAL_PROMPT=0`。
+  - 这些变量对 Specmetry 启动的**每一个** git 进程都生效，包括第一个运行的版本探测 `git --version`。探测在版本未知时运行，而低于 2.32 的 git 不认识 `GIT_CONFIG_GLOBAL`，会在打印版本之前就按用户全局配置中的 `trace2.*Target` 开启跟踪，连同 `trace2.envVars` 指定的环境变量值写入文件；三个 `GIT_TRACE2*=0` 的优先级高于这些配置，所以旧版 git 在被拒绝之前也不会写出任何内容（codex-review-016 B1）。已用从官方源码构建的 git 2.31.1 和 2.32.0 验证：在版本探测阶段，用户全局配置中只有 trace2 会产生副作用（`core.fsmonitor`、`core.pager`、`core.hooksPath`、经 `include` 引入的设置都不会）。
   - 仓库自己的配置照常生效（例如 `core.worktree`），只有其中会让读取命令执行程序的 `core.fsmonitor` 在命令行上被关闭（`-c core.fsmonitor=`，空值在各个 git 版本中都表示关闭）。命令还带 `--no-pager` 和 `--no-replace-objects`。这些命令不触发 Hook。
   - 需要 git 2.32 或更高版本（第一个支持 `GIT_CONFIG_GLOBAL` / `GIT_CONFIG_SYSTEM` 的版本）；更旧的 git 无法隔离用户配置，返回退出码 6。
   - 用户全局排除文件的默认位置（`$XDG_CONFIG_HOME/git/ignore`）仍然生效，因为 `HOME` 照常传递；`core.excludesFile` 指向别处时，那里的规则不生效（候选来源可能多出这些文件，不影响正确性）。

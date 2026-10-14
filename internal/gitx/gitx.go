@@ -235,14 +235,21 @@ func Canonical(p string) string {
 	return p
 }
 
-// controlledEnv is the git environment Specmetry sets: no system or global
-// configuration (an empty file instead; git maps /dev/null on Windows too),
-// no optional locks, so reading never writes the index, no prompts, and the
-// .git entry that findDotGit found by walking up without a filesystem limit.
+// controlledEnv is the git environment Specmetry sets for every git it
+// runs, the version probe included: no system or global configuration (an
+// empty file instead; git maps /dev/null on Windows too); trace2 off, which
+// a git too old for GIT_CONFIG_GLOBAL would otherwise enable from the
+// user's global configuration while it only prints its version
+// (codex-review-016 B1; the variables override trace2.*Target); no optional
+// locks, so reading never writes the index; no prompts; and the .git entry
+// that findDotGit found by walking up without a filesystem limit.
 var controlledEnv = []string{
 	"GIT_CONFIG_NOSYSTEM=1",
 	"GIT_CONFIG_SYSTEM=/dev/null",
 	"GIT_CONFIG_GLOBAL=/dev/null",
+	"GIT_TRACE2=0",
+	"GIT_TRACE2_EVENT=0",
+	"GIT_TRACE2_PERF=0",
 	"GIT_OPTIONAL_LOCKS=0",
 	"GIT_TERMINAL_PROMPT=0",
 	"GIT_DISCOVERY_ACROSS_FILESYSTEM=1",

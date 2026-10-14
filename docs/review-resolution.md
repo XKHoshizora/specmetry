@@ -1074,3 +1074,41 @@ PR：<https://github.com/XKHoshizora/specmetry/pull/1>（`feat/m0-foundation` �
 **回归测试**：调用前已取消 → 立即返回错误；遍历中途取消（第 10 次检查时）→ 立即停止，不再检查；git 列举在已取消时返回错误；公开 CLI 在已取消的 context 下，非 git 和 git 项目都返回错误，不创建数据目录和 marker。修复前：已取消时仍返回完整列表，公开路径登记了项目。
 
 审查原文按原样入库（它本来就是仓库内的相对链接）。
+
+## 21. WP1.1 定向复审（codex-review-016）的处理
+
+**审查结论**：NO-GO，只剩 1 项 BLOCKER。审查目标 `66d5948`。B2、B3、N1、N2 经独立复审关闭（N1、N2 修复有效），本轮不再改动。目标提交的三平台 CI 8/8 通过。
+
+### B1（剩余部分）：旧版 git 的版本探测会泄露环境变量
+
+**根因**：`checkVersion` 先运行 `git --version`，再判断是否达到 2.32。探测本身在受控环境中运行，但低于 2.32 的 git 不认识 `GIT_CONFIG_GLOBAL`，仍读取 `HOME` 中的全局配置；而 trace2 在处理命令之前就按全局配置的 `trace2.*Target` 初始化，于是在 Specmetry 以退出码 6 拒绝之前，跟踪文件已经写出，其中包含 `trace2.envVars` 指定的环境变量值。审查方用真实的 git 2.31.1 复现。
+
+**修复**（最小修改）：在每个 git 进程都使用的受控环境中加入 `GIT_TRACE2=0`、`GIT_TRACE2_EVENT=0`、`GIT_TRACE2_PERF=0`。第一个 git 进程（版本探测）启动时就已生效。继承的 `GIT_*` 变量照旧全部过滤；2.32 的最低版本要求不变；旧版 git 仍以退出码 6 拒绝。gitx 没有其他改动。
+
+**是否还有其他探测阶段的副作用**：用从官方源码构建的 git 2.31.1 和 2.32.0 验证。全局配置中同时设置 trace2 的三个目标、`trace2.envVars`、`trace2.configParams`、`core.fsmonitor`、`core.pager`、`core.hooksPath`（含 Hook），以及经 `include.path` 引入的 `core.sshCommand`，各自指向哨兵文件。不加控制时，`git --version` 只写出三个 trace2 文件，其中含有环境变量的值；其余设置都不生效。使用受控环境时，什么都不写，HOME 和当前目录中也没有新文件。因此只需关闭 trace2。
+
+**回归测试**：
+
+| 测试 | 修复前 | 修复后 |
+|---|---|---|
+| `TestFilterEnv`（受控环境的完整列表） | 缺少三个 trace2 变量 | 通过 |
+| `TestVersionProbeRunsInTheControlledEnvironment`（gitx；**替身**：报告 2.31.1 并记录调用的假 git） | 探测时没有 trace2 变量 | 只运行一次 `--version`，环境中的 `GIT_*` 恰好是受控集合，注入的 `GIT_TRACE2*` 被替换；随后以退出码 6 拒绝 |
+| `TestInitRefusesOldGitBeforeAnythingElse`（公开 `init --json --no-exclude`，新进程，**替身**） | 同上 | 退出码 6，提示需要 2.32；版本探测是唯一运行的 git；没有数据目录和 marker |
+| `TestInitRefusesRealOldGit`（**真实 git 2.31.1**，由 `SPECMETRY_TEST_GIT_2_31` 指定，CI 中跳过） | 写出 3 个 trace 文件 | 退出码 6；没有 trace 文件；stdout、stderr 中没有 canary；没有数据目录和 marker；`.git` 下的文件与 Ref 不变 |
+
+真实版本测试在 WSL（Ubuntu 24.04）中运行，git 2.31.1 和 2.32.0 从 kernel.org 的官方源码包构建，并对照同一目录的 `sha256sums.asc` 核对了哈希（未验证 GPG 签名）。测试先用这个 git 2.31.1 证明全局配置确实会写出含 canary 的跟踪文件，避免测试本身无效。CI 中没有旧版 git，只运行替身测试。替身测试不能代替真实旧版验证，报告中两者分开列出。
+
+**2.32 及更新版本仍正常工作**：gitx、project、cli、testutil 四个包的全部测试，分别在 git 2.32.0（自行构建）、2.43.0（WSL）和 2.56.0（Windows）下通过；其中包括 codex-review-015 的全部反例。
+
+### NON-BLOCKER
+
+1. **`doctor` 的跟踪写入**：未修改，作为独立的安全修复任务保留。它违反 `doctor` "非破坏性诊断" 的承诺，不是已接受的产品限制，已列入 implementation-plan M6 "发布前必须关闭的遗留安全问题"。
+2. **两处安全测试可以收紧**：按产品负责人的要求，本轮只修复剩余的 BLOCKER，保留现有回归测试不变，留作后续改进：
+   - Trace 用例的前置检查只要求至少一个变量生效（审查方已逐项验证五个变量都生效）；
+   - `TestInitRefusalsRegisterNothing` 中，Token 位于 worktree 路径，会先触发路径扫描，不能单独证明 Ref 扫描（审查方已用安全路径和敏感主分支另行验证）。
+
+### Linux SQLite 偶发失败
+
+仍未定位，也没有宣称已修复。已知情况：本会话在 37 次完整运行中出现 1 次失败，失败测试的名称因输出截断而丢失，其后 36 次全部通过。审查方又运行了两组各 40 次，都没有复现，第二组的 40 份完整日志保存在仓库外的临时产物中。目前没有证据把它归因于并发、数据完整性或资源竞争，本轮也不扩大范围。
+
+审查原文按原样入库（它本来就是仓库内的相对链接）。
