@@ -221,7 +221,11 @@ func TestDoctorReportsLoosenedPermissions(t *testing.T) {
 }
 
 func TestMain(m *testing.M) {
-	testutil.DispatchHelper(map[string]func() int{"crash": crashHelper})
+	testutil.DispatchHelper(map[string]func() int{
+		"crash":          crashHelper,
+		"cli":            cliHelper,
+		"cli-redirected": cliRedirectedHelper,
+	})
 	os.Exit(m.Run())
 }
 

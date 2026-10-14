@@ -93,7 +93,7 @@ flowchart LR
 
 **目标**：审查 #4、#5、#8 和中-1 的实现；#3、#6 中属于写入侧的部分。
 
-**状态（2026-10-14）**：设计收尾完成，G2 已满足（[review-resolution.md §13](review-resolution.md#13-m1-开工准备产品决策与设计收尾2026-10-14)）。产品负责人已授权开发（codex-review-009 GO 之后）。**WP1.3 已验收**（codex-review-011 GO，PR #3，合并提交 `cee87b4`；MVP-PRV-07 的 CLI 写入集成随 WP1.5 验证，见 [review-resolution.md §16](review-resolution.md#16-wp13-最终复审codex-review-011与验收)）；**WP1.0 已验收**（codex-review-013 GO，PR #4，合并提交 `84e6e70`，见 [review-resolution.md §18](review-resolution.md#18-wp10-最终复审codex-review-013与验收)）；WP1.2 进行中；其他工作包尚未开始。
+**状态（2026-10-14）**：设计收尾完成，G2 已满足（[review-resolution.md §13](review-resolution.md#13-m1-开工准备产品决策与设计收尾2026-10-14)）。产品负责人已授权开发（codex-review-009 GO 之后）。**WP1.3 已验收**（codex-review-011 GO，PR #3，合并提交 `cee87b4`；MVP-PRV-07 的 CLI 写入集成随 WP1.5 验证，见 [review-resolution.md §16](review-resolution.md#16-wp13-最终复审codex-review-011与验收)）；**WP1.0 已验收**（codex-review-013 GO，PR #4，合并提交 `84e6e70`，见 [review-resolution.md §18](review-resolution.md#18-wp10-最终复审codex-review-013与验收)）；**WP1.2 已实现**，等待 Codex 审查；其他工作包尚未开始。
 
 | 工作包 | 内容 |
 |---|---|
@@ -101,11 +101,11 @@ flowchart LR
 | WP1.1 | 项目与 worktree 的解析和登记（git 公共目录）、marker、`init`（输出 `init.v1`，包括 `init_progress` 和 `baseline_version`）、阶段识别与候选来源（architecture §6.1.1）、默认交付目标 |
 | WP1.2 | 通道识别：TTY、已知的 Agent 环境变量、交互式确认组件（architecture §5.1） |
 | WP1.3 | 密钥规则与字符串扫描（拒绝写入；architecture §10.8）；`config.toml` 的 `[secrets]` 追加规则 |
-| WP1.4 | 来源：`add` / `list` / `remove`（含 `--erase-excerpts`，M1 只有 `hash_only` 引用）/ `ack`，哈希，来源集合哈希，变化检测；`excerpt_storage` 默认 `hash_only`（PD-24）；输出 `source-add.v1`、`source-list.v1`。`full` 模式和擦除后的整理在 WP2.11 |
+| WP1.4 | 来源：`add` / `list` / `remove`（含 `--erase-excerpts`，M1 只有 `hash_only` 引用）/ `ack`，哈希，来源集合哈希，变化检测；`excerpt_storage` 默认 `hash_only`（PD-24）；输出 `source-add.v1`、`source-list.v1`。`full` 模式和擦除后的整理在 WP2.11。人类专属命令在写入之前调用 `channel.Guard`，并在本工作包中完成 MVP-CH-01、CH-02 对这些命令的验证 |
 | WP1.5 | 提案：schema 校验、版本前置条件、引用片段校验、代码引用、编号分配（AC 按需求的作用域分配）；输出 `proposal-receipt.v1` |
-| WP1.6 | 审核：逐条决定（接受 `update` 条目必须选择 `change_class`，V-R01）、冲突检测与三方对比、版本与变更记录、级联、父需求修订与 AC 后续处理、`reaffirm`、`propose --apply`；输出 `proposal-list.v1`、`proposal-show.v1`、`baseline-show.v1`、`baseline-history.v1` |
+| WP1.6 | 审核：逐条决定（接受 `update` 条目必须选择 `change_class`，V-R01）、冲突检测与三方对比、版本与变更记录、级联、父需求修订与 AC 后续处理、`reaffirm`、`propose --apply`；输出 `proposal-list.v1`、`proposal-show.v1`、`baseline-show.v1`、`baseline-history.v1`。人类专属命令在写入之前调用 `channel.Guard`，并在本工作包中完成 MVP-CH-01、CH-02 对这些命令的验证 |
 | WP1.7 | 待澄清问题（只能由人回答或驳回）；输出 `question-list.v1` |
-| WP1.8 | `target set`、`scope confirm`（独立提交，或附带在审核中）、声明校验、已有豁免的确认（V-T01）、读取时范围确认的校验（V-T02）；输出 `target-scope.v1` |
+| WP1.8 | `target set`、`scope confirm`（独立提交，或附带在审核中）、声明校验、已有豁免的确认（V-T01）、读取时范围确认的校验（V-T02）；输出 `target-scope.v1`。人类专属命令在写入之前调用 `channel.Guard`，并在本工作包中完成 MVP-CH-01、CH-02 对这些命令的验证 |
 
 **建表约束**（codex-review-004 N1）：见 [data-model.md §1.1](data-model.md#11-建表约束m1-起)；由 schema 不变量测试强制。
 

@@ -1,6 +1,7 @@
 package testutil
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -18,6 +19,12 @@ func TestMain(m *testing.M) {
 			return 0
 		},
 		"exit7": func() int { return 7 },
+		"readline": func() int {
+			fmt.Print("ready> ")
+			line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+			fmt.Printf("\ngot %q %v\n", strings.TrimSpace(line), err)
+			return 0
+		},
 	})
 	os.Exit(m.Run())
 }
@@ -74,6 +81,19 @@ func TestHelperProcessExitCode(t *testing.T) {
 	err := HelperCommand(t, "exit7").Run()
 	if err == nil || !strings.Contains(err.Error(), "7") {
 		t.Fatalf("helper exit: %v", err)
+	}
+}
+
+// RunInPTYSession types into the terminal once the program has printed what
+// a step waits for, as a person answering a prompt would.
+func TestRunInPTYSessionAnswersAPrompt(t *testing.T) {
+	cmd := HelperCommand(t, "readline")
+	res := RunInPTYSession(t, 30*time.Second, cmd.Env, []PTYStep{{Expect: "ready>", Send: "hello\r"}}, cmd.Path, cmd.Args[1:]...)
+	if res.WaitErr != nil {
+		t.Fatalf("helper failed: %v\n%s", res.WaitErr, res.Output)
+	}
+	if !strings.Contains(res.Output, `got "hello" <nil>`) {
+		t.Fatalf("pty output = %q", res.Output)
 	}
 }
 
