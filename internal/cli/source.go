@@ -218,7 +218,7 @@ nothing, not even its acknowledged hash: only source ack does that.`,
 			if err := secrets.Reject(w.scanner.Fields(secrets.Field{Pointer: "path", Value: args[0]})); err != nil {
 				return err
 			}
-			r, err := source.Resolve(args[0], w.cwd, w.where)
+			r, err := source.Resolve(ctx, args[0], w.cwd, w.where)
 			if err != nil {
 				return err
 			}

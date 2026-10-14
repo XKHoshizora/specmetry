@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/XKHoshizora/specmetry/internal/apperr"
+	"github.com/XKHoshizora/specmetry/internal/gitx"
 	"github.com/XKHoshizora/specmetry/internal/project"
 )
 
@@ -116,12 +117,18 @@ type Resolved struct {
 
 // Resolve resolves arg, relative to cwd, to a source of the project at w.
 // Symbolic links are resolved: a source is where its content is. A file in
-// the project is in_repo; one in a linked worktree other than the main one
-// is refused, because sources are observed in the main worktree; anything
-// else is external. A missing file, a directory or a file inside the git
-// directory is invalid input (exit code 2). The caller scans arg for
-// secrets first, since errors name it.
-func Resolve(arg, cwd string, w project.Where) (Resolved, error) {
+// the main worktree is in_repo; one in a linked worktree of the project is
+// refused, whichever worktree the command runs in, because sources are
+// observed in the main worktree (inLinkedWorktree); anything else is
+// external. A missing file, a directory, a file inside a git directory, or
+// one for which git cannot tell which worktree holds it, is invalid input
+// (exit code 2).
+//
+// Errors name only arg, which the caller has scanned for secrets, never
+// the resolved path: a link with a harmless name can lead to a file whose
+// path holds a secret (codex-review-018 B1). The caller scans the resolved
+// path before it uses it.
+func Resolve(ctx context.Context, arg, cwd string, w project.Where) (Resolved, error) {
 	p := arg
 	if !filepath.IsAbs(p) {
 		p = filepath.Join(cwd, p)
@@ -142,11 +149,17 @@ func Resolve(arg, cwd string, w project.Where) (Resolved, error) {
 			return Resolved{}, apperr.Newf(apperr.InvalidInput, "%s is inside the git directory, which holds no sources", arg)
 		}
 	}
-	if w.Current != w.Root {
-		if rel, ok := within(w.Current, canon); ok {
+	if w.Git {
+		linked, err := inLinkedWorktree(ctx, canon, w)
+		switch {
+		case ctx.Err() != nil:
+			return Resolved{}, interrupted(ctx.Err())
+		case err != nil:
 			return Resolved{}, apperr.Newf(apperr.InvalidInput,
-				"%s is in a linked worktree; sources are read in the main worktree, so register %s there instead",
-				arg, filepath.ToSlash(rel))
+				"%s cannot be a source: git cannot tell which worktree holds it (it may be inside a git directory, or in a repository git does not read), so it is not taken to be outside the project", arg)
+		case linked:
+			return Resolved{}, apperr.Newf(apperr.InvalidInput,
+				"%s is in a linked worktree of the project; sources are read in the main worktree, so register the file there instead", arg)
 		}
 	}
 	if rel, ok := within(w.Root, canon); ok {
@@ -157,6 +170,45 @@ func Resolve(arg, cwd string, w project.Where) (Resolved, error) {
 		return Resolved{Location: InRepo, Path: slash, File: canon}, nil
 	}
 	return Resolved{Location: External, Path: canon, File: canon}, nil
+}
+
+// inLinkedWorktree reports whether file is in a linked worktree of the
+// git project at w rather than in its main worktree. git says which
+// worktree holds the file's directory and that worktree's git common
+// directory; the worktree is one of the project's if that directory is the
+// project's. Directories are compared as files (os.SameFile), not by how
+// their paths are spelled, and a linked worktree inside the main one is
+// still a linked worktree. A file in no git repository is in none of the
+// project's worktrees. When git cannot tell (the file is inside a git
+// directory, or in a repository git refuses to read), the error says so:
+// the file is not assumed to be outside the project. Errors may name
+// paths; the caller does not pass them on.
+func inLinkedWorktree(ctx context.Context, file string, w project.Where) (bool, error) {
+	loc, err := gitx.Locate(ctx, filepath.Dir(file))
+	if errors.Is(err, gitx.ErrNotRepository) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	ours, err := sameFile(loc.CommonDir, w.CommonDir)
+	if err != nil || !ours {
+		return false, err
+	}
+	main, err := sameFile(loc.Worktree, w.Root)
+	return !main, err
+}
+
+func sameFile(a, b string) (bool, error) {
+	fa, err := os.Stat(a)
+	if err != nil {
+		return false, err
+	}
+	fb, err := os.Stat(b)
+	if err != nil {
+		return false, err
+	}
+	return os.SameFile(fa, fb), nil
 }
 
 // within returns p relative to root if p is inside root.

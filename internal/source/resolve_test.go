@@ -57,7 +57,7 @@ func TestResolve(t *testing.T) {
 		{filepath.Join("..", filepath.Base(outsideDir), "外部 文档", "客户 需求.md"), filepath.Join(filepath.Dir(outsideDir), filepath.Base(outsideDir)), "external", outside},
 	}
 	for _, c := range cases {
-		got, err := source.Resolve(c.arg, c.cwd, w)
+		got, err := source.Resolve(ctx, c.arg, c.cwd, w)
 		if err != nil {
 			t.Errorf("Resolve(%q in %s): %v", c.arg, c.cwd, err)
 			continue
@@ -85,11 +85,15 @@ func TestResolveRefuses(t *testing.T) {
 		filepath.Join(repo.Dir, ".git", "HEAD"),
 		filepath.Join(wt, "docs", "only-here.md"),
 	} {
-		if _, err := source.Resolve(arg, repo.Dir, where(t, wt)); apperr.ExitCode(err) != apperr.ExitInvalidInput {
+		if _, err := source.Resolve(ctx, arg, repo.Dir, where(t, wt)); apperr.ExitCode(err) != apperr.ExitInvalidInput {
 			t.Errorf("Resolve(%s) = %v", arg, err)
 		}
 	}
-	if _, err := source.Resolve("docs/brief.md", repo.Dir, w); err != nil {
+	// The same file named from the main worktree (codex-review-018 B3).
+	if _, err := source.Resolve(ctx, filepath.Join(wt, "docs", "only-here.md"), repo.Dir, w); apperr.ExitCode(err) != apperr.ExitInvalidInput {
+		t.Errorf("Resolve from the main worktree = %v", err)
+	}
+	if _, err := source.Resolve(ctx, "docs/brief.md", repo.Dir, w); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -110,7 +114,7 @@ func TestResolveFollowsLinks(t *testing.T) {
 		}
 		t.Fatal(err)
 	}
-	got, err := source.Resolve("linked.md", repo.Dir, where(t, repo.Dir))
+	got, err := source.Resolve(ctx, "linked.md", repo.Dir, where(t, repo.Dir))
 	if err != nil || got.Location != source.External || got.Path != target {
 		t.Fatalf("Resolve = %+v, %v", got, err)
 	}
@@ -126,7 +130,7 @@ func TestResolveOutsideGit(t *testing.T) {
 	if err := project.WriteMarker(root, project.Marker{ProjectID: idA, Name: "plain"}); err != nil {
 		t.Fatal(err)
 	}
-	got, err := source.Resolve("brief.md", filepath.Join(root, "docs"), where(t, filepath.Join(root, "docs")))
+	got, err := source.Resolve(ctx, "brief.md", filepath.Join(root, "docs"), where(t, filepath.Join(root, "docs")))
 	if err != nil || got.Location != source.InRepo || got.Path != "docs/brief.md" {
 		t.Fatalf("Resolve = %+v, %v", got, err)
 	}

@@ -1148,3 +1148,63 @@ PR：<https://github.com/XKHoshizora/specmetry/pull/1>（`feat/m0-foundation` �
 **仍然不能确定的部分**：本地 37 次运行中那一次未记录名称的失败，不能断定就是 `TestOpenLockTimeout`。
 
 审查原文按原样入库（它本来就是仓库内的相对链接）。
+
+## 23. WP1.4 代码审查（codex-review-018）的处理
+
+**审查结论**：NO-GO，3 项 BLOCKER、1 项 NON-BLOCKER。审查目标 `e29b426`（PR #7）。审查确认 `source list`、`ack`、`remove` 的既定功能、通道拦截与确认、Schema 输入错误脱敏、PD-25 来源集合哈希、数据目录消失条目的检查，以及正常硬链接环境中的 Marker 原子发布；这些不重新设计。产品负责人决定一次修复全部三项 BLOCKER，不扩大业务范围。
+
+### B1：符号链接目标路径经错误消息泄露
+
+**根因**：CLI 先扫描原始参数，再调用 `source.Resolve`；`Resolve` 拒绝关联 worktree 中的文件时，把**解析后的**相对路径拼进错误消息，而解析后的路径要到 `Resolve` 返回之后才扫描。名称无害的符号链接（`alias.md`）指向文件名含密钥的文件时，密钥进入 `error.v1`。
+
+**修复**：`Resolve` 的所有错误只给出原始参数（已扫描）和固定说明，不给出解析后的路径；解析后的路径仍在使用之前扫描（architecture §6.1.3）。
+
+**回归测试**（公开 CLI，Linux；Windows 没有创建符号链接的权限时跳过）：在关联 worktree 中创建 `alias.md`，指向文件名含合成 GitHub token 的文件，执行 `source add alias.md` 与 `--json`。修复前：退出码 2，但 stdout / `error.v1` 中出现 token 和目标目录名。修复后：两种输出都是退出码 2、`invalid_input`，不含 token 与目标目录名；不登记来源、不分配 `seq`。从主 worktree 经符号链接指向同一文件，同样拒绝且不泄露。合法的符号链接照旧解析：指向主 worktree 文档的链接登记为 `in_repo`（目标路径），指向外部文档的链接登记为 `external`。
+
+### B2：Marker 的 rename 回退可覆盖并发创建的不同 Marker
+
+**根因**：`os.Link` 失败（非"已存在"）后，代码先确认 Marker 不存在，再 `os.Rename`。另一个进程可以在两步之间创建 Marker，随后被替换（TOCTOU）。
+
+**产品决定**（2026-10-15）：不支持安全原子、不可覆盖发布的文件系统，直接返回环境错误（退出码 6），不使用有覆盖风险的 rename 回退。不为 FAT 等文件系统开发新的原子发布机制。
+
+**修复**（architecture §10.6）：保留"临时文件 + `os.Link`"的正常路径；硬链接失败时读取已有 Marker：内容相同视为成功，内容不同（或硬链接报告已存在）拒绝，不存在则返回退出码 6，说明硬链接失败、不使用 rename 回退。临时文件在任何结果下都被删除。错误消息带上原因，`init` 原样转述。
+
+**回归测试**（`os.Link` 经测试钩子替换为返回"不支持"或"权限不足"）：
+
+| 测试 | 修复前 | 修复后 |
+|---|---|---|
+| 硬链接失败，16 个不同 Marker 并发写入，10 轮 | 第 0 轮即有 6 个写入方返回成功，最终只保留其中一个（writer 10） | 全部返回退出码 6，消息说明硬链接；没有 Marker，也没有临时文件 |
+| 硬链接失败，已有 Marker，16 个写入方（一半内容相同、一半不同） | 通过（回归防护） | 内容相同的成功，不同的退出码 6；Marker 字节不变，目录中只有 Marker |
+| 正常硬链接，16 个不同 Marker 并发写入，20 轮 | 通过（回归防护） | 每轮恰好一个成功，Marker 是它写入的内容；其余退出码 6 |
+| 正常硬链接，相同 Marker 并发写入（已有测试） | 通过 | 通过 |
+
+**平台限制**：硬链接不可用的文件系统（FAT、exFAT，部分网络或 FUSE 挂载）上，`init` 无法写入 Marker，返回退出码 6；项目此时已登记（登记先于 Marker），修复问题后重新执行 `init`。NTFS、APFS、ext4 等常见文件系统不受影响。
+
+### B3：从主 worktree 可以登记关联 worktree 的文件
+
+**根因**：只检查"目标位于**当前**关联 worktree 中"，命令在主 worktree 或另一个关联 worktree 中执行时，检查被跳过；关联 worktree 放在主 worktree 目录之内时，路径前缀判断还会把它当作 `in_repo`。
+
+**修复**（architecture §6.1.3）：在目标文件所在的目录调用 `gitx.Locate`（已验收的受控执行环境），得到所属 worktree 与 git 公共目录。公共目录与项目的相同（`os.SameFile`，按文件身份）而 worktree 不是主 worktree 时，返回退出码 2；不在任何 git 仓库中、或属于其他独立仓库的文件，照常判定。git 无法判断时（文件在 git 目录或裸仓库中，git 拒绝读取所在仓库等），保守拒绝（退出码 2），不当作 `external`。错误只给出原始参数。
+
+**回归测试**（公开 CLI，Windows、Linux；每个拒绝都检查文本与 `--json` 两种输出的退出码和 `error.v1`，并在全部拒绝之后检查 `sources` 表为空、`seq` 不变）：
+
+| 情况 | 修复前 | 修复后 |
+|---|---|---|
+| 主 worktree → 关联 worktree A 的文件 | 退出码 0，登记为 `external` | 退出码 2 |
+| 关联 worktree A → B 的文件；B → A 的文件 | 退出码 0 | 退出码 2 |
+| 关联 worktree A → 自己的文件 | 退出码 2 | 退出码 2 |
+| 主 worktree → 放在主 worktree 目录之内的关联 worktree 中的文件（绝对路径、相对路径） | 退出码 0，登记为 `in_repo` | 退出码 2 |
+| 符号链接（主 worktree 中）→ 关联 worktree 的文件（Linux） | 退出码 0 | 退出码 2，不泄露目标路径 |
+| 裸仓库目录中的文件（git 无法判断） | 退出码 0，`external` | 退出码 2 |
+| 主 worktree → 主 worktree 的文档；关联 worktree → 主 worktree 的文档 | `in_repo` | `in_repo`（不变） |
+| 无关目录中的文档；另一个独立 git 仓库中的文档 | `external` | `external`（不变） |
+
+### NON-BLOCKER
+
+- **N1**：只违反 `propertyNames` 的输入，错误指针可能退化为 `/`。原因是 jsonschema v6.0.3 把 `propertyNames` 错误的 `InstanceLocation` 指向内部的位置栈而不复制（`validator.go:296`）。输入仍被正确拒绝，任意属性名不会泄露。继续记录；修正依赖或定位处理时，保持现有脱敏测试。本轮不修改 Schema 校验器。
+
+### 接受的风险与延期
+
+与审查原文一致：Source Ref 相关验收随 WP1.5 / M2；M1 只支持 `hash_only`，`full` 模式的擦除与整理在 WP2.11；超大来源文件流式哈希、可取消、无大小上限；Git exclude 重复追加、Windows `seq` 偶发 `SQLITE_BUSY`、非 Git 扫描数量限制保持原安排；`doctor` 的 git 版本查询隔离仍是发布前必须关闭的独立安全任务。
+
+审查原文按原样入库。

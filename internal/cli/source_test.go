@@ -844,3 +844,178 @@ func TestSourceAckDoesNotEchoInvalidInput(t *testing.T) {
 		t.Fatal("the acknowledged hash changed")
 	}
 }
+
+// worktreesProject is fx-docs-only, initialized, with two linked
+// worktrees beside the main one.
+func worktreesProject(t *testing.T) (home datadir.Dir, repo *testutil.GitRepo, a, b string) {
+	t.Helper()
+	home = testutil.TempHome(t)
+	f := testutil.BuildFixture(t, "fx-docs-only")
+	mustInit(t, f.Repo.Dir)
+	return home, f.Repo, f.Repo.AddWorktree("feature-a"), f.Repo.AddWorktree("feature-b")
+}
+
+func writeDoc(t *testing.T, p string) string {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, []byte("# doc\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+// trySymlink links name to target. It reports false where symbolic links
+// cannot be created (Windows without the privilege).
+func trySymlink(t *testing.T, target, name string) bool {
+	t.Helper()
+	err := os.Symlink(target, name)
+	if err != nil && runtime.GOOS != "windows" {
+		t.Fatal(err)
+	}
+	return err == nil
+}
+
+// symlinkOrSkip links name to target, or skips the test where symbolic
+// links cannot be created.
+func symlinkOrSkip(t *testing.T, target, name string) {
+	t.Helper()
+	if !trySymlink(t, target, name) {
+		t.Skip("cannot create symbolic links")
+	}
+}
+
+// sourceAddRefused runs source add in dir, as text and with --json, and
+// checks that both exit 2 with an invalid_input error.v1 that holds none
+// of the needles.
+func sourceAddRefused(t *testing.T, dir, arg string, needles ...string) {
+	t.Helper()
+	for _, asJSON := range []bool{false, true} {
+		args, schema := []string{"source", "add", arg}, ""
+		if asJSON {
+			args, schema = append(args, "--json"), "source-add.v1"
+		}
+		code, stdout, stderr := specmetry(t, dir, schema, args...)
+		if code != apperr.ExitInvalidInput {
+			t.Errorf("%v in %s: exit %d, want 2\n%s%s", args, dir, code, stdout, stderr)
+			continue
+		}
+		if asJSON {
+			var env apperr.Envelope
+			if err := json.Unmarshal([]byte(stdout), &env); err != nil || env.Error.Code != "invalid_input" {
+				t.Errorf("%v in %s: error.v1 %s (%v)", args, dir, stdout, err)
+			}
+		}
+		for _, needle := range needles {
+			if strings.Contains(stdout+stderr, needle) {
+				t.Errorf("%v in %s: the output names %q:\n%s%s", args, dir, needle, stdout, stderr)
+			}
+		}
+	}
+}
+
+// A safely named link in a linked worktree whose target's name holds a
+// secret is refused without naming the target: the refusal names only the
+// argument, which was scanned (codex-review-018 B1). Nothing is written.
+// Links to documents in the main worktree or outside the project are still
+// followed to the document.
+func TestSourceAddDoesNotEchoTheLinkTarget(t *testing.T) {
+	home, repo, a, _ := worktreesProject(t)
+	secret := "ghp_" + strings.Repeat("A1b2", 9)
+	target := writeDoc(t, filepath.Join(a, "private-target", secret+".md"))
+	symlinkOrSkip(t, target, filepath.Join(a, "alias.md"))
+	symlinkOrSkip(t, target, filepath.Join(repo.Dir, "alias-to-feature.md"))
+	before := seq(t, home)
+	sourceAddRefused(t, a, "alias.md", secret, "private-target")
+	sourceAddRefused(t, repo.Dir, "alias-to-feature.md", secret, "private-target")
+	if after := seq(t, home); after != before {
+		t.Fatalf("seq moved from %s to %s", before, after)
+	}
+	if n := count(t, home, `SELECT count(*) FROM sources`); n != 0 {
+		t.Fatalf("%d sources", n)
+	}
+
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	external := writeDoc(t, filepath.Join(dir, "external.md"))
+	symlinkOrSkip(t, filepath.Join(repo.Dir, "docs", "client-brief.md"), filepath.Join(repo.Dir, "brief-link.md"))
+	symlinkOrSkip(t, external, filepath.Join(repo.Dir, "external-link.md"))
+	if got := sourceAdd(t, repo.Dir, "brief-link.md").Source; got.Location != "in_repo" || got.Path != "docs/client-brief.md" {
+		t.Errorf("link to a main worktree document: %+v", got)
+	}
+	if got := sourceAdd(t, a, filepath.Join(repo.Dir, "external-link.md")).Source; got.Location != "external" || got.Path != external {
+		t.Errorf("link to an external document: %+v", got)
+	}
+}
+
+// A file in a linked worktree of the project is refused (exit 2) whichever
+// worktree the command runs in, also where the linked worktree lies inside
+// the main one, a link leads there, or git cannot tell which worktree holds
+// the file. Which worktree holds a file is asked of git, by its git common
+// directory, not read off the path (codex-review-018 B3). Files in the
+// main worktree stay in_repo from any worktree; files outside the project,
+// in a plain directory or another repository, stay external.
+func TestSourceAddRefusesLinkedWorktreeFiles(t *testing.T) {
+	home, repo, a, b := worktreesProject(t)
+	onlyA := writeDoc(t, filepath.Join(a, "docs", "only-a.md"))
+	onlyB := writeDoc(t, filepath.Join(b, "docs", "only-b.md"))
+	nested := filepath.Join(repo.Dir, ".worktrees", "nested")
+	repo.Git("worktree", "add", "-q", "-b", "nested", nested)
+	onlyNested := writeDoc(t, filepath.Join(nested, "docs", "only-nested.md"))
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo.Git("init", "-q", "--bare", filepath.Join(dir, "bare.git"))
+	inBare := writeDoc(t, filepath.Join(dir, "bare.git", "notes.md"))
+
+	before := seq(t, home)
+	for _, c := range []struct{ dir, arg string }{
+		{repo.Dir, onlyA},
+		{a, onlyB},
+		{b, onlyA},
+		{a, "docs/only-a.md"},
+		{repo.Dir, onlyNested},
+		{repo.Dir, ".worktrees/nested/docs/only-nested.md"},
+		{a, inBare},
+	} {
+		sourceAddRefused(t, c.dir, c.arg)
+	}
+	if trySymlink(t, onlyA, filepath.Join(repo.Dir, "to-feature.md")) {
+		sourceAddRefused(t, repo.Dir, "to-feature.md", "only-a")
+	} else {
+		t.Log("no symbolic links here: the link to a linked worktree is not tried")
+	}
+	if after := seq(t, home); after != before {
+		t.Fatalf("seq moved from %s to %s", before, after)
+	}
+	if n := count(t, home, `SELECT count(*) FROM sources`); n != 0 {
+		t.Fatalf("%d sources", n)
+	}
+
+	writeDoc(t, filepath.Join(repo.Dir, "docs", "main-only.md"))
+	plain := writeDoc(t, filepath.Join(dir, "plain", "notes.md"))
+	other := testutil.NewGitRepo(t)
+	other.WriteFile("docs/other.md", "# other\n")
+	other.Commit("init")
+	otherDoc, err := filepath.EvalSymlinks(filepath.Join(other.Dir, "docs", "other.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		dir, arg       string
+		location, path string
+	}{
+		{repo.Dir, "docs/client-brief.md", "in_repo", "docs/client-brief.md"},
+		{a, filepath.Join(repo.Dir, "docs", "main-only.md"), "in_repo", "docs/main-only.md"},
+		{b, plain, "external", plain},
+		{repo.Dir, otherDoc, "external", otherDoc},
+	} {
+		if got := sourceAdd(t, c.dir, c.arg).Source; got.Location != c.location || got.Path != c.path {
+			t.Errorf("source add %s in %s: %s %s, want %s %s", c.arg, c.dir, got.Location, got.Path, c.location, c.path)
+		}
+	}
+}

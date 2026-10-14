@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -181,11 +182,12 @@ func ReadMarker(root string) (Marker, bool, error) {
 }
 
 // WriteMarker creates the marker of the project rooted at root. It is
-// written to a temporary file first and then linked into place, so a
+// written to a temporary file first and then hard-linked into place, so a
 // reader never sees part of it, and it never replaces a marker that is
 // already there: concurrent init runs write the same marker at once; the
 // first link wins and the others find the marker holding what they meant
-// to write. A different marker there is an error. It refuses to write
+// to write. A different marker there is an error, and so is a file system
+// on which the hard link fails (publishMarker). It refuses to write
 // through anything but a real .specmetry directory.
 func WriteMarker(root string, m Marker) error {
 	exists, err := markerDirExists(root)
@@ -231,31 +233,44 @@ func WriteMarker(root string, m Marker) error {
 	// After a link the marker is the other name of the file.
 	_ = os.Remove(tmp.Name())
 	if werr != nil {
-		return apperr.Wrap(apperr.Environment, werr, "cannot write the marker "+MarkerPath(root))
+		// The reason is part of the message, which init passes on.
+		return apperr.Newf(apperr.Environment, "cannot write the marker %s: %v", MarkerPath(root), werr)
 	}
 	return nil
 }
 
+// linkFile is os.Link; a test replaces it to simulate a file system
+// without hard links.
+var linkFile = os.Link
+
 // publishMarker puts the complete file tmp in place as the marker without
-// replacing one: a hard link fails if the marker exists, and then the
-// marker must already hold m. A file system without hard links (FAT, for
-// example) gets a rename instead, after the same check.
+// ever replacing one: the hard link is created only if the marker does not
+// exist, atomically. A marker that exists must already hold m. Where the
+// link fails for another reason (a file system without hard links, FAT for
+// example, or one that does not permit them) the marker is not created:
+// renaming tmp into place after finding no marker could replace one that
+// another writer created in between (codex-review-018 B2), so there is no
+// such fallback. A marker already there that holds m still counts.
 func publishMarker(tmp, root string, m Marker) error {
-	final := MarkerPath(root)
-	err := os.Link(tmp, final)
+	err := linkFile(tmp, MarkerPath(root))
 	if err == nil {
 		return nil
 	}
-	if !errors.Is(err, fs.ErrExist) {
-		if _, lerr := os.Lstat(final); lerr != nil {
-			return os.Rename(tmp, final)
-		}
-	}
 	got, found, rerr := ReadMarker(root)
-	if rerr == nil && found && got == m {
+	switch {
+	case rerr != nil:
+		return rerr
+	case found && got == m:
 		return nil
+	case found || errors.Is(err, fs.ErrExist):
+		return errors.New("another marker is there already")
 	}
-	return errors.New("another marker is there already")
+	var le *os.LinkError
+	if errors.As(err, &le) {
+		err = le.Err
+	}
+	return fmt.Errorf("the marker is created with a hard link, which failed here (%w); "+
+		"Specmetry does not rename it into place instead, which could replace a marker written at the same time", err)
 }
 
 // FindMarker returns the nearest directory, from dir upwards, that holds a
