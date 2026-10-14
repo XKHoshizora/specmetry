@@ -1208,3 +1208,39 @@ PR：<https://github.com/XKHoshizora/specmetry/pull/1>（`feat/m0-foundation` �
 与审查原文一致：Source Ref 相关验收随 WP1.5 / M2；M1 只支持 `hash_only`，`full` 模式的擦除与整理在 WP2.11；超大来源文件流式哈希、可取消、无大小上限；Git exclude 重复追加、Windows `seq` 偶发 `SQLITE_BUSY`、非 Git 扫描数量限制保持原安排；`doctor` 的 git 版本查询隔离仍是发布前必须关闭的独立安全任务。
 
 审查原文按原样入库。
+
+## 24. WP1.4 最终复审（codex-review-019）与验收
+
+**审查结论**：**GO**，BLOCKER 为 0，没有新增 NON-BLOCKER。审查目标 `3d5272b`，修复基准 `e29b426`。
+
+- **B1 关闭**：拒绝错误只使用已扫描的原始参数，也不转述 git 归属识别的原始错误。审查方在 Linux 独立复验了 `alias.md` 反例和损坏的 git 配置：文本与 JSON 错误都不含 token 或目标路径，退出码 2，来源表和 `seq` 不变；合法符号链接仍可登记。
+- **B2 关闭**：rename 回退已完全删除。Windows、WSL Linux 的真实硬链接环境中，16 个不同 Marker 并发发布，连续 20 轮都恰好一个成功；Linux 上禁止真实的 `link` / `linkat` 系统调用后，全部返回环境错误，不留 Marker 或临时文件。审查方另外验证了"登记成功、Marker 发布失败"之后的恢复：第一次 `init` 退出码 6，恢复硬链接后再次执行，复用原项目与 worktree，补写 Marker，`seq` 不再增加。
+- **B3 关闭**：按目标目录的 git 元数据判断归属，用 `os.SameFile` 比较公共目录与 worktree，并在路径前缀分类之前拒绝关联 worktree；无法判断时保守拒绝。
+- 最终提交的三平台 CI 8/8 通过（运行 38595448856，Ubuntu 带 race detector）。
+
+**验收**：产品负责人于 2026-10-15 验收 WP1.4，PR #7 已合并（合并提交 `35d060f`）。
+
+**WP1.4 的验收范围**：MVP-SRC-01、02、03、05、06（按已确认的 PD-25）；SRC-04、SRC-07、SRC-08 的 M1 部分（见下）；MVP-CH-01、CH-02 对 `source ack`、`source remove`、`source add --allow-any-type` 的验证；CX-17 的 CLI 部分；MVP-INIT-04 中 `source list` 为空一项。另外包括验收前修复的三项检查（A、B、C）、共享 Schema 校验错误的脱敏（含数字映射键）、macOS 并发初始化的根因修复（数据目录消失条目、Marker 只创建不替换）。
+
+**仍未完成、随后续工作包验证**：
+
+- MVP-SRC-04 中"已有引用显示为 `source_removed`"：WP1.5 写入引用之后，随 WP1.5 / M2 验证。
+- MVP-SRC-08 中引用的 `excerpt_state = not_stored`、`locator` 与 `excerpt_sha256` 保留：随 WP1.5 验证；`full` 模式与擦除后的整理在 WP2.11（M2）。
+- MVP-SRC-07 中 `SOURCE_CHANGED` 作为差距：M2。
+- MVP-PRV-07 的 CLI 写入集成：随 WP1.5 验证（§16）。
+- MVP-CH-01、CH-02 对 `review` 与 `scope confirm` 的验证：随 WP1.6、WP1.8。
+
+**继续记录的事项**：`propertyNames` 错误指针定位不准（审查 018 N1，jsonschema v6.0.3 的定位问题），不修改共享校验器；Git exclude 重复追加、Windows `seq` 偶发 `SQLITE_BUSY` 维持原安排；`doctor` 的 git 版本查询隔离仍是发布前必须关闭的独立安全任务。
+
+**接受的风险**：硬链接不可用的文件系统上，`init` 无法写入 Marker 而返回退出码 6（产品负责人批准，2026-10-15）；项目已登记，修复环境后可以重试。
+
+**macOS 诊断记录**：两次临时诊断运行（只在 macOS、只由 `diag/**` 分支触发）的结果。Actions 日志有保留期限，关键结果记录如下：
+
+| 运行 | 代码 | 并发 `init`（50 次） | 创建数据库期间检查数据目录（20 次） | 并发写 Marker（50 次） | 消失条目测试（60 次） |
+|---|---|---|---|---|---|
+| [38583919277](https://github.com/XKHoshizora/specmetry/actions/runs/38583919277) | `9cceb51` 加诊断（`da6a57f`） | 48 通过，2 失败：`lstat …/specmetry.db-journal: no such file or directory`；`cannot list access control lists with /bin/ls: exit status 1` | 5 通过，15 失败（14 次 `/bin/ls`，1 次 `lstat`） | 0 通过，50 失败（`mkdir …/.specmetry: file exists`） | — |
+| [38583919241](https://github.com/XKHoshizora/specmetry/actions/runs/38583919241) | `e29b426` 加诊断（`220c607`） | 50 通过 | 20 通过 | 50 通过 | 60 通过 |
+
+两个诊断分支 `diag/macos-before`、`diag/macos-after` 已于验收后删除；运行记录仍在 Actions 中。
+
+审查原文按原样入库。
