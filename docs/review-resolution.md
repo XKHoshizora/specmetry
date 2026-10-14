@@ -1,7 +1,7 @@
 # Codex 审查意见处理记录
 
 > 状态：2026-10-14 · 对应设计版本 Draft v0.3
-> 原始审查：[reviews/codex-review-001.md](reviews/codex-review-001.md)（第一轮，§1 ~ §4）、[reviews/codex-review-002.md](reviews/codex-review-002.md)（冻结审查，§5）、[reviews/codex-review-003.md](reviews/codex-review-003.md)（最终设计审查，§6）、[reviews/codex-review-004.md](reviews/codex-review-004.md)（M0 代码审查，§7）、[reviews/codex-review-005.md](reviews/codex-review-005.md)（M0 第二次代码审查，§8）、[reviews/codex-review-006.md](reviews/codex-review-006.md)（M0 第三次代码审查，§9）、[reviews/codex-review-007.md](reviews/codex-review-007.md)（M0 最终定向复审，§10）、[reviews/codex-review-008.md](reviews/codex-review-008.md)（M0 代码审查 GO，§11）、[reviews/codex-review-009.md](reviews/codex-review-009.md)（M1 设计审查 GO，§14）、[reviews/codex-review-010.md](reviews/codex-review-010.md)（WP1.3 代码审查，§15）、[reviews/codex-review-011.md](reviews/codex-review-011.md)（WP1.3 最终复审 GO，§16）、[reviews/codex-review-012.md](reviews/codex-review-012.md)（WP1.0 代码审查，§17）
+> 原始审查：[reviews/codex-review-001.md](reviews/codex-review-001.md)（第一轮，§1 ~ §4）、[reviews/codex-review-002.md](reviews/codex-review-002.md)（冻结审查，§5）、[reviews/codex-review-003.md](reviews/codex-review-003.md)（最终设计审查，§6）、[reviews/codex-review-004.md](reviews/codex-review-004.md)（M0 代码审查，§7）、[reviews/codex-review-005.md](reviews/codex-review-005.md)（M0 第二次代码审查，§8）、[reviews/codex-review-006.md](reviews/codex-review-006.md)（M0 第三次代码审查，§9）、[reviews/codex-review-007.md](reviews/codex-review-007.md)（M0 最终定向复审，§10）、[reviews/codex-review-008.md](reviews/codex-review-008.md)（M0 代码审查 GO，§11）、[reviews/codex-review-009.md](reviews/codex-review-009.md)（M1 设计审查 GO，§14）、[reviews/codex-review-010.md](reviews/codex-review-010.md)（WP1.3 代码审查，§15）、[reviews/codex-review-011.md](reviews/codex-review-011.md)（WP1.3 最终复审 GO，§16）、[reviews/codex-review-012.md](reviews/codex-review-012.md)（WP1.0 代码审查，§17）、[reviews/codex-review-013.md](reviews/codex-review-013.md)（WP1.0 最终复审 GO，§18）
 > 处理原则：逐条分析，不默认全盘接受；只要会改变核心模型或交换协议，就在本轮设计清楚；只涉及实现细节的，安排在对应模块开工前关闭。不用"开发时再说"来掩盖当前的数据模型矛盾。
 
 **状态术语**（本文和 implementation-plan 统一使用）：
@@ -971,3 +971,16 @@ PR：<https://github.com/XKHoshizora/specmetry/pull/1>（`feat/m0-foundation` �
 **修复**：注记与需求说明一致（R8 没有可判定的验收描述，R3、R7 各有一处歧义）。新增检查：需求说明字节相同的夹具，清单中的注记也必须相同（修复前失败）。清单不属于被构造的仓库，三个夹具的固定提交 ID 不变。
 
 审查原文按原样入库（它本来就是仓库内的相对链接）。
+
+## 18. WP1.0 最终复审（codex-review-013）与验收
+
+**审查结论**：**GO**，BLOCKER 为 0，没有新增 NON-BLOCKER。审查目标 `a206a3a`。B1（git 环境隔离）、N1（提案 Oracle）、N2（清单注记一致性）均已关闭：审查方在外部临时仓库上独立复现了原始攻击，包括 Windows 混合大小写的变量名，确认修复后外部仓库的文件和 `.git` 内容不变。目标提交的三平台 CI 8/8 通过，三个夹具的固定提交 ID 一致。
+
+**验收**：产品负责人于 2026-10-14 验收 WP1.0，PR #4 已合并（合并提交 `84e6e70`）。
+
+**已接受的风险**：提案 Oracle 只针对当前固定的需求说明，不承担通用的自然语言需求判定。
+
+**仍未完成、随后续工作包补齐**：
+
+- `fx-in-dev` 中故意失败的测试和录制的 Claim、其余夹具和期望结果（WP2.9）。
+- 使用这些夹具的验收项随对应工作包验证：MVP-INIT-03、INIT-04 和 WT-01 的 M1 部分在 WP1.1，MVP-BL-01 在 WP1.5。

@@ -93,7 +93,7 @@ flowchart LR
 
 **目标**：审查 #4、#5、#8 和中-1 的实现；#3、#6 中属于写入侧的部分。
 
-**状态（2026-10-14）**：设计收尾完成，G2 已满足（[review-resolution.md §13](review-resolution.md#13-m1-开工准备产品决策与设计收尾2026-10-14)）。产品负责人已授权开发（codex-review-009 GO 之后）。**WP1.3 已验收**（codex-review-011 GO，PR #3，合并提交 `cee87b4`；MVP-PRV-07 的 CLI 写入集成随 WP1.5 验证，见 [review-resolution.md §16](review-resolution.md#16-wp13-最终复审codex-review-011与验收)）；**WP1.0 已实现**，等待 Codex 审查；其他工作包尚未开始。
+**状态（2026-10-14）**：设计收尾完成，G2 已满足（[review-resolution.md §13](review-resolution.md#13-m1-开工准备产品决策与设计收尾2026-10-14)）。产品负责人已授权开发（codex-review-009 GO 之后）。**WP1.3 已验收**（codex-review-011 GO，PR #3，合并提交 `cee87b4`；MVP-PRV-07 的 CLI 写入集成随 WP1.5 验证，见 [review-resolution.md §16](review-resolution.md#16-wp13-最终复审codex-review-011与验收)）；**WP1.0 已验收**（codex-review-013 GO，PR #4，合并提交 `84e6e70`，见 [review-resolution.md §18](review-resolution.md#18-wp10-最终复审codex-review-013与验收)）；WP1.2 进行中；其他工作包尚未开始。
 
 | 工作包 | 内容 |
 |---|---|
