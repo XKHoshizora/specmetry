@@ -90,10 +90,13 @@ type Operation struct {
 
 // Guard lets a human-only operation proceed: it refuses outside human_cli
 // without asking anything, and in human_cli shows the operation on out and
-// reads one line from in, which in human_cli is the terminal. Only the exact
-// confirmation text goes ahead; anything else, an empty line or the end of
-// input cancels with human_required (exit code 3). There is no way to skip
-// the confirmation.
+// reads one line from in, which in human_cli is the terminal. Only a whole
+// line, ended by Enter, holding the exact confirmation text goes ahead;
+// anything else, an empty line or the end of input, even after the
+// confirmation text, cancels with human_required (exit code 3). If the
+// operation or the prompt cannot be shown in full, Guard fails with
+// environment (exit code 6) without reading anything. There is no way to
+// skip the confirmation.
 func Guard(d Detection, in io.Reader, out io.Writer, op Operation) error {
 	if op.Confirm == "" {
 		return apperr.New(apperr.Internal, "human-only operation "+op.Name+" has no confirmation text")
@@ -101,14 +104,24 @@ func Guard(d Detection, in io.Reader, out io.Writer, op Operation) error {
 	if err := d.RequireHuman(op.Name); err != nil {
 		return err
 	}
-	_, _ = fmt.Fprintln(out, op.Name)
+	var prompt strings.Builder
+	prompt.WriteString(op.Name + "\n")
 	for _, line := range op.Summary {
-		_, _ = fmt.Fprintln(out, "  "+line)
+		prompt.WriteString("  " + line + "\n")
 	}
-	_, _ = fmt.Fprintf(out, "Type %q to confirm, or press Enter to cancel: ", op.Confirm)
+	fmt.Fprintf(&prompt, "Type %q to confirm, or press Enter to cancel: ", op.Confirm)
+	if n, err := io.WriteString(out, prompt.String()); err != nil || n != prompt.Len() {
+		if err == nil {
+			err = io.ErrShortWrite
+		}
+		return apperr.Wrap(apperr.Environment, err, "cannot show the confirmation for "+op.Name+"; nothing was changed")
+	}
 	line, err := bufio.NewReader(in).ReadString('\n')
-	if err != nil && !errors.Is(err, io.EOF) {
-		return apperr.Wrap(apperr.Environment, err, "cannot read the confirmation")
+	if errors.Is(err, io.EOF) {
+		return apperr.New(apperr.HumanRequired, op.Name+" was not confirmed (end of input); nothing was changed")
+	}
+	if err != nil {
+		return apperr.Wrap(apperr.Environment, err, "cannot read the confirmation for "+op.Name+"; nothing was changed")
 	}
 	if strings.TrimSpace(line) != op.Confirm {
 		return apperr.New(apperr.HumanRequired, op.Name+" was not confirmed; nothing was changed")

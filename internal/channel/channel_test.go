@@ -2,9 +2,12 @@ package channel_test
 
 import (
 	"bytes"
+	"errors"
+	"io"
 	"reflect"
 	"strings"
 	"testing"
+	"testing/iotest"
 
 	"github.com/XKHoshizora/specmetry/internal/apperr"
 	"github.com/XKHoshizora/specmetry/internal/channel"
@@ -103,7 +106,7 @@ func guard(t *testing.T, d channel.Detection, input string) (string, error) {
 // the person types the confirmation text.
 func TestGuardConfirmsInHumanChannel(t *testing.T) {
 	human := channel.Decide(true, true, env(nil))
-	for _, input := range []string{"REQ-001\n", "REQ-001\r\n", "  REQ-001  \n", "REQ-001"} {
+	for _, input := range []string{"REQ-001\n", "REQ-001\r\n", "  REQ-001  \n", "\tREQ-001\t\r\n"} {
 		out, err := guard(t, human, input)
 		if err != nil {
 			t.Errorf("input %q: %v", input, err)
@@ -116,11 +119,12 @@ func TestGuardConfirmsInHumanChannel(t *testing.T) {
 	}
 }
 
-// Anything but the exact confirmation text cancels: exit code 3, nothing
-// may be written.
+// Anything but the exact confirmation text, ended by Enter, cancels: exit
+// code 3, nothing may be written. End of input cancels even after the
+// confirmation text (architecture §5.1).
 func TestGuardCancels(t *testing.T) {
 	human := channel.Decide(true, true, env(nil))
-	for _, input := range []string{"\n", "", "req-001\n", "REQ-0011\n", "yes\n", "y\n"} {
+	for _, input := range []string{"\n", "", "req-001\n", "REQ-0011\n", "yes\n", "y\n", "REQ-001", "  REQ-001  ", "REQ-001\r"} {
 		_, err := guard(t, human, input)
 		if apperr.ExitCode(err) != apperr.ExitHumanRequired || !strings.Contains(err.Error(), "not confirmed") {
 			t.Errorf("input %q: %v", input, err)
@@ -145,5 +149,72 @@ func TestGuardNeedsConfirmationText(t *testing.T) {
 	err := channel.Guard(channel.Decide(true, true, env(nil)), strings.NewReader("\n"), &bytes.Buffer{}, channel.Operation{Name: "x"})
 	if apperr.ExitCode(err) != apperr.ExitInternal {
 		t.Fatalf("Guard without confirmation text = %v", err)
+	}
+}
+
+// failingWriter fails its write number failAt (counting from 1): with an
+// error, or with short set by writing less than asked and reporting no
+// error. failed records whether that happened.
+type failingWriter struct {
+	failAt, writes int
+	short, failed  bool
+}
+
+func (w *failingWriter) Write(p []byte) (int, error) {
+	w.writes++
+	if w.writes < w.failAt {
+		return len(p), nil
+	}
+	w.failed = true
+	if w.short {
+		return len(p) / 2, nil
+	}
+	return 0, errors.New("output closed")
+}
+
+// readCounter counts the reads made from it.
+type readCounter struct {
+	r     io.Reader
+	reads int
+}
+
+func (c *readCounter) Read(p []byte) (int, error) {
+	c.reads++
+	return c.r.Read(p)
+}
+
+// When the operation's summary or the prompt cannot be shown in full, the
+// guard fails with exit code 6 before reading anything, and the operation
+// does not go ahead even though the confirmation text is waiting: whichever
+// write fails or falls short.
+func TestGuardFailsWhenThePromptCannotBeShown(t *testing.T) {
+	human := channel.Decide(true, true, env(nil))
+	for failAt := 1; failAt <= 4; failAt++ {
+		for _, short := range []bool{false, true} {
+			w := &failingWriter{failAt: failAt, short: short}
+			in := &readCounter{r: strings.NewReader("REQ-001\n")}
+			err := channel.Guard(human, in, w, op)
+			if failAt == 1 && !w.failed {
+				t.Fatalf("Guard wrote nothing")
+			}
+			if !w.failed {
+				continue
+			}
+			if apperr.ExitCode(err) != apperr.ExitEnvironment {
+				t.Errorf("write %d failed (short=%v): Guard = %v, want exit code %d", failAt, short, err, apperr.ExitEnvironment)
+			}
+			if in.reads != 0 {
+				t.Errorf("write %d failed (short=%v): Guard read the confirmation", failAt, short)
+			}
+		}
+	}
+}
+
+// A failure to read the confirmation is not a confirmation.
+func TestGuardFailsWhenTheConfirmationCannotBeRead(t *testing.T) {
+	in := io.MultiReader(strings.NewReader("REQ-001"), iotest.ErrReader(errors.New("input closed")))
+	err := channel.Guard(channel.Decide(true, true, env(nil)), in, &bytes.Buffer{}, op)
+	if apperr.ExitCode(err) != apperr.ExitEnvironment {
+		t.Fatalf("Guard = %v, want exit code %d", err, apperr.ExitEnvironment)
 	}
 }
