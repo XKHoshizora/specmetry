@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -346,6 +347,13 @@ func migratorHelper() int {
 
 // lockHolderHelper takes the open lock and keeps it until $LOCK_STOP exists,
 // or exits while holding it if $LOCK_CRASH is set.
+//
+// The lock lasts as long as its file stays open. A dropped *openLock leaves
+// the *os.File unreachable, and its finalizer closes the file at the next
+// garbage collection, releasing the lock: TestOpenLockTimeout then failed
+// only when a collection happened to run while it waited (seen in CI on
+// Linux). The helper keeps the lock referenced, and collects garbage on
+// every turn of its wait so that a dropped reference fails at once.
 func lockHolderHelper() int {
 	dir, err := datadir.Resolve()
 	if err != nil {
@@ -356,13 +364,15 @@ func lockHolderHelper() int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	if _, err := acquireOpenLock(context.Background(), dir.Join(datadir.MigrateLockFile), time.Second); err != nil {
+	lock, err := acquireOpenLock(context.Background(), dir.Join(datadir.MigrateLockFile), time.Second)
+	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
 	if os.Getenv("LOCK_CRASH") != "" {
 		os.Exit(0) // the operating system releases the lock
 	}
+	defer lock.release()
 	if err := os.WriteFile(os.Getenv("LOCK_READY"), nil, 0o600); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
@@ -371,6 +381,7 @@ func lockHolderHelper() int {
 		if _, err := os.Stat(os.Getenv("LOCK_STOP")); err == nil {
 			return 0
 		}
+		runtime.GC()
 		time.Sleep(10 * time.Millisecond)
 	}
 }
