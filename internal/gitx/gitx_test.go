@@ -201,12 +201,7 @@ func gitVariables(env []string) []string {
 // other command. (A stand-in for git 2.31.1 records how it was run; the
 // real git 2.31.1 is the cli package's TestInitRefusesRealOldGit.)
 func TestVersionProbeRunsInTheControlledEnvironment(t *testing.T) {
-	versionMu.Lock()
-	was := versionOK
-	versionOK = false
-	versionMu.Unlock()
-	t.Cleanup(func() { versionMu.Lock(); versionOK = was; versionMu.Unlock() })
-
+	// The stand-in is a git gitx has not seen, so its version is checked.
 	dir, env, calls := testutil.FakeGit(t, "git version 2.31.1")
 	for _, kv := range env {
 		name, value, _ := strings.Cut(kv, "=")
@@ -217,9 +212,9 @@ func TestVersionProbeRunsInTheControlledEnvironment(t *testing.T) {
 	t.Setenv("GIT_TRACE2", "1")
 	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(t.TempDir(), "gitconfig"))
 
-	err := checkVersion(ctx)
+	_, err := gitToRun(ctx)
 	if apperr.ExitCode(err) != apperr.ExitEnvironment || !strings.Contains(err.Error(), "2.32 or newer") {
-		t.Fatalf("checkVersion = %v", err)
+		t.Fatalf("gitToRun = %v", err)
 	}
 	got := calls()
 	if len(got) != 1 || !reflect.DeepEqual(got[0].Args, []string{"--version"}) {

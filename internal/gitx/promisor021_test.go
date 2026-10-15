@@ -43,15 +43,14 @@ func standIn(t *testing.T) (script, ran string) {
 
 func ranAt(path string) bool { _, err := os.Stat(path); return err == nil }
 
-// forceOlderGit makes gitx take the path of a git without --no-lazy-fetch,
-// with any git.
-func forceOlderGit(t *testing.T) {
+// controlled runs git once in dir in the controlled environment.
+func controlled(t *testing.T, dir string, args ...string) ([]byte, int, error) {
 	t.Helper()
-	versionMu.Lock()
-	wasOK, wasOff := versionOK, lazyFetchOff
-	versionOK, lazyFetchOff = true, false
-	versionMu.Unlock()
-	t.Cleanup(func() { versionMu.Lock(); versionOK, lazyFetchOff = wasOK, wasOff; versionMu.Unlock() })
+	git, err := gitToRun(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return exec1(ctx, git, dir, args...)
 }
 
 // codex-review-021 B1-1: remote.<name>.promisor is read as git reads a
@@ -135,7 +134,7 @@ func TestNoTransportIsAllowed(t *testing.T) {
 			if err := os.Remove(ran); err != nil {
 				t.Fatal(err)
 			}
-			if _, code, err := exec1(ctx, repo.Dir, "ls-remote", name+"::unused"); err == nil && code == 0 {
+			if _, code, err := controlled(t, repo.Dir, "ls-remote", name+"::unused"); err == nil && code == 0 {
 				t.Error("ls-remote succeeded")
 			}
 			if ranAt(ran) {
@@ -169,7 +168,7 @@ func TestNoTransportIsAllowed(t *testing.T) {
 			if err := os.Remove(ran); err != nil {
 				t.Fatal(err)
 			}
-			if _, code, err := exec1(ctx, repo.Dir, c.args(script)...); err == nil && code == 0 {
+			if _, code, err := controlled(t, repo.Dir, c.args(script)...); err == nil && code == 0 {
 				t.Error("ls-remote succeeded")
 			}
 			if ranAt(ran) {
@@ -179,18 +178,19 @@ func TestNoTransportIsAllowed(t *testing.T) {
 	}
 	// https needs a helper git may not have been built with; it must fail
 	// either way, without a connection being tried for it to fail on.
-	if _, code, err := exec1(ctx, repo.Dir, "ls-remote", "https://127.0.0.1:9/repo.git"); err == nil && code == 0 {
+	if _, code, err := controlled(t, repo.Dir, "ls-remote", "https://127.0.0.1:9/repo.git"); err == nil && code == 0 {
 		t.Error("ls-remote over https succeeded")
 	}
 }
 
-// codex-review-021 B1-3: with a git without --no-lazy-fetch, whether the
-// repository is a partial clone is asked again before every object read,
-// never remembered: a repository that becomes one (promisor = true or 2)
-// after a first read is refused (exit 6) before any object is read, with
-// nothing run and nothing written; one that stops being one is read again.
-func TestObjectReadsRecheckThePartialClone(t *testing.T) {
-	forceOlderGit(t)
+// codex-review-022 BLOCKER: a repository that becomes a partial clone
+// between two reads (promisor = true or 2, a blob removed) is not fetched
+// from: no check of the repository comes before a read, so no change can
+// slip in between; git itself, which honours GIT_NO_LAZY_FETCH, refuses to
+// fetch while it reads (PD-26). The read fails with exit 6, the promisor
+// remote does not run, and nothing in the repository changes.
+func TestARepositoryThatBecomesAPartialCloneIsNotFetchedFrom(t *testing.T) {
+	requireSafeGit(t)
 	for _, value := range []string{"true", "2"} {
 		t.Run("promisor = "+value, func(t *testing.T) {
 			repo := testutil.NewGitRepo(t)
@@ -210,24 +210,13 @@ func TestObjectReadsRecheckThePartialClone(t *testing.T) {
 			removeObject(t, repo, blob)
 			gitDir := filepath.Join(repo.Dir, ".git")
 			before := testutil.SettledSnapshot(t, gitDir)
-			_, errLines := CountLines(ctx, repo.Dir, blob)
-			_, errTree := TreeFiles(ctx, repo.Dir, head)
-			_, errCommit := CommitOf(ctx, repo.Dir, "HEAD")
-			for name, err := range map[string]error{"CountLines": errLines, "TreeFiles": errTree, "CommitOf": errCommit} {
-				if apperr.ExitCode(err) != apperr.ExitEnvironment || !strings.Contains(err.Error(), "partial clone") {
-					t.Errorf("%s after the repository became a partial clone: %v", name, err)
-				}
+			if _, err := CountLines(ctx, repo.Dir, blob); apperr.ExitCode(err) != apperr.ExitEnvironment {
+				t.Errorf("CountLines of the removed blob = %v; want exit 6", err)
 			}
 			if ranAt(ran) {
 				t.Error("the promisor remote's upload-pack ran")
 			}
 			testutil.AssertTreeUnchanged(t, gitDir, before)
-
-			// A full clone again: read as before.
-			repo.Git("config", "--unset", "remote.origin.promisor")
-			if c, err := CommitOf(ctx, repo.Dir, "HEAD"); err != nil || c != head {
-				t.Fatalf("CommitOf after the repository was made a full clone again = %q, %v", c, err)
-			}
 		})
 	}
 }

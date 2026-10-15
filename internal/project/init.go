@@ -62,16 +62,17 @@ type Plan struct {
 	markerFound           bool
 	detected              Stage
 	candidates, hints     []string
-	// branch is the main worktree's branch, "" when detached or outside git.
-	branch      string
-	excludePath string
+	// branch is the main worktree's branch, "" when detached or outside git;
+	// snapshot is the commit it points at, "" when it has none yet.
+	branch, snapshot string
+	excludePath      string
 }
 
 // Target is the active delivery target.
 type Target struct {
 	ID, Ref string
-	// Snapshot is the commit the ref points at, "" if it has none (yet) or
-	// it cannot be resolved.
+	// Snapshot is the commit the ref points at, "" if it has none (yet).
+	// A commit that cannot be read is an error, never "" (PD-26).
 	Snapshot string
 }
 
@@ -118,6 +119,12 @@ func Prepare(ctx context.Context, opts InitOptions, scanner *secrets.Scanner) (*
 	case err != nil:
 		return nil, err
 	default:
+		// PD-26: a git that could fetch an object the repository lacks
+		// reads none, so a git project's init stops here, before its files
+		// are listed and before anything is written.
+		if err := gitx.CheckObjectReads(ctx); err != nil {
+			return nil, err
+		}
 		p.git = true
 		p.root, p.current = loc.Main, loc.Worktree
 		p.curGitDir, p.commonDir = loc.GitDir, loc.CommonDir
@@ -168,6 +175,14 @@ func Prepare(ctx context.Context, opts InitOptions, scanner *secrets.Scanner) (*
 		// created, since that is known only once the database is open.
 		if err := rejectSecretRef(scanner, p.branch); err != nil {
 			return nil, err
+		}
+		// The snapshot a new project's default target reports, read before
+		// anything is written: a commit that cannot be read stops init
+		// (exit 6) rather than pass for a branch without commits (PD-26).
+		if p.branch != "" {
+			if p.snapshot, err = gitx.CommitOf(ctx, p.root, p.branch); err != nil {
+				return nil, err
+			}
 		}
 		if !opts.NoExclude {
 			// Not resolving it only costs the exclude entry: a warning.
@@ -301,7 +316,11 @@ func (p *Plan) Apply(ctx context.Context, db *sqlite.DB, now time.Time) (Result,
 			InventorySkipped: proj.settings.flag("inventory_skipped"),
 			DocsOnly:         res.Stage == DocsOnly,
 		})
-		target, err = activeTarget(ctx, tx, proj.id)
+		if target, err = activeTarget(ctx, tx, proj.id); err != nil || target == nil {
+			return err
+		}
+		// In the transaction: a commit that cannot be read writes nothing.
+		target.Snapshot, err = p.snapshotOf(ctx, target.Ref)
 		return err
 	})
 	if err != nil {
@@ -325,14 +344,26 @@ func (p *Plan) Apply(ctx context.Context, db *sqlite.DB, now time.Time) (Result,
 			res.Warnings = append(res.Warnings, WarnExcludeNotWritable)
 		}
 	}
-	if target != nil {
-		// A snapshot that cannot be resolved is unknown, not an error.
-		if sha, err := gitx.CommitOf(ctx, p.root, target.Ref); err == nil && commitID.MatchString(sha) {
-			target.Snapshot = sha
-		}
-	}
 	res.Target = target
 	return res, nil
+}
+
+// snapshotOf returns the commit ref points at, "" when it has none yet. The
+// main worktree's branch was resolved by Prepare; another ref (the target
+// an existing project keeps) is resolved now. init.v1 reports a SHA-1
+// commit ID only.
+func (p *Plan) snapshotOf(ctx context.Context, ref string) (string, error) {
+	sha := p.snapshot
+	if ref != p.branch {
+		var err error
+		if sha, err = gitx.CommitOf(ctx, p.root, ref); err != nil {
+			return "", err
+		}
+	}
+	if !commitID.MatchString(sha) {
+		return "", nil
+	}
+	return sha, nil
 }
 
 // find looks the project up: a git project by its common directory, one

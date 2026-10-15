@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/XKHoshizora/specmetry/internal/apperr"
 	"github.com/XKHoshizora/specmetry/internal/testutil"
 )
 
@@ -143,41 +142,5 @@ func TestPartialClone(t *testing.T) {
 	full.Git("config", "remote.origin.promisor", "false")
 	if partial, err := PartialClone(ctx, full.Dir); err != nil || partial {
 		t.Errorf("PartialClone of a full clone = %v, %v", partial, err)
-	}
-}
-
-// With a git that cannot be told not to fetch (older than --no-lazy-fetch,
-// as git 2.32 to 2.43 are), no object of a partial clone is read at all:
-// each read is refused with an environment error before git looks at an
-// object, so nothing is fetched and nothing is written. A full clone is
-// read as usual. This runs the older git's path with any git.
-func TestOlderGitRefusesPartialClones(t *testing.T) {
-	versionMu.Lock()
-	wasOK, wasOff := versionOK, lazyFetchOff
-	versionOK, lazyFetchOff = true, false
-	versionMu.Unlock()
-	t.Cleanup(func() { versionMu.Lock(); versionOK, lazyFetchOff = wasOK, wasOff; versionMu.Unlock() })
-
-	repo, head, ran := promisorRepo(t)
-	blob := repo.Git("rev-parse", head+":internal/auth/login.go")
-	removeObject(t, repo, blob)
-	gitDir := filepath.Join(repo.Dir, ".git")
-	before := testutil.SettledSnapshot(t, gitDir)
-	_, errCommit := CommitOf(ctx, repo.Dir, "HEAD")
-	_, errTree := TreeFiles(ctx, repo.Dir, head)
-	_, errLines := CountLines(ctx, repo.Dir, blob)
-	for name, err := range map[string]error{"CommitOf": errCommit, "TreeFiles": errTree, "CountLines": errLines} {
-		if apperr.ExitCode(err) != apperr.ExitEnvironment || !strings.Contains(err.Error(), "partial clone") {
-			t.Errorf("%s in a partial clone: %v", name, err)
-		}
-	}
-	if _, err := os.Stat(ran); err == nil {
-		t.Error("the promisor remote's upload-pack ran")
-	}
-	testutil.AssertTreeUnchanged(t, gitDir, before)
-
-	full := committedRepo(t)
-	if c, err := CommitOf(ctx, full.Dir, "HEAD"); err != nil || c == "" {
-		t.Fatalf("CommitOf in a full clone = %q, %v", c, err)
 	}
 }

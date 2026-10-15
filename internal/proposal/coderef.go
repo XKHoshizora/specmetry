@@ -104,6 +104,11 @@ func fileChecker(ctx context.Context, w project.Where) (*files, error) {
 			return n, err == nil, err
 		}}, nil
 	}
+	// PD-26: a git that could fetch an object the repository lacks reads
+	// none.
+	if err := gitx.CheckObjectReads(ctx); err != nil {
+		return nil, err
+	}
 	// git would fetch the objects a partial clone lacks, from its promisor
 	// remote; Specmetry never does (codex-review-020 B1), so it reads no
 	// object there at all.

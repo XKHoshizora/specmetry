@@ -981,4 +981,4 @@ M0 的 CI 会校验这两者（WP0.4）。凡是需要数据库状态才能判�
 
 ## 10. 相关待决策事项
 
-已确认：PD-03、PD-04、PD-12、PD-16 ~ PD-22、PD-24、PD-25；待确认：PD-02（[prd.md §9](prd.md#9-产品待决策事项)）。技术：TD-01、TD-14、TD-18、TD-20、TD-21 已确认；TD-17、TD-24、TD-25 待确认（[architecture.md §16](architecture.md#16-技术待决策事项)）。
+已确认：PD-03、PD-04、PD-12、PD-16 ~ PD-22、PD-24、PD-25、PD-26；待确认：PD-02（[prd.md §9](prd.md#9-产品待决策事项)）。技术：TD-01、TD-14、TD-18、TD-20、TD-21 已确认；TD-17、TD-24、TD-25 待确认（[architecture.md §16](architecture.md#16-技术待决策事项)）。

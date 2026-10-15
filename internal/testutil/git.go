@@ -130,6 +130,16 @@ func (r *GitRepo) GitResult(args ...string) (string, error) {
 	return strings.TrimSpace(string(out)), err
 }
 
+// GitResultEnv is GitResult with extra variables, which take precedence.
+func (r *GitRepo) GitResultEnv(extra []string, args ...string) (string, error) {
+	r.t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = r.Dir
+	cmd.Env = append(slices.Clip(r.env), extra...)
+	out, err := cmd.Output()
+	return strings.TrimSpace(string(out)), err
+}
+
 // gitEnvIn runs git in dir with the repo's environment plus extra
 // variables, which take precedence.
 func (r *GitRepo) gitEnvIn(dir string, extra []string, args ...string) string {

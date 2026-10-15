@@ -13,6 +13,8 @@
 //     program, is turned off on the command line.
 //   - The commands run are read commands that run no hooks, without
 //     optional locks, a pager or replace objects.
+//   - A command that may read a git object runs only with a git shown,
+//     by running it, never to fetch a missing one (objects.go, PD-26).
 //
 // Errors never carry git's own messages, which can quote configuration
 // values, nor the directory (codex-review-015 B3).
@@ -174,28 +176,54 @@ func HeadBranch(ctx context.Context, worktree string) (string, error) {
 }
 
 // CommitOf resolves ref to the full ID of a commit, or "" when the ref does
-// not exist or has no commit yet.
+// not exist or has no commit yet (a branch without commits). A ref that
+// exists but whose commit cannot be read, because it is missing (as in a
+// partial clone) or is not a commit, is an environment error, never ""
+// (PD-26): the ref is resolved first, which reads no object, and only then
+// is its object read.
 func CommitOf(ctx context.Context, dir, ref string) (string, error) {
-	if err := objectsReadable(ctx, dir); err != nil {
-		return "", err
-	}
-	out, code, err := runCode(ctx, dir, "rev-parse", "-q", "--verify", ref+"^{commit}")
+	out, code, err := runObjectsCode(ctx, dir, "rev-parse", "-q", "--verify", ref)
 	if err != nil {
 		return "", err
 	}
 	if code == 1 {
 		return "", nil
 	}
-	return strings.TrimSpace(string(out)), nil
+	id := strings.TrimSpace(string(out))
+	if !objectID.MatchString(id) {
+		return "", apperr.New(apperr.Environment, "git rev-parse printed something other than an object ID")
+	}
+	out, code, err = runObjectsCode(ctx, dir, "rev-parse", "-q", "--verify", id+"^{commit}")
+	if err != nil {
+		return "", err
+	}
+	commit := strings.TrimSpace(string(out))
+	if code == 1 || !objectID.MatchString(commit) {
+		return "", apperr.New(apperr.Environment,
+			"the commit a ref points to cannot be read from the repository: it is missing (Specmetry never fetches objects, as from a partial clone's remote) or is not a commit; run git log in this directory to see why")
+	}
+	return commit, nil
 }
 
 // ListFiles lists the files of worktree that git sees: tracked files and
 // untracked files that are not ignored, relative to the worktree root with
-// forward slashes, each once.
+// forward slashes, each once. A sparse index is not expanded: a directory
+// outside the sparse checkout is listed as itself, with a trailing slash
+// (git would otherwise read its trees and rewrite the timestamps of object
+// files, PD-26). It may still read objects (a .gitignore outside the
+// sparse checkout is read from the index), so it runs only with a git that
+// never fetches.
 func ListFiles(ctx context.Context, worktree string) ([]string, error) {
-	out, err := run(ctx, worktree, "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--full-name", "--", ":/")
+	git, err := listGit(ctx)
 	if err != nil {
 		return nil, err
+	}
+	out, code, err := runWith(ctx, git, worktree, "ls-files", "-z", "--sparse", "--cached", "--others", "--exclude-standard", "--full-name", "--", ":/")
+	if err != nil {
+		return nil, err
+	}
+	if code != 0 {
+		return nil, failed("ls-files", code)
 	}
 	seen := map[string]bool{}
 	var files []string
@@ -220,10 +248,7 @@ func TreeFiles(ctx context.Context, worktree, commit string) (map[string]string,
 	if !objectID.MatchString(commit) {
 		return nil, apperr.New(apperr.Internal, "TreeFiles needs a full commit ID")
 	}
-	if err := objectsReadable(ctx, worktree); err != nil {
-		return nil, err
-	}
-	out, err := run(ctx, worktree, "ls-tree", "-r", "-z", "--full-tree", commit)
+	out, err := runObjects(ctx, worktree, "ls-tree", "-r", "-z", "--full-tree", commit)
 	if err != nil {
 		return nil, err
 	}
@@ -250,16 +275,9 @@ func CountLines(ctx context.Context, worktree, object string) (int, error) {
 	if !objectID.MatchString(object) {
 		return 0, apperr.New(apperr.Internal, "CountLines needs a full object ID")
 	}
-	if err := objectsReadable(ctx, worktree); err != nil {
-		return 0, err
-	}
 	var c lineCounter
-	code, err := execTo(ctx, worktree, &c, append(slices.Clone(globalArgs), "cat-file", "blob", object)...)
-	if err != nil {
+	if err := runObjectsTo(ctx, worktree, &c, "cat-file", "blob", object); err != nil {
 		return 0, err
-	}
-	if code != 0 {
-		return 0, failed("cat-file", code)
 	}
 	return c.lines(), nil
 }
@@ -320,25 +338,26 @@ func Canonical(p string) string {
 }
 
 // controlledEnv is the git environment Specmetry sets for every git it
-// runs, the version probe included: no system or global configuration (an
-// empty file instead; git maps /dev/null on Windows too); trace2 off, which
-// a git too old for GIT_CONFIG_GLOBAL would otherwise enable from the
-// user's global configuration while it only prints its version
-// (codex-review-016 B1; the variables override trace2.*Target); no optional
-// locks, so reading never writes the index; no prompts; the .git entry
-// that findDotGit found by walking up without a filesystem limit; and no
-// object is ever fetched (codex-review-020 B1). A partial clone fetches a
-// missing object from its promisor remote on demand, which could reach a
-// network or run the remote's upload-pack. A git that knows
-// --no-lazy-fetch stops that with GIT_NO_LAZY_FETCH. For every version
+// runs, the version check and the object read probe included: no system
+// or global configuration (an empty file instead; git maps /dev/null on
+// Windows too); trace2 off, which a git too old for GIT_CONFIG_GLOBAL
+// would otherwise enable from the user's global configuration while it
+// only prints its version (codex-review-016 B1; the variables override
+// trace2.*Target); no optional locks, so reading never writes the index;
+// no prompts; the .git entry that findDotGit found by walking up without a
+// filesystem limit; and no object is ever fetched (codex-review-020 B1,
+// PD-26). A partial clone fetches a missing object from its promisor
+// remote on demand, which could reach a network, run the remote's
+// upload-pack or write the repository's configuration. GIT_NO_LAZY_FETCH
+// stops that in a git that honours it, and commands that may read an
+// object run only with a git shown to (objects.go). For every version
 // from 2.32 on, GIT_ALLOW_PROTOCOL set and empty is an allow list with no
 // protocol in it: every transport (file, ssh, git, http and https, ext,
 // any remote helper) is refused before it connects or runs a program,
 // whatever the protocol.* configuration says. It must be set, not left
 // out: unset means git's default policy, which allows most transports
 // (codex-review-021 B1-2; an earlier value named a protocol, so a remote
-// helper of that name was allowed). Object reads with an older git also
-// refuse a partial clone up front (objectsReadable).
+// helper of that name was allowed).
 var controlledEnv = []string{
 	"GIT_CONFIG_NOSYSTEM=1",
 	"GIT_CONFIG_SYSTEM=/dev/null",
@@ -390,74 +409,73 @@ func supportedVersion(out string) bool {
 	return major > 2 || major == 2 && minor >= 32
 }
 
+// gitBinary is the file PATH finds for git. What gitx found out about a
+// git, its version and whether it may read objects, is kept only while
+// PATH finds the same file, unchanged; any other git is checked anew. The
+// file found is the one run.
+type gitBinary struct {
+	path    string
+	size    int64
+	modTime int64
+}
+
 var (
-	versionMu sync.Mutex
-	versionOK bool
-	// lazyFetchOff: git honours GIT_NO_LAZY_FETCH, so it never starts a
-	// fetch for a missing object (objectsReadable).
-	lazyFetchOff bool
+	stateMu sync.Mutex
+	// state is what gitx knows about bin. Only what a check showed is
+	// kept: a check that failed, was cancelled or found nothing out is
+	// made again next time.
+	state struct {
+		bin       gitBinary
+		versionOK bool
+		objects   objectSafety
+		sparse    sparseListing
+	}
 )
 
-// checkVersion refuses a git too old to be isolated, and finds out whether
-// git can be told never to fetch a missing object: --no-lazy-fetch and
-// GIT_NO_LAZY_FETCH came together, so a git that knows the option honours
-// the variable. Only a successful check is remembered, so a cancelled one
-// is repeated.
-func checkVersion(ctx context.Context) error {
-	versionMu.Lock()
-	defer versionMu.Unlock()
-	if versionOK {
-		return nil
-	}
-	out, code, err := exec1(ctx, "", "--version")
+// findGit returns the git that PATH finds.
+func findGit() (gitBinary, error) {
+	p, err := exec.LookPath("git")
 	if err != nil {
-		return err
+		return gitBinary{}, apperr.New(apperr.Environment, "git is required but was not found on PATH")
 	}
-	if code != 0 || !supportedVersion(string(out)) {
-		return apperr.New(apperr.Environment, "git "+minimumVersion+" or newer is required")
-	}
-	_, code, err = exec1(ctx, "", "--no-lazy-fetch", "version")
+	fi, err := os.Stat(p)
 	if err != nil {
-		return err
+		return gitBinary{}, apperr.New(apperr.Environment, "cannot run git ("+osProblem(err)+")")
 	}
-	lazyFetchOff, versionOK = code == 0, true
-	return nil
+	return gitBinary{path: p, size: fi.Size(), modTime: fi.ModTime().UnixNano()}, nil
 }
 
-// objectsReadable lets git read objects in the repository of dir only
-// where that never fetches one (codex-review-020 B1). A git that honours
-// GIT_NO_LAZY_FETCH never does. An older git, in a partial clone, starts a
-// fetch for any missing object; GIT_ALLOW_PROTOCOL makes that fetch fail
-// before it connects or runs a program, but it may write the repository's
-// configuration first (git 2.32 records the remote's filter). So with an
-// older git a partial clone is refused before any object is read. The
-// configuration is read again before every read, never remembered: a
-// repository can become a partial clone between two reads
-// (codex-review-021 B1-3). Between this check and the read itself the
-// configuration could still change; that window is not closed here, and
-// GIT_ALLOW_PROTOCOL still keeps any fetch in it from connecting or
-// running a program.
-func objectsReadable(ctx context.Context, dir string) error {
-	if err := checkVersion(ctx); err != nil {
-		return err
-	}
-	versionMu.Lock()
-	off := lazyFetchOff
-	versionMu.Unlock()
-	if off {
-		return nil
-	}
-	partial, err := PartialClone(ctx, dir)
-	if err != nil {
-		return err
-	}
-	if partial {
-		return apperr.New(apperr.Environment,
-			"this repository is a partial clone, and this git cannot read its objects without fetching the ones it lacks, which Specmetry never does; use a git that supports --no-lazy-fetch, or a full clone")
-	}
-	return nil
+// gitToRun returns the git to run after refusing one too old to be
+// isolated.
+func gitToRun(ctx context.Context) (string, error) {
+	stateMu.Lock()
+	defer stateMu.Unlock()
+	return gitToRunLocked(ctx)
 }
 
+// gitToRunLocked is gitToRun with stateMu held.
+func gitToRunLocked(ctx context.Context) (string, error) {
+	bin, err := findGit()
+	if err != nil {
+		return "", err
+	}
+	if bin != state.bin {
+		state.bin, state.versionOK, state.objects, state.sparse = bin, false, unprobed, sparseUnprobed
+	}
+	if !state.versionOK {
+		out, code, err := exec1(ctx, bin.path, "", "--version")
+		if err != nil {
+			return "", err
+		}
+		if code != 0 || !supportedVersion(string(out)) {
+			return "", apperr.New(apperr.Environment, "git "+minimumVersion+" or newer is required")
+		}
+		state.versionOK = true
+	}
+	return bin.path, nil
+}
+
+// run runs a git command that reads no object and must succeed.
 func run(ctx context.Context, dir string, args ...string) ([]byte, error) {
 	out, code, err := runCode(ctx, dir, args...)
 	if err != nil {
@@ -469,14 +487,19 @@ func run(ctx context.Context, dir string, args ...string) ([]byte, error) {
 	return out, nil
 }
 
-// runCode runs git in dir after checking its version. A non-zero exit
-// status other than 1 is an error; status 1 is returned for the caller to
-// interpret.
+// runCode runs a git command that reads no object in dir, after checking
+// git's version. A non-zero exit status other than 1 is an error; status 1
+// is returned for the caller to interpret.
 func runCode(ctx context.Context, dir string, args ...string) ([]byte, int, error) {
-	if err := checkVersion(ctx); err != nil {
+	git, err := gitToRun(ctx)
+	if err != nil {
 		return nil, -1, err
 	}
-	out, code, err := exec1(ctx, dir, append(slices.Clone(globalArgs), args...)...)
+	return runWith(ctx, git, dir, args...)
+}
+
+func runWith(ctx context.Context, git, dir string, args ...string) ([]byte, int, error) {
+	out, code, err := exec1(ctx, git, dir, append(slices.Clone(globalArgs), args...)...)
 	if err != nil {
 		return nil, -1, err
 	}
@@ -488,9 +511,9 @@ func runCode(ctx context.Context, dir string, args ...string) ([]byte, int, erro
 
 // exec1 runs git once in the controlled environment. git's own messages
 // are discarded, not kept: they may quote configuration values.
-func exec1(ctx context.Context, dir string, args ...string) ([]byte, int, error) {
+func exec1(ctx context.Context, git, dir string, args ...string) ([]byte, int, error) {
 	var stdout bytes.Buffer
-	code, err := execTo(ctx, dir, &stdout, args...)
+	code, err := execTo(ctx, git, dir, &stdout, args...)
 	if err != nil {
 		return nil, -1, err
 	}
@@ -498,10 +521,16 @@ func exec1(ctx context.Context, dir string, args ...string) ([]byte, int, error)
 }
 
 // execTo is exec1 with git's output written to stdout as it comes.
-func execTo(ctx context.Context, dir string, stdout io.Writer, args ...string) (int, error) {
-	cmd := exec.CommandContext(ctx, "git", args...)
+func execTo(ctx context.Context, git, dir string, stdout io.Writer, args ...string) (int, error) {
+	return command(ctx, git, dir, filterEnv(os.Environ()), stdout, args...)
+}
+
+// command runs git once in dir with env. Its output goes to stdout, or
+// nowhere when stdout is nil; its messages go nowhere.
+func command(ctx context.Context, git, dir string, env []string, stdout io.Writer, args ...string) (int, error) {
+	cmd := exec.CommandContext(ctx, git, args...)
 	cmd.Dir = dir
-	cmd.Env = filterEnv(os.Environ())
+	cmd.Env = env
 	cmd.Stdout = stdout
 	err := cmd.Run()
 	var exit *exec.ExitError
