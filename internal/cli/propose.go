@@ -45,8 +45,6 @@ worktree; that a file is there is no evidence that a criterion is met.`,
 				if err := d.RequireHuman("propose --apply"); err != nil {
 					return err
 				}
-				return apperr.New(apperr.InvalidInput,
-					"propose --apply (a person's edit, applied at once) is not available in this version; submit the proposal without --apply and review it")
 			}
 			if file == "" {
 				return apperr.New(apperr.InvalidInput, "pass the proposal with --file <path>, or --file - to read it from standard input")
@@ -84,9 +82,9 @@ worktree; that a file is there is no evidence that a criterion is met.`,
 				if err := d.RequireHuman("a proposal with origin human_edit"); err != nil {
 					return err
 				}
-				return apperr.New(apperr.InvalidInput,
-					"origin human_edit is a person's edit applied at once with propose --apply, which is not available in this version").
-					WithDetails(apperr.Detail{Pointer: "/origin", Problem: "human_edit needs propose --apply; use another origin to submit the proposal for review"})
+			}
+			if err := applyOrigin(p, apply); err != nil {
+				return err
 			}
 			if err := proposal.CheckStatic(doc, p); err != nil {
 				return err
@@ -132,22 +130,44 @@ worktree; that a file is there is no evidence that a criterion is met.`,
 			if checked.CodeRefs, err = proposal.CheckCodeRefs(ctx, w.where, codeRefs); err != nil {
 				return err
 			}
+			var edit *humanEdit
 			var receipt proposal.Receipt
-			if err := w.tx(ctx, func(tx *sql.Tx, proj project.Registered) error {
+			store := func(tx *sql.Tx, proj project.Registered) error {
 				receipt, err = proposal.Store(ctx, tx, proj.ID, proposal.Submission{
 					Proposal: p, Checked: checked, Where: w.where, Actor: actor, Channel: string(d.Channel)})
-				return err
-			}); err != nil {
+				if err != nil || edit == nil {
+					return err
+				}
+				return edit.apply(ctx, tx, proj.ID, p, checked, &receipt, actor, string(d.Channel))
+			}
+			if apply {
+				if edit, err = prepareEdit(ctx, w, p); err != nil {
+					return err
+				}
+				// A dry run first, rolled back: nobody is asked to confirm
+				// what cannot be applied.
+				if err := dryRun(ctx, w, store); err != nil {
+					return err
+				}
+				op := channel.Operation{Name: "propose --apply", Summary: edit.lines, Confirm: fmt.Sprintf("v%d", p.BaseVersion+1)}
+				if err := channel.Guard(d, cmd.InOrStdin(), cmd.OutOrStdout(), op); err != nil {
+					return err
+				}
+			}
+			if err := w.tx(ctx, store); err != nil {
 				return err
 			}
 			if asJSON {
 				return writeJSON(cmd.OutOrStdout(), "proposal-receipt.v1", receipt)
 			}
+			if apply {
+				return printApplied(cmd.OutOrStdout(), receipt)
+			}
 			return printReceipt(cmd.OutOrStdout(), receipt)
 		}),
 	}
 	cmd.Flags().StringVar(&file, "file", "", "the proposal.v1 document, or - for standard input")
-	cmd.Flags().BoolVar(&apply, "apply", false, "apply a person's edit at once (a person at a terminal only; not available yet)")
+	cmd.Flags().BoolVar(&apply, "apply", false, "apply a person's edit (origin human_edit) at once, as a new baseline version (a person at a terminal only)")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "print the proposal-receipt.v1 document")
 	return cmd
 }

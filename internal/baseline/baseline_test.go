@@ -2,7 +2,9 @@ package baseline_test
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"testing"
 
 	"github.com/XKHoshizora/specmetry/internal/baseline"
@@ -193,5 +195,30 @@ func TestNextKeyOfACriterionNeedsItsRequirement(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("a criterion key without its requirement was handed out")
+	}
+}
+
+// check_config_hash (data-model §4.4) is the sha256 of the RFC 8785 form of
+// {"command","workdir","shell","inputs"}, inputs sorted: here written out by
+// hand, characters JSON would escape for HTML kept as they are, and the
+// timeout and rationale left out.
+func TestCheckConfigHash(t *testing.T) {
+	bash := "bash"
+	c := baseline.Check{Command: `go test ./... && echo "<ok>" & tab:` + "\t", Workdir: "docs", Shell: &bash, TimeoutSec: 60,
+		Inputs: []string{"b.go", "a.go"}, Rationale: "anything"}
+	canonical := `{"command":"go test ./... && echo \"<ok>\" & tab:\t","inputs":["a.go","b.go"],"shell":"bash","workdir":"docs"}`
+	sum := sha256.Sum256([]byte(canonical))
+	if got, want := baseline.CheckConfigHash(c), hex.EncodeToString(sum[:]); got != want {
+		t.Fatalf("CheckConfigHash = %s, want %s", got, want)
+	}
+	other := c
+	other.TimeoutSec, other.Rationale, other.Inputs = 300, "else", []string{"a.go", "b.go"}
+	if baseline.CheckConfigHash(other) != baseline.CheckConfigHash(c) {
+		t.Fatal("the timeout, the rationale or the order of the inputs changed the hash")
+	}
+	none := baseline.Check{Command: "make", Workdir: "."}
+	sum = sha256.Sum256([]byte(`{"command":"make","inputs":[],"shell":null,"workdir":"."}`))
+	if got := baseline.CheckConfigHash(none); got != hex.EncodeToString(sum[:]) {
+		t.Fatalf("CheckConfigHash without shell and inputs = %s", got)
 	}
 }

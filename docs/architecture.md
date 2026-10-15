@@ -386,11 +386,11 @@ sequenceDiagram
 
 ### 6.1.4 提案的提交（M1 实现）
 
-命令：`propose --file <path|-> [--json]`（`-` 表示从标准输入读取，最大 8 MiB）。任何通道都可以提交；提交**不改变基准**：条目以 `pending` 等待人审核（WP1.6），问题在提交时立即以 `open` 登记。不创建基准版本，不写入 `goals`、`requirements`、`acceptance_criteria`。
+命令：`propose --file <path|-> [--json]`（`-` 表示从标准输入读取，最大 8 MiB）。任何通道都可以提交；提交**不改变基准**：条目以 `pending` 等待人审核（§6.1.5），问题在提交时立即以 `open` 登记。不创建基准版本，不写入 `goals`、`requirements`、`acceptance_criteria`。
 
 **通道与人工编辑**（V-P01）：
 
-- `--apply`（人工编辑、立即应用）只能由人在 `human_cli` 中使用，Agent 通道返回退出码 3。应用机制在 WP1.6 实现；在那之前，人在终端中使用 `--apply` 也返回退出码 2，不写入。
+- `--apply`（人工编辑、立即应用）只能由人在 `human_cli` 中使用，Agent 通道返回退出码 3。应用机制见 §6.1.5（WP1.6）。
 - `origin = human_edit`：Agent 通道返回退出码 3；人在终端中不带 `--apply` 提交时返回退出码 2（指向 `/origin`）。它永远不会被当作普通的待审提案保存。
 - actor：Agent 通道为 `agent:<agent>`，设置了 Claude Code 的环境变量时为 `agent:claude_code`，否则为 `agent:unknown`；人在终端中提交时为 `human:<显示名>`（同 §6.1.3）。
 
@@ -425,6 +425,80 @@ sequenceDiagram
 - 问题指向已有编号时，立即关联到该条目；指向本提案内的 `ref` 时，记录 `proposal_item_id`，审核接受该条目时再回填（WP1.6，data-model §4.8）。问题的来源引用立即写入 `source_refs`（`entity_type = question`，`entity_revision = 1`，`excerpt` 为 NULL），因此会出现在 `source list --refs` 中；条目的来源引用在审核接受时才写入 `source_refs`（WP1.6）。
 
 **输出**：`propose --json` 输出 `proposal-receipt.v1`，输出前按 schema 校验：待审提案 `applied_version = null`，每个条目有 `item_id`、`review_state = pending`、`assigned_key = null`，来源引用只给出 `source_id` 和校验结果，代码引用给出 `exists`，**不回显片段**。schema 的字段间条件见 MVP-BL-28。文本输出给出各类校验结果的数量和有问题的引用位置，同样不包含片段。
+
+### 6.1.5 提案的审核与人工编辑（M1 实现）
+
+**命令**：
+
+- `review --file <path> [--json]`：人工审核（人类专属）。
+- `propose --apply --file <path> [--json]`：人工编辑，立即应用（人类专属）。
+- `proposal list [--pending] [--json]`、`proposal show <id> [--json]`：查看提案（任何通道）。
+- `baseline show [--include-retired] [--json]`、`baseline history [--since <version>] [--json]`：查看基准（任何通道）。
+
+只读命令的 `--json` 分别输出 `proposal-list.v1`、`proposal-show.v1`、`baseline-show.v1`、`baseline-history.v1`，输出前按 schema 校验。
+
+**审核**：审核决定写在 `review.v1` 文件中。人先用 `proposal show` 查看条目、冲突的三方对比和当前基准版本，再写出决定。`review` 是"交互式审核"的 CLI 形式：命令显示每个决定将产生的结果，由人逐字输入确认后才写入。逐条的富交互审核由 M5 的 Dashboard 提供。
+
+处理顺序如下。拒绝为退出码 2，过期为退出码 5，都不写入任何数据，也不分配 `seq`：
+
+1. `channel.Guard` 前置拦截：`agent_cli`（包括设置了已知 Agent 环境变量的终端、重定向和管道）返回退出码 3，不读取输入。
+2. 按 `review.v1` 严格校验，并扫描全部字符串（备注、编辑后的值、摘要、理由）中的密钥（§10.8）。
+3. 在事务中先比较 `seen_base_version` 与当前基准版本。不一致时立即返回退出码 5，`error.current.baseline_version` 给出当前版本，错误指向 `/seen_base_version`，不再做后面的任何检查：过期优先于冲突、条目状态和后续处理的问题（codex-review-025 B2）。这一步在第 5、7 步的事务中都会重新执行，所以确认期间基准被其他连接推进时，同样返回退出码 5。
+   然后对照已保存的提案检查：
+   - 条目属于该提案、尚未审核（每个条目只审核一次），并且没有重复决定；
+   - 处于冲突的条目必须带 `acknowledged_conflict`，拒绝冲突条目时同样需要；
+   - 接受的 `update` 条目必须带审核者选择的 `change_class`（V-R01），提案中建议的类别不会被采用；其他类型的条目不接受 `change_class`；
+   - `accepted` 不能带 `final_data`；`retire`、`reaffirm` 没有可编辑的数据，不能编辑后接受；
+   - `final_data` 按该条目的数据定义校验（`proposal.v1`），并检查代码围栏、路径不越出仓库、本提案 `ref` 的类型。
+4. 携带 `scope`（范围确认）时，返回退出码 2（指向 `/scope`）。附带在审核中的范围确认随 WP1.8 实现，在此之前不会被静默忽略。
+5. 演练：在一个总是回滚的写事务中完整应用一次。任何应用阶段的错误都在提示确认之前报告，人不会被要求确认一个无法应用的审核。
+6. 显示操作摘要（提案、将生成的版本号、每个条目的决定与修订类别、后续处理），要求输入提案 ID 确认。拒绝确认时返回退出码 3。
+7. 写事务（`BEGIN IMMEDIATE`）中重新做第 3 步的检查，再按 data-model §5.5 的固定顺序应用（下文"应用机制"）。
+
+审核可以只处理提案中的部分条目，未处理的条目保持 `pending`。新增 AC 引用的本提案需求，或者新增需求引用的本提案目标，必须在本次或更早的审核中被接受，否则整次审核失败（BL-07）。被接受的父条目使用它已分配的编号。
+
+**应用机制**（`baseline.Apply`，审核和人工编辑共用）：在同一写事务中，以一个 `seq` 完成以下工作：
+
+- **版本检查**：校验读取的版本（审核为 `seen_base_version`，人工编辑为 `base_version`）。
+- **固定顺序**：按 data-model §5.5 的第 2 ~ 9 步应用，同一步内部按 `item_index` 顺序执行。
+- **编号**：为新增条目分配编号（TD-14，只增不减，事务回滚则不消耗）。
+- **版本与变更记录**：生成基准版本，摘要取审核的 `summary`，没有时取提案摘要。每个变更写入 `baseline_changes`，包括变更前后的完整快照（修订号、状态、AC 的 `requirement_revision`，以及按提案数据形态表示、链接使用编号的字段值）。
+- **审核字段**：写入条目的审核字段，每个条目只写一次。`final_payload_json` 为实际应用的值，其中本提案的 `ref` 已替换为编号。`change_class` 为记录的类别，强制 `material` 的字段已生效。
+- **没有接受的条目**：不生成版本，只记录拒绝。
+- **修订规则**（data-model §7.2）：
+  - `update` 按审核者选择的类别修订；修改强制字段（AC 的 `verification`，检查的 `command`、`workdir`、`shell`、`inputs`）时，一律按 `material` 记录并加修订号。检查的超时和理由可以是 `editorial`。修改检查时重新计算 `check_config_hash`。
+  - 有检查的 AC 必须是 `automated`。
+  - 目标已退役（包括本次审核中级联退役的）的条目只能拒绝。
+- **级联**：
+  - 退役需求时，在同一版本中退役它的 `active` AC，每条记为 `retire`，`proposal_item_id` 为空；
+  - 退役目标时，清空其需求的目标关联，每条记为 `update`。修订号不变，因此类别为 `editorial`。
+- **AC 的后续处理**（`criterion_followups`）：只用于本次审核中被 `material` 修订的需求下、没有被其他已接受条目修改过的 `active` AC。
+  - `seen_revision` 必须等于 AC 的当前修订号，否则返回退出码 5。
+  - `reaffirm` 把 `requirement_revision` 更新为父需求当前的修订号；`retire` 退役该 AC。两者都记录变更，`proposal_item_id` 为空，理由写入变更记录。
+  - `defer` 不产生变更，AC 保持 `parent_revised`。
+  - 未列出的 AC 视为 `defer`。
+- **引用**：来源引用和代码引用绑定到变更之后的修订号，只追加。
+  - 新增条目写入提交时校验过的引用。
+  - `material` 更新：没有提供某类新引用时，沿用当前修订的该类引用，重新校验后写成新行。`hash_only` 来源的当前哈希仍等于引用的 `source_sha256` 时沿用原结果；不同时为 `not_checkable`；无法读取时为 `source_missing`。代码引用对照当前 worktree 的 HEAD 重新检查，受 §6.1.2 的对象读取能力约束。
+  - `editorial` 更新：只追加它提供的新引用，不沿用。
+  - `hash_only` 下不保存片段原文（PD-24）。
+- **问题**：关于本提案新增条目的问题，在条目被接受时回填关联（只回填仍为 `open` 的问题）。条目被拒绝时不改动问题，"关联条目已拒绝"由条目状态推导（M2）。
+- **冲突**：这次变更修改过的实体，凡是被其他待审条目（包括同一提案中未处理的条目）作为目标的，这些条目都标记为 `conflict`。读取命令另外动态判断：目标在提案的 `base_version` 之后有任何变更（包括修订号不变的 `editorial` 修改）就视为冲突，所以显示不依赖写入时刻。
+
+**人工编辑**（`propose --apply`，FR-BL-08）：
+
+- 只能由人在 `human_cli` 中使用，Agent 通道返回退出码 3。
+- 文档的 `origin` 必须是 `human_edit`，至少有一个条目，每个 `update` 条目必须带 `change_class`（V-P09）；不满足时返回退出码 2。
+- 提交时的全部校验与 §6.1.4 相同。演练和确认之后（确认内容为将生成的版本，例如 `v3`），在同一写事务中保存提案并用上述应用机制接受全部条目，提案与版本使用同一个 `seq`。
+- `--json` 输出 `proposal-receipt.v1`：`applied_version` 为新版本，条目为 `accepted`，新增条目带分配的编号，关于新增条目的问题改为指向编号。
+
+**读取**：
+
+- `proposal show` 的参数必须是 ULID 格式，否则返回退出码 2；找不到提案时返回 `not_found`（退出码 2）。两种错误都使用固定消息，不回显参数（参数是尚未确认的外部输入，可能是误粘贴的密钥；codex-review-025 B1）。`baseline history --since` 不是非负整数时返回退出码 2，同样不回显。
+- `proposal show` 给出：每个条目的状态（处于冲突时为 `conflict`，并给出三方对比：提案读取版本中的值、当前值、提议值）、审核结果和问题。本提案中已被接受条目的 `ref`，显示为它的编号。
+- `baseline show` 给出确认的基准及各实体的修订号，供提案携带。
+- `baseline history` 按版本列出全部变更（变更前后的快照、操作者、通道、来源条目）。
+- 这些输出都不包含片段原文（`hash_only`）。
 
 ### 6.2 Hook 采集与入库
 

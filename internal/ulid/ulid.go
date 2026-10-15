@@ -6,6 +6,7 @@ package ulid
 import (
 	"crypto/rand"
 	"encoding/binary"
+	"strings"
 	"time"
 )
 
@@ -44,4 +45,18 @@ func New() string {
 	var entropy [10]byte
 	_, _ = rand.Read(entropy[:]) // never fails (crypto/rand)
 	return Make(uint64(time.Now().UnixMilli()), entropy)
+}
+
+// Valid reports whether s has the form of a ULID: 26 characters of the
+// Crockford alphabet, as the exchange schemas require (common.v1 ulid).
+func Valid(s string) bool {
+	if len(s) != 26 {
+		return false
+	}
+	for i := range len(s) {
+		if strings.IndexByte(crockford, s[i]) < 0 {
+			return false
+		}
+	}
+	return true
 }

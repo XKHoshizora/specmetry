@@ -164,6 +164,54 @@
           "if": { "properties": { "review_state": { "enum": ["pending", "conflict"] } } },
           "then": { "properties": { "review": { "const": null } } },
           "else": { "properties": { "review": { "type": "object" } } }
+        },
+        {
+          "description": "A goal item's values have the goal data shape (MVP-BL-14).",
+          "if": { "properties": { "type": { "const": "goal" } } },
+          "then": {
+            "properties": {
+              "proposed": { "oneOf": [{ "$ref": "proposal.v1.schema.json#/$defs/goalData" }, { "type": "null" }] },
+              "conflict": {
+                "oneOf": [
+                  { "type": "null" },
+                  { "type": "object", "properties": { "base": { "$ref": "proposal.v1.schema.json#/$defs/goalData" }, "current": { "$ref": "proposal.v1.schema.json#/$defs/goalData" }, "proposed": { "oneOf": [{ "$ref": "proposal.v1.schema.json#/$defs/goalData" }, { "type": "null" }] } } }
+                ]
+              },
+              "review": { "oneOf": [{ "type": "null" }, { "type": "object", "properties": { "final": { "oneOf": [{ "$ref": "proposal.v1.schema.json#/$defs/goalData" }, { "type": "null" }] } } }] }
+            }
+          }
+        },
+        {
+          "description": "A requirement item's values have the requirement data shape (MVP-BL-14).",
+          "if": { "properties": { "type": { "const": "requirement" } } },
+          "then": {
+            "properties": {
+              "proposed": { "oneOf": [{ "$ref": "proposal.v1.schema.json#/$defs/requirementData" }, { "type": "null" }] },
+              "conflict": {
+                "oneOf": [
+                  { "type": "null" },
+                  { "type": "object", "properties": { "base": { "$ref": "proposal.v1.schema.json#/$defs/requirementData" }, "current": { "$ref": "proposal.v1.schema.json#/$defs/requirementData" }, "proposed": { "oneOf": [{ "$ref": "proposal.v1.schema.json#/$defs/requirementData" }, { "type": "null" }] } } }
+                ]
+              },
+              "review": { "oneOf": [{ "type": "null" }, { "type": "object", "properties": { "final": { "oneOf": [{ "$ref": "proposal.v1.schema.json#/$defs/requirementData" }, { "type": "null" }] } } }] }
+            }
+          }
+        },
+        {
+          "description": "A criterion item's values have the criterion data shape (MVP-BL-14).",
+          "if": { "properties": { "type": { "const": "criterion" } } },
+          "then": {
+            "properties": {
+              "proposed": { "oneOf": [{ "$ref": "proposal.v1.schema.json#/$defs/criterionData" }, { "type": "null" }] },
+              "conflict": {
+                "oneOf": [
+                  { "type": "null" },
+                  { "type": "object", "properties": { "base": { "$ref": "proposal.v1.schema.json#/$defs/criterionData" }, "current": { "$ref": "proposal.v1.schema.json#/$defs/criterionData" }, "proposed": { "oneOf": [{ "$ref": "proposal.v1.schema.json#/$defs/criterionData" }, { "type": "null" }] } } }
+                ]
+              },
+              "review": { "oneOf": [{ "type": "null" }, { "type": "object", "properties": { "final": { "oneOf": [{ "$ref": "proposal.v1.schema.json#/$defs/criterionData" }, { "type": "null" }] } } }] }
+            }
+          }
         }
       ]
     },

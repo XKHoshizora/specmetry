@@ -408,11 +408,11 @@ func TestProposeRefuses(t *testing.T) {
 }
 
 // V-P01, MVP-BL-13 (Agent part): human_edit and propose --apply are a
-// person's; from the Agent channel they exit 3 and write nothing.
-// propose --apply itself (applying at once) arrives with WP1.6: in a
-// terminal it is refused (exit 2) rather than taken as a pending proposal,
-// and so is human_edit without --apply. A person's ordinary proposal stays
-// pending, with a human actor.
+// person's; from the Agent channel they exit 3 and write nothing. In a
+// terminal, propose --apply asks for confirmation (WP1.6; not confirmed,
+// exit 3 and nothing written; applying it: review_test), and human_edit
+// without --apply is refused (exit 2) rather than taken as a pending
+// proposal. A person's ordinary proposal stays pending, with a human actor.
 func TestProposeHumanEdit(t *testing.T) {
 	home, f, _ := proposalsProject(t)
 	edit := patched(t, recorded(t, f), "/origin", "human_edit")
@@ -423,13 +423,14 @@ func TestProposeHumanEdit(t *testing.T) {
 		t.Errorf("propose --apply from the Agent channel: exit %d\n%s%s", code, stdout, stderr)
 	}
 	for _, c := range []struct {
-		args []string
-		exit string
+		args   []string
+		answer string
+		exit   string
 	}{
-		{[]string{"propose", "--apply", "--file", writeProposal(t, edit), "--json"}, "exit=2"},
-		{[]string{"propose", "--file", writeProposal(t, edit), "--json"}, "exit=2"},
+		{[]string{"propose", "--apply", "--file", writeProposal(t, edit), "--json"}, "", "exit=3"},
+		{[]string{"propose", "--file", writeProposal(t, edit), "--json"}, noPrompt, "exit=2"},
 	} {
-		if out := inTerminal(t, f.Repo.Dir, c.args, noPrompt); !strings.Contains(out, c.exit) {
+		if out := inTerminal(t, f.Repo.Dir, c.args, c.answer); !strings.Contains(out, c.exit) {
 			t.Errorf("%v in a terminal:\n%s", c.args[:2], out)
 		}
 	}
