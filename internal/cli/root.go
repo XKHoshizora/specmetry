@@ -26,7 +26,12 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 // handed to commands in the context; human-only commands pass it to
 // channel.Guard before writing anything.
 func executeRoot(ctx context.Context, root *cobra.Command, args []string, stderr io.Writer) int {
-	ctx = channel.NewContext(ctx, channel.Detect(os.Stdin, os.Stdout))
+	return executeAs(ctx, channel.Detect(os.Stdin, os.Stdout), root, args, stderr)
+}
+
+// executeAs is executeRoot with the channel given.
+func executeAs(ctx context.Context, d channel.Detection, root *cobra.Command, args []string, stderr io.Writer) int {
+	ctx = channel.NewContext(ctx, d)
 	root.SetArgs(args)
 	cmd, err := root.ExecuteContextC(ctx)
 	if err == nil {
@@ -59,7 +64,8 @@ func newRoot(stdout, stderr io.Writer) *cobra.Command {
 	root.SetOut(stdout)
 	root.SetErr(stderr)
 	root.CompletionOptions.DisableDefaultCmd = true
-	root.AddCommand(newVersionCmd(), newDoctorCmd(), newInitCmd(), newSourceCmd(), newProposeCmd())
+	root.AddCommand(newVersionCmd(), newDoctorCmd(), newInitCmd(), newSourceCmd(), newProposeCmd(), newProposalCmd(),
+		newReviewCmd(), newBaselineCmd())
 	return root
 }
 
