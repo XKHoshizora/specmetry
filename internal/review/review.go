@@ -93,13 +93,32 @@ func itemPointer(i int, rest ...string) string {
 	return "/items/" + strconv.Itoa(i) + strings.Join(append([]string{""}, rest...), "/")
 }
 
+// CheckVersion compares the current baseline version, in the caller's
+// transaction, with the review's seen_base_version: a stale review is
+// stale_precondition (exit code 5) whatever else is wrong with it, so it
+// comes before every other check (codex-review-025 B2). baseline.Apply
+// checks it again.
+func CheckVersion(ctx context.Context, q baseline.Querier, projectID string, seen int) error {
+	current, err := baseline.CurrentVersion(ctx, q, projectID)
+	if err != nil {
+		return err
+	}
+	if current != seen {
+		return baseline.StaleVersion(current, seen, "/seen_base_version")
+	}
+	return nil
+}
+
 // Check checks the review against the proposal as stored, in the caller's
-// transaction: every item is the proposal's and still undecided, decided
-// once; an item in conflict is acknowledged; an accepted update carries
+// transaction: first that seen_base_version is current (CheckVersion);
+// then every item is the proposal's and still undecided, decided once; an item in conflict is acknowledged; an accepted update carries
 // the reviewer's change_class (V-R01); edited data is valid item data; a
 // delivery scope cannot be confirmed yet (WP1.8). Problems are invalid
 // input (exit code 2) at their pointers; nothing is written.
 func Check(ctx context.Context, tx *sql.Tx, projectID string, doc Document, val Validator) (Checked, error) {
+	if err := CheckVersion(ctx, tx, projectID, doc.SeenBaseVersion); err != nil {
+		return Checked{}, err
+	}
 	if doc.Scope != nil && string(doc.Scope) != "null" {
 		return Checked{}, apperr.New(apperr.InvalidInput,
 			"confirming the delivery scope in a review is not available in this version (it arrives with scope confirm, WP1.8); review without scope, and confirm the scope later").
@@ -110,7 +129,7 @@ func Check(ctx context.Context, tx *sql.Tx, projectID string, doc Document, val 
 		return Checked{}, err
 	}
 	if !found {
-		return Checked{}, apperr.Newf(apperr.NotFound, "the project has no proposal %s (see proposal list)", doc.ProposalID).
+		return Checked{}, apperr.New(apperr.NotFound, "the project has no such proposal (see proposal list)").
 			WithDetails(apperr.Detail{Pointer: "/proposal_id", Problem: "names no proposal of this project"})
 	}
 	items := map[string]proposal.StoredItem{}

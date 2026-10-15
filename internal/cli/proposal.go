@@ -10,8 +10,10 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/XKHoshizora/specmetry/internal/apperr"
 	"github.com/XKHoshizora/specmetry/internal/project"
 	"github.com/XKHoshizora/specmetry/internal/proposal"
+	"github.com/XKHoshizora/specmetry/internal/ulid"
 )
 
 func newProposalCmd() *cobra.Command {
@@ -83,6 +85,11 @@ back as seen_base_version.`,
 		Args: cobra.ExactArgs(1),
 		RunE: run(func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
+			// The argument is not echoed: it is input not yet known to be
+			// an ID (codex-review-025 B1).
+			if !ulid.Valid(args[0]) {
+				return apperr.New(apperr.InvalidInput, "the proposal ID is not a ULID (see proposal list for the IDs)")
+			}
 			w, err := prepare(ctx)
 			if err != nil {
 				return err

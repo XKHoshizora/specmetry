@@ -348,7 +348,8 @@ type ShowQuestion struct {
 }
 
 // ShowDocument builds proposal-show.v1 for a proposal of the project, or
-// not_found (exit code 2). Refs to items that reviews accepted show as the
+// not_found (exit code 2), whose message never quotes id: it is the
+// caller's input, not yet known to be a proposal ID (codex-review-025 B1). Refs to items that reviews accepted show as the
 // keys they were given. A conflict shows the target's values in the
 // proposal's base_version, its values now, and the proposed ones.
 func ShowDocument(ctx context.Context, q baseline.Querier, projectID, id string) (ShowDoc, error) {
@@ -357,7 +358,7 @@ func ShowDocument(ctx context.Context, q baseline.Querier, projectID, id string)
 		return ShowDoc{}, err
 	}
 	if !found {
-		return ShowDoc{}, apperr.Newf(apperr.NotFound, "the project has no proposal %s (see proposal list)", id)
+		return ShowDoc{}, apperr.New(apperr.NotFound, "the project has no such proposal (see proposal list)")
 	}
 	version, err := baseline.CurrentVersion(ctx, q, projectID)
 	if err != nil {

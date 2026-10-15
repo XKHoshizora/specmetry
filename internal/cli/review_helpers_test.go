@@ -102,6 +102,10 @@ func reviewRefused(t *testing.T, home datadir.Dir, dir string, doc map[string]an
 	if got != code {
 		t.Errorf("exit %d, want %d (%s)\n%s%s", got, code, pointer, stdout, stderr)
 	}
+	// Refused before the person is asked anything.
+	if strings.Contains(stdout, "to confirm") {
+		t.Errorf("%s: the person was asked to confirm a review that is refused", pointer)
+	}
 	var env apperr.Envelope
 	if err := json.Unmarshal([]byte(jsonPart(stdout)), &env); err != nil {
 		t.Errorf("no error.v1: %v\n%s", err, stdout)

@@ -81,25 +81,21 @@ seen_base_version must be the current baseline version.`,
 			if err := w.open(ctx); err != nil {
 				return err
 			}
+			// review.Check compares seen_base_version with the current
+			// version first, in each transaction: before the prompt, in the
+			// dry run and when writing, so that a stale review is exit 5
+			// even if the baseline moved while the person was confirming
+			// (codex-review-025 B2).
 			var checked review.Checked
 			var sources map[string]source.Source
-			var current int
 			if err := w.tx(ctx, func(tx *sql.Tx, p project.Registered) error {
 				if checked, err = review.Check(ctx, tx, p.ID, rv, val); err != nil {
-					return err
-				}
-				if current, err = baseline.CurrentVersion(ctx, tx, p.ID); err != nil {
 					return err
 				}
 				sources, err = review.CarriedSources(ctx, tx, p.ID, checked.Carry)
 				return err
 			}); err != nil {
 				return err
-			}
-			// A stale version is refused before the prompt, and again when
-			// writing.
-			if current != rv.SeenBaseVersion {
-				return staleVersion(current, rv.SeenBaseVersion)
 			}
 			carried, err := review.Recheck(ctx, w.where, sources, checked.Carry)
 			if err != nil {
@@ -141,14 +137,6 @@ seen_base_version must be the current baseline version.`,
 	cmd.Flags().StringVar(&file, "file", "", "the review.v1 document")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "print errors as error.v1")
 	return cmd
-}
-
-func staleVersion(current, seen int) error {
-	e := apperr.Newf(apperr.StalePrecondition,
-		"the baseline is at version %d, not %d; read the proposal again (proposal show) and decide against it", current, seen).
-		WithDetails(apperr.Detail{Pointer: "/seen_base_version", Problem: fmt.Sprintf("is stale: the current baseline version is %d", current)})
-	e.Current = map[string]any{"baseline_version": current}
-	return e
 }
 
 func printReviewResult(w io.Writer, r baseline.Result, rejected int) error {

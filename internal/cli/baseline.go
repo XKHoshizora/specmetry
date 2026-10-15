@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
 
+	"github.com/XKHoshizora/specmetry/internal/apperr"
 	"github.com/XKHoshizora/specmetry/internal/baseline"
 	"github.com/XKHoshizora/specmetry/internal/project"
 )
@@ -94,7 +96,7 @@ func printBaseline(w io.Writer, doc baseline.ShowDoc) error {
 }
 
 func newBaselineHistoryCmd() *cobra.Command {
-	var since int
+	var sinceFlag string
 	var asJSON bool
 	cmd := &cobra.Command{
 		Use:   "history [--since <version>]",
@@ -102,6 +104,16 @@ func newBaselineHistoryCmd() *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE: run(func(cmd *cobra.Command, _ []string) error {
 			ctx := cmd.Context()
+			// Parsed here so that a bad value is not echoed, as a flag
+			// parse error would (codex-review-025 B1).
+			since := 0
+			if sinceFlag != "" {
+				n, err := strconv.Atoi(sinceFlag)
+				if err != nil || n < 0 {
+					return apperr.New(apperr.InvalidInput, "--since takes a baseline version number, 0 or more")
+				}
+				since = n
+			}
 			w, err := prepare(ctx)
 			if err != nil {
 				return err
@@ -123,7 +135,7 @@ func newBaselineHistoryCmd() *cobra.Command {
 			return printHistory(cmd.OutOrStdout(), doc)
 		}),
 	}
-	cmd.Flags().IntVar(&since, "since", 0, "only versions after this one")
+	cmd.Flags().StringVar(&sinceFlag, "since", "", "only versions after this one")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "print the baseline-history.v1 document")
 	return cmd
 }

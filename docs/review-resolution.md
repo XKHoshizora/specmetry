@@ -1606,3 +1606,56 @@ MVP v0.1.0 不支持 SHA-256 格式的 git 对象 ID。§27 记录的现象（64
 **接受的风险**：沿用 PD-26 已批准的能力探测边界，包括可信 git 可执行文件的边界：刻意替换 git 程序并保持路径、大小和修改时间不变，不在防护范围之内。
 
 审查原文按原样入库。
+
+## 31. WP1.6 代码审查（codex-review-025）的处理
+
+**审查结论**：NO-GO。审查目标 `fa58b44`，有两项可复现的 BLOCKER 和两项 NON-BLOCKER。本轮不需要新的产品决策。
+
+本轮只修复 B1 和 B2，不重新设计 WP1.6。以下内容不变：
+
+- 基准的应用顺序与编号规则；
+- 迁移 0005；
+- material / editorial 的持久化规则；
+- 来源引用与 `hash_only` 防线；
+- 问题关联；
+- WP1.7、WP1.8、M2 的功能，以及已验收的 WP1.5。
+
+审查原文按原样入库。
+
+### B1：`proposal show` 回显敏感参数
+
+**根因**：CLI 只检查参数个数，就把未经校验的参数交给 `ShowDocument`；找不到提案时，`not_found` 的消息直接拼入这个参数。因此误粘贴的密钥会进入文本错误和 `error.v1`，绕过了 schema 错误的脱敏防线。
+
+**修复**：
+
+- `ShowDocument` 找不到提案时，使用固定消息，不含任何外部参数。其他调用方直接调用它也不会泄露参数。审核中同样的 `not_found`（`review.Check`）也改为固定消息。
+- `proposal show` 先检查参数是否为 ULID 格式（新增 `ulid.Valid`，与 `common.v1` 的 `ulid` 模式一致）。格式无效时返回退出码 2，消息和详情不含原值。
+- 同类问题，本轮新增的 `baseline history --since`：它原是整数 flag，解析失败时 cobra 的错误（文本模式下会输出原因）会回显原值。现在由命令自己解析，错误使用固定消息。
+
+**回归测试**（`TestProposalShowDoesNotEchoItsArgument`）：
+
+- 输入：合成的 GitHub Token、合法但不存在的 ULID、`--since` 后跟 Token；每种都在文本模式和 `--json` 模式下执行。
+- 期望：退出码 2；stdout、stderr、`error.v1` 的 message / details / current，以及数据目录中都找不到输入；没有业务写入；正常的 `proposal show` 照常可用。
+- 修复前（`fa58b44`）：前两种在两种模式下都回显输入；`--since` 在文本中回显，`--json` 时没有输出 `error.v1`（参数解析在命令之前失败）。
+
+### B2：过期的审核返回退出码 2
+
+**根因**：首次检查和正式写入都先执行 `review.Check`。目标已变化时，它先报告"冲突未确认"（退出码 2），版本比较根本执行不到。第一次的版本比较还放在事务之外，无法覆盖确认期间基准被其他连接推进的情况。这违反了 MVP-BL-10。
+
+**修复**：
+
+- 新增 `review.CheckVersion`：在事务中读取当前基准版本，与 `seen_base_version` 比较，不一致即返回 `stale_precondition`（退出码 5，`error.current.baseline_version`，指向 `/seen_base_version`）。
+- `review.Check` 第一步就调用它，因此首次读取、演练、确认后的正式写入，这三个事务都先比较版本，过期时不再做冲突、条目状态和后续处理的检查，也不分配 `seq`。
+- 事务外的版本比较已删除。`baseline.Apply` 内部的版本检查保留，作为第二道防线；两处使用同一个错误构造函数 `baseline.StaleVersion`。
+
+**回归测试**：
+
+- **反例 A**（`TestReviewIsStaleBeforeTheConflict`）：两份提案在版本 1 修改同一个需求；接受第一份之后，以 `seen_base_version = 1` 审核第二份。不带和带 `acknowledged_conflict` 两种情况都返回退出码 5，`current.baseline_version = 2`，没有出现确认提示，没有写入。版本为当前版本、但冲突未确认时，仍然返回退出码 2。
+- **反例 B**（`TestReviewIsStaleAfterTheConfirmation`）：第二份审核通过首次检查和演练，进入确认；读取确认输入时，用另一个数据库连接提交第一份审核，然后确认第二份。结果为退出码 5、版本 2；第二份没有被应用。版本、实体、编号、`seq`、引用和条目状态，都与第一份审核提交后完全一致；第二份的条目为 `conflict`，未审核。
+- **修复前**（`fa58b44`）：反例 A 在不带 `acknowledged_conflict` 时，反例 B 在确认之后，都返回退出码 2。
+- 另外，所有被拒绝的审核测试现在都断言：拒绝发生在确认提示之前。审查方的双连接并发测试（两个审核都完成演练后同时确认，结果为 `[0, 5]`）在本轮之前已通过，本修复没有改变写事务的提交顺序。
+
+### NON-BLOCKER（登记并保留，不在本轮修改）
+
+- **N1**：确认预览显示审核者选择的 `editorial`，而应用时强制字段会把它升级为 `material`。持久化正确，预览应显示最终生效的类别及原因。待后续处理。
+- **N2**：`baseline history` 没有输出已保存的后续处理理由（`baseline_changes.rationale`）。理由没有丢失，扩展历史 schema、读取模型和测试待后续处理。

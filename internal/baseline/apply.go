@@ -129,11 +129,7 @@ func Apply(ctx context.Context, tx *sql.Tx, plan Plan) (Result, error) {
 		return Result{}, err
 	}
 	if current != plan.ExpectedVersion {
-		e := apperr.Newf(apperr.StalePrecondition,
-			"the baseline is at version %d, not %d; read it again (proposal show, baseline show) and decide against it", current, plan.ExpectedVersion).
-			WithDetails(apperr.Detail{Pointer: plan.VersionPointer, Problem: fmt.Sprintf("is stale: the current baseline version is %d", current)})
-		e.Current = map[string]any{"baseline_version": current}
-		return Result{}, e
+		return Result{}, StaleVersion(current, plan.ExpectedVersion, plan.VersionPointer)
 	}
 	a := &applier{ctx: ctx, tx: tx, plan: plan, version: current + 1, result: Result{Keys: map[string]string{}},
 		refs: map[string]string{}, final: map[string]any{}, classes: map[string]string{}, changed: map[string]bool{},
@@ -187,6 +183,17 @@ VALUES (?, ?, ?, ?, ?, ?, ?)`, a.versionID, plan.Seq, plan.ProjectID, a.version,
 	}
 	a.result.Version = a.version
 	return a.result, nil
+}
+
+// StaleVersion is the stale_precondition (exit code 5) of a review or edit
+// made against version read when the baseline is at current: it points at
+// the version read, and gives the current one.
+func StaleVersion(current, read int, pointer string) error {
+	e := apperr.Newf(apperr.StalePrecondition,
+		"the baseline is at version %d, not %d; read it again (proposal show, baseline show) and decide against it", current, read).
+		WithDetails(apperr.Detail{Pointer: pointer, Problem: fmt.Sprintf("is stale: the current baseline version is %d", current)})
+	e.Current = map[string]any{"baseline_version": current}
+	return e
 }
 
 type applier struct {
