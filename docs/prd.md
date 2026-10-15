@@ -369,7 +369,7 @@
 | `proposal list\|show` | 查看提案（含三方对比） | 任意 |
 | `propose --file <path\|->` | 提交提案 | 任意 |
 | `propose --apply --file` | 人工编辑，立即应用 | 人 |
-| `review` | 交互式审核（可以附带范围确认） | 人 |
+| `review --file <path>` | 审核：提交审核决定（`review.v1`），显示摘要并由人交互式确认（附带范围确认随 WP1.8） | 人 |
 | `baseline show\|history` | 查看基准 | 任意 |
 | `question list` / `answer` / `dismiss` | 待澄清问题 | `list`：任意；其余：人 |
 | `claim --file <path\|->` | 提交 Claim 批次 | 任意（`manual` 仅限人） |

@@ -297,7 +297,9 @@ CLI 或 Hook 第一次在某个 worktree 中出现时，系统会自动登记它
 | 表 | 字段 |
 |---|---|
 | `baseline_versions` | `id`、`seq`、`project_id`、`number`（项目内从 1 递增）、`summary`、`actor`、`channel` |
-| `baseline_changes` | `id`、`seq`、`project_id`、`version_id`、`entity_type`、`entity_id`、`op`（`add` / `update` / `retire` / `reaffirm`）、`change_class`、`before_json`、`after_json`、`proposal_item_id` NULL（级联变更为 NULL） |
+| `baseline_changes` | `id`、`seq`、`project_id`、`version_id`、`change_index`（版本内变更的顺序，从 0 开始）、`entity_type`、`entity_id`、`op`（`add` / `update` / `retire` / `reaffirm`）、`change_class`（只有 `update` 有）、`before_json`（`add` 为 NULL）、`after_json`、`proposal_item_id` NULL（级联变更和审核中 AC 的后续处理为 NULL）、`rationale` NULL（AC 后续处理的理由） |
+
+`before_json` 和 `after_json` 是实体的完整快照：修订号、状态、AC 的 `requirement_revision`，以及按提案数据形态（`goalData` / `requirementData` / `criterionData`）表示的字段值，链接使用编号（`baseline-history.v1` 的 `snapshot`）。提案的三方对比中，"提案读取版本中的值"取自这些快照（[architecture.md §6.1.5](architecture.md#615-提案的审核与人工编辑m1-实现)）。表由迁移 `0005_baseline_changes` 创建（WP1.6）。
 
 ### 4.8 `questions`
 
@@ -307,7 +309,7 @@ Question 在提案提交时立即创建（编号按 TD-14 分配），只能由�
 
 当 `about` 指向提案内的临时引用时，先记录 `proposal_item_id`：
 
-- 条目被**接受**时，在同一事务中把 `related_type` / `related_id` 回填为新条目；
+- 条目被**接受**时，在同一事务中把 `related_type` / `related_id` 回填为新条目（只回填仍为 `open` 的问题；已回答或驳回的问题保持指向条目）；
 - 条目被**拒绝**时，问题标记为"关联条目已拒绝"，此后不再计为阻塞问题（§6.8），但仍然保持 `open`，等人驳回。
 
 ### 4.9 `agent_sessions`、`events` 与 `hook_drops`
