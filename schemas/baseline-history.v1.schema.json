@@ -64,6 +64,21 @@
           "if": { "properties": { "op": { "const": "update" } } },
           "then": { "properties": { "change_class": { "enum": ["material", "editorial"] } } },
           "else": { "properties": { "change_class": { "const": null } } }
+        },
+        {
+          "description": "A goal change's snapshots have the goal data shape.",
+          "if": { "properties": { "entity_type": { "const": "goal" } } },
+          "then": { "properties": { "before": { "oneOf": [{ "type": "null" }, { "type": "object", "properties": { "values": { "$ref": "proposal.v1.schema.json#/$defs/goalData" } } }] }, "after": { "properties": { "values": { "$ref": "proposal.v1.schema.json#/$defs/goalData" } } } } }
+        },
+        {
+          "description": "A requirement change's snapshots have the requirement data shape.",
+          "if": { "properties": { "entity_type": { "const": "requirement" } } },
+          "then": { "properties": { "before": { "oneOf": [{ "type": "null" }, { "type": "object", "properties": { "values": { "$ref": "proposal.v1.schema.json#/$defs/requirementData" } } }] }, "after": { "properties": { "values": { "$ref": "proposal.v1.schema.json#/$defs/requirementData" } } } } }
+        },
+        {
+          "description": "A criterion change's snapshots have the criterion data shape.",
+          "if": { "properties": { "entity_type": { "const": "criterion" } } },
+          "then": { "properties": { "before": { "oneOf": [{ "type": "null" }, { "type": "object", "properties": { "values": { "$ref": "proposal.v1.schema.json#/$defs/criterionData" } } }] }, "after": { "properties": { "values": { "$ref": "proposal.v1.schema.json#/$defs/criterionData" } } } } }
         }
       ]
     },
