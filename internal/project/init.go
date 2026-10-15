@@ -62,16 +62,17 @@ type Plan struct {
 	markerFound           bool
 	detected              Stage
 	candidates, hints     []string
-	// branch is the main worktree's branch, "" when detached or outside git.
-	branch      string
-	excludePath string
+	// branch is the main worktree's branch, "" when detached or outside git;
+	// snapshot is the commit it points at, "" when it has none yet.
+	branch, snapshot string
+	excludePath      string
 }
 
 // Target is the active delivery target.
 type Target struct {
 	ID, Ref string
-	// Snapshot is the commit the ref points at, "" if it has none (yet) or
-	// it cannot be resolved.
+	// Snapshot is the commit the ref points at, "" if it has none (yet).
+	// A commit that cannot be read is an error, never "" (PD-26).
 	Snapshot string
 }
 
@@ -118,6 +119,23 @@ func Prepare(ctx context.Context, opts InitOptions, scanner *secrets.Scanner) (*
 	case err != nil:
 		return nil, err
 	default:
+		// TD-26: SHA-1 object IDs only. A SHA-256 repository is refused
+		// before anything is written, whether or not a snapshot would be
+		// reported.
+		format, err := gitx.ObjectFormat(ctx, dir)
+		if err != nil {
+			return nil, err
+		}
+		if format != "sha1" {
+			return nil, apperr.New(apperr.Environment,
+				"this repository uses SHA-256 object IDs, which this version of Specmetry does not support (TD-26); nothing was registered")
+		}
+		// PD-26: a git that could fetch an object the repository lacks
+		// reads none, so a git project's init stops here, before its files
+		// are listed and before anything is written.
+		if err := gitx.CheckObjectReads(ctx); err != nil {
+			return nil, err
+		}
 		p.git = true
 		p.root, p.current = loc.Main, loc.Worktree
 		p.curGitDir, p.commonDir = loc.GitDir, loc.CommonDir
@@ -168,6 +186,14 @@ func Prepare(ctx context.Context, opts InitOptions, scanner *secrets.Scanner) (*
 		// created, since that is known only once the database is open.
 		if err := rejectSecretRef(scanner, p.branch); err != nil {
 			return nil, err
+		}
+		// The snapshot a new project's default target reports, read before
+		// anything is written: a commit that cannot be read stops init
+		// (exit 6) rather than pass for a branch without commits (PD-26).
+		if p.branch != "" {
+			if p.snapshot, err = gitx.CommitOf(ctx, p.root, p.branch); err != nil {
+				return nil, err
+			}
 		}
 		if !opts.NoExclude {
 			// Not resolving it only costs the exclude entry: a warning.
@@ -301,7 +327,11 @@ func (p *Plan) Apply(ctx context.Context, db *sqlite.DB, now time.Time) (Result,
 			InventorySkipped: proj.settings.flag("inventory_skipped"),
 			DocsOnly:         res.Stage == DocsOnly,
 		})
-		target, err = activeTarget(ctx, tx, proj.id)
+		if target, err = activeTarget(ctx, tx, proj.id); err != nil || target == nil {
+			return err
+		}
+		// In the transaction: a commit that cannot be read writes nothing.
+		target.Snapshot, err = p.snapshotOf(ctx, target.Ref)
 		return err
 	})
 	if err != nil {
@@ -325,14 +355,27 @@ func (p *Plan) Apply(ctx context.Context, db *sqlite.DB, now time.Time) (Result,
 			res.Warnings = append(res.Warnings, WarnExcludeNotWritable)
 		}
 	}
-	if target != nil {
-		// A snapshot that cannot be resolved is unknown, not an error.
-		if sha, err := gitx.CommitOf(ctx, p.root, target.Ref); err == nil && commitID.MatchString(sha) {
-			target.Snapshot = sha
-		}
-	}
 	res.Target = target
 	return res, nil
+}
+
+// snapshotOf returns the commit ref points at, "" when it has none yet. The
+// main worktree's branch was resolved by Prepare; another ref (the target
+// an existing project keeps) is resolved now. init.v1 holds a SHA-1 commit
+// ID only, and another is an error, never left out (TD-26).
+func (p *Plan) snapshotOf(ctx context.Context, ref string) (string, error) {
+	sha := p.snapshot
+	if ref != p.branch {
+		var err error
+		if sha, err = gitx.CommitOf(ctx, p.root, ref); err != nil {
+			return "", err
+		}
+	}
+	if sha != "" && !commitID.MatchString(sha) {
+		return "", apperr.New(apperr.Environment,
+			"the commit ID is not a SHA-1 ID, the only object format this version of Specmetry supports (TD-26)")
+	}
+	return sha, nil
 }
 
 // find looks the project up: a git project by its common directory, one
@@ -512,6 +555,28 @@ func (p *Plan) gitDir(dir string) any {
 		return nil
 	}
 	return dir
+}
+
+// EnsureWorktree returns the ID of the worktree w.Current of a registered
+// project, registering it the first time any command runs there
+// (data-model §4.1); a known one only has last_seen_at updated, without a
+// seq. The caller has scanned its path and git directory for secrets.
+func EnsureWorktree(ctx context.Context, tx *sql.Tx, projectID string, w Where, now time.Time) (string, error) {
+	var id string
+	err := tx.QueryRowContext(ctx, `SELECT id FROM worktrees WHERE project_id = ? AND path = ?`, projectID, w.Current).Scan(&id)
+	if err == nil {
+		_, err = tx.ExecContext(ctx, `UPDATE worktrees SET last_seen_at = ? WHERE id = ?`, now.UnixMilli(), id)
+		return id, err
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return "", err
+	}
+	var gitDir any
+	if w.Git {
+		gitDir = w.GitDir
+	}
+	id = ulid.New()
+	return id, insertWorktree(ctx, tx, id, projectID, w.Current, gitDir, false, now)
 }
 
 func insertWorktree(ctx context.Context, tx *sql.Tx, id, projectID, path string, gitDir any, isMain bool, now time.Time) error {

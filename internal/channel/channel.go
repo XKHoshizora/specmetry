@@ -44,6 +44,9 @@ func AgentVariables() []string { return append([]string(nil), agentVariables...)
 type Detection struct {
 	Channel Channel
 	Reasons []string
+	// Agent names the Agent whose variable is set ("claude_code"), and is
+	// "" when none is: an actor is agent:<agent> (data-model §1).
+	Agent string
 }
 
 // Decide identifies the channel: human_cli when stdin and stdout are
@@ -57,13 +60,15 @@ func Decide(stdinTerminal, stdoutTerminal bool, lookupEnv func(string) (string, 
 	if !stdoutTerminal {
 		reasons = append(reasons, "stdout is not a terminal")
 	}
+	agent := ""
 	for _, name := range agentVariables {
 		if v, ok := lookupEnv(name); ok && v != "" {
 			reasons = append(reasons, "the Agent environment variable "+name+" is set")
+			agent = "claude_code"
 		}
 	}
 	if len(reasons) > 0 {
-		return Detection{Channel: AgentCLI, Reasons: reasons}
+		return Detection{Channel: AgentCLI, Reasons: reasons, Agent: agent}
 	}
 	return Detection{Channel: HumanCLI}
 }

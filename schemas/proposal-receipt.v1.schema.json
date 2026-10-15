@@ -29,9 +29,13 @@
         "properties": {
           "key": { "$ref": "common.v1.schema.json#/$defs/questionKey" },
           "about": {
-            "description": "Existing key, or the proposal-local ref it points to until that item is accepted.",
-            "type": ["string", "null"],
-            "maxLength": 64
+            "description": "Existing requirement or criterion key, or the proposal-local ref it points to until that item is accepted; null when the question is about the project.",
+            "oneOf": [
+              { "$ref": "common.v1.schema.json#/$defs/requirementKey" },
+              { "$ref": "common.v1.schema.json#/$defs/criterionKey" },
+              { "$ref": "common.v1.schema.json#/$defs/localRef" },
+              { "type": "null" }
+            ]
           },
           "blocking": { "type": "boolean" }
         }
@@ -43,6 +47,26 @@
       "if": { "properties": { "origin": { "const": "human_edit" } } },
       "then": { "properties": { "applied_version": { "type": "integer" } } },
       "else": { "properties": { "applied_version": { "const": null } } }
+    },
+    {
+      "description": "A proposal waiting for review (applied_version null) has only pending items and no assigned keys; an applied human edit has only accepted items, and each add item has its assigned key (MVP-BL-28).",
+      "if": { "properties": { "applied_version": { "type": "null" } } },
+      "then": {
+        "properties": {
+          "items": { "items": { "properties": { "review_state": { "const": "pending" }, "assigned_key": { "const": null } } } }
+        }
+      },
+      "else": {
+        "properties": {
+          "items": {
+            "items": {
+              "properties": { "review_state": { "const": "accepted" } },
+              "if": { "properties": { "op": { "const": "add" } } },
+              "then": { "properties": { "assigned_key": { "type": "string" } } }
+            }
+          }
+        }
+      }
     }
   ],
   "$defs": {
@@ -58,8 +82,12 @@
         "ref": { "oneOf": [{ "$ref": "common.v1.schema.json#/$defs/localRef" }, { "type": "null" }] },
         "target": {
           "description": "Key of the existing entity for update, retire and reaffirm; null for add.",
-          "type": ["string", "null"],
-          "maxLength": 32
+          "oneOf": [
+            { "$ref": "common.v1.schema.json#/$defs/goalKey" },
+            { "$ref": "common.v1.schema.json#/$defs/requirementKey" },
+            { "$ref": "common.v1.schema.json#/$defs/criterionKey" },
+            { "type": "null" }
+          ]
         },
         "review_state": {
           "description": "pending for Agent proposals; accepted for applied human edits.",
@@ -67,8 +95,12 @@
         },
         "assigned_key": {
           "description": "Key assigned to an applied add item; null otherwise.",
-          "type": ["string", "null"],
-          "maxLength": 32
+          "oneOf": [
+            { "$ref": "common.v1.schema.json#/$defs/goalKey" },
+            { "$ref": "common.v1.schema.json#/$defs/requirementKey" },
+            { "$ref": "common.v1.schema.json#/$defs/criterionKey" },
+            { "type": "null" }
+          ]
         },
         "sources": {
           "type": "array",
@@ -94,7 +126,53 @@
             }
           }
         }
-      }
+      },
+      "allOf": [
+        {
+          "description": "An add item has its proposal-local ref and no target; update, retire and reaffirm items have a target and no ref.",
+          "if": { "properties": { "op": { "const": "add" } } },
+          "then": { "properties": { "ref": { "type": "string" }, "target": { "const": null } } },
+          "else": { "properties": { "ref": { "const": null }, "target": { "type": "string" } } }
+        },
+        {
+          "description": "Only add items get a key.",
+          "if": { "properties": { "op": { "const": "add" } } },
+          "else": { "properties": { "assigned_key": { "const": null } } }
+        },
+        {
+          "description": "reaffirm applies to criteria only.",
+          "if": { "properties": { "op": { "const": "reaffirm" } } },
+          "then": { "properties": { "type": { "const": "criterion" } } }
+        },
+        {
+          "description": "The target and the assigned key are keys of the item's type.",
+          "if": { "properties": { "type": { "const": "goal" } } },
+          "then": {
+            "properties": {
+              "target": { "oneOf": [{ "$ref": "common.v1.schema.json#/$defs/goalKey" }, { "type": "null" }] },
+              "assigned_key": { "oneOf": [{ "$ref": "common.v1.schema.json#/$defs/goalKey" }, { "type": "null" }] }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "requirement" } } },
+          "then": {
+            "properties": {
+              "target": { "oneOf": [{ "$ref": "common.v1.schema.json#/$defs/requirementKey" }, { "type": "null" }] },
+              "assigned_key": { "oneOf": [{ "$ref": "common.v1.schema.json#/$defs/requirementKey" }, { "type": "null" }] }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "criterion" } } },
+          "then": {
+            "properties": {
+              "target": { "oneOf": [{ "$ref": "common.v1.schema.json#/$defs/criterionKey" }, { "type": "null" }] },
+              "assigned_key": { "oneOf": [{ "$ref": "common.v1.schema.json#/$defs/criterionKey" }, { "type": "null" }] }
+            }
+          }
+        }
+      ]
     }
   }
 }

@@ -24,6 +24,9 @@ type Where struct {
 	Current string
 	// CommonDir is the git common directory ("" outside git).
 	CommonDir string
+	// GitDir is the git directory of the Current worktree ("" outside
+	// git).
+	GitDir string
 }
 
 // Locate finds the project root of dir.
@@ -40,7 +43,7 @@ func Locate(ctx context.Context, dir string) (Where, error) {
 	case err != nil:
 		return Where{}, err
 	}
-	return Where{Git: true, Root: loc.Main, Current: loc.Worktree, CommonDir: loc.CommonDir}, nil
+	return Where{Git: true, Root: loc.Main, Current: loc.Worktree, CommonDir: loc.CommonDir, GitDir: loc.GitDir}, nil
 }
 
 // IsDocumentType reports whether a file name has a document type: the

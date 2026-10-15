@@ -16,7 +16,7 @@ import (
 // GitRepo is a throwaway git repository isolated from the user's git setup:
 // git runs without any inherited GIT_* variable, without system or global
 // configuration, templates or hooks, with a fixed identity and SHA-1
-// objects (codex-review-012 B1).
+// objects unless made by NewSHA256GitRepo (codex-review-012 B1).
 type GitRepo struct {
 	t   testing.TB
 	Dir string
@@ -25,6 +25,17 @@ type GitRepo struct {
 
 // NewGitRepo creates an empty repository on branch main.
 func NewGitRepo(t testing.TB) *GitRepo {
+	t.Helper()
+	return newGitRepo(t, "sha1")
+}
+
+// NewSHA256GitRepo is NewGitRepo with SHA-256 object IDs.
+func NewSHA256GitRepo(t testing.TB) *GitRepo {
+	t.Helper()
+	return newGitRepo(t, "sha256")
+}
+
+func newGitRepo(t testing.TB, format string) *GitRepo {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git is not installed")
@@ -70,7 +81,7 @@ func NewGitRepo(t testing.TB) *GitRepo {
 	if err := os.MkdirAll(r.Dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	r.Git("init", "-q", "-b", "main", "--object-format=sha1")
+	r.Git("init", "-q", "-b", "main", "--object-format="+format)
 	r.requireOwnGitDir()
 	r.Git("config", "core.autocrlf", "false")
 	return r
@@ -117,6 +128,27 @@ func (r *GitRepo) Git(args ...string) string {
 func (r *GitRepo) GitIn(dir string, args ...string) string {
 	r.t.Helper()
 	return r.gitEnvIn(dir, nil, args...)
+}
+
+// GitResult runs git in the repository like Git, but returns a failure
+// instead of failing the test, for commands that are expected to fail.
+func (r *GitRepo) GitResult(args ...string) (string, error) {
+	r.t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = r.Dir
+	cmd.Env = slices.Clip(r.env)
+	out, err := cmd.Output()
+	return strings.TrimSpace(string(out)), err
+}
+
+// GitResultEnv is GitResult with extra variables, which take precedence.
+func (r *GitRepo) GitResultEnv(extra []string, args ...string) (string, error) {
+	r.t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = r.Dir
+	cmd.Env = append(slices.Clip(r.env), extra...)
+	out, err := cmd.Output()
+	return strings.TrimSpace(string(out)), err
 }
 
 // gitEnvIn runs git in dir with the repo's environment plus extra

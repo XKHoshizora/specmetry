@@ -1,0 +1,47 @@
+{
+  "schema": "specmetry.proposal-receipt/v1",
+  "proposal_id": "01J9Z3K5Q8R2T4V6W8X0Y2Z4B1",
+  "seq": 31,
+  "origin": "human_edit",
+  "base_version": 4,
+  "applied_version": 5,
+  "items": [
+    {
+      "item_id": "01J9Z3K5Q8R2T4V6W8X0Y2Z4B2",
+      "item_index": 0,
+      "op": "add",
+      "type": "criterion",
+      "ref": "c1",
+      "target": null,
+      "review_state": "accepted",
+      "assigned_key": "AC-002-3",
+      "sources": [],
+      "code_refs": []
+    },
+    {
+      "item_id": "01J9Z3K5Q8R2T4V6W8X0Y2Z4B3",
+      "item_index": 1,
+      "op": "update",
+      "type": "requirement",
+      "ref": null,
+      "target": "REQ-002",
+      "review_state": "accepted",
+      "assigned_key": null,
+      "sources": [],
+      "code_refs": []
+    },
+    {
+      "item_id": "01J9Z3K5Q8R2T4V6W8X0Y2Z4B4",
+      "item_index": 2,
+      "op": "reaffirm",
+      "type": "criterion",
+      "ref": null,
+      "target": "AC-002-1",
+      "review_state": "accepted",
+      "assigned_key": null,
+      "sources": [],
+      "code_refs": []
+    }
+  ],
+  "questions": []
+}

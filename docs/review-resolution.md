@@ -1208,3 +1208,369 @@ PR：<https://github.com/XKHoshizora/specmetry/pull/1>（`feat/m0-foundation` �
 与审查原文一致：Source Ref 相关验收随 WP1.5 / M2；M1 只支持 `hash_only`，`full` 模式的擦除与整理在 WP2.11；超大来源文件流式哈希、可取消、无大小上限；Git exclude 重复追加、Windows `seq` 偶发 `SQLITE_BUSY`、非 Git 扫描数量限制保持原安排；`doctor` 的 git 版本查询隔离仍是发布前必须关闭的独立安全任务。
 
 审查原文按原样入库。
+
+## 24. WP1.4 最终复审（codex-review-019）与验收
+
+**审查结论**：**GO**，BLOCKER 为 0，没有新增 NON-BLOCKER。审查目标 `3d5272b`，修复基准 `e29b426`。
+
+- **B1 关闭**：拒绝错误只使用已扫描的原始参数，也不转述 git 归属识别的原始错误。审查方在 Linux 独立复验了 `alias.md` 反例和损坏的 git 配置：文本与 JSON 错误都不含 token 或目标路径，退出码 2，来源表和 `seq` 不变；合法符号链接仍可登记。
+- **B2 关闭**：rename 回退已完全删除。Windows、WSL Linux 的真实硬链接环境中，16 个不同 Marker 并发发布，连续 20 轮都恰好一个成功；Linux 上禁止真实的 `link` / `linkat` 系统调用后，全部返回环境错误，不留 Marker 或临时文件。审查方另外验证了"登记成功、Marker 发布失败"之后的恢复：第一次 `init` 退出码 6，恢复硬链接后再次执行，复用原项目与 worktree，补写 Marker，`seq` 不再增加。
+- **B3 关闭**：按目标目录的 git 元数据判断归属，用 `os.SameFile` 比较公共目录与 worktree，并在路径前缀分类之前拒绝关联 worktree；无法判断时保守拒绝。
+- 最终提交的三平台 CI 8/8 通过（运行 38595448856，Ubuntu 带 race detector）。
+
+**验收**：产品负责人于 2026-10-15 验收 WP1.4，PR #7 已合并（合并提交 `35d060f`）。
+
+**WP1.4 的验收范围**：MVP-SRC-01、02、03、05、06（按已确认的 PD-25）；SRC-04、SRC-07、SRC-08 的 M1 部分（见下）；MVP-CH-01、CH-02 对 `source ack`、`source remove`、`source add --allow-any-type` 的验证；CX-17 的 CLI 部分；MVP-INIT-04 中 `source list` 为空一项。另外包括验收前修复的三项检查（A、B、C）、共享 Schema 校验错误的脱敏（含数字映射键）、macOS 并发初始化的根因修复（数据目录消失条目、Marker 只创建不替换）。
+
+**仍未完成、随后续工作包验证**：
+
+- MVP-SRC-04 中"已有引用显示为 `source_removed`"：WP1.5 写入引用之后，随 WP1.5 / M2 验证。
+- MVP-SRC-08 中引用的 `excerpt_state = not_stored`、`locator` 与 `excerpt_sha256` 保留：随 WP1.5 验证；`full` 模式与擦除后的整理在 WP2.11（M2）。
+- MVP-SRC-07 中 `SOURCE_CHANGED` 作为差距：M2。
+- MVP-PRV-07 的 CLI 写入集成：随 WP1.5 验证（§16）。
+- MVP-CH-01、CH-02 对 `review` 与 `scope confirm` 的验证：随 WP1.6、WP1.8。
+
+**继续记录的事项**：`propertyNames` 错误指针定位不准（审查 018 N1，jsonschema v6.0.3 的定位问题），不修改共享校验器；Git exclude 重复追加、Windows `seq` 偶发 `SQLITE_BUSY` 维持原安排；`doctor` 的 git 版本查询隔离仍是发布前必须关闭的独立安全任务。
+
+**接受的风险**：硬链接不可用的文件系统上，`init` 无法写入 Marker 而返回退出码 6（产品负责人批准，2026-10-15）；项目已登记，修复环境后可以重试。
+
+**macOS 诊断记录**：两次临时诊断运行（只在 macOS、只由 `diag/**` 分支触发）的结果。Actions 日志有保留期限，关键结果记录如下：
+
+| 运行 | 代码 | 并发 `init`（50 次） | 创建数据库期间检查数据目录（20 次） | 并发写 Marker（50 次） | 消失条目测试（60 次） |
+|---|---|---|---|---|---|
+| [38583919277](https://github.com/XKHoshizora/specmetry/actions/runs/38583919277) | `9cceb51` 加诊断（`da6a57f`） | 48 通过，2 失败：`lstat …/specmetry.db-journal: no such file or directory`；`cannot list access control lists with /bin/ls: exit status 1` | 5 通过，15 失败（14 次 `/bin/ls`，1 次 `lstat`） | 0 通过，50 失败（`mkdir …/.specmetry: file exists`） | — |
+| [38583919241](https://github.com/XKHoshizora/specmetry/actions/runs/38583919241) | `e29b426` 加诊断（`220c607`） | 50 通过 | 20 通过 | 50 通过 | 60 通过 |
+
+两个诊断分支 `diag/macos-before`、`diag/macos-after` 已于验收后删除；运行记录仍在 Actions 中。
+
+审查原文按原样入库。
+
+## 25. WP1.5 代码审查（codex-review-020）的处理
+
+**审查结论**：NO-GO，5 项 BLOCKER、2 项 NON-BLOCKER。审查目标 `2abca00`（PR #8）。审查确认 V-P01 ~ V-P08 的主要校验、`propose` 的原文剥离与输出脱敏、事务与并发、版本前置条件、`proposal-receipt.v1` 的条件与反例，以及六项实现细化。产品负责人决定一次关闭全部五项，不扩大范围，不开始 WP1.6。
+
+### B1：读取对象可能触发按需抓取
+
+**根因**：部分克隆缺少的对象，git 在读取时会从 promisor remote 抓取（启动 `git fetch`，运行远端的 upload-pack）。受控环境没有禁止这一点。
+
+**修复**（`internal/gitx`，architecture §6.1.2）：
+
+- 受控环境增加 `GIT_NO_LAZY_FETCH=1` 和禁止所有传输的 `GIT_ALLOW_PROTOCOL`。
+- 版本检查时探测一次 git 是否支持 `--no-lazy-fetch`。不支持时，`CommitOf`、`TreeFiles`、`CountLines` 在读取对象之前识别部分克隆（只读配置），是部分克隆就返回退出码 6。
+- 代码引用检查在任何 git 版本下都先识别部分克隆并拒绝（退出码 6），提示改用完整克隆。
+- 最低版本仍为 2.32。
+
+**为什么旧版 git 需要"识别后拒绝"**：用真实的 git 2.32.0 验证，`GIT_ALLOW_PROTOCOL` 确实让 upload-pack 不再运行，但 git 仍会启动 `git fetch --filter=blob:none`，它在因传输被禁止而失败之前，向仓库配置写入 `remote.origin.partialclonefilter`。只靠环境变量不能保证只读，所以对不支持 `--no-lazy-fetch` 的 git 一律拒绝部分克隆中的对象读取。
+
+**回归测试**（upload-pack 替身只向仓库外的标记文件追加一行，不连接网络；每个用例先用普通 git 做对照，证明替身确实会被执行）：
+
+| 场景 | git 2.56（Windows） | git 2.43（Linux） | git 2.32.0（Linux，官方源码构建） |
+|---|---|---|---|
+| 修复前：缺失 blob、树、提交 | 替身执行，`.git` 改变 | 同左 | 同左 |
+| 修复后：缺失 blob（`CountLines`）、树（`TreeFiles`）、提交（`CommitOf`） | 替身不执行，`.git` 逐文件不变，不报告为存在 | 同左 | 同左（经由识别后拒绝） |
+| 强制走旧版路径（任何 git） | 三种读取都返回退出码 6，替身不执行，`.git` 不变；完整克隆照常读取 | 同左 | 同左 |
+| 公开 `propose` 带代码引用（部分克隆） | 修复前：替身执行后才退出 6；修复后：退出 6，替身不执行，`.git` 不变，不写入、不分配 `seq`；不带代码引用的提案照常保存 | 通过 | 通过 |
+
+另外在 git 2.32.0 上运行了全部 18 个 `propose` / `source` 相关的 CLI 测试，全部通过。macOS 与 Windows、Ubuntu 的其他版本由 CI 验证。
+
+### B2：`final_payload_json` 缺少 `hash_only` 防线
+
+**根因**：触发器只在插入时检查 `sources_json`。
+
+**修复**（修改尚未合并的迁移 0004）：`proposal_items` 在插入和更新时，用 `json_tree` 检查 `sources_json` 与 `final_payload_json` 中任何层级、取值不为 null 的 `excerpt` 键；`source_refs` 在插入之外也检查更新；这些触发器在维护模式下同样生效。
+
+**回归测试**：
+
+- 数据层：插入、更新待审条目、更深层级、审核时带原文，都被拒绝且原因正确；维护模式下给引用写入原文同样被拒绝；不含原文的审核结果（`excerpt` 为 null）照常写入。
+- 公开路径：`propose` 提交含 canary 的片段之后，用普通 `WriteTx` 尝试更新与插入。修复前三次都成功、并新增一行；修复后都被拒绝，业务记录与 `seq` 不变，数据目录（数据库与 WAL）中找不到 canary；不含原文的审核结果更新成功。
+
+### B3：`goal: null` 被当作空编号
+
+**根因**：`json.Unmarshal` 把 null 解码为空字符串且不报错。
+
+**修复**：读取字符串字段时，缺失与 null 都表示"没有编号"；null 原样保留在 payload 中。
+
+**回归测试**（公开 CLI）：新增需求 `goal: null`、更新需求清除 `goal`。修复前退出码 2；修复后保存为待审条目，payload 中保留 `"goal": null`。不存在的目标编号、类型不对的编号仍为退出码 2。
+
+### B4：行号溢出被当作"没有行号"
+
+**根因**：`strconv.Atoi` 溢出时返回 `ok = false`，调用方把它解释为未填写行号，因而 `exists = true`。
+
+**修复**：静态检查与代码引用检查共用一个解析函数，区分"未填写"与"无效"。行号范围为 1 ~ 2147483647（32 位上限），超出或倒置都返回退出码 2；即使绕过静态检查，无效范围也只会得到 `exists = false`。
+
+**回归测试**：公开 CLI 中 30 位数字、溢出的起点或终点、2147483648、`1-2147483648`、64 位上限与溢出，修复前都以退出码 0 写入（`exists = true`），修复后都返回退出码 2、指针正确、不写入；2147483647、`1-2147483647`、空文件（有、无行号）给出正确的 `exists`；单元测试覆盖边界。
+
+### B5：特殊文件使提案阻塞
+
+**根因**：先 `os.Open` 再检查类型；没有写端的 FIFO 会让打开本身阻塞，取消无从生效。WP1.4 的 `source.HashFile` 有同样的问题。
+
+**修复**：共用的 `source.OpenRegular`。Unix 以 `O_NONBLOCK|O_NOCTTY` 打开，再对描述符 `fstat`，不是普通文件就关闭并拒绝，普通文件恢复阻塞模式；Windows 打开设备或管道本身不等待，再通过句柄确认类型。`HashFile`、片段校验和非 git 项目的代码引用都改用它。
+
+**回归测试**：Linux 上，`HashFile`、`CheckExcerpts`（含 25 ms 超时）、公开 `propose` 与 `source list` 遇到 FIFO 都立即返回（修复前四项都阻塞）；普通文件与 FIFO 在检查期间反复互换，2 秒内 10692 次检查全部立即返回，结果只有 `verified` 或 `source_missing`；提案照常保存，只使用一个 `seq`。Windows 上，`NUL` 设备和目录被拒绝。macOS 由 CI 验证。
+
+### NON-BLOCKER
+
+- **N1**：增加真正超过 1 MiB 的测试文件：跨块边界的多字节字符、匹配之后出现的 NUL、文件末尾截断的字符、读取过程中（两块之间）取消；随机对照测试中每三轮有一轮超过 1 MiB，并断言这一点。
+- **N2**：符号链接与子模块测试改为直接提交索引，不再经过 `git add -A`，并在检查前断言提交树中确实有 `120000`、`160000`、`100755` 条目。
+
+### 接受的风险
+
+与审查原文一致：引用结果绑定读取时的 `source_sha256` 与 `checked_head`；正式审核与编号分配属于 WP1.6；`verified` 与 `exists` 只是标记。新增的平台限制：部分克隆中不能检查代码引用；不支持 `--no-lazy-fetch` 的 git 在部分克隆中不读取任何对象（例如 `init` 读取 HEAD 提交时返回退出码 6）。
+
+审查原文按原样入库。
+
+## 26. WP1.5 定向复审（codex-review-021）的处理
+
+**审查结论**：NO-GO。审查目标 `0af9d19`。审查 020 的 B2 ~ B5 关闭，N1、N2 的测试改进有效；**B1 仍有三个残余缺口**，可用真实的 git 2.32.0 绕过。本轮只修复 B1，不改动已关闭的事项。
+
+### B1-1：promisor 的布尔值未按 git 的语义解析
+
+**根因**：`PartialClone` 手工把空值、`true`、`yes`、`on`、`1` 当作真值。git 2.32.0 把 `promisor = 2` 解释为真，Specmetry 却判为完整克隆；空值（`promisor =`）在 git 中为假，却被判为真；git 无法解析的值被当作"不是部分克隆"。
+
+**修复**：`extensions.partialClone` 单独判断，有任何取值即为部分克隆（它是远端名称，不按布尔值解释）；`remote.<name>.promisor` 用 `git config --bool --get-regexp` 由 git 自己解析，任一远端为真即为部分克隆。git 无法解析或无法读取时返回退出码 6，不读取对象。仍在受控环境中只读配置，错误不出现配置值。
+
+### B1-2：`GIT_ALLOW_PROTOCOL` 实际允许了一个协议
+
+**根因**：取值 `specmetry-no-transport` 是允许列表中的一项，同名的 remote helper（`git-remote-specmetry-no-transport`）因此被允许运行。
+
+**修复**：`GIT_ALLOW_PROTOCOL=`，设置为空串：允许列表中没有任何协议。变量必须存在，未设置时按 git 的默认策略允许大多数传输。
+
+### B1-3：部分克隆的否定结果被缓存
+
+**根因**：旧版 git 路径按目录缓存识别结果；仓库在第一次读取之后变成部分克隆时，仍沿用"不是部分克隆"。
+
+**修复**：取消缓存，每次读取对象之前都重新识别。识别与读取之间的并发配置修改不在保证范围内，已在 architecture §6.1.2 写明边界（见下）。
+
+### 回归测试与证据
+
+每个用例都先在旧代码（`0af9d19`）上失败；涉及外部程序的用例先用普通 git 做对照，证明替身确实会被执行。remote helper 替身是测试程序自身的副本（Windows 上同样能被 git 运行），只向隔离目录中的标记文件追加一行，不连接网络。
+
+| 反例 | 修复前 | 修复后（git 2.56 Windows、2.43 Linux、真实 2.32.0 Linux） |
+|---|---|---|
+| `PartialClone` 布尔值表：`true`、`yes`、`on`、`1`、`2`、`TRUE`、无值的键为真；`false`、`no`、`off`、`0`、空值为假；两个远端其一为真；`maybe`；`extensions.partialClone` 取远端名、`false`、`2` | `2` 与"其一为真"判为假，空值判为真，`maybe` 判为完整克隆（三个版本相同） | 全部符合 git 的解析；`maybe` 返回退出码 6，错误中没有该值 |
+| `ls-remote` 经由 Specmetry 的受控环境：同名 helper、另一名称的 helper、file（upload-pack 替身）、ext（`protocol.ext.allow=always`）、ssh（`core.sshCommand` 替身）、https | 同名 helper 运行（三个版本），其余被拒绝 | 全部被拒绝，替身都不运行 |
+| 旧版 git 路径：完整克隆读取一次后，改为 `promisor = true` 或 `2` 并删除 blob，再调用 `CountLines`、`TreeFiles`、`CommitOf` | 只有 `CountLines` 出错（读取了对象），另两个照常读取；真实 2.32.0 上 `.git/config` 被追加 32 字节 | 三个都在读取对象之前返回退出码 6；替身不运行，`.git` 逐文件不变；去掉 promisor 设置后照常读取 |
+| 公开 `propose --json` 组合反例：`promisor = 2`、URL `specmetry-no-transport::unused`、PATH 中有同名 helper、删除已提交的 blob | 真实 2.32.0 上 helper 运行之后才退出 6；2.56 上读取了对象（`git cat-file` 失败）而不是先拒绝 | 退出码 6 并说明是部分克隆；helper 不运行；`.git` 逐文件不变；不写入、不分配 `seq`；JSON 与文本错误中都没有 helper 名称和仓库路径 |
+
+另外：`gitx` 全部 19 个测试在 2.32.0、2.43 和 2.56 上通过；真实 git 2.31.1 的拒绝测试仍通过。
+
+### 并发边界
+
+（此节描述的机制已被 §27 / PD-26 取代。）识别与随后的对象读取是两个独立的 git 进程。两者之间仓库配置仍可能被并发修改，本轮没有关闭这个窗口，测试也没有覆盖它。窗口内即使启动抓取，空的 `GIT_ALLOW_PROTOCOL` 仍使它无法连接或运行任何程序；但旧版 git 的抓取可能已改写仓库配置。需要完全排除这种情况时，使用支持 `--no-lazy-fetch` 的 git，此时 git 根本不启动抓取。
+
+审查原文按原样入库。
+
+## 27. WP1.5 静态定向复审（codex-review-022）与 PD-26 的处理
+
+**审查结论**：NO-GO。审查目标 `96be996`。B1-1 ~ B1-3 的修复通过了静态审查。
+
+- **BLOCKER**：旧版 git 的只读保证尚未闭合。识别部分克隆与读取对象是两个 git 进程，配置可能在两者之间被并发修改，旧版 git 仍可能改写仓库配置。
+- **NON-BLOCKER**：HTTPS 测试的断言弱于其说明。
+
+审查原文按原样入库。
+
+**评估与产品决策**：针对这项 BLOCKER，先评估了以下几点：
+
+- git 的按需抓取（Lazy Fetch）能力，即 `--no-lazy-fetch` 与 `GIT_NO_LAZY_FETCH` 在 2.32、2.43、2.56 上的实际行为；
+- 按能力拒绝会带来的影响；
+- 私有元数据视图的可行性。
+
+产品负责人据此确认 **PD-26（方案 A）**：运行时探测安全能力，不具备能力时拒绝读取对象。最低版本仍为 2.32；不开发私有视图。本轮只做以下几件事：
+
+- 能力探测与对象读取保护；
+- `ListFiles` 门禁；
+- `init` 的前置检查与错误传递；
+- 直接相关的测试和文档。
+
+已验收的 WP1.5 B2 ~ B5、提案数据模型、Source Ref、问题编号和 schema 脱敏都不改动。
+
+### 评估中确认的事实
+
+以下结果都在隔离的临时仓库中测得：
+
+| git | `--no-lazy-fetch` | `GIT_NO_LAZY_FETCH` | 读取部分克隆缺失的对象 |
+|---|---|---|---|
+| 2.32.0（官方源码构建） | 不认识 | 不遵守 | 启动抓取。空的允许列表使 upload-pack 不运行，但 `.git/config` 被改写 |
+| 2.43.0（Ubuntu `1:2.43.0-1ubuntu7.3`，带 CVE-2024-32465 的修复） | 不认识（退出码 129） | 遵守 | 不抓取，直接失败 |
+| 2.56.0（Git for Windows） | 认识 | 遵守 | 不抓取，直接失败 |
+
+旧实现按"认识 `--no-lazy-fetch`"推断"遵守 `GIT_NO_LAZY_FETCH`"。这个推断对 Ubuntu 的 2.43 不成立：它不认识选项，却遵守变量，于是被错误地归入旧版路径，即带并发窗口的部分克隆识别。反过来，一个认识选项、却不遵守变量的 git（测试中用替身模拟），会被旧实现当作安全的 git，直接读取对象。
+
+评估中还发现两个问题：
+
+- **稀疏索引上的 `ListFiles` 没有防护**：`ls-files` 由树对象展开稀疏索引，这是对象读取。git 2.32.0 在这里会启动抓取并改写配置。
+- **`init` 静默输出 `snapshot = null`**：快照解析失败时，`init` 把它当作"分支还没有提交"，输出 `snapshot = null`。
+
+### 修复
+
+1. **能力探测**（`internal/gitx/objects.go`；architecture §6.1.2）：
+   - 每个进程在第一次需要读取对象时，在 Specmetry 新建的临时目录中手工写出一个裸的部分克隆：promisor remote 指向不存在的本地路径，不含任何对象。
+   - 然后让 git 读取一个不存在的对象，运行两次，用 trace2 的结构化事件（JSON）记录。
+   - 对照运行不设置 `GIT_NO_LAZY_FETCH`。事件中必须出现 git 自己启动的 `fetch` 子进程。
+   - 测试运行设置该变量。只有同时满足以下条件，才判定为"不会抓取"：git 自己的 `start` 和 `exit` 事件齐全；退出状态与进程实际的退出状态一致，并且非零；没有任何子进程。
+   - 测试中出现 `fetch` 子进程，判定为"会抓取"。其他情况都是"无法判定"，按不具备能力处理。
+   - 判断依据是结构化事件，并有正反对照，不依据"某段文本没有出现"。
+   - 临时目录在成功、失败、超时（30 秒）和取消后都删除。git 的输出全部丢弃。
+2. **统一入口**：可能读取对象的命令只通过 `runObjects` / `runObjectsCode` / `runObjectsTo` 运行，入口先取得经探测确认的 git。
+   - 涉及 `CommitOf`、`TreeFiles`、`CountLines` 和 `ListFiles`。
+   - 不具备能力时，在任何仓库中都于运行之前返回退出码 6。
+   - 原来的"每次读取前识别部分克隆"（`objectsReadable`）被删除。现在的门禁是 git 的能力，不是仓库的状态。读取进程自己就遵守 `GIT_NO_LAZY_FETCH`，所以审查 022 指出的"识别与读取之间"的窗口不再存在。
+   - 包级文档写明：M2 起新增的对象读取（如 `status`）必须经过同一入口。
+   - `PartialClone` 保留，只用于代码引用检查的提示。代码引用检查在它之前先做能力检查。
+3. **受控复用**：只保存明确的结论，并且只在 PATH 找到的仍是同一个 git 文件（路径、大小、修改时间都不变）时复用。git 变化后重新检查版本并重新探测；实际运行的就是这个文件。失败、取消、超时和"无法判定"都不保存。
+4. **`CommitOf`**：
+   - 先解析 ref（`rev-parse -q --verify <ref>`，不读取对象）。ref 不存在或分支还没有提交时，返回空。
+   - 再读取它指向的提交（`<oid>^{commit}`）。读取失败时返回退出码 6：对象缺失，或者不是提交。不再返回空。
+5. **`init`**：
+   - git 项目在定位仓库之后、列出文件之前，先做能力检查。
+   - 主 worktree 分支的快照在打开数据库之前解析。
+   - 已登记项目的目标 ref 与当前分支不同时，这个 ref 在写事务中解析，失败则整个事务回滚。
+   - 读取失败一律返回退出码 6。`init.v1` 不变。
+6. **`ListFiles` 不展开稀疏索引**：`ls-files` 带 `--sparse` 运行，稀疏检出之外的目录以目录项列出。目录项不是常规文件，不参与候选来源和阶段识别，所以结果与展开后相同。
+
+### 实施中发现、待确认的事项
+
+以下四项已在 2026-10-15 由产品负责人决定，见 §28。
+
+1. **展开稀疏索引会写对象文件。**
+   - git 2.56 与 2.43 实测：不带 `--sparse` 的 `ls-files` 展开稀疏索引时，会重新写入已存在的树对象，改写对象文件的修改时间。树对象缺失时，还会静默漏掉其中的文件。git 2.32.0 的源码中，`ensure_full_index` 同样调用 `cache_tree_update`。`--sparse` 可以避免展开。
+   - git 2.32.0 在解析参数之前就读取并展开了索引：带 `--sparse` 时，它在报告"选项未知"（退出码 129）之前，已经抓取并改写了配置。所以是否认识这个选项不能在用户仓库中试探，只能在临时目录中探测。
+   - **本轮实现**：不认识 `--sparse` 的 git，列出文件时返回退出码 6（fail-closed），依据是 PD-26 ④"不能安全完成文件发现"。影响范围：遵守 `GIT_NO_LAZY_FETCH`、但 `ls-files` 不认识 `--sparse` 的 git，例如可能把该修复回移到较旧版本的发行版。本轮没有实测确认是否真有这样的发行版。在这类 git 上，即使仓库没有稀疏索引，Git 项目的 `init` 也会被拒绝。
+   - **备选方案**：索引不是稀疏索引时，仍用不带 `--sparse` 的 `ls-files`。但这需要先判断索引是否稀疏，判断与读取之间同样存在并发窗口。
+   - **请产品负责人确认**采用哪一种。
+2. **稀疏检出中缺失的 `.gitignore`。** git 从索引读取工作区之外的 `.gitignore` 时，如果 blob 缺失，具备能力的 git 不抓取、不报错，按没有这些规则处理（2.56、2.43 实测）。这只影响候选来源列表，不影响安全，记录为已知行为。
+3. **SHA-256 仓库。** `init.v1` 的 `commitSha` 只接受 40 位 SHA-1。SHA-256 仓库的提交能够读取，但 `init` 仍按原有行为输出 `snapshot = null`。这是格式限制，不是读取失败，本轮未改动。是否需要新增 TD 条目，请确认。
+4. **M2 的衔接。** M2 的目标解析与状态推导同样必须经过统一入口。git 不具备能力时，返回退出码 6，还是按 data-model §6 的"git 不可用"给出保守结论 `not_assessed`，需要在 M2 设计细化时确定。
+
+### 回归测试与证据
+
+替身是测试程序自身的副本，命名为 `git`，可在三个平台上运行。它把命令转交给真实的 git，只做以下一种改动：
+
+- 隐藏 `GIT_NO_LAZY_FETCH`，模拟不遵守该变量的 git；
+- 隐藏 trace2 事件，模拟无法判定的 git；
+- 使 `ls-files --sparse` 以退出码 129 失败；
+- 一直挂起。
+
+涉及外部程序的用例，都先用普通 git 做对照，证明替身确实会被执行。
+
+| 反例 | 修复前（`96be996`） | 修复后 |
+|---|---|---|
+| 用"会抓取"的替身执行 git 项目的 `init`：新项目、已登记的项目；数据目录尚不存在，或已有其他项目 | 退出码 0，项目被登记（旧实现按选项判断，认为这个 git 安全） | 退出码 6。数据目录不存在时不创建；已存在时，数据目录和仓库逐文件不变（包括修改时间）。没有运行任何可能读取用户仓库对象的命令。非 git 项目照常初始化 |
+| 部分克隆缺少 HEAD 提交，执行 `init` | 退出码 0，`snapshot = null` | 退出码 6，不创建数据目录，仓库不变，promisor remote 不运行 |
+| 已登记项目从关联 worktree 再次执行 `init`，目标 ref（`main`）的提交缺失 | （新增用例） | 退出码 6，`seq` 不变，关联 worktree 未被登记（事务回滚） |
+| 用"会抓取"的替身提交含代码引用的 `propose` | 退出码 0，写入 1 个提案、1 个条目，`seq` 3 → 4；运行了 `rev-parse HEAD^{commit}`、`ls-tree`、`cat-file blob` | 退出码 6，不写入，`.git` 不变，没有读取对象。不含代码引用的 `propose`，以及 `source add`、`list`、`ack`、`remove` 都照常工作 |
+| 稀疏索引，执行 `ListFiles`（变异测试：去掉 `--sparse`） | 对象文件的修改时间被改写；从树对象展开出 `b/y.txt` | `.git` 逐文件不变；`b/` 作为目录项列出。树对象缺失时不抓取，仓库不变 |
+| `CommitOf`：分支还没有提交、ref 不存在；部分克隆或完整克隆缺失提交；ref 指向 blob | 缺失的提交返回空，被当作"没有提交" | 前两种返回空；后几种返回退出码 6，不抓取，仓库不变 |
+| 探测本身 | — | 真实 git 的结论与独立判据（不设协议限制，看 upload-pack 替身是否写出标记）一致。只打印版本的替身、隐藏 trace2 的替身判定为"无法判定"，结论不保存，下次重新探测。成功、"会抓取"、"无法判定"、取消（执行前与执行中）、超时之后，临时目录都已删除。同一个 git 只探测一次；git 文件变化后重新探测（版本、对照、测试共 3 次运行）。`ls-files --sparse` 未知时拒绝列出文件，只在临时目录中试探一次 |
+
+真实 git 的结果：
+
+| git | 探测结论 | 独立判据 | 验证范围 |
+|---|---|---|---|
+| 2.32.0（WSL，官方源码构建） | 会抓取 | 一致 | `gitx` 的探测与替身测试通过。公开命令方面：git 项目的 `init` 返回退出码 6，不写入；代码引用检查返回退出码 6，不写入；非 git 项目的 `init`、不含代码引用的 `propose`，以及 `source add`、`list`、`ack`、`remove` 都照常工作（`TestARealGitThatFetches`） |
+| 2.43.0（WSL，Ubuntu） | 不会抓取 | 一致 | 全部测试包通过（`SPECMETRY_TEST_GIT_OBJECTS=safe`） |
+| 2.56.0（Windows） | 不会抓取 | 一致 | 全部测试包通过 |
+| 2.31.1（官方源码构建） | 不进入探测：版本检查即拒绝 | — | `TestInitRefusesRealOldGit` 通过 |
+
+被替换的测试：`TestOlderGitRefusesPartialClones` 和 `TestObjectReadsRecheckThePartialClone` 强制走旧版路径，已被下面两个测试取代：
+
+- `TestAGitThatFetchesReadsNoObject`：覆盖完整克隆、部分克隆和稀疏索引；
+- `TestARepositoryThatBecomesAPartialCloneIsNotFetchedFrom`：第一次读取之后，仓库变成部分克隆；用具备能力的 git 读取时不抓取，仓库不变。
+
+### 未处理
+
+审查 022 的 NON-BLOCKER（HTTPS 测试的断言）不在本轮范围内，保持未处理。
+
+## 28. PD-26 的细化决定与 SHA-256 仓库的拒绝（2026-10-15）
+
+`25a93df` 的三平台 CI 8/8 成功之后，产品负责人对 §27 中待确认的事项作出三项决定。本轮只修改 SHA-256 仓库的拒绝逻辑、直接相关的测试，以及这三项决定的文档。以下内容不变：
+
+- git Lazy Fetch 的行为探测；
+- `--sparse` 的安全处理；
+- WP1.5 的 B2 ~ B5 修复；
+- Proposal、Source Ref、Question 和 Schema 的现有实现；
+- git 2.32 的最低版本要求，以及 PD-26 已确认的规则。
+
+### 决定一：`ls-files --sparse`
+
+批准当前实现，作为 PD-26 已批准的实施细化，不再待确认：
+
+- git 不认识 `ls-files --sparse` 时，`ListFiles` 返回退出码 6；
+- 即使普通索引也许可以读取，也不在用户仓库中试探；
+- 候选来源发现只面向 worktree 中实际可访问的普通文件，不要求列举稀疏检出之外的全部文件。
+
+已记入 PRD 的 PD-26、architecture §6.1.2 和 MVP-INIT-12。代码不变。
+
+### 决定二：SHA-256 仓库
+
+MVP v0.1.0 不支持 SHA-256 格式的 git 对象 ID。§27 记录的现象（64 位提交 ID 被转为 `snapshot = null`）不可接受，只做最小修复：
+
+- **识别**：`gitx.ObjectFormat` 用受控的 `git rev-parse --show-object-format` 识别仓库的对象格式，只读配置，不读取对象。git 2.32.0、2.43、2.56 都支持这条命令；git 给出 `sha1`、`sha256` 以外的答复时，返回退出码 6。
+- **拒绝**：git 项目的 `init` 在定位仓库之后、能力检查和任何写入之前识别对象格式。是 SHA-256 时返回 environment（退出码 6）：不创建数据库，不登记项目，不写 marker 和 exclude，不分配 `seq`。拒绝与是否会输出快照无关：分支还没有提交、处于分离 HEAD 时同样拒绝，不能靠省略快照绕过。
+- **快照**：快照解析得到的不是 40 位 SHA-1 ID 时，同样返回退出码 6。原来的"转为 `null`"已删除。SHA-1 分支还没有提交时，仍按既有规则输出 `snapshot = null`。
+- **不变的部分**：`init.v1` 不变，不提前支持 64 位提交 ID。新增 TD-26，记录完整支持需要同步调整 Schema、数据模型、Code Ref、Git Reader 与测试，不属于 v0.1.0。
+
+**回归测试**（真实的 SHA-256 临时仓库，用 `git init --object-format=sha256` 创建）：
+
+| 用例 | 修复前（`25a93df`） | 修复后 |
+|---|---|---|
+| 分支有提交、没有提交、分离 HEAD 三种 SHA-256 仓库，数据目录尚不存在 | 退出码 0，`created = true`，`snapshot = null` | 退出码 6；不创建数据目录；仓库（包括 marker、exclude 和 `.git`）逐文件不变 |
+| 同上，数据目录中已有 3 个项目（非 git、SHA-1 有提交、SHA-1 没有提交） | 退出码 0，项目被登记 | 退出码 6；数据目录逐文件不变，`seq` 不变，项目仍为 3 个；仓库逐文件不变 |
+| SHA-1 对照 | — | 有提交时快照等于 HEAD；分支还没有提交时 `snapshot = null` |
+| `ObjectFormat` | — | SHA-1 仓库返回 `sha1`；SHA-256 仓库（没有提交）返回 `sha256`；替身 git 给出其他答复时返回退出码 6 |
+
+### 决定三：M2 的环境失败
+
+确认原则：正确的进度推导依赖 git 对象，而 git 无法安全读取时，返回 environment（退出码 6），不把环境失败转换为正常的 `not_assessed`。已记入 implementation-plan 的 M2；data-model §6 中"git 不可用"一行的结论，在 M2 实现时据此细化，并补齐测试。本轮不提前开发 M2。
+
+## 29. WP1.5 最终定向审查（codex-review-023）的处理
+
+**审查结论**：NO-GO。审查目标 `27a49af`。PD-26 的门禁结构、Sparse Index 和 TD-26 的拒绝逻辑基本符合批准方案，但有 1 项 BLOCKER。NON-BLOCKER（HTTPS 测试的断言）维持原分类，本轮仍不处理。审查原文按原样入库。本轮只修复事件完整性与安全分类，改动限于 `internal/gitx/objects.go` 和直接相关的测试。以下内容不变：
+
+- PD-26 的方案，TD-26 的限制，git 最低版本；
+- 数据库、Proposal、Source Ref、Question；
+- Review 020 的 B2 ~ B5；
+- Sparse Index 与 `init` 的设计。
+
+### B1：异常的 trace2 事件流可能被判为 `neverFetches`
+
+**根因**：`readProbeEvents` 只检查了事件的来源，没有检查生命周期：
+
+- git 之下进程（后代 sid）的事件被直接忽略，即使它们显示有子进程在运行；
+- 重复的 `exit` 会覆盖之前的结果；
+- `exit` 出现在 `start` 之前也被接受。
+
+这样，不完整或矛盾的事件流可能得出"可信、完整、没有子进程"的结论，进而被判为 `neverFetches` 并保存。
+
+**修复**：新增 `checkProbeEvents`，按写入顺序逐条检查。只有事件流构成 git 的一次完整、一致的运行才可信（规则见 architecture §6.1.2"事件流的完整性"）：
+
+- **git 自身的生命周期**：`version` 至多一次且在 `start` 之前；`start`、`exit` 各一次，顺序正确；`atexit` 至多一次，在 `exit` 之后，状态相同；其他事件都在 `start` 与 `atexit` 之间。
+- **子进程事件**：只在 git 运行期间出现。`child_start` 的 `child_id` 互不相同；`child_exit`、`child_ready` 只对应已启动、未退出的子进程；不认识的 `child_*` 事件不可信；所有子进程都在 git 退出前退出。
+- **后代进程**：后代 sid 的任何事件都是子进程的证据，只能在 git 运行期间出现，并且这样的子进程不多于 `child_start`。
+- **退出状态**：`exit` 的状态必须与进程实际的退出状态一致；不一致、或出现其他进程的事件，都不可信。
+
+分类改用 `showsNoChild`：完整的运行中，既没有 `child_start`，也没有任何后代事件，才判为 `neverFetches`。不可信的事件流仍是"无法判定"：返回错误，不保存，下次重新探测。能力探测本身不会被跳过。
+
+### 回归测试与证据
+
+用纯 JSON 测试，不启动 git、不运行外部程序、不联网。测试事件流按真实 git 2.56、2.43、2.32.0 写出的事件构造，事件类型与顺序以 2026-10-15 在隔离临时仓库中的实测为准。
+
+| 测试 | 修复前（`27a49af`） | 修复后 |
+|---|---|---|
+| Codex 反例 A：缺少 `child_start` 的后代 sid（`fetch` 子进程的 start、exit 都在） | 被判为"完整、没有子进程" | 不可信 |
+| Codex 反例 B：`exit` 在 `start` 之前 | 同上 | 不可信 |
+| Codex 反例 C：先 `exit` 0，再 `exit` 128，实际 128 | 同上 | 不可信 |
+| 另外 12 种异常：两次 `exit`；第二次 `start` 属于另一命令；两次 `atexit`；`atexit` 状态不同；`atexit` 之后的事件；`start` 之前的其他事件；`start` 之后的 `version`；没有 `child_start` 的 `child_exit`、`child_ready`、其他子进程事件；只有孙进程的事件；git `start` 之前的子进程事件 | 被判为"完整、没有子进程" | 不可信 |
+| 另外 6 种异常：`child_start` 缺 `child_id`；缺 `child_exit`；同一 `child_id` 两次；git 退出后的 `child_exit`；两个子进程只有一个 `child_start`；git `atexit` 之后的子进程事件 | 被当作可信的完整运行（有子进程） | 不可信 |
+| 13 种原本就能识别的情况：重复的 probe `start`；缺少 `exit`、`start` 或任何事件；`atexit` 没有 `exit`；退出状态不一致或缺失；git 成功退出；无效 JSON；缺 sid；其他进程；sid 只是前缀相似；两次 probe 命令 | 不可信或不完整 | 不可信或不完整（回归保护） |
+| 合法事件流：2.56、2.43、2.32.0 三种形态的无子进程测试运行；没有 `atexit`；中间有空行；线程的 `data` 事件；合法的抓取对照 | 通过 | 通过（没有被过度拒绝） |
+| 经由 `CheckObjectReads`：由替身 git（测试程序自身，不运行真实 git）写出合法对照和反例 A、B、C | 判为 `neverFetches`，没有错误，结论被保存 | 退出码 6（无法判定），不保存；再次检查重新运行两次探测。合法的无子进程流仍判为 `neverFetches`，抓取流判为 `fetches` |
+
+真实 git 的回归见 PR #8 描述中的验证一节：
+
+- 2.32.0 仍判为会抓取，2.43 和 2.56 仍判为不会抓取；
+- 2.31.1 仍被版本检查拒绝；
+- 临时目录照常清理；
+- 对象读取、Sparse Index、SHA-256 拒绝、`init` 和 `propose` 的既有测试都通过。
+
+三平台 CI 中真实 git 的版本为 2.55 或 2.56；真实旧版 git 的测试在 CI 中按设计跳过，只在本地验证。

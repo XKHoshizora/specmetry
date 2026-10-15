@@ -215,3 +215,24 @@ func TestGuardFailsWhenTheConfirmationCannotBeRead(t *testing.T) {
 		t.Fatalf("Guard = %v, want exit code %d", err, apperr.ExitEnvironment)
 	}
 }
+
+// The Agent is named when one of its variables is set (actor
+// agent:claude_code), and only then.
+func TestDecideNamesTheAgent(t *testing.T) {
+	env := func(vars map[string]string) func(string) (string, bool) {
+		return func(k string) (string, bool) { v, ok := vars[k]; return v, ok }
+	}
+	for _, c := range []struct {
+		vars map[string]string
+		want string
+	}{
+		{map[string]string{"CLAUDECODE": "1"}, "claude_code"},
+		{map[string]string{"CLAUDE_CODE_ENTRYPOINT": "cli"}, "claude_code"},
+		{map[string]string{"CLAUDECODE": ""}, ""},
+		{nil, ""},
+	} {
+		if d := channel.Decide(false, false, env(c.vars)); d.Agent != c.want {
+			t.Errorf("%v: Agent %q, want %q", c.vars, d.Agent, c.want)
+		}
+	}
+}

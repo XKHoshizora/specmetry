@@ -18,10 +18,12 @@ func TestLocate(t *testing.T) {
 	repo.Commit("init")
 	wt := repo.AddWorktree("feature-x")
 	gitDir := filepath.Join(repo.Dir, ".git")
+	// A linked worktree's own git directory is named after its directory.
+	wtGitDir := filepath.Join(gitDir, "worktrees", filepath.Base(wt))
 	for dir, want := range map[string]project.Where{
-		repo.Dir:                        {Git: true, Root: repo.Dir, Current: repo.Dir, CommonDir: gitDir},
-		filepath.Join(repo.Dir, "docs"): {Git: true, Root: repo.Dir, Current: repo.Dir, CommonDir: gitDir},
-		wt:                              {Git: true, Root: repo.Dir, Current: wt, CommonDir: gitDir},
+		repo.Dir:                        {Git: true, Root: repo.Dir, Current: repo.Dir, CommonDir: gitDir, GitDir: gitDir},
+		filepath.Join(repo.Dir, "docs"): {Git: true, Root: repo.Dir, Current: repo.Dir, CommonDir: gitDir, GitDir: gitDir},
+		wt:                              {Git: true, Root: repo.Dir, Current: wt, CommonDir: gitDir, GitDir: wtGitDir},
 	} {
 		if got, err := project.Locate(ctx, dir); err != nil || got != want {
 			t.Errorf("Locate(%s) = %+v, %v; want %+v", dir, got, err, want)

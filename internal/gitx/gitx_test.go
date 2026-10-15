@@ -122,6 +122,7 @@ func TestFilterEnv(t *testing.T) {
 		"GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=core.fsmonitor", "GIT_CONFIG_VALUE_0=x", "GIT_CONFIG_PARAMETERS='a'='b'",
 		"GIT_CONFIG_GLOBAL=/g", "GIT_CONFIG_SYSTEM=/s", "GIT_CONFIG_NOSYSTEM=0", "GIT_TRACE=/t", "GIT_TRACE2_EVENT=/e",
 		"GIT_EXEC_PATH=/p", "GIT_OPTIONAL_LOCKS=1", "Git_Trace_Setup=/u",
+		"GIT_ALLOW_PROTOCOL=file:ext", "GIT_NO_LAZY_FETCH=0",
 	}
 	got := filterEnv(in)
 	want := []string{
@@ -129,6 +130,7 @@ func TestFilterEnv(t *testing.T) {
 		"GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_SYSTEM=/dev/null", "GIT_CONFIG_GLOBAL=/dev/null",
 		"GIT_TRACE2=0", "GIT_TRACE2_EVENT=0", "GIT_TRACE2_PERF=0",
 		"GIT_OPTIONAL_LOCKS=0", "GIT_TERMINAL_PROMPT=0", "GIT_DISCOVERY_ACROSS_FILESYSTEM=1",
+		"GIT_NO_LAZY_FETCH=1", "GIT_ALLOW_PROTOCOL=",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("filterEnv =\n%q\nwant\n%q", got, want)
@@ -199,12 +201,7 @@ func gitVariables(env []string) []string {
 // other command. (A stand-in for git 2.31.1 records how it was run; the
 // real git 2.31.1 is the cli package's TestInitRefusesRealOldGit.)
 func TestVersionProbeRunsInTheControlledEnvironment(t *testing.T) {
-	versionMu.Lock()
-	was := versionOK
-	versionOK = false
-	versionMu.Unlock()
-	t.Cleanup(func() { versionMu.Lock(); versionOK = was; versionMu.Unlock() })
-
+	// The stand-in is a git gitx has not seen, so its version is checked.
 	dir, env, calls := testutil.FakeGit(t, "git version 2.31.1")
 	for _, kv := range env {
 		name, value, _ := strings.Cut(kv, "=")
@@ -215,9 +212,9 @@ func TestVersionProbeRunsInTheControlledEnvironment(t *testing.T) {
 	t.Setenv("GIT_TRACE2", "1")
 	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(t.TempDir(), "gitconfig"))
 
-	err := checkVersion(ctx)
+	_, err := gitToRun(ctx)
 	if apperr.ExitCode(err) != apperr.ExitEnvironment || !strings.Contains(err.Error(), "2.32 or newer") {
-		t.Fatalf("checkVersion = %v", err)
+		t.Fatalf("gitToRun = %v", err)
 	}
 	got := calls()
 	if len(got) != 1 || !reflect.DeepEqual(got[0].Args, []string{"--version"}) {
@@ -275,5 +272,63 @@ func TestGitPath(t *testing.T) {
 		if got, err := GitPath(ctx, dir, "info/exclude"); err != nil || got != want {
 			t.Errorf("GitPath(%s) = %s, %v; want %s", dir, got, err, want)
 		}
+	}
+}
+
+// Code references are checked against a commit's tree: its regular files,
+// by path from the top, and their line counts. A symbolic link, a
+// directory or a file that is not committed is not a file of the tree.
+// Expected values are written out.
+func TestTreeFilesAndLines(t *testing.T) {
+	repo := testutil.NewGitRepo(t)
+	repo.WriteFile("internal/auth/login.go", "package auth\n\nfunc Login() {}\n")
+	repo.WriteFile("docs/客户 需求.md", "第一行\r\n第二行\r\n第三行")
+	repo.WriteFile("empty.txt", "")
+	repo.WriteFile("run.sh", "#!/bin/sh\necho hi\n")
+	repo.WriteFile("link-target.txt", "internal/auth/login.go")
+	repo.Git("add", "-A")
+	repo.Git("update-index", "--chmod=+x", "run.sh")
+	// A symbolic link and a submodule exist only in the index; committing
+	// without add -A keeps them (codex-review-020 N2).
+	object := repo.Git("hash-object", "-w", "link-target.txt")
+	repo.Git("update-index", "--add", "--cacheinfo", "120000,"+object+",link.go")
+	repo.Git("update-index", "--add", "--cacheinfo", "160000,"+strings.Repeat("1", 40)+",vendor/sub")
+	repo.Git("commit", "-q", "-m", "init")
+	head := repo.Git("rev-parse", "HEAD")
+	tree := repo.Git("ls-tree", "-r", head)
+	for _, entry := range []string{"120000 blob " + object + "\tlink.go", "160000 commit " + strings.Repeat("1", 40) + "\tvendor/sub",
+		"100755 blob"} {
+		if !strings.Contains(tree, entry) {
+			t.Fatalf("the commit's tree lacks %q:\n%s", entry, tree)
+		}
+	}
+	repo.WriteFile("later.go", "package later\n")
+
+	files, err := TreeFiles(ctx, repo.Dir, head)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var paths []string
+	for p := range files {
+		paths = append(paths, p)
+	}
+	slices.Sort(paths)
+	want := []string{"docs/客户 需求.md", "empty.txt", "internal/auth/login.go", "link-target.txt", "run.sh"}
+	if !reflect.DeepEqual(paths, want) {
+		t.Fatalf("TreeFiles = %v, want %v", paths, want)
+	}
+	for path, lines := range map[string]int{"internal/auth/login.go": 3, "docs/客户 需求.md": 3, "empty.txt": 0, "run.sh": 2} {
+		n, err := CountLines(ctx, repo.Dir, files[path])
+		if err != nil || n != lines {
+			t.Errorf("CountLines(%s) = %d, %v; want %d", path, n, err, lines)
+		}
+	}
+	// Only object and commit IDs are accepted: an argument never reaches
+	// git as an option.
+	if _, err := TreeFiles(ctx, repo.Dir, "--output=x"); err == nil {
+		t.Error("TreeFiles accepted an option as the commit")
+	}
+	if _, err := CountLines(ctx, repo.Dir, "-p"); err == nil {
+		t.Error("CountLines accepted an option as the object")
 	}
 }

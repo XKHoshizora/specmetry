@@ -8,7 +8,7 @@
 |---|---|---|
 | Go | `go.mod` 中的 `go` 版本（当前 1.27） | 纯 Go 构建，不需要 cgo |
 | Node.js | ≥ 22.12（CI 使用 24） | 只用于构建内嵌的 Dashboard |
-| git | 2.32 或更高 | 运行时和测试都需要；`init` 用 `GIT_CONFIG_GLOBAL` / `GIT_CONFIG_SYSTEM` 隔离用户的 git 配置（architecture §6.1.2） |
+| git | 2.32 或更高 | 运行时和测试都需要；`init` 用 `GIT_CONFIG_GLOBAL` / `GIT_CONFIG_SYSTEM` 隔离用户的 git 配置（architecture §6.1.2）。读取 git 对象（git 项目的 `init`、代码引用检查）还要求 git 遵守 `GIT_NO_LAZY_FETCH`，并且 `ls-files` 认识 `--sparse`，运行时探测（PD-26）；git 2.32.0 不满足，测试需要较新的 git。用指定的 git 运行测试时，可设置 `SPECMETRY_TEST_GIT_OBJECTS=safe` 或 `unsafe`，说明预期的探测结论。SHA-256 仓库不受支持（TD-26） |
 | golangci-lint | v2.14.0 | 与 CI 保持一致：`go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0` |
 
 开发时建议把 `SPECMETRY_HOME` 指向一个临时目录，避免改动 `~/.specmetry` 中的真实数据：
@@ -30,7 +30,9 @@ export SPECMETRY_HOME="$(mktemp -d)/specmetry-home"
 | `internal/secrets/` | 密钥识别（architecture §10.8）：14 条内置规则、追加规则校验、按字段扫描（JSON Pointer）、不回显命中文本的拒绝错误。只能降低泄露风险，不能保证检测出所有秘密 |
 | `internal/store/sqlite/` | SQLite 存储基础：打开顺序、迁移框架、备份、墓碑、`seq`、只追加触发器、只读检查；迁移 v2 起是业务表（`projects`、`worktrees`、`delivery_targets`） |
 | `internal/project/` | 项目登记与 `init`（architecture §6.1.1、§6.1.2）：阶段识别与候选来源（只看路径和大小，不读内容）、marker、exclude 条目、项目与 worktree 的登记、默认交付目标 |
-| `internal/source/` | 来源（architecture §6.1.3）：路径解析（`in_repo` / `external`）、分块计算 sha256（可取消，不保存内容）、磁盘观测、来源集合哈希、登记、确认与移除 |
+| `internal/source/` | 来源（architecture §6.1.3）：路径解析（`in_repo` / `external`）、分块计算 sha256（可取消，不保存内容）、磁盘观测、来源集合哈希、登记、确认与移除、引用列表 |
+| `internal/baseline/` | 读取已确认的基准（当前版本、按编号查找条目），按 TD-14 分配编号（`GOAL-n`、`REQ-nnn`、`AC-<需求号>-n`、`Q-nnn`，永不复用） |
+| `internal/proposal/` | 提案（architecture §6.1.4）：静态规则、来源解析、流式片段校验（不保存原文）、代码引用检查、在一个写事务中保存提案、条目、问题与问题的来源引用 |
 | `internal/gitx/` | 调用 git CLI（只读）：定位仓库与 worktree、分支与提交、文件列表；不传递 `GIT_DIR` 等定位变量 |
 | `internal/domain/derive/` | 推导规则（纯函数，data-model §6）；目前只有初始化进度（§6.12） |
 | `internal/ulid/` | ULID 生成（只用于标识，不用于排序） |

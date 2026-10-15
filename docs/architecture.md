@@ -252,12 +252,40 @@ sequenceDiagram
 - 当前目录位于 git 目录内部或裸仓库中时，没有可以登记的 worktree，返回退出码 6；不会把它当作非 git 项目。
 - **非 git 项目**：项目目录是从当前目录向上最近的、含有 marker 的目录，没有时就是当前目录；项目由这个目录（主 worktree 的路径）识别。返回 `not_a_git_repository` 警告，`target = null`（FR-INIT-09）。
 - 所有路径都先规范化，再保存和比较：绝对路径，解析符号链接；Windows 上还统一短文件名和大小写。经由符号链接或不同大小写的路径进入同一目录，得到的是同一个项目和同一个 worktree。
-- **git 的执行环境**（codex-review-015 B1）：`init` 只运行读取类 git 命令（`rev-parse`、`worktree list`、`symbolic-ref`、`ls-files`）。这些命令不应执行其他程序、写入文件或修改提交、引用、索引和配置；为此：
+- **git 的执行环境**（codex-review-015 B1）：`init` 只运行读取类 git 命令（`rev-parse`、`worktree list`、`symbolic-ref`、`ls-files`；探测 git 能力时，还在临时目录中运行 `cat-file` 和 `ls-files`，见下文"不按需抓取对象"）。这些命令不应执行其他程序、写入文件或修改提交、引用、索引和配置；为此：
   - 不传递任何继承的 `GIT_*` 变量（不区分大小写），包括配置注入（`GIT_CONFIG_COUNT` / `KEY` / `VALUE`、`GIT_CONFIG_PARAMETERS`、`GIT_CONFIG_GLOBAL`）、跟踪（`GIT_TRACE*`）、仓库定位（`GIT_DIR`、`GIT_WORK_TREE`、`GIT_CEILING_DIRECTORIES` 等）和 `GIT_EXEC_PATH`。仓库只由目录决定，与 Hook 一致。
-  - 只重新设置受控的变量：`GIT_CONFIG_NOSYSTEM=1`、`GIT_CONFIG_SYSTEM` 与 `GIT_CONFIG_GLOBAL` 指向空文件（不读取系统和用户的全局配置，也不修改它们；`trace2.*` 等只在这两处生效的设置因此不起作用）、`GIT_TRACE2=0`、`GIT_TRACE2_EVENT=0`、`GIT_TRACE2_PERF=0`、`GIT_OPTIONAL_LOCKS=0`（读取不写索引）、`GIT_TERMINAL_PROMPT=0`。
+  - 只重新设置受控的变量：`GIT_CONFIG_NOSYSTEM=1`、`GIT_CONFIG_SYSTEM` 与 `GIT_CONFIG_GLOBAL` 指向空文件（不读取系统和用户的全局配置，也不修改它们；`trace2.*` 等只在这两处生效的设置因此不起作用）、`GIT_TRACE2=0`、`GIT_TRACE2_EVENT=0`、`GIT_TRACE2_PERF=0`、`GIT_OPTIONAL_LOCKS=0`（读取不写索引）、`GIT_TERMINAL_PROMPT=0`，以及禁止按需抓取对象的 `GIT_NO_LAZY_FETCH=1` 和 `GIT_ALLOW_PROTOCOL=`（**设置为空**：允许列表中没有任何协议，file、ssh、git、http、https、ext 和任何 remote helper 都被拒绝，并覆盖仓库中的 `protocol.*` 配置；不能省略这个变量，未设置时按 git 的默认策略允许大多数传输；codex-review-021 B1-2）。
   - 这些变量对 Specmetry 启动的**每一个** git 进程都生效，包括第一个运行的版本探测 `git --version`。探测在版本未知时运行，而低于 2.32 的 git 不认识 `GIT_CONFIG_GLOBAL`，会在打印版本之前就按用户全局配置中的 `trace2.*Target` 开启跟踪，连同 `trace2.envVars` 指定的环境变量值写入文件；三个 `GIT_TRACE2*=0` 的优先级高于这些配置，所以旧版 git 在被拒绝之前也不会写出任何内容（codex-review-016 B1）。已用从官方源码构建的 git 2.31.1 和 2.32.0 验证：在版本探测阶段，用户全局配置中只有 trace2 会产生副作用（`core.fsmonitor`、`core.pager`、`core.hooksPath`、经 `include` 引入的设置都不会）。
   - 仓库自己的配置照常生效（例如 `core.worktree`），只有其中会让读取命令执行程序的 `core.fsmonitor` 在命令行上被关闭（`-c core.fsmonitor=`，空值在各个 git 版本中都表示关闭）。命令还带 `--no-pager` 和 `--no-replace-objects`。这些命令不触发 Hook。
-  - 需要 git 2.32 或更高版本（第一个支持 `GIT_CONFIG_GLOBAL` / `GIT_CONFIG_SYSTEM` 的版本）；更旧的 git 无法隔离用户配置，返回退出码 6。
+  - **不按需抓取对象**（codex-review-020 B1、codex-review-022；PD-26）：部分克隆（有 promisor remote 的仓库）缺少的对象，git 会在读取时从远端抓取（Lazy Fetch）。这可能发起网络请求、运行远端的 upload-pack，或在失败前改写仓库配置（已用真实的 git 2.32.0 验证，它会记录远端的过滤条件）。规则如下：
+    - **可能读取对象的命令，只用经实测不会抓取的 git 运行。** 这类命令包括：解析 ref 指向的提交（`rev-parse --verify`）、`ls-tree`、`cat-file`，以及 `ls-files`。`ls-files` 在稀疏检出中会从索引读取工作区之外的 `.gitignore`；不带 `--sparse` 时还会由树对象展开稀疏索引。只读取 ref、配置或目录布局的命令不受此限制，包括 `rev-parse --show-toplevel` / `--git-path`、`worktree list`、`symbolic-ref` 和 `config`。`internal/gitx` 中所有可能读取对象的命令都经过同一个入口；M2 起新增的 git 操作（例如 `status`）也必须经过它。
+    - **能力探测**：每个进程在第一次需要读取对象时探测一次，只在 Specmetry 新建的临时目录中进行，不使用用户仓库，不联网。探测先手工写出一个裸的部分克隆：不含任何对象，promisor remote 指向一个不存在的本地路径。然后让 git 读取一个不存在的对象，共运行两次，用 trace2 的结构化事件（JSON，每行一个事件）记录 git 的行为：
+      - **对照**：不设置 `GIT_NO_LAZY_FETCH`。事件中必须出现 git 自己启动的抓取子进程（`child_start` 事件，`argv` 中含 `fetch`）。这证明这个仓库确实会触发抓取，也证明抓取能在事件中观察到。
+      - **测试**：设置 `GIT_NO_LAZY_FETCH=1`。只有同时满足以下条件，才判定为"不会抓取"：事件中有 git 自己的 `start` 和 `exit`；`exit` 中的退出状态与进程实际的退出状态一致，并且非零；没有任何子进程。
+      - **事件流的完整性**（codex-review-023 B1）：事件流必须构成 git 的一次完整、一致的运行，才可信。具体要求如下：
+        - git 自己的 `version` 至多一次，并且在 `start` 之前；`start`、`exit` 各一次，顺序正确，`exit` 带退出状态；`atexit` 至多一次，在 `exit` 之后，状态与 `exit` 相同；其他事件都在 `start` 与 `atexit` 之间。
+        - 子进程事件只在 git 运行期间、`exit` 之前出现：每个 `child_start` 有各自不同的 `child_id`；`child_exit`、`child_ready` 只对应已启动、尚未退出的子进程，且 `child_exit` 只出现一次；不认识的子进程事件不可信；所有子进程都在 git 退出之前退出。
+        - git 之下任何进程（sid 以 git 的 sid 为前缀）的事件，都是存在子进程的证据，只能在 git 运行期间出现，并且这样的子进程不多于 `child_start` 的数量。即使缺少 `child_start`，也绝不判为没有子进程：缺少就不可信。
+        - 重复、倒序、矛盾或无法归属的事件，退出状态与进程实际状态不一致，或者其他进程的事件，都使整个事件流不可信，结论为"无法判定"，不保存。真实 git 2.32.0、2.43、2.56 的事件流都符合这些要求。
+      - 测试中出现抓取子进程，判定为"会抓取"。其他任何情况都是"无法判定"，按不具备能力处理（fail-closed），例如：没有事件、对照中没有抓取、事件不是 JSON 或属于其他进程、出现其他子进程、退出状态不一致、超时或被取消。不依据版本号，也不依据 git 是否认识 `--no-lazy-fetch` 来推断：Ubuntu 的 git 2.43 不认识这个选项，却遵守这个变量。
+      - 两次运行都使用受控环境（包括空的 `GIT_ALLOW_PROTOCOL`），所以对照中的抓取在连接或运行任何程序之前就失败。git 的输出全部丢弃。临时目录在成功、失败、超时（30 秒）和取消后都会删除。探测内容不写入用户仓库、数据库或错误输出。
+    - **受控复用**：只保存明确的结论（"会抓取"或"不会抓取"），并且只在 PATH 找到的仍是同一个 git 文件（路径、大小、修改时间都不变）时复用；git 文件变了，就重新检查版本并重新探测。失败、取消、超时和"无法判定"都不保存，下次重新探测。实际运行的就是 PATH 找到的那个文件。
+    - **不具备能力时**：所有可能读取对象的操作都在运行之前返回退出码 6，在任何仓库中都是如此。不再先识别仓库是否为部分克隆，因为识别与读取是两个 git 进程，仓库可能在两者之间发生变化（codex-review-022）。不读取对象的操作不受影响，例如项目定位、`source` 命令、不含代码引用的 `propose`。
+    - **具备能力时**：git 读取缺失的对象会直接失败，不抓取、不运行程序、不写仓库。缺失的对象一律不会被当作存在。仓库在两次读取之间变成部分克隆也是如此，因为读取进程自己就遵守 `GIT_NO_LAZY_FETCH`。
+    - **实测（2026-10-15）**：官方源码构建的 git 2.32.0 判定为"会抓取"。Ubuntu 的 git 2.43.0（`1:2.43.0-1ubuntu7.3`）和 Git for Windows 2.56.0 判定为"不会抓取"。三者的结论都与一个独立判据一致：不设置协议限制，由 promisor remote 的 upload-pack 替身写标记文件，以此判断是否发生了抓取。
+    - 已知边界：探测证明的是 PATH 上的 git 文件的行为。在探测与运行之间，有人在原位置替换 git 文件（并保持大小和修改时间不变），不在防护范围之内。
+  - **列出文件不展开稀疏索引**（PD-26）：
+    - `ls-files` 带 `--sparse` 运行。稀疏检出之外的目录以目录项（末尾带 `/`）列出，不由树对象展开，也就不读取这些树。目录项不是常规文件，不参与候选来源和阶段识别。这与展开后的结果相同，因为稀疏检出之外的文件本来就不在工作区中。
+    - 不带 `--sparse` 时，git 2.56 和 2.43 展开稀疏索引都会改写对象文件的修改时间（重新写入已存在的树对象）；树对象缺失时，还会静默漏掉其中的文件。
+    - `ls-files` 不认识 `--sparse` 的 git（例如 2.32.0），在解析参数之前就已读取并展开索引，所以不能在用户仓库中试探。是否认识这个选项，同样在临时目录中探测一次，并按同样的方式复用结论。不认识时，列出文件返回退出码 6，所以这类 git 上 Git 项目的 `init` 返回退出码 6。即使索引不是稀疏索引、普通的 `ls-files` 也许可以读取，也不冒险在用户仓库中试探（PD-26 已批准的实施细化，2026-10-15）。候选来源发现只面向 worktree 中实际可访问的普通文件，不要求列举稀疏检出之外的全部文件。
+    - 稀疏检出中，git 从索引读取工作区之外的 `.gitignore`。它的 blob 缺失时，具备能力的 git 不抓取、不报错，按没有这些规则处理（git 2.56、2.43 实测）。这只影响候选来源列表，不影响安全。
+  - **部分克隆的识别**（codex-review-021 B1-1）：只用于 §6.1.4 代码引用的提示。在具备能力的 git 上，检查代码引用之前仍先识别部分克隆，是部分克隆就返回退出码 6，提示改用完整克隆。识别方法如下：
+    - `extensions.partialClone` 有任何取值，即为部分克隆（它的值是远端名称，不按布尔值解释）；
+    - `remote.<name>.promisor` 由 git 自己按布尔值解析（`git config --bool --get-regexp`），git 认为是真值的（包括 `2` 这样的数值），即为部分克隆；
+    - git 无法把它解析为布尔值，或无法读取这些配置时，返回退出码 6，不当作完整克隆。
+    - 识别只读取配置，不读取对象；错误中不出现配置值。
+  - **对象格式**（TD-26）：v0.1.0 只支持 SHA-1 对象 ID。git 项目的 `init` 在定位仓库之后，先用 `git rev-parse --show-object-format` 识别仓库的对象格式（只读配置，不读取对象）。是 `sha256` 时，在任何写入之前返回退出码 6：不创建数据库，不登记项目，不写 marker 和 exclude，不分配 `seq`。是否会输出快照与此无关：分支还没有提交、处于分离 HEAD 时同样拒绝，不能靠省略快照绕过。git 给出其他答复时同样返回退出码 6。快照解析得到的不是 40 位 SHA-1 ID 时，也返回退出码 6，不输出 `snapshot = null`。
+  - 需要 git 2.32 或更高版本（第一个支持 `GIT_CONFIG_GLOBAL` / `GIT_CONFIG_SYSTEM` 的版本）；更旧的 git 无法隔离用户配置，返回退出码 6。最低版本仍是 2.32（PD-26 不提高它）；读取对象另外需要上述能力。
   - 用户全局排除文件的默认位置（`$XDG_CONFIG_HOME/git/ignore`）仍然生效，因为 `HOME` 照常传递；`core.excludesFile` 指向别处时，那里的规则不生效（候选来源可能多出这些文件，不影响正确性）。
 - **git 的错误**（codex-review-015 B3）：git 自己的错误信息（可能引用配置值或路径）一律丢弃，不进入输出、`error.v1` 或日志，也不保存。错误只说明是哪个 git 子命令、退出状态是多少（退出码 6）；找不到仓库等错误也不包含当前目录。
 
@@ -267,7 +295,7 @@ sequenceDiagram
 - marker 中的 `project_id` 与数据库中的项目不同，或者数据库中没有 marker 所指的项目（例如该项目已被 `purge`，或登记在另一个 `SPECMETRY_HOME` 中，或者目录是从其他项目复制或移动来的）：返回退出码 6，**不登记项目、不分配 `seq`，marker 保持原样**，提示人检查。数据目录中还没有数据库时，在创建数据库之前就拒绝，数据目录逐字节不变（codex-review-015 N1）。人确认后删除 marker 再执行 `init`，目录就会登记为新项目。marker 中的 ID 从不被沿用，所以已删除的项目不会因此复活。仓库移动或复制后如何继承原项目，见 TD-25。
 - marker 无法解析、不是常规文件，或者 `.specmetry` 不是目录（包括符号链接）：返回退出码 6，不写入。
 
-**首次执行**（数据库中没有这个项目）：在一个写事务中登记项目、主 worktree，以及当前 worktree（如果与主 worktree 不同）；并按 FR-INIT-10 创建默认交付目标：名称为 `default`，ref 是主 worktree 当前所在的分支（即使 `init` 在关联 worktree 中执行），`actor` 和 `channel` 为 `system`。分支还没有提交时也创建目标，快照为 `null`；主 worktree 处于分离 HEAD 时不创建，并返回 `detached_head_no_target`。阶段取 `--stage`，否则取识别结果；名称取 `--name`，否则取主 worktree 的目录名。
+**首次执行**（数据库中没有这个项目）：在一个写事务中登记项目、主 worktree，以及当前 worktree（如果与主 worktree 不同）；并按 FR-INIT-10 创建默认交付目标：名称为 `default`，ref 是主 worktree 当前所在的分支（即使 `init` 在关联 worktree 中执行），`actor` 和 `channel` 为 `system`。分支还没有提交时也创建目标，快照为 `null`；主 worktree 处于分离 HEAD 时不创建，并返回 `detached_head_no_target`。分支已有提交、但提交对象无法读取（例如部分克隆缺少它），不等于"还没有提交"：返回退出码 6，不写入任何内容（PD-26）。先解析 ref（不读取对象），ref 不存在时快照为 `null`；ref 存在时再读取它指向的提交，读取失败即报错。阶段取 `--stage`，否则取识别结果；名称取 `--name`，否则取主 worktree 的目录名。
 
 **再次执行**：
 
@@ -279,7 +307,7 @@ sequenceDiagram
 
 **写入顺序与失败**：
 
-1. 参数、路径和分支的校验都在打开数据库之前完成；校验失败时，连数据目录都不会创建。扫描被取消（例如按下 Ctrl-C）时，`init` 立即停止，返回退出码 6，不会把中断的扫描当作完整结果，也不登记任何内容（codex-review-015 N2）。
+1. 参数、路径和分支的校验都在打开数据库之前完成；校验失败时，连数据目录都不会创建。git 项目在定位仓库之后，先完成对象读取能力的检查（PD-26），然后才列出文件。不具备能力时返回退出码 6，数据目录、项目登记、marker、exclude 和 `seq` 都不变。主 worktree 分支的快照也在打开数据库之前解析。已登记项目的目标 ref 与主 worktree 当前的分支不同时，这个 ref 在写事务中解析，解析失败则整个事务回滚。扫描被取消（例如按下 Ctrl-C）时，`init` 立即停止，返回退出码 6，不会把中断的扫描当作完整结果，也不登记任何内容（codex-review-015 N2）。
 2. 数据库写入在一个写事务中完成（`BEGIN IMMEDIATE`），所以并发执行的 `init` 只会登记一个项目；`git_common_dir` 的唯一约束是第二道防线。事务中的任何失败都会回滚，不留下数据。
 3. 事务提交之后写 marker（先写临时文件，再原子替换），最后写 exclude 条目（§10.6）。marker 写入失败时返回退出码 6；项目已经登记，再次执行 `init` 会补写 marker。
 
@@ -344,7 +372,7 @@ sequenceDiagram
 - 交互式确认之后写入 `removed_seq`。已移除的来源不会再改变，来源行也不会被删除（`purge` 与墓碑除外），两者都由数据库触发器保护。引用保留。
 - `--erase-excerpts`：M1 中项目只能是 `hash_only`，没有保存任何片段原文，所以没有内容需要擦除，确认提示中会说明这一点。`full` 模式下的擦除与整理在 WP2.11 实现；在那之前，遇到不是 `hash_only` 的项目时拒绝（退出码 6），不改动任何内容。
 
-**引用**：`source_refs` 由 WP1.5 的提案写入，在此之前没有任何引用，`--refs` 输出空列表。MVP-SRC-04 中"已有引用显示为 `source_removed`"和 MVP-SRC-08 中的 `excerpt_state`，随 WP1.5 和 M2 验证。
+**引用**：`source_refs` 由提案写入（§6.1.4）：WP1.5 写入问题的来源引用，审核接受条目时写入条目的来源引用（WP1.6）。`--refs` 列出每个来源的全部引用（当前与历史），包括已移除来源的引用（加上 `--include-removed`）；`hash_only` 下 `excerpt_state = not_stored`、`excerpt` 为 null。MVP-SRC-04 中引用以 `source_removed` 的形式出现在状态与差距中，随 M2 验证。
 
 **来源集合哈希**：按 data-model §4.3 计算，在写事务中从数据库读取未移除的来源。它只随登记、确认和移除改变，观测不影响它。MVP-SRC-06 的含义见 PD-25（已确认）：文件发生变化、但尚未经人工确认时，集合哈希不变。
 
@@ -355,6 +383,48 @@ sequenceDiagram
 - `source ack`、`source remove` 是人类专属命令，只输出文本；出错时，带 `--json` 输出 `error.v1`。
 
 **隐私**：来源原文不进入数据库、输出或日志。路径（原始参数和要保存的路径）、理由和显示名，在写入之前做密钥扫描；命中时返回退出码 2，错误中只给出字段和规则。
+
+### 6.1.4 提案的提交（M1 实现）
+
+命令：`propose --file <path|-> [--json]`（`-` 表示从标准输入读取，最大 8 MiB）。任何通道都可以提交；提交**不改变基准**：条目以 `pending` 等待人审核（WP1.6），问题在提交时立即以 `open` 登记。不创建基准版本，不写入 `goals`、`requirements`、`acceptance_criteria`。
+
+**通道与人工编辑**（V-P01）：
+
+- `--apply`（人工编辑、立即应用）只能由人在 `human_cli` 中使用，Agent 通道返回退出码 3。应用机制在 WP1.6 实现；在那之前，人在终端中使用 `--apply` 也返回退出码 2，不写入。
+- `origin = human_edit`：Agent 通道返回退出码 3；人在终端中不带 `--apply` 提交时返回退出码 2（指向 `/origin`）。它永远不会被当作普通的待审提案保存。
+- actor：Agent 通道为 `agent:<agent>`，设置了 Claude Code 的环境变量时为 `agent:claude_code`，否则为 `agent:unknown`；人在终端中提交时为 `human:<显示名>`（同 §6.1.3）。
+
+**处理顺序**（拒绝为退出码 2，过期为退出码 5；两者都不写入任何数据，也不分配 `seq`）：
+
+1. 读取输入；所在项目按 §6.1.2 确定，没有数据库或项目未登记时返回退出码 4。
+2. 按 `proposal.v1` 严格校验（V-P01）；错误按 §10.8 脱敏，只给出 JSON Pointer 和约束。
+3. 不需要数据库的规则：
+   - 所有字符串值都不能包含代码围栏（V-P05）；
+   - `ref` 在提案内唯一；`goal`、`requirement`、`about` 指向本提案内的 `ref` 时，被指向的条目类型必须正确（需求的 `goal` 指向目标，AC 的 `requirement` 指向需求，问题的 `about` 指向需求或 AC）；同一 `target` 至多出现一次，并且编号的类型与条目的 `type` 一致（V-P03）；
+   - `workdir`、`inputs` 和代码引用的路径，统一分隔符并按字面规范化之后，不得越出仓库根（V-P04；schema 已拒绝绝对路径和 `..` 段，这里是第二道防线）；
+   - 代码引用的行号：可以不填；填写时为 `a` 或 `a-b`，`1 ≤ a ≤ b ≤ 2147483647`（32 位上限，32 位与 64 位构建的解释一致）。超出上限（包括 schema 允许、但无法表示的超长数字）或倒置的范围都拒绝，绝不当作"没有行号"（codex-review-020 B4）；静态检查与代码引用检查使用同一个解析函数。片段去掉空白之后不能为空（否则在任何来源中都能"找到"）。
+   - 需求的 `goal` 可以为 `null`（不关联目标；更新时表示清除关联），不作为编号查找，并原样保留在 payload 中（codex-review-020 B3）。
+4. 密钥扫描（V-P05，§10.8）：提案中的**每个**字符串值（包括片段、路径和检查命令），以及可能被登记的当前 worktree 路径和 git 目录。
+5. 解析来源（V-P06）：`source` 按登记时保存的路径或来源 ID 精确匹配；已移除或未登记的来源都拒绝，错误指向每个这样的引用。
+6. 在事务之外读取来源与代码：
+   - **片段校验**（V-P07，标记）：每个来源文件只流式读取一次，同时计算 sha256，读完即丢弃。规范化方式：去掉所有 Unicode 空白字符（空格、制表符、换行，包括 CRLF 和全角空格），再做子串匹配，因此只有空白或换行不同的片段为 `verified`，改动任何一个字为 `not_found`。`.pdf`、`.docx`、`.doc`、`.odt`、`.rtf`，以及不是有效 UTF-8 或含有 NUL 字节的文件，为 `not_checkable`；文件无法读取、或不是普通文件时为 `source_missing`：来源文件以不会因 FIFO、设备等特殊文件而阻塞的方式打开（Unix 用 `O_NONBLOCK`，Windows 打开设备或管道本身不等待），再通过已打开的描述符或句柄确认是普通文件，所以检查与打开之间不会被替换；取消在每块读取之前生效，不产生部分结果（codex-review-020 B5）。来源登记与观测的哈希计算（§6.1.3）使用同一种打开方式。其他类型逐字匹配文件原文，不解析 HTML 或邮件编码。`verified` 只说明片段出现在来源中，**不说明**条目语义正确或覆盖完整（data-model §4.5），文本输出中如实说明这一点。
+   - **代码引用**（V-P08，标记）：git 项目中，对照**当前 worktree 的 HEAD 提交**检查：路径必须是该提交树中的普通文件（目录、符号链接和子模块都不算），有行号时行号必须在文件的行数之内。未提交的文件、没有任何提交的 worktree，都记为不存在。非 git 项目对照项目根目录下的文件，解析链接之后仍须在根目录之内。只读取行数，不保存任何代码内容。代码引用只说明文件位置存在，**不是**验收证据。git 调用沿用 `internal/gitx` 的受控环境，只接受完整的对象 ID。git 不具备安全读取对象的能力时（§6.1.2 的"不按需抓取对象"，PD-26），含代码引用的提案返回退出码 6，不写入、不分配 `seq`；不含代码引用的提案不受影响。部分克隆中不检查代码引用：读取对象之前识别出部分克隆时返回退出码 6，提示改用完整克隆或不带代码引用提交（codex-review-020 B1）。
+7. 写事务（`BEGIN IMMEDIATE`）：
+   - `base_version` 不等于当前基准版本（不存在版本时为 0）时返回退出码 5，`error.current` 给出 `base_version`（V-P02）；
+   - 编号必须指向未退役、类型正确的条目，否则退出码 2（V-P03）；
+   - `target_revision` 不是目标当前的 revision 时返回退出码 5，`error.current.targets` 逐项给出 JSON Pointer、编号和当前 revision（V-P02）；
+   - 更新 AC 时，结果不能是"有检查但不是自动化"：设置检查需要 AC 是 `automated`，改为 `manual` 需要同时去掉检查（V-P04）；
+   - 引用的来源在此期间被移除时拒绝；
+   - 当前 worktree 第一次出现时自动登记（data-model §4.1）；
+   - 分配**一个** `seq`，写入提案、全部条目（`pending`）、问题（按 TD-14 分配 `Q-nnn`）和问题的来源引用。任何一步失败，整个事务回滚。
+
+**保存的内容**（`hash_only`，M1 唯一的模式）：
+
+- `proposal_items.payload_json` 为提交的 `data`（`retire`、`reaffirm` 为 null）；提议者对 `update` 建议的修订类别单独保存在 `suggested_change_class`，不会代替审核者的选择（V-R01）。
+- `sources_json` 的每一项为 `source_id`、`locator`、`excerpt_sha256`（提交的片段原文的 sha256）、`verification` 和 `source_sha256`（校验时来源文件的哈希，无法读取时为 null），**不含片段原文**；`code_refs_json` 的每一项为 `path`、`lines`、`exists` 和 `checked_head`。数据库触发器拒绝在 `hash_only` 项目中保存片段原文（第二道防线）：`proposal_items` 在插入和更新时检查 `sources_json` 与 `final_payload_json` 中任何层级、取值不为 null 的 `excerpt` 键（用 SQLite 的 `json_tree`），`source_refs` 在插入和更新时检查 `excerpt` 列；这些触发器在维护模式下同样生效，擦除只会去掉原文（codex-review-020 B2）。
+- 问题指向已有编号时，立即关联到该条目；指向本提案内的 `ref` 时，记录 `proposal_item_id`，审核接受该条目时再回填（WP1.6，data-model §4.8）。问题的来源引用立即写入 `source_refs`（`entity_type = question`，`entity_revision = 1`，`excerpt` 为 NULL），因此会出现在 `source list --refs` 中；条目的来源引用在审核接受时才写入 `source_refs`（WP1.6）。
+
+**输出**：`propose --json` 输出 `proposal-receipt.v1`，输出前按 schema 校验：待审提案 `applied_version = null`，每个条目有 `item_id`、`review_state = pending`、`assigned_key = null`，来源引用只给出 `source_id` 和校验结果，代码引用给出 `exists`，**不回显片段**。schema 的字段间条件见 MVP-BL-28。文本输出给出各类校验结果的数量和有问题的引用位置，同样不包含片段。
 
 ### 6.2 Hook 采集与入库
 
@@ -972,3 +1042,4 @@ schemas/  skill/  web/  testdata/fixtures/  docs/
 | TD-23 | `check.inputs` 的对象 ID 粒度 | 文件取 blob ID，目录取 tree ID | M2 |
 | TD-24 | 隔离执行器的后端与验证方法：物化方式（`git worktree add --detach` 或 `git archive`）；各平台的只读强制机制（容器只读挂载、Linux 上的 bubblewrap / Landlock、macOS 沙箱、Windows 待评估）；执行前写入探测与执行后树比对的实现；子模块、LFS 和依赖缓存的处理 | 待定；约束：不能依赖文件权限位；无法验证时绝不标为隔离级；普通项目不强制安装 | 隔离执行器开工前（MVP 之后） |
 | TD-25 | 仓库移动或复制后的项目身份：marker 与数据库不一致时，如何判断是原项目换了位置（应继承原项目），还是复制出的新项目 | M1（WP1.1）采取保守做法：拒绝并说明原因，不写入；由人删除 marker 后，登记为新项目（§6.1.2）。是否提供人类专属的"迁移项目位置"命令，待定 | M4（自测之前） |
+| TD-26 | Git SHA-256 对象格式的完整支持 | **v0.1.0 不支持（2026-10-15，产品负责人）**：SHA-256 仓库的 `init` 在任何写入之前返回退出码 6（§6.1.2）。完整支持需要同步调整 Schema（`commitSha` 等只接受 40 位 ID 的字段）、数据模型、Code Ref、Git Reader 与测试 | v0.1.0 之后 |

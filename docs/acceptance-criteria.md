@@ -51,7 +51,9 @@
 | MVP-INIT-08 | `[P1]` 写入 `.git/info/exclude`；把该文件设为只读后再执行 `init` → 退出码 0，并给出警告 | 集成 | FR-INIT-06 | M1 |
 | MVP-INIT-09 | 非 git 目录 → `init` 成功，`target = null`；交付状态为 `not_assessed`（`NO_TARGET`）；检查可以运行，但 `qualifying = false`。`init` 一侧（成功、`target = null`、`not_a_git_repository` 警告、从子目录再次执行仍是同一项目）已在 WP1.1 验证 | 集成 | FR-INIT-09、FR-TGT-03 | M2 |
 | MVP-INIT-10 | `[P1]` 有 `go.mod`、`package.json`、`pytest.ini` 的夹具 → 给出测试命令提示 | 集成 | FR-INIT-08 | M1 |
-| MVP-INIT-11 | 主 worktree 在 `main` 分支 → `init --json` 中默认交付目标的 `ref = refs/heads/main`；主 worktree 处于分离 HEAD → `target = null`，并给出 `detached_head_no_target` 警告（M1）；差距中有 `NO_TARGET`（M2）。M1 还验证：在关联 worktree 中首次执行时，目标仍是主 worktree 的分支；分支还没有提交时，目标的 `snapshot = null` | 集成 | FR-INIT-10 | M1 / M2 |
+| MVP-INIT-11 | 主 worktree 在 `main` 分支 → `init --json` 中默认交付目标的 `ref = refs/heads/main`；主 worktree 处于分离 HEAD → `target = null`，并给出 `detached_head_no_target` 警告（M1）；差距中有 `NO_TARGET`（M2）。M1 还验证：在关联 worktree 中首次执行时，目标仍是主 worktree 的分支；分支还没有提交时，目标的 `snapshot = null`；分支已有提交、但提交对象无法读取时，不输出 `snapshot = null`，而是退出码 6（MVP-INIT-12） | 集成 | FR-INIT-10 | M1 / M2 |
+| MVP-INIT-12 | **git 对象读取的兼容性前提**（PD-26，产品确认，2026-10-15）：① git 不具备安全读取对象的能力（设置 `GIT_NO_LAZY_FETCH` 后读取缺失对象仍会抓取，例如 git 2.32.0；或者无法判定）→ 在 git 项目中执行 `init`（新项目，或已登记的项目）→ 退出码 6；数据目录（不存在时不创建）、项目登记、marker、exclude、`seq` 和 `.git` 都不变；没有运行任何可能读取用户仓库对象的 git 命令；非 git 项目的 `init` 不受影响。② git 具备该能力 → `init` 照常：候选来源和快照正确；主 worktree 分支的提交对象无法读取（例如部分克隆缺少它）→ 退出码 6，不写入，promisor remote 不运行；已登记项目的目标 ref 的提交无法读取 → 退出码 6，写事务回滚，`seq` 不变。③ 稀疏索引不展开：列出文件后 `.git` 逐文件不变（包括修改时间），稀疏检出之外的树对象缺失时不抓取；`ls-files` 不认识 `--sparse` 的 git → 列出文件返回退出码 6，没有在用户仓库中运行 `ls-files`（PD-26 已批准的实施细化）。④ 能力按行为探测：真实 git 2.32.0 判定为不具备，Ubuntu 的 git 2.43.0（`1:2.43.0-1ubuntu7.3`）和 git 2.56 判定为具备；探测的临时目录在成功、失败、超时和取消后都被删除，无法判定的结论不复用 | 集成（三个平台用替身；真实 git 2.32.0 / 2.43 / 2.56 兼容性检查） | FR-INIT-01、FR-INIT-10 | M1 |
+| MVP-INIT-13 | **SHA-256 仓库不受支持**（TD-26，2026-10-15）：真实的 SHA-256 仓库（分支有提交、没有提交、分离 HEAD 三种）→ `init` → 退出码 6。数据目录不存在时不创建；已有其他项目时，数据目录逐文件不变，`seq` 不变，没有登记项目；仓库（包括 marker、exclude 和 `.git`）逐文件不变。SHA-1 仓库照常初始化：有提交时快照正确，分支还没有提交时 `snapshot = null` | 集成 | FR-INIT-01、FR-INIT-10 | M1 |
 
 ### 2.2 来源（SRC）
 
@@ -60,7 +62,7 @@
 | MVP-SRC-01 | 登记一个仓库内的文件，和一个仓库外、路径含空格和中文的文件 → 都记录了路径、类型、`acked_sha256` 和大小 | 集成 | FR-SRC-01 | M1 |
 | MVP-SRC-02 | 修改已登记的来源 → `source list --json`（`source-list.v1`）显示 `changed`，`current_sha256` 为新哈希；删除文件 → 显示 `missing`，`current_sha256 = null` | 集成 | FR-SRC-02 | M1 |
 | MVP-SRC-03 | 非 TTY 执行 `source ack` → 退出码 3；在 TTY 中执行，但 `observed_sha256` 与磁盘不一致 → 退出码 5；一致时 → 写入 `source_acks`（包括理由），`acked_sha256` 更新，来源集合哈希改变 | 集成 | FR-SRC-03 | M1 |
-| MVP-SRC-04 | 非 TTY 执行 `source remove` → 退出码 3；在 TTY 中执行 → 写入 `removed_seq`，已有引用显示为 `source_removed`，来源集合哈希改变。M1 中还没有引用（WP1.5 才写入），"已有引用显示为 `source_removed`"随 WP1.5 / M2 验证；WP1.4 验证其余部分 | 集成 | FR-SRC-04 | M1 |
+| MVP-SRC-04 | 非 TTY 执行 `source remove` → 退出码 3；在 TTY 中执行 → 写入 `removed_seq`，已有引用显示为 `source_removed`，来源集合哈希改变。WP1.4 验证其余部分；WP1.5 验证引用在移除后保留，并在 `source list --include-removed --refs` 中列在已移除的来源下；引用以 `source_removed` 的形式出现在状态与差距中，随 M2 验证 | 集成 | FR-SRC-04 | M1 |
 | MVP-SRC-05 | `source add` 一个不存在的路径 → 退出码 2，不写入 | 集成 | FR-SRC-01 | M1 |
 | MVP-SRC-06 | 同一组来源记录（`source_id` 与 `acked_sha256` 均相同）以不同顺序输入 → 来源集合哈希相同；`source_id` 改变（移除后重新登记），或人工 `ack` 更新了 `acked_sha256` → 哈希改变；文件发生变化、但尚未经人工确认 → 哈希不变（PD-25） | 单元 + 集成 | FR-SRC-05 | M1 |
 | MVP-SRC-07 | `source add internal/auth/login.go`（非文档类型）→ 退出码 2；在 TTY 中加上 `--allow-any-type` → 成功；修改已登记的来源后，Agent 再次 `source add` 同一路径 → 什么都不做，`acked_sha256` 不变，`SOURCE_CHANGED` 仍然存在。审查确认 Specmetry 只为引用校验读取文本，不解析文档语义。 | 集成 + 审查 | FR-SRC-01、FR-SRC-06 | M1 |
@@ -98,6 +100,7 @@
 | MVP-BL-26 | **前置**：项目的 `excerpt_storage = full`（WP2.11）。对同一来源反复提交片段，已保存原文的总量超过上限（文本长度的 50% 或 20000 字符）→ 退出码 2。M1 只有 `hash_only`，不计算累计总量；M1 验证的是单个片段超过 500 字符时退出码 2（BL-04），以及原文不落盘（PRV-08） | 集成 | FR-BL-02、FR-PRV-02 | M2 |
 | MVP-BL-27 | **审核必须选择修订类别**（PD-04 方案 A，V-R01）：接受 Agent 提案中的 `update` 条目（包括 `accepted_with_edits` 和冲突条目），但没有 `change_class` → 退出码 2，错误指向 `/items/<i>/change_class`，不写入，提案中建议的类别不会被采用；选择 `editorial` 但改动了强制字段 → 按 `material` 记录 | 集成 | FR-BL-07 | M1 |
 | MVP-BL-28 | `propose --json` 的输出符合 `proposal-receipt.v1`：每个条目有 `item_id` 和片段校验结果，代码引用有 `exists`；输出、错误信息和日志中都找不到片段原文（canary）；实现该输出时补充 schema 条件约束与反例：Agent 提案（`applied_version = null`）的条目只能是 `pending` 且 `assigned_key = null`，人工编辑的条目为 `accepted` | 集成 | FR-BL-01、FR-BL-02 | M1 |
+| MVP-BL-29 | git 不具备安全读取对象的能力（PD-26，见 MVP-INIT-12）→ 含代码引用的 `propose` → 退出码 6，不写入、不分配 `seq`，`.git` 不变，没有运行任何可能读取对象的 git 命令；不含代码引用的 `propose`，以及 `source add`、`list`、`ack`、`remove` 不受影响 | 集成（替身；真实 git 2.32.0 兼容性检查） | FR-BL-01 | M1 |
 
 ### 2.4 交付目标与范围（TGT）
 
