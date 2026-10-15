@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -501,12 +502,18 @@ func TestQuestionInputIsChecked(t *testing.T) {
 			if strings.Contains(stdout+stderr, token) {
 				t.Errorf("%v echoes its input:\n%s%s", run, stdout, stderr)
 			}
-			if c.pointer == "" || !asJSON {
+			if !asJSON {
 				continue
 			}
-			var env apperr.Envelope
-			if err := json.Unmarshal([]byte(stdout), &env); err != nil {
-				t.Errorf("%v: no error.v1: %v\n%s", run, err, stdout)
+			// Every --json run prints a whole error.v1, whether or not
+			// the error points at a field (codex-review-027 B3).
+			want := apperr.InvalidInput
+			if slices.Contains(c.args, "Q-099") {
+				want = apperr.NotFound
+			}
+			what := strings.ReplaceAll(strings.Join(run, " "), token, "<token>")
+			env := errorV1(t, what, stdout, want)
+			if c.pointer == "" {
 				continue
 			}
 			found := false

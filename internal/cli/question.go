@@ -15,6 +15,7 @@ import (
 	"github.com/XKHoshizora/specmetry/internal/proposal"
 	"github.com/XKHoshizora/specmetry/internal/question"
 	"github.com/XKHoshizora/specmetry/internal/secrets"
+	"github.com/XKHoshizora/specmetry/internal/termtext"
 )
 
 // questionAnswerDoc is the question-answer.v1 input.
@@ -36,15 +37,40 @@ func (d questionAnswerDoc) text() string {
 }
 
 func newQuestionCmd() *cobra.Command {
+	var asJSON bool
 	cmd := &cobra.Command{
 		Use:   "question",
 		Short: "List, answer and dismiss the questions to clarify",
+		// Without Args and RunE, cobra shows the help for an unknown
+		// command and exits 0 (codex-review-027 B2).
+		Args: unknownQuestionCommand,
+		RunE: run(func(cmd *cobra.Command, _ []string) error {
+			if asJSON {
+				return apperr.New(apperr.InvalidInput, "name a question command: list, answer or dismiss (see specmetry question --help)")
+			}
+			return cmd.Help()
+		}),
 	}
+	cmd.Flags().BoolVar(&asJSON, "json", false, "print errors as error.v1")
+	cmd.SuggestionsMinimumDistance = 2 // cobra's default, which SuggestionsFor does not apply
 	// The question commands quote no flag they cannot parse (flagError);
 	// the subcommands inherit it.
 	cmd.SetFlagErrorFunc(flagError)
 	cmd.AddCommand(newQuestionListCmd(), newQuestionCloseCmd(question.Answer), newQuestionCloseCmd(question.Dismiss))
 	return cmd
+}
+
+// unknownQuestionCommand refuses a question command that does not exist,
+// without quoting it; it may suggest the names of those that do.
+func unknownQuestionCommand(cmd *cobra.Command, args []string) error {
+	if len(args) == 0 {
+		return nil
+	}
+	msg := "unknown question command"
+	if names := cmd.SuggestionsFor(args[0]); len(names) > 0 {
+		msg += "; did you mean " + strings.Join(names, " or ") + "?"
+	}
+	return apperr.New(apperr.InvalidInput, msg+" (see specmetry question --help)")
 }
 
 // noArgs refuses arguments without quoting them: they are input not yet
@@ -57,7 +83,9 @@ func noArgs(_ *cobra.Command, args []string) error {
 }
 
 // flagError reports a flag that cannot be parsed without quoting the
-// command line, for the same reason as noArgs.
+// command line, for the same reason as noArgs. pflag stops at that flag,
+// so the error is marked unparsedFlags: whether --json was asked for is
+// read from the arguments (codex-review-027 B3).
 func flagError(_ *cobra.Command, err error) error {
 	problem := "an unknown flag, or a flag without its value"
 	switch msg := err.Error(); {
@@ -68,8 +96,15 @@ func flagError(_ *cobra.Command, err error) error {
 	case strings.HasPrefix(msg, "invalid argument"):
 		problem = "a flag with a value it does not take"
 	}
-	return apperr.New(apperr.InvalidInput, "invalid command line: "+problem+" (see --help)")
+	return unparsedFlags{apperr.New(apperr.InvalidInput, "invalid command line: "+problem+" (see --help)")}
 }
+
+// unparsedFlags is an error after which the command's flags were not all
+// parsed (flagError).
+type unparsedFlags struct{ err *apperr.Error }
+
+func (u unparsedFlags) Error() string { return u.err.Error() }
+func (u unparsedFlags) Unwrap() error { return u.err }
 
 func newQuestionListCmd() *cobra.Command {
 	var all, asJSON bool
@@ -146,7 +181,9 @@ func printQuestions(w io.Writer, doc question.ListDoc, all bool) error {
 		b.WriteString("\nOnly a person answers or dismisses a question, at a terminal:\n" +
 			"  specmetry question answer <key> -m <answer>\n  specmetry question dismiss <key> -m <reason>\n")
 	}
-	_, err := io.WriteString(w, b.String())
+	// The texts come from proposals and people: escaped where they reach
+	// the terminal, all at once (codex-review-027 B1).
+	_, err := io.WriteString(w, termtext.Escape(b.String()))
 	return err
 }
 
@@ -167,7 +204,9 @@ func describeQuestion(q question.Question) string {
 	return fmt.Sprintf("%s, %s, %s (proposal %s, seq %d)", q.Status, blocking, about, q.ProposalID, q.CreatedSeq)
 }
 
-// indented is text whose further lines are indented under the first.
+// indented is text whose further lines are indented under the first. It
+// is escaped (termtext) where it is written; a CRLF, which the escaping
+// turns into a line feed, keeps the indentation.
 func indented(text string) string { return strings.ReplaceAll(text, "\n", "\n    ") }
 
 func newQuestionCloseCmd(action question.Action) *cobra.Command {
@@ -219,7 +258,10 @@ answer changes no baseline: a change it calls for goes through a proposal.`,
 			}); err != nil {
 				return err
 			}
-			op := channel.Operation{Name: name, Summary: closeSummary(q, in, actor, d.Channel), Confirm: q.Key}
+			// The summary holds the question's, the person's and the
+			// configuration's texts: escaped for the terminal
+			// (codex-review-027 B1).
+			op := channel.Operation{Name: name, Summary: termtext.Lines(closeSummary(q, in, actor, d.Channel)), Confirm: q.Key}
 			if err := channel.Guard(d, cmd.InOrStdin(), cmd.OutOrStdout(), op); err != nil {
 				return err
 			}
@@ -237,7 +279,7 @@ answer changes no baseline: a change it calls for goes through a proposal.`,
 			if action == question.Dismiss {
 				past = "Dismissed"
 			}
-			return printf(cmd.OutOrStdout(), "%s %s (seq %d). The baseline is unchanged.\n", past, q.Key, seq)
+			return printf(cmd.OutOrStdout(), "%s", termtext.Escape(fmt.Sprintf("%s %s (seq %d). The baseline is unchanged.\n", past, q.Key, seq)))
 		}),
 	}
 	help := "the answer"
