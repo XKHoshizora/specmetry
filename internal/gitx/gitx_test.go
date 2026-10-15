@@ -130,7 +130,7 @@ func TestFilterEnv(t *testing.T) {
 		"GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_SYSTEM=/dev/null", "GIT_CONFIG_GLOBAL=/dev/null",
 		"GIT_TRACE2=0", "GIT_TRACE2_EVENT=0", "GIT_TRACE2_PERF=0",
 		"GIT_OPTIONAL_LOCKS=0", "GIT_TERMINAL_PROMPT=0", "GIT_DISCOVERY_ACROSS_FILESYSTEM=1",
-		"GIT_NO_LAZY_FETCH=1", "GIT_ALLOW_PROTOCOL=specmetry-no-transport",
+		"GIT_NO_LAZY_FETCH=1", "GIT_ALLOW_PROTOCOL=",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("filterEnv =\n%q\nwant\n%q", got, want)

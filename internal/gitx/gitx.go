@@ -329,12 +329,16 @@ func Canonical(p string) string {
 // that findDotGit found by walking up without a filesystem limit; and no
 // object is ever fetched (codex-review-020 B1). A partial clone fetches a
 // missing object from its promisor remote on demand, which could reach a
-// network or run the remote's upload-pack. git 2.44 and later stop that
-// with GIT_NO_LAZY_FETCH; for every version from 2.32 on, a
-// GIT_ALLOW_PROTOCOL that names no real protocol forbids all transports,
-// overriding any protocol.* configuration, so the fetch git starts fails
-// before it connects or runs anything. Code references, which read
-// objects, also refuse a partial clone up front (PartialClone).
+// network or run the remote's upload-pack. A git that knows
+// --no-lazy-fetch stops that with GIT_NO_LAZY_FETCH. For every version
+// from 2.32 on, GIT_ALLOW_PROTOCOL set and empty is an allow list with no
+// protocol in it: every transport (file, ssh, git, http and https, ext,
+// any remote helper) is refused before it connects or runs a program,
+// whatever the protocol.* configuration says. It must be set, not left
+// out: unset means git's default policy, which allows most transports
+// (codex-review-021 B1-2; an earlier value named a protocol, so a remote
+// helper of that name was allowed). Object reads with an older git also
+// refuse a partial clone up front (objectsReadable).
 var controlledEnv = []string{
 	"GIT_CONFIG_NOSYSTEM=1",
 	"GIT_CONFIG_SYSTEM=/dev/null",
@@ -346,7 +350,7 @@ var controlledEnv = []string{
 	"GIT_TERMINAL_PROMPT=0",
 	"GIT_DISCOVERY_ACROSS_FILESYSTEM=1",
 	"GIT_NO_LAZY_FETCH=1",
-	"GIT_ALLOW_PROTOCOL=specmetry-no-transport",
+	"GIT_ALLOW_PROTOCOL=",
 }
 
 // globalArgs come before every git command. An empty core.fsmonitor turns
@@ -420,19 +424,19 @@ func checkVersion(ctx context.Context) error {
 	return nil
 }
 
-var (
-	partialMu     sync.Mutex
-	partialClones = map[string]bool{}
-)
-
 // objectsReadable lets git read objects in the repository of dir only
 // where that never fetches one (codex-review-020 B1). A git that honours
 // GIT_NO_LAZY_FETCH never does. An older git, in a partial clone, starts a
 // fetch for any missing object; GIT_ALLOW_PROTOCOL makes that fetch fail
-// before it connects or runs the remote's upload-pack, but it may write
-// the repository's configuration first (git 2.32 records the remote's
-// filter). So with an older git a partial clone is refused before any
-// object is read, and the answer is kept for each directory.
+// before it connects or runs a program, but it may write the repository's
+// configuration first (git 2.32 records the remote's filter). So with an
+// older git a partial clone is refused before any object is read. The
+// configuration is read again before every read, never remembered: a
+// repository can become a partial clone between two reads
+// (codex-review-021 B1-3). Between this check and the read itself the
+// configuration could still change; that window is not closed here, and
+// GIT_ALLOW_PROTOCOL still keeps any fetch in it from connecting or
+// running a program.
 func objectsReadable(ctx context.Context, dir string) error {
 	if err := checkVersion(ctx); err != nil {
 		return err
@@ -443,17 +447,9 @@ func objectsReadable(ctx context.Context, dir string) error {
 	if off {
 		return nil
 	}
-	partialMu.Lock()
-	partial, known := partialClones[dir]
-	partialMu.Unlock()
-	if !known {
-		var err error
-		if partial, err = PartialClone(ctx, dir); err != nil {
-			return err
-		}
-		partialMu.Lock()
-		partialClones[dir] = partial
-		partialMu.Unlock()
+	partial, err := PartialClone(ctx, dir)
+	if err != nil {
+		return err
 	}
 	if partial {
 		return apperr.New(apperr.Environment,
@@ -540,29 +536,49 @@ func osProblem(err error) string {
 }
 
 // PartialClone reports whether the repository of worktree is a partial
-// clone: one with a promisor remote (extensions.partialClone, or a remote
-// whose promisor setting is true), from which git fetches the objects it
-// lacks on demand. Only the configuration is read, never an object.
+// clone: one with a promisor remote, from which git fetches the objects it
+// lacks on demand. Either setting makes one: extensions.partialClone,
+// which names a remote and counts whatever its value; or a
+// remote.<name>.promisor that is true. promisor is read by git itself as
+// a boolean (git config --bool), so every value git takes for true counts
+// (git 2.32 takes promisor = 2 for true; codex-review-021 B1-1). A value
+// git cannot read as a boolean makes this fail (exit 6) rather than answer
+// "not a partial clone". Only the configuration is read, never an object,
+// and errors never quote it.
 func PartialClone(ctx context.Context, worktree string) (bool, error) {
-	out, code, err := runCode(ctx, worktree, "config", "--get-regexp", `^(extensions\.partialclone|remote\..*\.promisor)$`)
+	_, code, err := runCode(ctx, worktree, "config", "--get-regexp", `^extensions\.partialclone$`)
 	if err != nil {
-		return false, err
+		return false, unreadable(ctx, err)
+	}
+	if code == 0 {
+		return true, nil
+	}
+	out, code, err := runCode(ctx, worktree, "config", "--bool", "--get-regexp", `^remote\..*\.promisor$`)
+	if err != nil {
+		return false, unreadable(ctx, err)
 	}
 	if code == 1 {
-		return false, nil // no such setting
+		return false, nil // no remote has the setting
 	}
-	for _, line := range strings.Split(strings.ReplaceAll(string(out), "\r\n", "\n"), "\n") {
-		key, value, _ := strings.Cut(line, " ")
-		switch {
-		case key == "extensions.partialclone":
+	for _, line := range strings.Split(strings.TrimSpace(strings.ReplaceAll(string(out), "\r\n", "\n")), "\n") {
+		_, value, _ := strings.Cut(line, " ")
+		switch value {
+		case "true":
 			return true, nil
-		case strings.HasPrefix(key, "remote.") && strings.HasSuffix(key, ".promisor"):
-			// git's booleans: a key without a value is true.
-			switch strings.ToLower(value) {
-			case "", "true", "yes", "on", "1":
-				return true, nil
-			}
+		case "false":
+		default:
+			return false, unreadable(ctx, nil)
 		}
 	}
 	return false, nil
+}
+
+// unreadable is the error of a partial clone check that could not be made:
+// no object is read then either.
+func unreadable(ctx context.Context, err error) error {
+	if ctx.Err() != nil && err != nil {
+		return err
+	}
+	return apperr.New(apperr.Environment,
+		"cannot tell whether this repository is a partial clone (git cannot read its extensions.partialClone or remote.<name>.promisor setting), so Specmetry reads none of its objects; check the repository's configuration")
 }

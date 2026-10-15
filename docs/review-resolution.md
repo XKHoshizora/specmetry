@@ -1318,3 +1318,44 @@ PR：<https://github.com/XKHoshizora/specmetry/pull/1>（`feat/m0-foundation` �
 与审查原文一致：引用结果绑定读取时的 `source_sha256` 与 `checked_head`；正式审核与编号分配属于 WP1.6；`verified` 与 `exists` 只是标记。新增的平台限制：部分克隆中不能检查代码引用；不支持 `--no-lazy-fetch` 的 git 在部分克隆中不读取任何对象（例如 `init` 读取 HEAD 提交时返回退出码 6）。
 
 审查原文按原样入库。
+
+## 26. WP1.5 定向复审（codex-review-021）的处理
+
+**审查结论**：NO-GO。审查目标 `0af9d19`。审查 020 的 B2 ~ B5 关闭，N1、N2 的测试改进有效；**B1 仍有三个残余缺口**，可用真实的 git 2.32.0 绕过。本轮只修复 B1，不改动已关闭的事项。
+
+### B1-1：promisor 的布尔值未按 git 的语义解析
+
+**根因**：`PartialClone` 手工把空值、`true`、`yes`、`on`、`1` 当作真值。git 2.32.0 把 `promisor = 2` 解释为真，Specmetry 却判为完整克隆；空值（`promisor =`）在 git 中为假，却被判为真；git 无法解析的值被当作"不是部分克隆"。
+
+**修复**：`extensions.partialClone` 单独判断，有任何取值即为部分克隆（它是远端名称，不按布尔值解释）；`remote.<name>.promisor` 用 `git config --bool --get-regexp` 由 git 自己解析，任一远端为真即为部分克隆。git 无法解析或无法读取时返回退出码 6，不读取对象。仍在受控环境中只读配置，错误不出现配置值。
+
+### B1-2：`GIT_ALLOW_PROTOCOL` 实际允许了一个协议
+
+**根因**：取值 `specmetry-no-transport` 是允许列表中的一项，同名的 remote helper（`git-remote-specmetry-no-transport`）因此被允许运行。
+
+**修复**：`GIT_ALLOW_PROTOCOL=`，设置为空串：允许列表中没有任何协议。变量必须存在，未设置时按 git 的默认策略允许大多数传输。
+
+### B1-3：部分克隆的否定结果被缓存
+
+**根因**：旧版 git 路径按目录缓存识别结果；仓库在第一次读取之后变成部分克隆时，仍沿用"不是部分克隆"。
+
+**修复**：取消缓存，每次读取对象之前都重新识别。识别与读取之间的并发配置修改不在保证范围内，已在 architecture §6.1.2 写明边界（见下）。
+
+### 回归测试与证据
+
+每个用例都先在旧代码（`0af9d19`）上失败；涉及外部程序的用例先用普通 git 做对照，证明替身确实会被执行。remote helper 替身是测试程序自身的副本（Windows 上同样能被 git 运行），只向隔离目录中的标记文件追加一行，不连接网络。
+
+| 反例 | 修复前 | 修复后（git 2.56 Windows、2.43 Linux、真实 2.32.0 Linux） |
+|---|---|---|
+| `PartialClone` 布尔值表：`true`、`yes`、`on`、`1`、`2`、`TRUE`、无值的键为真；`false`、`no`、`off`、`0`、空值为假；两个远端其一为真；`maybe`；`extensions.partialClone` 取远端名、`false`、`2` | `2` 与"其一为真"判为假，空值判为真，`maybe` 判为完整克隆（三个版本相同） | 全部符合 git 的解析；`maybe` 返回退出码 6，错误中没有该值 |
+| `ls-remote` 经由 Specmetry 的受控环境：同名 helper、另一名称的 helper、file（upload-pack 替身）、ext（`protocol.ext.allow=always`）、ssh（`core.sshCommand` 替身）、https | 同名 helper 运行（三个版本），其余被拒绝 | 全部被拒绝，替身都不运行 |
+| 旧版 git 路径：完整克隆读取一次后，改为 `promisor = true` 或 `2` 并删除 blob，再调用 `CountLines`、`TreeFiles`、`CommitOf` | 只有 `CountLines` 出错（读取了对象），另两个照常读取；真实 2.32.0 上 `.git/config` 被追加 32 字节 | 三个都在读取对象之前返回退出码 6；替身不运行，`.git` 逐文件不变；去掉 promisor 设置后照常读取 |
+| 公开 `propose --json` 组合反例：`promisor = 2`、URL `specmetry-no-transport::unused`、PATH 中有同名 helper、删除已提交的 blob | 真实 2.32.0 上 helper 运行之后才退出 6；2.56 上读取了对象（`git cat-file` 失败）而不是先拒绝 | 退出码 6 并说明是部分克隆；helper 不运行；`.git` 逐文件不变；不写入、不分配 `seq`；JSON 与文本错误中都没有 helper 名称和仓库路径 |
+
+另外：`gitx` 全部 19 个测试在 2.32.0、2.43 和 2.56 上通过；真实 git 2.31.1 的拒绝测试仍通过。
+
+### 并发边界
+
+识别与随后的对象读取是两个独立的 git 进程。两者之间仓库配置仍可能被并发修改，本轮没有关闭这个窗口，测试也没有覆盖它。窗口内即使启动抓取，空的 `GIT_ALLOW_PROTOCOL` 仍使它无法连接或运行任何程序；但旧版 git 的抓取可能已改写仓库配置。需要完全排除这种情况时，使用支持 `--no-lazy-fetch` 的 git，此时 git 根本不启动抓取。
+
+审查原文按原样入库。

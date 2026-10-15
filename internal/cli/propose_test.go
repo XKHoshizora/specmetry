@@ -774,6 +774,52 @@ func TestProposeCodeRefsInAPartialClone(t *testing.T) {
 	}
 }
 
+// codex-review-021 B1, the combined case: a partial clone known only from
+// remote.origin.promisor = 2 (no extensions.partialClone), a promisor URL
+// for the remote helper named as the earlier allow list was, that helper
+// on PATH (a stand-in that only leaves a marker), and a blob removed.
+// propose refuses (exit 6) before reading an object: the helper never
+// runs, and the git directory and the database stay as they were.
+func TestProposeRefusesPartialCloneByAnyMeans(t *testing.T) {
+	home, f, _ := proposalsProject(t)
+	repo := f.Repo
+	repo.WriteFile("internal/auth/login.go", "package auth\n\nfunc Login() {}\n")
+	head := repo.Commit("add login")
+	blob := repo.Git("rev-parse", head+":internal/auth/login.go")
+	pathDir := t.TempDir()
+	ran := testutil.FakeRemoteHelper(t, pathDir, "specmetry-no-transport")
+	t.Setenv("PATH", pathDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	repo.Git("config", "remote.origin.url", "specmetry-no-transport::unused")
+	repo.Git("config", "remote.origin.promisor", "2")
+	if err := os.Remove(filepath.Join(repo.Dir, ".git", "objects", blob[:2], blob[2:])); err != nil {
+		t.Fatal(err)
+	}
+	doc := map[string]any{"schema": "specmetry.proposal/v1", "origin": "skill_init", "base_version": 0, "summary": "inferred",
+		"items": []any{map[string]any{"op": "add", "type": "requirement", "ref": "r1", "origin": "inferred_from_code",
+			"rationale": "the login handler locks accounts",
+			"code_refs": []any{map[string]any{"path": "internal/auth/login.go", "lines": "1-3"}},
+			"data":      map[string]any{"title": "log in", "kind": "functional", "priority": "must"}}}}
+	gitDir := filepath.Join(repo.Dir, ".git")
+	before := testutil.SettledSnapshot(t, gitDir)
+	env := proposeRefused(t, home, repo.Dir, doc, apperr.ExitEnvironment, "")
+	if env.Error.Code != "environment" || !strings.Contains(env.Error.Message, "partial clone") {
+		t.Errorf("error %+v", env.Error)
+	}
+	if b, _ := json.Marshal(env); bytes.Contains(b, []byte("specmetry-no-transport")) || bytes.Contains(b, []byte(filepath.ToSlash(repo.Dir))) {
+		t.Errorf("the error names the configuration or the repository: %s", b)
+	}
+	// The text error as well.
+	code, stdout, stderr := specmetry(t, repo.Dir, "", "propose", "--file", writeProposal(t, doc))
+	if code != apperr.ExitEnvironment || strings.Contains(stdout+stderr, "specmetry-no-transport") ||
+		strings.Contains(filepath.ToSlash(stdout+stderr), filepath.ToSlash(repo.Dir)) {
+		t.Errorf("text error: exit %d\n%s%s", code, stdout, stderr)
+	}
+	if _, err := os.Stat(ran); err == nil {
+		t.Fatal("the remote helper ran")
+	}
+	testutil.AssertTreeUnchanged(t, gitDir, before)
+}
+
 // MVP-BL-21: a check with its rationale, an environment variable for its
 // secret and paths inside the repository is accepted and kept as proposed.
 func TestProposeAcceptsAChecked(t *testing.T) {

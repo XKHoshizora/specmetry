@@ -254,12 +254,14 @@ sequenceDiagram
 - 所有路径都先规范化，再保存和比较：绝对路径，解析符号链接；Windows 上还统一短文件名和大小写。经由符号链接或不同大小写的路径进入同一目录，得到的是同一个项目和同一个 worktree。
 - **git 的执行环境**（codex-review-015 B1）：`init` 只运行读取类 git 命令（`rev-parse`、`worktree list`、`symbolic-ref`、`ls-files`）。这些命令不应执行其他程序、写入文件或修改提交、引用、索引和配置；为此：
   - 不传递任何继承的 `GIT_*` 变量（不区分大小写），包括配置注入（`GIT_CONFIG_COUNT` / `KEY` / `VALUE`、`GIT_CONFIG_PARAMETERS`、`GIT_CONFIG_GLOBAL`）、跟踪（`GIT_TRACE*`）、仓库定位（`GIT_DIR`、`GIT_WORK_TREE`、`GIT_CEILING_DIRECTORIES` 等）和 `GIT_EXEC_PATH`。仓库只由目录决定，与 Hook 一致。
-  - 只重新设置受控的变量：`GIT_CONFIG_NOSYSTEM=1`、`GIT_CONFIG_SYSTEM` 与 `GIT_CONFIG_GLOBAL` 指向空文件（不读取系统和用户的全局配置，也不修改它们；`trace2.*` 等只在这两处生效的设置因此不起作用）、`GIT_TRACE2=0`、`GIT_TRACE2_EVENT=0`、`GIT_TRACE2_PERF=0`、`GIT_OPTIONAL_LOCKS=0`（读取不写索引）、`GIT_TERMINAL_PROMPT=0`，以及禁止按需抓取对象的 `GIT_NO_LAZY_FETCH=1` 和 `GIT_ALLOW_PROTOCOL`（取值不对应任何真实协议，即禁止所有传输，并覆盖仓库中的 `protocol.*` 配置）。
+  - 只重新设置受控的变量：`GIT_CONFIG_NOSYSTEM=1`、`GIT_CONFIG_SYSTEM` 与 `GIT_CONFIG_GLOBAL` 指向空文件（不读取系统和用户的全局配置，也不修改它们；`trace2.*` 等只在这两处生效的设置因此不起作用）、`GIT_TRACE2=0`、`GIT_TRACE2_EVENT=0`、`GIT_TRACE2_PERF=0`、`GIT_OPTIONAL_LOCKS=0`（读取不写索引）、`GIT_TERMINAL_PROMPT=0`，以及禁止按需抓取对象的 `GIT_NO_LAZY_FETCH=1` 和 `GIT_ALLOW_PROTOCOL=`（**设置为空**：允许列表中没有任何协议，file、ssh、git、http、https、ext 和任何 remote helper 都被拒绝，并覆盖仓库中的 `protocol.*` 配置；不能省略这个变量，未设置时按 git 的默认策略允许大多数传输；codex-review-021 B1-2）。
   - 这些变量对 Specmetry 启动的**每一个** git 进程都生效，包括第一个运行的版本探测 `git --version`。探测在版本未知时运行，而低于 2.32 的 git 不认识 `GIT_CONFIG_GLOBAL`，会在打印版本之前就按用户全局配置中的 `trace2.*Target` 开启跟踪，连同 `trace2.envVars` 指定的环境变量值写入文件；三个 `GIT_TRACE2*=0` 的优先级高于这些配置，所以旧版 git 在被拒绝之前也不会写出任何内容（codex-review-016 B1）。已用从官方源码构建的 git 2.31.1 和 2.32.0 验证：在版本探测阶段，用户全局配置中只有 trace2 会产生副作用（`core.fsmonitor`、`core.pager`、`core.hooksPath`、经 `include` 引入的设置都不会）。
   - 仓库自己的配置照常生效（例如 `core.worktree`），只有其中会让读取命令执行程序的 `core.fsmonitor` 在命令行上被关闭（`-c core.fsmonitor=`，空值在各个 git 版本中都表示关闭）。命令还带 `--no-pager` 和 `--no-replace-objects`。这些命令不触发 Hook。
   - **不按需抓取对象**（codex-review-020 B1）：部分克隆（有 promisor remote 的仓库）缺少的对象，git 会在读取时从远端抓取，这可能发起网络请求或运行远端的 upload-pack。分两层防护：
     - 支持 `--no-lazy-fetch` 的 git（版本检查时探测一次）遵守 `GIT_NO_LAZY_FETCH`，读取缺失对象时直接失败，不启动抓取；
-    - 更旧的 git（2.32 起）不认识它，读取缺失对象时仍会启动 `git fetch`；`GIT_ALLOW_PROTOCOL` 让它在连接或运行 upload-pack 之前失败，但已用真实的 git 2.32.0 验证，它在失败之前可能改写仓库配置（记录远端的过滤条件）。因此对这类 git，读取提交、树或 blob 之前先识别部分克隆（只读配置 `extensions.partialClone` 和 `remote.<name>.promisor`，不读对象），是部分克隆就返回退出码 6，不读取任何对象。
+    - 更旧的 git（2.32 起）不认识它，读取缺失对象时仍会启动 `git fetch`；`GIT_ALLOW_PROTOCOL` 让它在连接或运行任何程序之前失败，但已用真实的 git 2.32.0 验证，它在失败之前可能改写仓库配置（记录远端的过滤条件）。因此对这类 git，读取提交、树或 blob 之前先识别部分克隆，是部分克隆就返回退出码 6，不读取任何对象。
+    - 识别方式（codex-review-021 B1-1）：`extensions.partialClone` 有任何取值即为部分克隆（它的值是远端名称，不按布尔值解释）；`remote.<name>.promisor` 由 git 自己按布尔值解析（`git config --bool --get-regexp`），git 认为是真值的（包括 `2` 这样的数值）即为部分克隆。git 无法解析为布尔值、或无法读取这些配置时，同样返回退出码 6，不当作完整克隆。只读配置、不读对象；错误中不出现配置值。
+    - 每次读取对象之前都重新识别，不缓存结果（codex-review-021 B1-3）：仓库可能在两次读取之间变成部分克隆。识别与随后的读取是两个独立的 git 进程，两者之间配置仍可能被并发修改；这个窗口没有关闭，也没有测试覆盖。窗口内即使启动抓取，空的 `GIT_ALLOW_PROTOCOL` 仍使它无法连接或运行任何程序，但旧版 git 可能已改写配置。需要完全排除这种情况时，使用支持 `--no-lazy-fetch` 的 git。
     - 缺失的对象一律不会被当作存在。
   - 需要 git 2.32 或更高版本（第一个支持 `GIT_CONFIG_GLOBAL` / `GIT_CONFIG_SYSTEM` 的版本）；更旧的 git 无法隔离用户配置，返回退出码 6。
   - 用户全局排除文件的默认位置（`$XDG_CONFIG_HOME/git/ignore`）仍然生效，因为 `HOME` 照常传递；`core.excludesFile` 指向别处时，那里的规则不生效（候选来源可能多出这些文件，不影响正确性）。

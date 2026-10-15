@@ -84,11 +84,43 @@ func copyFile(t testing.TB, from, to string) {
 	}
 }
 
+const fakeHelperMarkerEnv = "SPECMETRY_FAKE_REMOTE_HELPER_MARKER"
+
+// FakeRemoteHelper puts a stand-in git remote helper named
+// git-remote-<name> in dir, a copy of the test binary (so that git runs it
+// on Windows too), and returns the marker file it appends to whenever git
+// runs it; it does nothing else and fails. The marker goes to git through
+// the environment, which this sets for the rest of the test. The package's
+// TestMain must call DispatchFakeGit first.
+func FakeRemoteHelper(t *testing.T, dir, name string) (marker string) {
+	t.Helper()
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := "git-remote-" + name
+	if runtime.GOOS == "windows" {
+		file += ".exe"
+	}
+	copyFile(t, self, filepath.Join(dir, file))
+	marker = filepath.Join(t.TempDir(), "remote-helper-ran")
+	t.Setenv(fakeHelperMarkerEnv, marker)
+	return marker
+}
+
 // DispatchFakeGit must be called first in the TestMain of a package that
-// uses FakeGit. When the test binary runs as a fake git, it records the
-// call, prints the version and exits.
+// uses FakeGit or FakeRemoteHelper. When the test binary runs as a fake
+// git, it records the call, prints the version and exits; as a remote
+// helper, it appends to its marker and fails.
 func DispatchFakeGit() {
 	name := strings.TrimSuffix(strings.ToLower(filepath.Base(os.Args[0])), ".exe")
+	if strings.HasPrefix(name, "git-remote-") {
+		if f, err := os.OpenFile(os.Getenv(fakeHelperMarkerEnv), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o600); err == nil {
+			_, _ = f.WriteString("ran\n")
+			_ = f.Close()
+		}
+		os.Exit(1)
+	}
 	if name != "git" {
 		return
 	}
