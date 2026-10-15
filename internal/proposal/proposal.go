@@ -222,6 +222,28 @@ func CheckStatic(doc any, p *Proposal) error {
 	return ps.err()
 }
 
+// CheckEditedData applies to data a reviewer edited the rules CheckStatic
+// applies to an item's data: no code fence in any string, and a check's
+// workdir and inputs inside the repository. pointer locates data.
+func CheckEditedData(data map[string]json.RawMessage, pointer string) []apperr.Detail {
+	var ps problems
+	var doc any
+	if b, err := json.Marshal(data); err == nil && json.Unmarshal(b, &doc) == nil {
+		fences(doc, pointer, &ps)
+	}
+	if c, _ := checkData(data); c != nil {
+		if c.Workdir != "" && !insideRepository(c.Workdir) {
+			ps.add(pointer+"/check/workdir", "leaves the repository")
+		}
+		for k, in := range c.Inputs {
+			if !insideRepository(in) {
+				ps.add(pointer+"/check/inputs/"+strconv.Itoa(k), "leaves the repository")
+			}
+		}
+	}
+	return ps
+}
+
 func excerpts(refs []SourceRef, pointer string, ps *problems) {
 	for k, r := range refs {
 		if Normalize(r.Excerpt) == "" {
