@@ -1695,3 +1695,103 @@ MVP v0.1.0 不支持 SHA-256 格式的 git 对象 ID。§27 记录的现象（64
 **接受的风险**：沿用既有批准边界：通道识别只防误操作，不证明身份；M1 的 `hash_only` 策略；后续工作包的既定范围。没有接受新的风险。
 
 审查原文按原样入库。
+
+## 33. WP1.7 代码审查（codex-review-027）的处理
+
+**审查结论**：NO-GO。审查目标 `78ca882`，有 3 项 BLOCKER 和 1 项 NON-BLOCKER。本轮不需要新的产品决策。审查确认 Question 的状态转换、持久化、查询关联、通道拦截和并发保护正确。
+
+本轮只修复 B1、B2、B3，以及直接相关的回归测试。以下内容不变：
+
+- Question 的状态模型、`questions` 表、迁移 0004 和 0005；
+- schema 的业务字段结构；
+- 并发处理和 `seq` 的分配；
+- Proposal、Baseline、Scope 的业务行为；
+- WP1.8 和 M2 的功能。
+
+审查原文按原样入库。
+
+### B1：提案文本中的终端控制字符进入人工确认摘要
+
+**根因**：文本 schema 和密钥扫描都允许 ESC、CR、BEL 等控制字符。`indented` 只处理换行，`printQuestions`、`closeSummary` 和 `channel.Guard` 的确认提示把其余字符原样写到终端。不可信的提案因此可以清屏、移动光标、覆盖整行、设置终端标题，伪装人看到的确认摘要。
+
+**修复**：
+
+- 新增 `internal/termtext`，作为统一的终端转义函数 `Escape`：
+  - LF 和制表符保留，CRLF 显示为 LF；
+  - 其他 C0 控制字符、DEL、C1 控制字符显示为可见的转义；
+  - 双向控制字符和行、段分隔符显示为 `\uNNNN`；
+  - 不是 UTF-8 的字节显示为 `\xNN`。
+  - 不删除任何字符，`Escape` 是幂等的。
+- `question` 各命令在写到终端的边界统一转义：
+  - `question list` 的文本输出整体转义；
+  - `question answer`、`question dismiss` 交给 `channel.Guard` 的确认摘要逐行转义（问题、上下文、回答或理由、显示名、关联）；
+  - 结果行同样转义。
+- 数据库、提案原文和 `--json` 输出不变。schema 允许的文本不会因此被拒绝。
+
+**回归测试**：
+
+- `TestQuestionTextIsShownSafely`：
+  - 通过公开的 `propose` 提交含有 CSI、OSC、ESC、CR、BEL、BS、DEL、C1、双向控制字符、CRLF 和正常换行的问题与上下文；配置中的显示名含有 OSC 和双向控制字符；回答和理由也含有控制字符。
+  - `question list`（`--all` 与否）以及 `question answer` 和 `question dismiss` 的确认摘要中，都没有任何原始控制字符，每一处都能看到明确的转义文本；换行保留在缩进之下。
+  - 取消确认时不写入。
+  - `question list --json` 解码后、数据库中，都是原始文本。
+  - 所有检查都在内存缓冲区中进行，没有向真实终端发送控制序列。
+- `internal/termtext` 的单元测试：逐项检查各类字符、幂等性，并扫描 U+0000 ~ U+3000 和全部单字节，确认转义后不留下控制字符。
+- **修复前**（`78ca882`）：`question list` 和两个确认摘要都含有原始的 0x1b、0x0d、0x07 等字节，测试失败。
+
+### B2：未知的 Question 子命令显示帮助并返回成功
+
+**根因**：`question` 命令组既没有 `Args` 也没有 `RunE`，cobra 对未知子命令显示帮助并返回 0。带 `--json` 时，命令组没有这个 flag，返回退出码 2 的文本错误，stdout 没有 `error.v1`。
+
+**修复**：
+
+- 命令组的 `Args` 拒绝未知子命令：返回 `invalid_input`（退出码 2），消息中不引用原值，只可能建议已有子命令的名字。
+- 命令组新增 `--json`（错误输出 `error.v1`）。
+- 只输入 `question` 或使用 `--help` 时，仍显示帮助并返回 0。`question --json` 不带子命令时返回退出码 2 的 `error.v1`，不输出帮助。
+- `list`、`answer`、`dismiss` 的行为不变。
+
+**回归测试**（`TestQuestionCommandLineErrors`，经过真实的命令入口）：
+
+- 测试的输入：`question unknown`、`question answr`、以 Token 作为子命令、`--json` 在前或在后、未知 flag 在子命令之前。
+- 结果：都返回退出码 2，不回显；带 `--json` 时 stdout 是通过 schema 校验的完整 `error.v1`，stderr 为空。
+- `question`、`question --help`、`question list --help` 返回 0。
+- 没有写入，不分配 `seq`。
+- **修复前**：前三种返回 0 并输出帮助；带 `--json` 的形式 stdout 都不是 `error.v1`。
+
+### B3：无法解析的 flag 在 `--json` 之前时，不输出 `error.v1`
+
+**根因**：`wantsJSON` 只看 cobra 已经解析的 `json` flag。pflag 在出错的 flag 处停止解析，后面的 `--json` 没有生效。另外，原测试在没有 JSON Pointer 的用例上跳过了 JSON 断言，恰好漏掉了未知 flag 和无效布尔值。
+
+**修复**：
+
+- `question` 命令的 flag 错误（`flagError`）标记为 `unparsedFlags`。
+- 只有遇到这类错误时，`executeAs` 才按 pflag 的规则从参数中判断是否要求 JSON（`jsonInArgs`）：
+  - `--json`、`--json=<布尔值>` 都算，以最后一个为准；
+  - `--json=<非布尔值>` 不改变结果；
+  - 取值 flag 的值不算（`-m x`、`-mx`、`-m=x`、`--message x`、`--file x`）；
+  - `--` 之后的参数不算；
+  - 未知 flag 不取值，`--unknown=--json` 不算。
+- 正常解析的命令，以及其他命令（它们的 flag 错误不是 `unparsedFlags`），仍按已解析的 flag 判断，行为不变。
+- 错误消息仍是固定文本，不引用 flag 名、值或位置参数。
+
+**回归测试**：
+
+- `TestQuestionCommandLineErrors` 覆盖了审查列出的全部输入，并补充了更多形式：
+  - 应为 JSON：`--json=true`、重复的 `--json`、`-mx` 加未知 flag、`--file` 加未知 flag；
+  - 应为文本：`--json --json=false`、`--json=maybe`、`--message --json`、`--file --json`、`--` 之后的 `--json`。
+- 要求 JSON 时，断言退出码 2、stdout 为完整且通过 schema 校验的 `error.v1`、`error.code` 为 `invalid_input`、stderr 为空。
+- 不要求 JSON 时，断言 stdout 为空、stderr 为文本错误。
+- `question answer Q-001 -m --json`：`--json` 是回答文本，命令正常解析；在 Agent 通道返回退出码 3 的文本错误，不进入 JSON 模式。
+- `TestQuestionInputIsChecked` 的缺口已修正：每个 `--json` 用例都断言完整的 `error.v1` 和 `error.code`（`Q-099` 为 `not_found`，其余为 `invalid_input`），JSON Pointer 单独检查。
+- **修复前**：`list --all=not-bool --json`、`answer Q-001 -m x --unknown --json` 等 11 种形式的 stdout 都不是 `error.v1`；修正后的 `TestQuestionInputIsChecked` 也在 `--<token>`、`--all=<token>` 两种用例上失败。
+
+### NON-BLOCKER 与遗留安全问题
+
+- **N1：其他 CLI 回显不可信参数**。这是实际的隐私缺陷，不是已接受的风险。
+  - PR #10 原描述中"带 `--json` 时只把固定消息放入 `error.v1`"的说法不成立：`apperr.ToEnvelope` 使用包含原因的 `Error()`。现已更正。
+  - 本轮复现了受影响的入口：根命令的未知子命令、`cobra.NoArgs` 命令多出的参数、其他命令无法解析的 flag 值和未知 flag。文本模式和 `--json` 模式都会回显。
+  - 已作为独立的安全维护任务登记在 implementation-plan M6"发布前必须关闭的遗留安全问题"，列出了入口、复现方式和修复方向，最晚在 v0.1.0 发布之前关闭。本轮不修改 `root.go` 的整体错误处理。
+- **同类遗留问题：其他命令的文本输出没有转义控制字符**。本轮在内存中确认，`proposal list`、`proposal show`、`review` 的确认摘要、`baseline show`、`baseline history` 原样输出提案中的 ESC。同样登记在 M6，未修复。
+- WP1.6 的两项 NON-BLOCKER 保留：审核预览的修订类别可能与最终类别不同；`baseline history` 没有展示后续处理理由。
+
+**接受的风险**：沿用审查列出的既有边界，没有接受新的风险。
