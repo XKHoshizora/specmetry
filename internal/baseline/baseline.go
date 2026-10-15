@@ -25,9 +25,9 @@ const (
 
 // CurrentVersion returns the project's current baseline version: the
 // highest version number, or 0 before the first.
-func CurrentVersion(ctx context.Context, tx *sql.Tx, projectID string) (int, error) {
+func CurrentVersion(ctx context.Context, q Querier, projectID string) (int, error) {
 	var v int
-	err := tx.QueryRowContext(ctx, `SELECT coalesce(max(number), 0) FROM baseline_versions WHERE project_id = ?`, projectID).Scan(&v)
+	err := q.QueryRowContext(ctx, `SELECT coalesce(max(number), 0) FROM baseline_versions WHERE project_id = ?`, projectID).Scan(&v)
 	return v, err
 }
 
