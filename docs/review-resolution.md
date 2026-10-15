@@ -1430,6 +1430,8 @@ PR：<https://github.com/XKHoshizora/specmetry/pull/1>（`feat/m0-foundation` �
 
 ### 实施中发现、待确认的事项
 
+以下四项已在 2026-10-15 由产品负责人决定，见 §28。
+
 1. **展开稀疏索引会写对象文件。**
    - git 2.56 与 2.43 实测：不带 `--sparse` 的 `ls-files` 展开稀疏索引时，会重新写入已存在的树对象，改写对象文件的修改时间。树对象缺失时，还会静默漏掉其中的文件。git 2.32.0 的源码中，`ensure_full_index` 同样调用 `cache_tree_update`。`--sparse` 可以避免展开。
    - git 2.32.0 在解析参数之前就读取并展开了索引：带 `--sparse` 时，它在报告"选项未知"（退出码 129）之前，已经抓取并改写了配置。所以是否认识这个选项不能在用户仓库中试探，只能在临时目录中探测。
@@ -1478,3 +1480,45 @@ PR：<https://github.com/XKHoshizora/specmetry/pull/1>（`feat/m0-foundation` �
 ### 未处理
 
 审查 022 的 NON-BLOCKER（HTTPS 测试的断言）不在本轮范围内，保持未处理。
+
+## 28. PD-26 的细化决定与 SHA-256 仓库的拒绝（2026-10-15）
+
+`25a93df` 的三平台 CI 8/8 成功之后，产品负责人对 §27 中待确认的事项作出三项决定。本轮只修改 SHA-256 仓库的拒绝逻辑、直接相关的测试，以及这三项决定的文档。以下内容不变：
+
+- git Lazy Fetch 的行为探测；
+- `--sparse` 的安全处理；
+- WP1.5 的 B2 ~ B5 修复；
+- Proposal、Source Ref、Question 和 Schema 的现有实现；
+- git 2.32 的最低版本要求，以及 PD-26 已确认的规则。
+
+### 决定一：`ls-files --sparse`
+
+批准当前实现，作为 PD-26 已批准的实施细化，不再待确认：
+
+- git 不认识 `ls-files --sparse` 时，`ListFiles` 返回退出码 6；
+- 即使普通索引也许可以读取，也不在用户仓库中试探；
+- 候选来源发现只面向 worktree 中实际可访问的普通文件，不要求列举稀疏检出之外的全部文件。
+
+已记入 PRD 的 PD-26、architecture §6.1.2 和 MVP-INIT-12。代码不变。
+
+### 决定二：SHA-256 仓库
+
+MVP v0.1.0 不支持 SHA-256 格式的 git 对象 ID。§27 记录的现象（64 位提交 ID 被转为 `snapshot = null`）不可接受，只做最小修复：
+
+- **识别**：`gitx.ObjectFormat` 用受控的 `git rev-parse --show-object-format` 识别仓库的对象格式，只读配置，不读取对象。git 2.32.0、2.43、2.56 都支持这条命令；git 给出 `sha1`、`sha256` 以外的答复时，返回退出码 6。
+- **拒绝**：git 项目的 `init` 在定位仓库之后、能力检查和任何写入之前识别对象格式。是 SHA-256 时返回 environment（退出码 6）：不创建数据库，不登记项目，不写 marker 和 exclude，不分配 `seq`。拒绝与是否会输出快照无关：分支还没有提交、处于分离 HEAD 时同样拒绝，不能靠省略快照绕过。
+- **快照**：快照解析得到的不是 40 位 SHA-1 ID 时，同样返回退出码 6。原来的"转为 `null`"已删除。SHA-1 分支还没有提交时，仍按既有规则输出 `snapshot = null`。
+- **不变的部分**：`init.v1` 不变，不提前支持 64 位提交 ID。新增 TD-26，记录完整支持需要同步调整 Schema、数据模型、Code Ref、Git Reader 与测试，不属于 v0.1.0。
+
+**回归测试**（真实的 SHA-256 临时仓库，用 `git init --object-format=sha256` 创建）：
+
+| 用例 | 修复前（`25a93df`） | 修复后 |
+|---|---|---|
+| 分支有提交、没有提交、分离 HEAD 三种 SHA-256 仓库，数据目录尚不存在 | 退出码 0，`created = true`，`snapshot = null` | 退出码 6；不创建数据目录；仓库（包括 marker、exclude 和 `.git`）逐文件不变 |
+| 同上，数据目录中已有 3 个项目（非 git、SHA-1 有提交、SHA-1 没有提交） | 退出码 0，项目被登记 | 退出码 6；数据目录逐文件不变，`seq` 不变，项目仍为 3 个；仓库逐文件不变 |
+| SHA-1 对照 | — | 有提交时快照等于 HEAD；分支还没有提交时 `snapshot = null` |
+| `ObjectFormat` | — | SHA-1 仓库返回 `sha1`；SHA-256 仓库（没有提交）返回 `sha256`；替身 git 给出其他答复时返回退出码 6 |
+
+### 决定三：M2 的环境失败
+
+确认原则：正确的进度推导依赖 git 对象，而 git 无法安全读取时，返回 environment（退出码 6），不把环境失败转换为正常的 `not_assessed`。已记入 implementation-plan 的 M2；data-model §6 中"git 不可用"一行的结论，在 M2 实现时据此细化，并补齐测试。本轮不提前开发 M2。

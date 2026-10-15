@@ -157,6 +157,22 @@ func mainWorktree(ctx context.Context, dir string) (string, error) {
 	return Canonical(main), nil
 }
 
+// ObjectFormat returns the object format of the repository of worktree,
+// "sha1" or "sha256", as git reports it (rev-parse --show-object-format
+// reads the configuration, not an object). Any other answer is an
+// environment error.
+func ObjectFormat(ctx context.Context, worktree string) (string, error) {
+	out, err := run(ctx, worktree, "rev-parse", "--show-object-format")
+	if err != nil {
+		return "", err
+	}
+	switch format := strings.TrimSpace(string(out)); format {
+	case "sha1", "sha256":
+		return format, nil
+	}
+	return "", apperr.New(apperr.Environment, "cannot tell the object format of the repository")
+}
+
 // HeadBranch returns the full name of the branch checked out in worktree,
 // such as refs/heads/main, or "" when its HEAD is detached. A branch
 // without commits yet is still returned.

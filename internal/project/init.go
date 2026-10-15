@@ -119,6 +119,17 @@ func Prepare(ctx context.Context, opts InitOptions, scanner *secrets.Scanner) (*
 	case err != nil:
 		return nil, err
 	default:
+		// TD-26: SHA-1 object IDs only. A SHA-256 repository is refused
+		// before anything is written, whether or not a snapshot would be
+		// reported.
+		format, err := gitx.ObjectFormat(ctx, dir)
+		if err != nil {
+			return nil, err
+		}
+		if format != "sha1" {
+			return nil, apperr.New(apperr.Environment,
+				"this repository uses SHA-256 object IDs, which this version of Specmetry does not support (TD-26); nothing was registered")
+		}
 		// PD-26: a git that could fetch an object the repository lacks
 		// reads none, so a git project's init stops here, before its files
 		// are listed and before anything is written.
@@ -350,8 +361,8 @@ func (p *Plan) Apply(ctx context.Context, db *sqlite.DB, now time.Time) (Result,
 
 // snapshotOf returns the commit ref points at, "" when it has none yet. The
 // main worktree's branch was resolved by Prepare; another ref (the target
-// an existing project keeps) is resolved now. init.v1 reports a SHA-1
-// commit ID only.
+// an existing project keeps) is resolved now. init.v1 holds a SHA-1 commit
+// ID only, and another is an error, never left out (TD-26).
 func (p *Plan) snapshotOf(ctx context.Context, ref string) (string, error) {
 	sha := p.snapshot
 	if ref != p.branch {
@@ -360,8 +371,9 @@ func (p *Plan) snapshotOf(ctx context.Context, ref string) (string, error) {
 			return "", err
 		}
 	}
-	if !commitID.MatchString(sha) {
-		return "", nil
+	if sha != "" && !commitID.MatchString(sha) {
+		return "", apperr.New(apperr.Environment,
+			"the commit ID is not a SHA-1 ID, the only object format this version of Specmetry supports (TD-26)")
 	}
 	return sha, nil
 }
