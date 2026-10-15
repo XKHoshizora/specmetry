@@ -1522,3 +1522,55 @@ MVP v0.1.0 不支持 SHA-256 格式的 git 对象 ID。§27 记录的现象（64
 ### 决定三：M2 的环境失败
 
 确认原则：正确的进度推导依赖 git 对象，而 git 无法安全读取时，返回 environment（退出码 6），不把环境失败转换为正常的 `not_assessed`。已记入 implementation-plan 的 M2；data-model §6 中"git 不可用"一行的结论，在 M2 实现时据此细化，并补齐测试。本轮不提前开发 M2。
+
+## 29. WP1.5 最终定向审查（codex-review-023）的处理
+
+**审查结论**：NO-GO。审查目标 `27a49af`。PD-26 的门禁结构、Sparse Index 和 TD-26 的拒绝逻辑基本符合批准方案，但有 1 项 BLOCKER。NON-BLOCKER（HTTPS 测试的断言）维持原分类，本轮仍不处理。审查原文按原样入库。本轮只修复事件完整性与安全分类，改动限于 `internal/gitx/objects.go` 和直接相关的测试。以下内容不变：
+
+- PD-26 的方案，TD-26 的限制，git 最低版本；
+- 数据库、Proposal、Source Ref、Question；
+- Review 020 的 B2 ~ B5；
+- Sparse Index 与 `init` 的设计。
+
+### B1：异常的 trace2 事件流可能被判为 `neverFetches`
+
+**根因**：`readProbeEvents` 只检查了事件的来源，没有检查生命周期：
+
+- git 之下进程（后代 sid）的事件被直接忽略，即使它们显示有子进程在运行；
+- 重复的 `exit` 会覆盖之前的结果；
+- `exit` 出现在 `start` 之前也被接受。
+
+这样，不完整或矛盾的事件流可能得出"可信、完整、没有子进程"的结论，进而被判为 `neverFetches` 并保存。
+
+**修复**：新增 `checkProbeEvents`，按写入顺序逐条检查。只有事件流构成 git 的一次完整、一致的运行才可信（规则见 architecture §6.1.2"事件流的完整性"）：
+
+- **git 自身的生命周期**：`version` 至多一次且在 `start` 之前；`start`、`exit` 各一次，顺序正确；`atexit` 至多一次，在 `exit` 之后，状态相同；其他事件都在 `start` 与 `atexit` 之间。
+- **子进程事件**：只在 git 运行期间出现。`child_start` 的 `child_id` 互不相同；`child_exit`、`child_ready` 只对应已启动、未退出的子进程；不认识的 `child_*` 事件不可信；所有子进程都在 git 退出前退出。
+- **后代进程**：后代 sid 的任何事件都是子进程的证据，只能在 git 运行期间出现，并且这样的子进程不多于 `child_start`。
+- **退出状态**：`exit` 的状态必须与进程实际的退出状态一致；不一致、或出现其他进程的事件，都不可信。
+
+分类改用 `showsNoChild`：完整的运行中，既没有 `child_start`，也没有任何后代事件，才判为 `neverFetches`。不可信的事件流仍是"无法判定"：返回错误，不保存，下次重新探测。能力探测本身不会被跳过。
+
+### 回归测试与证据
+
+用纯 JSON 测试，不启动 git、不运行外部程序、不联网。测试事件流按真实 git 2.56、2.43、2.32.0 写出的事件构造，事件类型与顺序以 2026-10-15 在隔离临时仓库中的实测为准。
+
+| 测试 | 修复前（`27a49af`） | 修复后 |
+|---|---|---|
+| Codex 反例 A：缺少 `child_start` 的后代 sid（`fetch` 子进程的 start、exit 都在） | 被判为"完整、没有子进程" | 不可信 |
+| Codex 反例 B：`exit` 在 `start` 之前 | 同上 | 不可信 |
+| Codex 反例 C：先 `exit` 0，再 `exit` 128，实际 128 | 同上 | 不可信 |
+| 另外 12 种异常：两次 `exit`；第二次 `start` 属于另一命令；两次 `atexit`；`atexit` 状态不同；`atexit` 之后的事件；`start` 之前的其他事件；`start` 之后的 `version`；没有 `child_start` 的 `child_exit`、`child_ready`、其他子进程事件；只有孙进程的事件；git `start` 之前的子进程事件 | 被判为"完整、没有子进程" | 不可信 |
+| 另外 6 种异常：`child_start` 缺 `child_id`；缺 `child_exit`；同一 `child_id` 两次；git 退出后的 `child_exit`；两个子进程只有一个 `child_start`；git `atexit` 之后的子进程事件 | 被当作可信的完整运行（有子进程） | 不可信 |
+| 13 种原本就能识别的情况：重复的 probe `start`；缺少 `exit`、`start` 或任何事件；`atexit` 没有 `exit`；退出状态不一致或缺失；git 成功退出；无效 JSON；缺 sid；其他进程；sid 只是前缀相似；两次 probe 命令 | 不可信或不完整 | 不可信或不完整（回归保护） |
+| 合法事件流：2.56、2.43、2.32.0 三种形态的无子进程测试运行；没有 `atexit`；中间有空行；线程的 `data` 事件；合法的抓取对照 | 通过 | 通过（没有被过度拒绝） |
+| 经由 `CheckObjectReads`：由替身 git（测试程序自身，不运行真实 git）写出合法对照和反例 A、B、C | 判为 `neverFetches`，没有错误，结论被保存 | 退出码 6（无法判定），不保存；再次检查重新运行两次探测。合法的无子进程流仍判为 `neverFetches`，抓取流判为 `fetches` |
+
+真实 git 的回归见 PR #8 描述中的验证一节：
+
+- 2.32.0 仍判为会抓取，2.43 和 2.56 仍判为不会抓取；
+- 2.31.1 仍被版本检查拒绝；
+- 临时目录照常清理；
+- 对象读取、Sparse Index、SHA-256 拒绝、`init` 和 `propose` 的既有测试都通过。
+
+三平台 CI 中真实 git 的版本为 2.55 或 2.56；真实旧版 git 的测试在 CI 中按设计跳过，只在本地验证。

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -20,7 +21,14 @@ const (
 	fakeGitVersionEnv  = "SPECMETRY_FAKE_GIT_VERSION"
 	passthroughRealEnv = "SPECMETRY_FAKE_GIT_REAL"
 	passthroughModeEnv = "SPECMETRY_FAKE_GIT_MODE"
+	traceControlEnv    = "SPECMETRY_FAKE_GIT_TRACE_CONTROL"
+	traceTestEnv       = "SPECMETRY_FAKE_GIT_TRACE_TEST"
+	traceCodeEnv       = "SPECMETRY_FAKE_GIT_TRACE_CODE"
 )
+
+// clearModes are variables that override the modes of fake gits set
+// earlier in the test.
+var clearModes = []string{passthroughRealEnv + "=", traceControlEnv + "="}
 
 // FakeGitCall is one run of a fake git: its arguments and environment.
 type FakeGitCall struct {
@@ -38,9 +46,27 @@ type FakeGitCall struct {
 func FakeGit(t testing.TB, version string) (dir string, env []string, calls func() []FakeGitCall) {
 	t.Helper()
 	dir, record, calls := fakeGitDir(t)
-	// An empty passthroughRealEnv overrides a PassthroughGit's set earlier
-	// in the test.
-	return dir, []string{fakeGitRecordEnv + "=" + record, fakeGitVersionEnv + "=" + version, passthroughRealEnv + "="}, calls
+	return dir, append([]string{fakeGitRecordEnv + "=" + record, fakeGitVersionEnv + "=" + version}, clearModes...), calls
+}
+
+// FakeTraceGit makes a stand-in for git that runs no git: it reports
+// version 2.56.0 to git --version and, run as git cat-file, writes a
+// scripted trace2 event stream to the file GIT_TRACE2_EVENT names (control
+// without GIT_NO_LAZY_FETCH=1, test with it) and exits with code. Any
+// other command exits 0. It returns what FakeGit returns. The package's
+// TestMain must call DispatchFakeGit first.
+func FakeTraceGit(t testing.TB, control, test string, code int) (dir string, env []string, calls func() []FakeGitCall) {
+	t.Helper()
+	dir, record, calls := fakeGitDir(t)
+	files := t.TempDir()
+	controlFile, testFile := filepath.Join(files, "control.jsonl"), filepath.Join(files, "test.jsonl")
+	for path, content := range map[string]string{controlFile: control, testFile: test} {
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir, []string{fakeGitRecordEnv + "=" + record, fakeGitVersionEnv + "=git version 2.56.0", passthroughRealEnv + "=",
+		traceControlEnv + "=" + controlFile, traceTestEnv + "=" + testFile, traceCodeEnv + "=" + strconv.Itoa(code)}, calls
 }
 
 // Modes of a PassthroughGit.
@@ -80,7 +106,7 @@ func PassthroughGit(t testing.TB, mode string) (dir string, env []string, calls 
 		t.Fatal(err)
 	}
 	dir, record, calls := fakeGitDir(t)
-	return dir, []string{fakeGitRecordEnv + "=" + record, passthroughRealEnv + "=" + real, passthroughModeEnv + "=" + mode}, calls
+	return dir, []string{fakeGitRecordEnv + "=" + record, passthroughRealEnv + "=" + real, passthroughModeEnv + "=" + mode, traceControlEnv + "="}, calls
 }
 
 // fakeGitDir copies the test binary as git into a new directory and
@@ -164,7 +190,7 @@ func FakeRemoteHelper(t *testing.T, dir, name string) (marker string) {
 }
 
 // DispatchFakeGit must be called first in the TestMain of a package that
-// uses FakeGit, PassthroughGit or FakeRemoteHelper. When the test binary
+// uses FakeGit, FakeTraceGit, PassthroughGit or FakeRemoteHelper. When the test binary
 // runs as a fake git, it records the call, then prints the version and
 // exits, or runs the real git; as a remote helper, it appends to its
 // marker and fails.
@@ -185,11 +211,47 @@ func DispatchFakeGit() {
 		_, _ = f.Write(append(b, '\n'))
 		_ = f.Close()
 	}
+	if os.Getenv(traceControlEnv) != "" {
+		os.Exit(fakeTrace())
+	}
 	if real := os.Getenv(passthroughRealEnv); real != "" {
 		os.Exit(passthrough(real, os.Getenv(passthroughModeEnv)))
 	}
 	fmt.Println(os.Getenv(fakeGitVersionEnv))
 	os.Exit(0)
+}
+
+// fakeTrace is FakeTraceGit's git: it returns the exit status.
+func fakeTrace() int {
+	args := os.Args[1:]
+	switch {
+	case slices.Equal(args, []string{"--version"}):
+		fmt.Println(os.Getenv(fakeGitVersionEnv))
+		return 0
+	case !slices.Contains(args, "cat-file"):
+		return 0
+	}
+	script := os.Getenv(traceControlEnv)
+	if os.Getenv("GIT_NO_LAZY_FETCH") == "1" {
+		script = os.Getenv(traceTestEnv)
+	}
+	events, err := os.ReadFile(script)
+	if err != nil {
+		return 127
+	}
+	f, err := os.OpenFile(os.Getenv("GIT_TRACE2_EVENT"), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o600)
+	if err != nil {
+		return 127
+	}
+	_, err = f.Write(events)
+	if cerr := f.Close(); err != nil || cerr != nil {
+		return 127
+	}
+	code, err := strconv.Atoi(os.Getenv(traceCodeEnv))
+	if err != nil {
+		return 127
+	}
+	return code
 }
 
 // passthrough runs the real git as PassthroughGit's mode says and returns

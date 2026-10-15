@@ -240,10 +240,13 @@ const maxProbeEvents = 1 << 20
 //     its own start and exit, with the failure status it exited with, and
 //     no child process at all.
 //
-// A test run whose events show a fetch is a git that fetches. Anything else
-// (no events, a control without a fetch, an event that is not JSON or
-// belongs to another process, a child that is not a fetch, an exit status
-// that disagrees) shows nothing: an error, and nothing is kept. Both runs
+// Events are trusted only when they fit one consistent run of git
+// (checkProbeEvents): any event of a child counts as a child, and a
+// lifecycle event that is repeated, out of order or contradicts another
+// makes the run show nothing. A test run whose events show a fetch is a git
+// that fetches. Anything else (no events, a control without a fetch, events
+// that are not trusted, a child that is not a fetch, an exit status that
+// disagrees) shows nothing: an error, and nothing is kept. Both runs
 // use the controlled environment otherwise, GIT_ALLOW_PROTOCOL= included,
 // so the control's fetch is refused before it connects or runs a program.
 // git's output is discarded, and the directory is removed whatever the
@@ -282,24 +285,33 @@ func probeIn(ctx context.Context, git string) (objectSafety, error) {
 		return unprobed, err
 	case test.fetched:
 		return fetches, nil
-	case test.complete() && test.children == 0:
+	case test.showsNoChild():
 		return neverFetches, nil
 	}
 	return unprobed, refused(msgUnknown)
 }
 
-// probeResult is what one probe run's events show.
+// probeResult is what one probe run's events show. readProbeEvents fills
+// it only from a stream it trusts.
 type probeResult struct {
-	// started and exited: git's own start and exit events, the exit
-	// event agreeing with the status git exited with, which is a failure.
+	// started and exited: git's own start and exit events, once each and
+	// in that order, the exit status the one git exited with, a failure.
 	started, exited bool
 	// children counts git's own child_start events; fetched is set when
-	// one of them is a fetch.
-	children int
-	fetched  bool
+	// one of them is a fetch. descendants is set when a process below git
+	// wrote an event.
+	children    int
+	fetched     bool
+	descendants bool
 }
 
 func (r probeResult) complete() bool { return r.started && r.exited }
+
+// showsNoChild reports a complete run in which no child process shows in
+// any form: the only evidence that git never fetches.
+func (r probeResult) showsNoChild() bool {
+	return r.complete() && r.children == 0 && !r.fetched && !r.descendants
+}
 
 // probeRun makes the repository name.git in tmp and asks git in it for
 // probeObject, with GIT_NO_LAZY_FETCH=1 when noLazyFetch.
@@ -359,18 +371,17 @@ func probeEnv(env []string, events string, noLazyFetch bool) []string {
 
 // traceEvent holds the fields of a trace2 event the probe reads.
 type traceEvent struct {
-	Event string   `json:"event"`
-	SID   string   `json:"sid"`
-	Argv  []string `json:"argv"`
-	Code  *int     `json:"code"`
+	Event   string   `json:"event"`
+	SID     string   `json:"sid"`
+	Argv    []string `json:"argv"`
+	Code    *int     `json:"code"`
+	ChildID *int     `json:"child_id"`
 }
 
 // readProbeEvents reads one probe run's events; code is the status git
 // exited with. It reports false when the events cannot be trusted: a line
-// that is not an event, more than one start of the probe's command, an
-// event of a process that is neither git nor a child of it, or too many
-// events. The events of git's children (their sid extends git's) are
-// allowed: the control's fetch writes its own.
+// that is not an event, too many events, or events that do not fit one
+// consistent run (checkProbeEvents).
 func readProbeEvents(path string, code int) (probeResult, bool) {
 	f, err := os.Open(path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -401,6 +412,41 @@ func readProbeEvents(path string, code int) (probeResult, bool) {
 	if sc.Err() != nil {
 		return probeResult{}, false
 	}
+	return checkProbeEvents(events, code)
+}
+
+// stage is how far git's own events have got.
+type stage int
+
+const (
+	beforeStart stage = iota
+	running           // after start
+	exited            // after exit
+	ended             // after atexit
+)
+
+// checkProbeEvents reads one probe run's events in the order they were
+// written, and trusts them only when every event fits one consistent run
+// of git, the process whose start event runs the probe's cat-file
+// (codex-review-023 B1):
+//
+//   - git writes version at most once and before start; start once; exit
+//     once, after start, with a status; atexit at most once, after exit,
+//     with the same status; every other event of its own between start and
+//     atexit;
+//   - its child events come while it runs, before its exit: each
+//     child_start with a child_id of its own; child_exit and child_ready
+//     only for a child that started and has not exited, child_exit once;
+//     no other child event; every child exits before git does;
+//   - a process below git (its sid extends git's) writes only while git
+//     runs, and there are no more such children than child_start events: a
+//     child's events are never taken for no child;
+//   - an event of any other process, an exit status other than the one git
+//     exited with, or events without git's start are not trusted.
+//
+// code is the status git exited with. Anything a real git writes for the
+// probe fits (git 2.32.0, 2.43, 2.56).
+func checkProbeEvents(events []traceEvent, code int) (probeResult, bool) {
 	root := ""
 	for _, e := range events {
 		if e.Event == "start" && slices.Contains(e.Argv, "cat-file") && slices.Contains(e.Argv, probeObject) {
@@ -410,26 +456,83 @@ func readProbeEvents(path string, code int) (probeResult, bool) {
 			root = e.SID
 		}
 	}
-	var r probeResult
 	if root == "" {
-		return r, true
+		return probeResult{}, len(events) == 0 // no event: nothing shown
 	}
-	r.started = true
+	var r probeResult
+	at, versions, status := beforeStart, 0, 0
+	childExited := map[int]bool{} // by child_id
+	below := map[string]bool{}    // git's children that wrote events, by sid
 	for _, e := range events {
 		switch {
 		case e.SID == root:
-			switch e.Event {
-			case "exit":
-				r.exited = e.Code != nil && *e.Code == code && code != 0
-			case "child_start":
+			switch {
+			case e.Event == "version":
+				if at != beforeStart || versions > 0 {
+					return probeResult{}, false
+				}
+				versions++
+			case e.Event == "start":
+				if at != beforeStart {
+					return probeResult{}, false
+				}
+				at = running
+			case e.Event == "exit":
+				if at != running || e.Code == nil {
+					return probeResult{}, false
+				}
+				for _, done := range childExited {
+					if !done {
+						return probeResult{}, false
+					}
+				}
+				at, status = exited, *e.Code
+			case e.Event == "atexit":
+				if at != exited || e.Code == nil || *e.Code != status {
+					return probeResult{}, false
+				}
+				at = ended
+			case e.Event == "child_start":
+				if at != running || e.ChildID == nil {
+					return probeResult{}, false
+				}
+				if _, seen := childExited[*e.ChildID]; seen {
+					return probeResult{}, false
+				}
+				childExited[*e.ChildID] = false
 				r.children++
 				r.fetched = r.fetched || slices.Contains(e.Argv, "fetch")
+			case e.Event == "child_exit" || e.Event == "child_ready":
+				if at != running || e.ChildID == nil {
+					return probeResult{}, false
+				}
+				if done, seen := childExited[*e.ChildID]; !seen || done {
+					return probeResult{}, false
+				}
+				childExited[*e.ChildID] = e.Event == "child_exit"
+			case strings.HasPrefix(e.Event, "child_"):
+				return probeResult{}, false
+			default:
+				if at != running && at != exited {
+					return probeResult{}, false
+				}
 			}
 		case strings.HasPrefix(e.SID, root+"/"):
+			if at != running {
+				return probeResult{}, false
+			}
+			r.descendants = true
+			child, _, _ := strings.Cut(strings.TrimPrefix(e.SID, root+"/"), "/")
+			below[child] = true
 		default:
 			return probeResult{}, false
 		}
 	}
+	if len(below) > r.children || at >= exited && status != code {
+		return probeResult{}, false
+	}
+	r.started = at != beforeStart
+	r.exited = at >= exited && code != 0
 	return r, true
 }
 
