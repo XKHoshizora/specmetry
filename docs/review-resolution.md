@@ -2059,3 +2059,47 @@ MVP v0.1.0 不支持 SHA-256 格式的 git 对象 ID。§27 记录的现象（64
 - 审查 029 N1（成功 JSON 输出的断言偏弱）、`doctor` 的 git 版本查询隔离（M6）、WP1.6 的 N1 和 N2、本地 Windows 测试超时，维持原安排。
 
 **M1 状态不变**：M1 尚未整体完成，WP1.8 尚未开始。
+
+## 41. 人工确认与 JSON 输出的分流（codex-review-031 N2）
+
+**来源**：codex-review-031 NON-BLOCKER N2，登记为独立维护事项（implementation-plan，M6 之后）。不是已接受的风险。本修复不属于任何工作包，单独提交、单独审查。
+
+**问题**：人类专属命令带 `--json` 时，确认提示和最终的 `error.v1` 写在同一个 stdout 中。取消确认后，stdout 不是一份完整的 JSON 文档。修复前（`f0ebd58`）的复现：human 通道执行 `question answer Q-001 -m x --json` 并取消，stdout 以确认提示开头，接着是 `error.v1`，整体无法作为一份 JSON 解析，stderr 为空。已有测试用 `jsonPart` 跳过 stdout 开头的提示，正是这个问题的表现。
+
+**设计核对**：
+
+- architecture §5.1 规则 1：stderr 不参与通道识别。本修复不改变识别规则（`Decide` 仍只看 stdin 和 stdout），`Detection` 只是新增一个"stderr 是否为终端"的事实字段。
+- §5.1 规则 2 原文是"在标准输出显示操作名称和摘要"。按产品负责人给出的规则，带 `--json` 时改为显示在 stderr，这是这条规则的直接修订，已同步修改。stderr 不是终端时返回退出码 6，与规则 2 中"确认提示无法完整输出时返回退出码 6"属于同一原则。
+- §9.1"`--json` 时错误输出完整的 `error.v1`，stderr 为空"：增加一个受限的例外，只有人在交互中看到的确认提示可以出现在 stderr。
+- 与已批准的 `check run --json`（stdout 只有一份 JSON，其余输出转到 stderr，MVP-EV-12）原则一致。MVP-CH-02（`--json` 不改变识别结果）不受影响。
+- 没有发现需要额外产品取舍的冲突。
+
+**修复**：
+
+- 新增 `internal/cli` 的 `confirm(cmd, d, op)`，作为所有人类专属命令唯一的确认入口：
+  - 不带 `--json`（或 `--json=false`）时，确认显示在 stdout，行为不变；
+  - 带 `--json` 时，先拒绝 Agent 通道（退出码 3，不显示提示）。stderr 不是终端时，不显示、不读取，返回退出码 6，stdout 输出一份 `error.v1`；否则确认显示在 stderr，stdout 只有命令的输出。
+- `channel.Guard` 不变：完整输出检查、短写入保护（stderr 同样经过 `termtext.Writer`）、确认原文比较都照旧有效。
+- `question answer` 和 `dismiss`、`review`、`propose --apply`、`source ack` 和 `remove`、`source add --allow-any-type` 都改为调用 `confirm`。`TestHumanOnlyCommandsConfirmThroughConfirm` 检查 CLI 源码中没有命令直接调用 `channel.Guard`，以后新增的人类专属命令（WP1.8）也必须走这个入口。
+- 成功输出的契约不变：`propose --apply --json` 输出 `proposal-receipt.v1`，`source add --json` 输出 `source-add.v1`；其他人类专属命令成功时仍输出文本（`--json` 只影响错误），没有新增成功响应的 schema。
+- 根级与子命令级 `--json`、`--json=false`、重复的 flag，都按已有的解析规则决定最终效果。没有引入 `--yes` 或任何自动确认。
+
+**回归测试**：
+
+- `TestConfirmationWithJSON`（human 通道，在内存中）：对上述 7 个确认逐一测试，带 `--json` 时：
+  - 按 Enter 取消、输入错误、输入结束：退出码 3；stdout 恰好是一份通过 schema 校验的 `error.v1`（整个 stdout 按单个 JSON 文档解析，不只看首字符）；确认提示只在 stderr。
+  - 读取失败：退出码 6，stdout 为 `error.v1`。
+  - stderr 不是终端、stderr 短写入：退出码 6，确认输入读取 0 次，stdout 为 `error.v1`。
+  - Agent 通道：退出码 3，任何输出流中都没有确认提示。
+  - 不带 flag 和 `--json=false`：确认在 stdout，stderr 是文本错误。
+  - 以上全部不写入（业务状态、seq、版本、来源确认与移除都不变）。
+  - 最后逐一确认：`propose --apply` 和 `source add` 的 stdout 恰好是一份通过 schema 校验的文档，其他命令输出成功文本；确认提示都只在 stderr；问题被回答或驳回、基准版本加一、来源被确认或移除、新来源被登记，与预期一致。
+- `TestConfirmationWithJSONInTerminal`（真实 PTY，通道和输出流都是进程实际拥有的）：
+  - `--json` 时确认能正常显示并完成，取消时为退出码 3 和 `error.v1`；
+  - stderr 重定向到文件时：带 `--json` 返回退出码 6，没有显示确认，stderr 为 0 字节，`error.v1` 在 stdout，没有写入；不带 `--json` 时确认在 stdout 正常完成。
+- 原来用 `jsonPart` 跳过提示的测试，改用 `wholeJSON`，要求 stdout 恰好是一份 JSON 文档；检查"拒绝发生在提示之前"的测试，改为同时检查 stdout 和 stderr。
+- **修复前**（`f0ebd58`）：`question answer --json` 取消后，stdout 不是一份 JSON，提示在 stdout，stderr 为空。
+
+**范围外，不变**：业务状态模型、迁移、schema 业务字段、CLI 参数脱敏、补全拦截、终端转义规则、审查 031 N1、`doctor` 的 git 版本查询隔离、WP1.6 的 N1 和 N2、WP1.8、M2。
+
+**状态**：已修复，等待独立审查；审查通过之前，维护事项 N2 不关闭。
