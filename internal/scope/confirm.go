@@ -28,7 +28,19 @@ type Input struct {
 	Attestations            Attestations `json:"attestations"`
 	AcknowledgedWaivers     []string     `json:"acknowledged_waivers"`
 	SeenScopeConfirmationID *string      `json:"seen_scope_confirmation_id"`
-	Note                    string       `json:"note"`
+	// Note is nil without one.
+	Note *string `json:"note,omitempty"`
+}
+
+// Document is in as the scope.v1 document it stands for, to be checked
+// against that schema: a confirmation built from the command line is
+// checked like one from a file (codex-review-034 B1). in carries the
+// baseline version it was read at.
+func (in Input) Document() ([]byte, error) {
+	return json.Marshal(struct {
+		Schema string `json:"schema"`
+		Input
+	}{"specmetry.scope/v1", in})
 }
 
 // Check checks in against the current state (data-model §7.1), with the
@@ -165,8 +177,8 @@ func Write(ctx context.Context, tx *sql.Tx, projectID string, st State, in Input
 		return "", err
 	}
 	var note any
-	if in.Note != "" {
-		note = in.Note
+	if in.Note != nil {
+		note = *in.Note
 	}
 	id := ulid.New()
 	if _, err := tx.ExecContext(ctx, `INSERT INTO scope_confirmations (id, seq, project_id, target_id, baseline_version, source_set_hash,

@@ -386,6 +386,23 @@ func count(t *testing.T, db *sqlite.DB, query string) int {
 
 // SetTarget archives the active target and creates the new one at one seq;
 // the new target has no scope; a target changed meanwhile is stale.
+// codex-review-034 B2: a target name is one line of 1 to 200 characters
+// without control characters or a code fence (architecture §10.2);
+// Chinese, Japanese, emoji and single or double backticks are valid.
+func TestCheckName(t *testing.T) {
+	for _, name := range []string{"首期交付", "第一リリース", "🚀 launch", "`v1`", "``v1`` final", strings.Repeat("x", 200)} {
+		if err := scope.CheckName(name); err != nil {
+			t.Errorf("%q: %v", name, err)
+		}
+	}
+	for _, name := range []string{"", " ", "a\nb", "a\x1bb", strings.Repeat("x", 201), "```", "rel ```go x``` ", "a````b", "\xff"} {
+		err := scope.CheckName(name)
+		if e := apperr.From(err); err == nil || e.Code != apperr.InvalidInput || len(e.Details) != 1 || e.Details[0].Pointer != "--name" {
+			t.Errorf("%q: %+v", name, err)
+		}
+	}
+}
+
 func TestSetTarget(t *testing.T) {
 	_, db := store(t)
 	if _, err := confirm(db, inputFrom(read(t, db), "REQ-001")); err != nil {
@@ -412,6 +429,14 @@ func TestSetTarget(t *testing.T) {
 	})
 	if apperr.ExitCode(err) != apperr.ExitStalePrecondition {
 		t.Fatalf("a target changed meanwhile: %v", err)
+	}
+	// The name is checked where it is written too.
+	err = db.WriteTx(ctx, func(tx *sql.Tx) error {
+		_, err := scope.SetTarget(ctx, tx, projectA, ptr(made.ID), "refs/heads/main", "main ```", "human:me", "human_cli")
+		return err
+	})
+	if apperr.ExitCode(err) != apperr.ExitInvalidInput {
+		t.Fatalf("a name with a code fence: %v", err)
 	}
 	if n := count(t, db, `SELECT count(*) FROM delivery_targets`); n != 2 {
 		t.Fatalf("%d targets, want 2", n)

@@ -64,7 +64,8 @@ func ShortName(ref string) string {
 }
 
 // CheckName checks a target's name: one line of at most 200 characters,
-// without control characters.
+// without control characters or a code fence, which no free text may hold
+// (architecture §10.2; codex-review-034 B2).
 func CheckName(name string) error {
 	problem := ""
 	switch {
@@ -76,6 +77,8 @@ func CheckName(name string) error {
 		problem = "is longer than 200 characters"
 	case strings.ContainsFunc(name, unicode.IsControl):
 		problem = "contains a line break or another control character"
+	case strings.Contains(name, "```"):
+		problem = "contains a code fence (three backticks), which free text may not"
 	default:
 		return nil
 	}
@@ -88,6 +91,9 @@ func CheckName(name string) error {
 // the person was shown (nil for none); another one is stale, so that two
 // people changing the target at once do not archive each other's.
 func SetTarget(ctx context.Context, tx *sql.Tx, projectID string, seen *string, ref, name, actor, channel string) (Target, error) {
+	if err := CheckName(name); err != nil {
+		return Target{}, err
+	}
 	current, err := ActiveTarget(ctx, tx, projectID)
 	if err != nil {
 		return Target{}, err

@@ -31,7 +31,13 @@
           "required": ["id", "name", "ref", "snapshot", "created_seq"],
           "properties": {
             "id": { "$ref": "common.v1.schema.json#/$defs/ulid" },
-            "name": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[^\\r\\n]*$" },
+            "name": {
+              "description": "One line, no fenced code: free text (architecture §10.2; codex-review-034 B2).",
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200,
+              "pattern": "^(?![^\\r\\n]*```)[^\\r\\n]*$"
+            },
             "ref": { "type": "string", "pattern": "^refs/(heads|tags)/.+$" },
             "snapshot": {
               "description": "The commit the ref resolves to now; null when it cannot be resolved.",

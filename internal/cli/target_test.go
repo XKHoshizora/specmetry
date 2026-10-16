@@ -133,7 +133,7 @@ func scopeFile(t *testing.T, ts targetScopeOut, keys []string, change func(map[s
 // scopeState is everything target set and scope confirm may write: the
 // seq counter, every target (ref, name, created and archived seq,
 // channel), the confirmations and their items; and what they must not:
-// the baseline and the pending items.
+// the baseline, the proposals and the pending items.
 func scopeState(t *testing.T, home datadir.Dir) string {
 	t.Helper()
 	return strings.Join(rows(t, home, `SELECT (SELECT seq_counter FROM meta),
@@ -141,7 +141,7 @@ func scopeState(t *testing.T, home datadir.Dir) string {
         FROM delivery_targets ORDER BY created_seq)),
     (SELECT count(*) FROM scope_confirmations), (SELECT count(*) FROM scope_items),
     (SELECT count(*) FROM baseline_versions), (SELECT count(*) || '/' || coalesce(sum(revision), 0) FROM requirements),
-    (SELECT count(*) FROM proposal_items WHERE reviewed_seq IS NULL)`)[0], " ")
+    (SELECT count(*) FROM proposals), (SELECT count(*) FROM proposal_items WHERE reviewed_seq IS NULL)`)[0], " ")
 }
 
 // humanRefused runs a human-only command with --json as a person at a
@@ -537,7 +537,8 @@ func TestScopeConfirm(t *testing.T) {
 	}{
 		{apperr.ExitInvalidInput, "/requirements", "", []string{"scope", "confirm", "--requirements", ","}},
 		{apperr.ExitInvalidInput, "/requirements/1", "", []string{"scope", "confirm", "--requirements", "REQ-001,REQ-009"}},
-		{apperr.ExitInvalidInput, "/requirements/1", "", []string{"scope", "confirm", "--requirements", "REQ-001,REQ-001"}},
+		// Checked as a scope.v1 document, like --file (codex-review-034 B1).
+		{apperr.ExitInvalidInput, "/requirements", "", []string{"scope", "confirm", "--requirements", "REQ-001,REQ-001"}},
 		{apperr.ExitInvalidInput, "-m", secret, []string{"scope", "confirm", "-m", "see " + secret}},
 		{apperr.ExitInvalidInput, "", "", []string{"scope", "confirm", "--file", scopeFile(t, c2, []string{"REQ-001"}, nil), "-m", "x"}},
 		{apperr.ExitInvalidInput, "/requirements", "", []string{"scope", "confirm", "--file", scopeFile(t, c2, []string{}, nil)}},

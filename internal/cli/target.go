@@ -213,6 +213,12 @@ refs/tags/). The ref need not resolve to a commit yet.`,
 					WithDetails(apperr.Detail{Pointer: "--ref", Problem: "is not refs/heads/... or refs/tags/..."})
 			}
 			if err := scope.CheckName(name); err != nil {
+				if !cmd.Flags().Changed("name") {
+					// Taken from the ref: the person names the target instead.
+					e := apperr.From(err)
+					e.Message = "the name taken from the ref is not a valid target name; name the target with --name"
+					return e
+				}
 				return err
 			}
 			actor, err := w.actor()
@@ -311,6 +317,10 @@ instead. Anything that changes before it is written is stale (exit 5).`,
 			}
 			var fromFile *scope.Input
 			var doc any
+			val, err := validator()
+			if err != nil {
+				return apperr.Wrap(apperr.Internal, err, "cannot load the exchange schemas")
+			}
 			if file != "" {
 				if cmd.Flags().Changed("requirements") || cmd.Flags().Changed("message") || cmd.Flags().Changed("missing-goals-reviewed") {
 					return apperr.New(apperr.InvalidInput, "--file replaces --requirements, -m and --missing-goals-reviewed; give one or the other")
@@ -318,10 +328,6 @@ instead. Anything that changes before it is written is stale (exit 5).`,
 				raw, err := readSmallFile(file)
 				if err != nil {
 					return err
-				}
-				val, err := validator()
-				if err != nil {
-					return apperr.Wrap(apperr.Internal, err, "cannot load the exchange schemas")
 				}
 				if err := val.ValidateJSON("scope.v1", raw); err != nil {
 					return err
@@ -359,9 +365,25 @@ instead. Anything that changes before it is written is stale (exit 5).`,
 			}); err != nil {
 				return err
 			}
-			in, err := scopeInput(st, fromFile, requirements, note, missingGoals)
+			var given *string
+			if cmd.Flags().Changed("message") {
+				given = &note
+			}
+			in, err := scopeInput(st, fromFile, requirements, given, missingGoals)
 			if err != nil {
 				return err
+			}
+			if fromFile == nil {
+				// Built from the command line, it is checked as the scope.v1
+				// document it stands for, like --file, before anybody is
+				// asked (codex-review-034 B1); the errors point into it.
+				raw, err := in.Document()
+				if err != nil {
+					return apperr.Wrap(apperr.Internal, err, "cannot encode the scope")
+				}
+				if err := val.ValidateJSON("scope.v1", raw); err != nil {
+					return err
+				}
 			}
 			reqs, err := scope.Check(st, in, "")
 			if err != nil {
@@ -414,8 +436,9 @@ instead. Anything that changes before it is written is stale (exit 5).`,
 // built from st, the state the person is shown: the target, the version
 // and the source set read, the pending count, the requirements named (by
 // default every active must requirement, FR-TGT-07), the waivers in effect
-// under them, and the target's current confirmation.
-func scopeInput(st scope.State, fromFile *scope.Input, requirements, note string, missingGoals bool) (scope.Input, error) {
+// under them, and the target's current confirmation; note is nil without
+// -m, and missing_goals_reviewed is left out without its flag.
+func scopeInput(st scope.State, fromFile *scope.Input, requirements string, note *string, missingGoals bool) (scope.Input, error) {
 	if fromFile != nil {
 		return *fromFile, nil
 	}
@@ -480,8 +503,8 @@ func confirmSummary(st scope.State, in scope.Input, reqs []scope.Requirement, sn
 	} else {
 		lines = append(lines, fmt.Sprintf("it replaces scope %s (seq %d)", st.Latest.ID, st.Latest.Seq))
 	}
-	if in.Note != "" {
-		lines = append(lines, "note: "+in.Note)
+	if in.Note != nil {
+		lines = append(lines, "note: "+*in.Note)
 	}
 	return lines
 }
