@@ -196,7 +196,7 @@ SRC-08、TGT-10 的 M2 部分，以及 PRV-10，也在本里程碑验收。
 **发布前必须关闭的遗留安全问题**：
 
 - `doctor` 的 git 版本查询（`git --version`）仍继承完整环境：设置 `GIT_TRACE` 等变量时会在外部写入跟踪文件，违反 `doctor` "非破坏性诊断" 的承诺（codex-review-016 NON-BLOCKER 1）。修复方向：改用 `internal/gitx` 的受控环境运行，并对低于 2.32 的 git 报告失败。已作为独立的安全修复任务登记，不属于 WP1.1，但**不是已接受的产品限制**，最晚在 v0.1.0 发布之前关闭。
-- **CLI 错误回显不可信参数**（codex-review-027 NON-BLOCKER N1，与 codex-review-025 B1 同类，是隐私缺陷，不是已接受的风险）。
+- ~~**CLI 错误回显不可信参数**~~ **已完成**（2026-10-16；PR #11，合并提交 `a91016e`；codex-review-030 GO）。原登记内容保留如下，作为证据：codex-review-027 NON-BLOCKER N1，与 codex-review-025 B1 同类，是隐私缺陷，不是已接受的风险。
   - 原因：cobra 和 pflag 的错误被包装后保留原因。`printError` 的文本，以及 `error.v1` 的 `message`（`apperr.ToEnvelope` 使用包含原因的 `Error()`），都会原样引用参数。
   - 已复现的入口（以合成的 GitHub Token 作为参数）：
     - 根命令的未知子命令：`specmetry <x>`，带 `--json` 时同样回显；
@@ -204,12 +204,29 @@ SRC-08、TGT-10 的 M2 部分，以及 PRV-10，也在本里程碑验收。
     - 无法解析的 flag 值和未知 flag：`proposal list --pending=<x>`（`--json` 在前、在后都回显）、`source list --<x>`、`review -<x>`。
   - 机制相同、应一并处理的入口：其他使用 `cobra.NoArgs` 的命令（`init`、`doctor`、`version`、`source list`、`propose`、`review`、`baseline show`、`baseline history`），以及 `question` 之外的全部命令的 flag 错误。
   - 修复方向：在根命令上设置不引用参数的 flag 错误函数和 `Args` 校验，与 `question` 命令的 `noArgs`、`flagError` 相同；`error.v1` 的 `message` 不包含 cobra 的原因；补充覆盖全部命令、文本与 `--json` 两种模式的回归测试。
-  - `question` 命令已在 WP1.7 中处理。其他命令已在独立的安全修复中统一处理（分支 `fix/cli-untrusted-argument-errors`，PR #11，规则见 architecture §9.1"命令行错误"）；审查 029 发现的 cobra 隐藏补全入口也已在该分支修复，**等待定向复审**；审查通过之前本项不关闭，最晚在 v0.1.0 发布之前关闭。
+  - 关闭依据：
+    - 全部命令由 `secureCommandLine` 统一处理（architecture §9.1"命令行错误"）；
+    - cobra 的隐藏补全命令在 cobra 执行之前被拒绝（codex-review-029 B1）；
+    - 回归测试 `TestCommandLineErrorsQuoteNothing`（63 种命令行）、`TestShellCompletionIsRefused` 与 `TestShellCompletionWordIsData`（真实二进制的子进程）在三平台 CI 中运行通过；
+    - 处理记录见 review-resolution.md §35 ~ §37。
+  - 保留的 NON-BLOCKER：codex-review-029 N1，成功的 JSON 输出测试只检查以 `{` 开头，待改为按具体 schema 校验。
 - **其他命令的文本输出没有转义终端控制字符**（与 codex-review-027 B1 同类）。
   - Agent 提交的提案文本可以含有 ESC、CR、BEL 等控制字符。
   - 已按 027 B1 的方法在内存中确认原样输出的命令：`proposal list`、`proposal show`、`review` 的确认摘要、`baseline show`、`baseline history`。`propose --apply` 的确认摘要和 `source` 命令的文本输出可能同样受影响，修复时一并检查。
   - 修复方向：这些命令的文本输出和确认摘要统一使用 `internal/termtext`。
-  - `question` 命令已在 WP1.7 中处理。其他命令**尚未修复**，最晚在 v0.1.0 发布之前关闭。
+  - `question` 命令已在 WP1.7 中处理。其他命令已在独立的安全修复中统一处理（分支 `fix/cli-terminal-text-escaping`，规则见 architecture §9.1"终端显示"）：命令的 stdout、stderr 都经过 `termtext.Writer`，人工确认摘要由 `channel.Guard` 转义，JSON 文档保持标准编码。PR #12；审查 031 发现的短写入问题（B1）已在同一分支修复，**等待定向复审**；审查通过之前本项不关闭，最晚在 v0.1.0 发布之前关闭。
+
+**独立维护事项**（不是安全修复，不属于任何工作包，各自单独处理；不是已接受的风险）：
+
+- **首次登记特殊路径的非文档来源，确认可能无法输入**（codex-review-031 NON-BLOCKER N1）。
+  - `source add --allow-any-type` 登记一个尚未登记的来源时，还没有来源 ID 可用，`confirmText` 回退为原始路径（`internal/cli/source.go`）。
+  - 审查方的复现：路径含双向控制字符的非文档文件，输入屏幕上显示的转义文本时返回退出码 3、不写入；输入实际的原始路径时可以登记。输出中没有危险控制字符，没有错误放行。
+  - 对 POSIX 允许的含换行的文件名，单行读取的确认无法输入这样的路径（未在真实 POSIX 文件系统上动态复验）。
+  - 修复方向：对无法单行确认的路径给出明确提示，或改用一个可以输入的确认标识。
+- **人工交互取消后，`--json` 的 stdout 混入确认提示**（codex-review-031 NON-BLOCKER N2）。
+  - 在 human 通道执行 `question answer Q-001 -m answer --json`，取消确认后，stdout 依次是确认提示和 `error.v1`，整个 stdout 不是一个完整的 JSON 文档（`internal/cli/question.go` 调用 `channel.Guard` 时写到 stdout；`internal/cli/root.go` 把 `error.v1` 也写到 stdout）。`review`、`propose --apply`、`source ack` 等人类专属命令的确认使用同一机制，也会这样（按代码确认，未逐一复现）。
+  - 基准提交 `a91016e` 与 `db81f5a` 都能复现，取消时没有写入，不是 PR #12 引入的回归。
+  - 修复方向：`--json` 模式下把确认提示与机器可读输出分流（例如提示写到 stderr 或终端），并补充对整个 stdout 做 JSON 解析的测试。
 
 ### M7 隔离执行器（MVP 之后，不属于 v0.1.0）
 

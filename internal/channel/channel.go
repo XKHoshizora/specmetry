@@ -19,6 +19,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/XKHoshizora/specmetry/internal/apperr"
+	"github.com/XKHoshizora/specmetry/internal/termtext"
 )
 
 // Channel is a CLI channel.
@@ -109,10 +110,15 @@ func Guard(d Detection, in io.Reader, out io.Writer, op Operation) error {
 	if err := d.RequireHuman(op.Name); err != nil {
 		return err
 	}
+	// The summary holds texts from proposals, people and the
+	// configuration: each line is escaped for the terminal, and a line it
+	// continues is indented under it, so that it cannot pass for a line of
+	// its own. The confirmation text is shown quoted (%q escapes it) and
+	// compared as it is.
 	var prompt strings.Builder
-	prompt.WriteString(op.Name + "\n")
+	prompt.WriteString(termtext.Line(op.Name) + "\n")
 	for _, line := range op.Summary {
-		prompt.WriteString("  " + line + "\n")
+		prompt.WriteString("  " + strings.ReplaceAll(termtext.Escape(line), "\n", "\n    ") + "\n")
 	}
 	fmt.Fprintf(&prompt, "Type %q to confirm, or press Enter to cancel: ", op.Confirm)
 	if n, err := io.WriteString(out, prompt.String()); err != nil || n != prompt.Len() {

@@ -14,6 +14,7 @@ import (
 	"github.com/XKHoshizora/specmetry/internal/config"
 	"github.com/XKHoshizora/specmetry/internal/datadir"
 	"github.com/XKHoshizora/specmetry/internal/store/sqlite"
+	"github.com/XKHoshizora/specmetry/internal/termtext"
 )
 
 type checkStatus string
@@ -83,9 +84,9 @@ func runChecks(cmd *cobra.Command) []check {
 	case err != nil:
 		checks = append(checks, check{statusFail, "data directory", err.Error()})
 	case !exists:
-		checks = append(checks, check{statusInfo, "data directory", fmt.Sprintf("%s (%s) does not exist yet; it is created on first use", dir.Path, source)})
+		checks = append(checks, check{statusInfo, "data directory", fmt.Sprintf("%s (%s) does not exist yet; it is created on first use", termtext.Line(dir.Path), source)})
 	default:
-		checks = append(checks, check{statusOK, "data directory", fmt.Sprintf("%s (%s)", dir.Path, source)})
+		checks = append(checks, check{statusOK, "data directory", fmt.Sprintf("%s (%s)", termtext.Line(dir.Path), source)})
 		checks = append(checks, permissionCheck(dir))
 		checks = append(checks, configCheck(dir))
 		checks = append(checks, databaseChecks(cmd, dir)...)

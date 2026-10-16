@@ -11,6 +11,7 @@ import (
 
 	"github.com/XKHoshizora/specmetry/internal/apperr"
 	"github.com/XKHoshizora/specmetry/internal/channel"
+	"github.com/XKHoshizora/specmetry/internal/termtext"
 )
 
 // env returns a lookup function over vars, as os.LookupEnv would see them.
@@ -119,6 +120,39 @@ func TestGuardConfirmsInHumanChannel(t *testing.T) {
 	}
 }
 
+// The prompt is safe on any writer: Guard escapes the operation's name and
+// summary for the terminal (termtext) and indents the lines a summary line
+// continues on, so that a text from a proposal cannot pass for a line of
+// the summary. The confirmation text is shown quoted and compared as it
+// is.
+func TestGuardShowsTheSummarySafely(t *testing.T) {
+	human := channel.Decide(true, true, env(nil))
+	rlo := string(rune(0x202e))
+	op := channel.Operation{
+		Name:    "review",
+		Summary: []string{"proposal by agent:x: fix\x1b[2J\x07" + rlo + "\r\n  item 0: reject add requirement ref r1", "second\rline"},
+		Confirm: "01J9Z3K5Q8R2T4V6W8X0Y2Z4A5",
+	}
+	var out bytes.Buffer
+	if err := channel.Guard(human, strings.NewReader(op.Confirm+"\n"), &out, op); err != nil {
+		t.Fatalf("confirmed: %v", err)
+	}
+	prompt := out.String()
+	for _, r := range prompt {
+		if r < 0x20 && r != '\n' || r == 0x7f || r >= 0x80 && r <= 0x9f || r >= 0x202a && r <= 0x202e {
+			t.Fatalf("the prompt holds %U:\n%q", r, prompt)
+		}
+	}
+	want := "review\n  proposal by agent:x: fix" + `\x1b[2J\a\u202e` + "\n      item 0: reject add requirement ref r1\n  second" + `\r` + "line\n" +
+		`Type "01J9Z3K5Q8R2T4V6W8X0Y2Z4A5" to confirm, or press Enter to cancel: `
+	if prompt != want {
+		t.Fatalf("prompt:\n%q\nwant\n%q", prompt, want)
+	}
+	if err := channel.Guard(human, strings.NewReader(`\x1b`+"\n"), io.Discard, op); apperr.ExitCode(err) != apperr.ExitHumanRequired {
+		t.Fatalf("the escaped form confirmed: %v", err)
+	}
+}
+
 // Anything but the exact confirmation text, ended by Enter, cancels: exit
 // code 3, nothing may be written. End of input cancels even after the
 // confirmation text (architecture §5.1).
@@ -177,7 +211,10 @@ func (c *readCounter) Read(p []byte) (int, error) {
 // When the operation, its summary or the prompt cannot be shown in full,
 // the guard fails with exit code 6 before reading anything, and the
 // operation does not go ahead even though the confirmation text is
-// waiting. Every write fails, so the fault is certain to happen.
+// waiting. Every write fails, so the fault is certain to happen. The same
+// holds through the terminal escaping every command's output goes through
+// (termtext.Writer; codex-review-031 B1): a short write without an error
+// is still a short write there.
 func TestGuardFailsWhenThePromptCannotBeShown(t *testing.T) {
 	errOutput := errors.New("output closed")
 	cases := []struct {
@@ -190,20 +227,42 @@ func TestGuardFailsWhenThePromptCannotBeShown(t *testing.T) {
 		{"nothing written", func([]byte) (int, error) { return 0, nil }},
 	}
 	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			out := &faultyWriter{write: c.write}
-			in := &readCounter{r: strings.NewReader("REQ-001\n")}
-			err := channel.Guard(channel.Decide(true, true, env(nil)), in, out, op)
-			if out.writes == 0 {
-				t.Fatal("Guard wrote nothing, so the fault did not happen")
+		for _, escaped := range []bool{false, true} {
+			name := c.name
+			if escaped {
+				name += ", through termtext.Writer"
 			}
-			if apperr.ExitCode(err) != apperr.ExitEnvironment {
-				t.Errorf("Guard = %v, want exit code %d", err, apperr.ExitEnvironment)
-			}
-			if in.reads != 0 {
-				t.Errorf("Guard read the confirmation %d times", in.reads)
-			}
-		})
+			t.Run(name, func(t *testing.T) {
+				out := &faultyWriter{write: c.write}
+				var w io.Writer = out
+				if escaped {
+					w = termtext.NewWriter(out)
+				}
+				in := &readCounter{r: strings.NewReader("REQ-001\n")}
+				err := channel.Guard(channel.Decide(true, true, env(nil)), in, w, op)
+				if out.writes == 0 {
+					t.Fatal("Guard wrote nothing, so the fault did not happen")
+				}
+				if apperr.ExitCode(err) != apperr.ExitEnvironment {
+					t.Errorf("Guard = %v, want exit code %d", err, apperr.ExitEnvironment)
+				}
+				if in.reads != 0 {
+					t.Errorf("Guard read the confirmation %d times", in.reads)
+				}
+			})
+		}
+	}
+	// Written whole, directly or escaped, the confirmation goes ahead.
+	for _, escaped := range []bool{false, true} {
+		var buf bytes.Buffer
+		var w io.Writer = &buf
+		if escaped {
+			w = termtext.NewWriter(&buf)
+		}
+		in := &readCounter{r: strings.NewReader("REQ-001\n")}
+		if err := channel.Guard(channel.Decide(true, true, env(nil)), in, w, op); err != nil || in.reads == 0 {
+			t.Errorf("written whole (escaped %v): %v after %d reads", escaped, err, in.reads)
+		}
 	}
 }
 

@@ -11,6 +11,7 @@ import (
 
 	"github.com/XKHoshizora/specmetry/internal/apperr"
 	"github.com/XKHoshizora/specmetry/internal/contract"
+	"github.com/XKHoshizora/specmetry/internal/termtext"
 )
 
 // validator compiles the exchange schemas once per process.
@@ -18,8 +19,11 @@ var validator = sync.OnceValues(contract.New)
 
 // writeJSON validates v against the named schema and prints it. Output
 // meant for an Agent must conform to schemas/ (AGENTS.md); a document that
-// does not is an internal error and is not printed.
+// does not is an internal error and is not printed. The document is written
+// as JSON encodes it, past the terminal escaping of text (termtext.Raw):
+// decoded, every value is the stored one.
 func writeJSON(w io.Writer, schema string, v any) error {
+	w = termtext.Raw(w)
 	val, err := validator()
 	if err != nil {
 		return apperr.Wrap(apperr.Internal, err, "cannot load the exchange schemas")
