@@ -2205,4 +2205,77 @@ MVP v0.1.0 不支持 SHA-256 格式的 git 对象 ID。§27 记录的现象（64
   - `TestShellCompletion` 需要 go 工具链，因此不在其中；改用真实的 Linux 二进制重放补全拒绝：退出码 2，不输出 canary，不写调试文件，数据目录为空。
 - 三平台 CI 的结果记录在 PR 中。
 
-**状态**：已实现，等待 Codex 对 WP1.8 的首次独立代码审查。M1 尚未整体验收。
+**状态**：已实现。首次独立代码审查为 codex-review-034（NO-GO），处理见 §44。M1 尚未整体验收。
+
+## 44. WP1.8 代码审查（codex-review-034）的处理
+
+**审查结论**：**NO-GO**，有 2 项 BLOCKER、1 项 NON-BLOCKER。审查目标 `90beb48`，基准 `fbd6dff`。审查原文按原样入库（`docs/reviews/codex-review-034.md`）。
+
+- 审查方认可的部分，本轮不重新设计：Target 与 Scope 的主要事务和并发机制、V-T01、V-T02、审核附带范围的原子性（包括晚期失败时的全部回滚），以及迁移 0006。
+- 两项 BLOCKER 都是新增的自由文本入口违反了已冻结的隐私校验规则（architecture §10.2"所有自由文本都不能包含代码围栏，由 schema 强制"）。没有新增产品决策。
+
+**B1：交互式范围确认的备注绕过 schema**
+
+- 问题：`scope confirm --file` 按 `scope.v1` 严格校验，而 `scope confirm -m` 只对备注做密钥扫描和 `scope.Check`。
+  - 含代码围栏的备注被写入 `scope_confirmations.note`；
+  - 1001 个字符的备注先进入人工确认，之后才因数据库长度约束返回 internal（退出码 1）。
+- 修复：交互式确认按它所代表的完整 `scope.v1` 文档，使用与 `--file` 相同的 validator 校验，在确认之前完成（`scope.Input.Document`，architecture §6.1.7"确认范围"第 4 步）。
+  - 文档补齐 `schema`、`target_id`、`baseline_version`、`source_set_hash`、`requirements`、`attestations`、`acknowledged_waivers`（总是数组）和 `seen_scope_confirmation_id`（首次确认为 null）。
+  - `scope.Input.Note` 改为可选（`*string`，没有时省略）。没有 `-m` 时省略 `note`，所以合法的默认确认不受影响；没有 `--missing-goals-reviewed` 时省略 `missing_goals_reviewed`。
+  - 没有另写备注的正则：长度、代码围栏都由 `scope.v1` 的 `plainText1000` 决定。
+  - `scope.Check` 的业务前置条件和过期判定不变。文档由刚读到的状态构造，所以 schema 校验不会把过期改判为输入错误；写事务中的重新检查照旧。
+  - 审核附带的范围，原本就由 `review.v1` 的 `confirmationInReview` 校验（没有 `baseline_version`），备注错误指向 `/scope/note`。本轮补了回归测试。
+  - 错误只给出字段与问题类型，不回显输入（validator 的脱敏输出）。
+- 一项需要说明的选择：`-m ""`（显式给出空备注）与文件中的 `"note": ""` 等价，都返回退出码 2（`/note`）。不带 `-m` 时才是"没有备注"。修复前，`-m ""` 被当作没有备注接受。
+- 直接相关的测试调整：`--requirements REQ-001,REQ-001` 现在由 schema 的 `uniqueItems` 先拒绝，与 `--file` 相同：仍是退出码 2，指针由 `/requirements/1` 变为 `/requirements`。
+
+**B2：交付目标名称允许代码围栏**
+
+- 问题：`CheckName` 只检查 UTF-8、空值、长度和控制字符，`target-scope.v1` 的 `target.name` 也没有禁止代码围栏。代码围栏名称可以写入 `delivery_targets.name`，并能通过输出 schema 校验。
+- 修复：
+  - `CheckName` 拒绝含三个连续反引号的名称，原有的非空、单行、UTF-8、控制字符和 200 字符限制保持不变。
+  - `SetTarget` 在写入处再调用一次 `CheckName`，作为第二道防线。
+  - `target-scope.v1` 的 `target.name` 增加相同的代码围栏限制（新反例 SCH-147）。
+  - 显式 `--name` 和由 ref 生成的默认名称经过同一校验，都在打开数据库之前完成：返回退出码 2，指向 `--name`，不显示确认，不写入。默认名称不合法时，消息提示用 `--name` 给出名称。
+  - Git ref 的合法性规则和 `init` 的默认目标都没有改变。含代码围栏的分支用合法的 `--name` 仍可设置为目标。
+
+**回归测试**（测试先行；修复前的结果为当前代码 `90beb48` 上的实际运行）：
+
+| 测试 | 修复前 | 修复后 |
+|---|---|---|
+| `TestScopeNoteIsCheckedLikeAFile`：两个入口分别提交代码围栏备注、行内围栏、1001 字符、空备注；审核附带范围的围栏备注 | `-m` 的围栏备注返回 exit 0 并写入；1001 字符在确认之后返回 exit 1；`-m ""` 返回 exit 0；`--file` 已经是 exit 2 | 两个入口都是 exit 2（`/note`）：error.v1 合法，没有确认提示，`seq`、目标、范围、基准、提案、待审条目都不变，输出和数据目录中都没有合成内容；审核为 exit 2（`/scope/note`）。1000 字符（按字符计）、中文、日文、emoji、没有备注，两个入口都确认成功，并按原值保存（没有备注时为 NULL） |
+| `TestTargetNameHasNoCodeFence`：显式 `--name` 含围栏、行内围栏、同 ref 改名为非法名称、ref 生成的默认名称含围栏；已有目标和范围确认 | 四种情形都返回 exit 0，并创建或归档目标 | 全部 exit 2（`--name`），没有提示，没有写入，`seq` 不变，原目标与范围确认不变，数据目录中没有合成内容。含围栏的 ref 加合法 `--name` 可以设置；中文、日文、emoji、单反引号、双反引号的名称都能设置并按原值读取 |
+| `internal/scope` 的 `TestCheckName`、`TestSetTarget` | 代码围栏名称通过 | `CheckName` 和写入处的 `SetTarget` 都拒绝 |
+| `internal/contract` 的 SCH-147 ~ 149 | SCH-147 被接受（SCH-148、149 已经被拒绝） | 全部被拒绝 |
+
+- `scopeState` 增加提案计数，以验证拒绝时提案不变。
+
+**直接回归**：以下测试照常通过，没有修改断言（除上面说明的一处指针变化）。
+
+- V-T01：`TestCheck`、`TestCheckWaivers`，空集合与合成非空集合；
+- V-T02：`TestConfirmRace`（两个连接）、`TestScopeConfirmedMeanwhile`；
+- 审核附带范围的同事务提交与失败回滚：`TestScopeInReview`；
+- 目标替换、无变更与并发保护：`TestTargetShowAndSet`、`TestTargetSetWhileConfirming`、`TestTargetWithoutOne`；
+- 来源集合哈希、基准版本、待审与冲突计数：`TestScopeConfirm`；
+- 人类专属命令都经过 `RequireHuman` 和 `cli.confirm`：`TestHumanOnlyCommandsConfirmThroughConfirm`、`TestTargetAndScopeNeedAPerson`；
+- JSON 的 stdout 与 stderr 分流：`TestConfirmationWithJSON`；
+- 终端转义与短写入保护：`TestTextOutputIsShownSafely`、`TestTargetAndScopeConfirmationNotShownWhole`；
+- 迁移：没有新增或修改迁移，`internal/store/sqlite` 全部通过。
+
+**N1：跨项目需求外键的测试可能由另一条外键先拒绝**（`internal/store/sqlite/scope_test.go`）。审查方已确认实际约束正确，不是生产缺陷。本轮只登记为独立维护事项（implementation-plan"独立维护事项"），不扩大 B1、B2 的修复范围。
+
+**范围外，不变**：Target 与 Scope 的事务和并发设计、迁移 0001 ~ 0006、M2、Dashboard，以及已登记的遗留事项（`doctor` 的 git 版本查询隔离、审查 029 N1、031 N1、033 N1、WP1.6 的 N1 和 N2、本地 Windows 测试超时）。
+
+**验证**（本地）：
+
+- `scripts/check.sh`：`go mod tidy`、`go vet`、Markdown 链接检查、golangci-lint（0 issues）都通过。
+- `go test ./...`：`internal/cli` 以外的包全部通过。
+  - `internal/cli` 再次触发本地 Windows 上 Go 默认的 10 分钟超时，此前没有测试失败。
+  - 单独以 `-timeout 30m` 运行，通过（864 秒）。
+  - 脚本和全局超时都没有修改。
+- web 检查、`go build -o dist/ ./cmd/specmetry`、`go test ./web/` 都通过。
+- golangci-lint 在三个平台都是 0 issues；`golangci-lint fmt --diff` 没有差异。
+- WSL Linux（git 2.43.0）：19 个测试二进制全部通过，其中 `cli` 140 项、`scope` 6 项。补全拒绝用真实的 Linux 二进制重放，结果不变。
+- 三平台 CI 的结果记录在 PR #14 中。
+
+**状态**：已修复，等待 Codex 定向复审（审查 035）。PR #14 未合并，M1 尚未整体验收。
