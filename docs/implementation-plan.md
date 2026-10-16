@@ -210,11 +210,16 @@ SRC-08、TGT-10 的 M2 部分，以及 PRV-10，也在本里程碑验收。
     - 回归测试 `TestCommandLineErrorsQuoteNothing`（63 种命令行）、`TestShellCompletionIsRefused` 与 `TestShellCompletionWordIsData`（真实二进制的子进程）在三平台 CI 中运行通过；
     - 处理记录见 review-resolution.md §35 ~ §37。
   - 保留的 NON-BLOCKER：codex-review-029 N1，成功的 JSON 输出测试只检查以 `{` 开头，待改为按具体 schema 校验。
-- **其他命令的文本输出没有转义终端控制字符**（与 codex-review-027 B1 同类）。
+- ~~**其他命令的文本输出没有转义终端控制字符**~~ **已完成**（2026-10-16；PR #12，合并提交 `26c787b`；codex-review-032 GO）。原登记内容保留如下，作为证据：与 codex-review-027 B1 同类。
   - Agent 提交的提案文本可以含有 ESC、CR、BEL 等控制字符。
   - 已按 027 B1 的方法在内存中确认原样输出的命令：`proposal list`、`proposal show`、`review` 的确认摘要、`baseline show`、`baseline history`。`propose --apply` 的确认摘要和 `source` 命令的文本输出可能同样受影响，修复时一并检查。
   - 修复方向：这些命令的文本输出和确认摘要统一使用 `internal/termtext`。
-  - `question` 命令已在 WP1.7 中处理。其他命令已在独立的安全修复中统一处理（分支 `fix/cli-terminal-text-escaping`，规则见 architecture §9.1"终端显示"）：命令的 stdout、stderr 都经过 `termtext.Writer`，人工确认摘要由 `channel.Guard` 转义，JSON 文档保持标准编码。PR #12；审查 031 发现的短写入问题（B1）已在同一分支修复，**等待定向复审**；审查通过之前本项不关闭，最晚在 v0.1.0 发布之前关闭。
+  - 关闭依据：
+    - 命令的 stdout、stderr 都经过 `termtext.Writer`，人工确认摘要由 `channel.Guard` 转义，JSON 文档保持标准编码（architecture §9.1"终端显示"）；
+    - `termtext.Writer` 会报告短写入，确认提示没有完整显示时 `Guard` 仍返回退出码 6（codex-review-031 B1）；
+    - 回归测试 `TestTextOutputIsShownSafely`、`TestInitTextIsShownSafely`、`TestGuardShowsTheSummarySafely`、`TestWriterReportsShortWrites`、`TestConfirmationNotShownWholeWritesNothing` 在三平台 CI 中运行通过；
+    - 处理记录见 review-resolution.md §38 ~ §40。
+  - 保留的独立维护事项：codex-review-031 N1、N2（见下文"独立维护事项"）。
 
 **独立维护事项**（不是安全修复，不属于任何工作包，各自单独处理；不是已接受的风险）：
 
