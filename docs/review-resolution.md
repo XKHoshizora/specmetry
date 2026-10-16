@@ -2103,3 +2103,21 @@ MVP v0.1.0 不支持 SHA-256 格式的 git 对象 ID。§27 记录的现象（64
 **范围外，不变**：业务状态模型、迁移、schema 业务字段、CLI 参数脱敏、补全拦截、终端转义规则、审查 031 N1、`doctor` 的 git 版本查询隔离、WP1.6 的 N1 和 N2、WP1.8、M2。
 
 **状态**：已修复，等待独立审查；审查通过之前，维护事项 N2 不关闭。
+
+## 42. 人工确认与 JSON 输出分流 PR #13 的代码审查（codex-review-033）与关闭
+
+**审查结论**：**GO**，BLOCKER 为 0，有 1 项 NON-BLOCKER。审查目标 `511403d`，基准 `26c787b`。审查原文按原样入库。
+
+- **审查 031 N2 关闭。** 审查方在隔离副本中对照：基准提交上取消后 stdout 是"确认提示加 `error.v1`"，无法整体解码；目标提交上提示在 stderr，整个 stdout 是一份通过 `error.v1` 校验的文档。另外独立验证了 16 组 JSON flag 组合、4 种 stderr 故障与短写入、真实 ConPTY 中的确认与 stderr 重定向，都没有回归。
+- PR #13 已合并（合并提交 `fbd6dff`，2026-10-17）。implementation-plan 中的维护事项 N2 标记为已完成。
+- 审查方说明了源码扫描测试 `TestHumanOnlyCommandsConfirmThroughConfirm` 的边界：它是字符串扫描，不能覆盖导入别名等语义等价的写法，只是辅助检查，不能代替人类专属命令自身的验收。
+
+**N1：自定义 Writer 与进程 stderr 的终端属性可能不一致。** 登记为独立维护事项（implementation-plan，M6 之后），不是已接受的风险。
+
+- `cli.Execute` 接受调用者传入的 Writer，而终端检测针对进程的 `os.Stderr`。
+- 正式二进制唯一的调用传入的就是 `os.Stdout`、`os.Stderr`，不受影响。
+- 保留 `Execute` 的交互输出使用约束：交互时 stdout、stderr 必须是进程自己的终端流。
+
+**其他事项**：审查 031 N1、审查 029 N1、`doctor` 的 git 版本查询隔离（M6）、WP1.6 的 N1 和 N2、本地 Windows 测试超时，维持原安排。
+
+**M1 状态**：随后开始 WP1.8（M1 的最后一个工作包）；M1 尚未整体完成。

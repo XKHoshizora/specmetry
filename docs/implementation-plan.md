@@ -228,10 +228,16 @@ SRC-08、TGT-10 的 M2 部分，以及 PRV-10，也在本里程碑验收。
   - 审查方的复现：路径含双向控制字符的非文档文件，输入屏幕上显示的转义文本时返回退出码 3、不写入；输入实际的原始路径时可以登记。输出中没有危险控制字符，没有错误放行。
   - 对 POSIX 允许的含换行的文件名，单行读取的确认无法输入这样的路径（未在真实 POSIX 文件系统上动态复验）。
   - 修复方向：对无法单行确认的路径给出明确提示，或改用一个可以输入的确认标识。
-- **人工交互取消后，`--json` 的 stdout 混入确认提示**（codex-review-031 NON-BLOCKER N2）。**已修复，等待独立审查**（分支 `fix/cli-json-interactive-output`；带 `--json` 时确认显示在 stderr，stderr 不是终端时返回退出码 6；规则见 architecture §5.1 规则 2、§9.1；处理记录见 review-resolution.md §41）。原登记内容：
+- ~~**人工交互取消后，`--json` 的 stdout 混入确认提示**~~ **已完成**（2026-10-17；PR #13，合并提交 `fbd6dff`；codex-review-033 GO）。带 `--json` 时确认显示在 stderr，stderr 不是终端时返回退出码 6；规则见 architecture §5.1 规则 2、§9.1；处理记录见 review-resolution.md §41、§42。原登记内容（codex-review-031 NON-BLOCKER N2）保留如下：
   - 在 human 通道执行 `question answer Q-001 -m answer --json`，取消确认后，stdout 依次是确认提示和 `error.v1`，整个 stdout 不是一个完整的 JSON 文档（`internal/cli/question.go` 调用 `channel.Guard` 时写到 stdout；`internal/cli/root.go` 把 `error.v1` 也写到 stdout）。`review`、`propose --apply`、`source ack` 等人类专属命令的确认使用同一机制，也会这样（按代码确认，未逐一复现）。
   - 基准提交 `a91016e` 与 `db81f5a` 都能复现，取消时没有写入，不是 PR #12 引入的回归。
   - 修复方向：`--json` 模式下把确认提示与机器可读输出分流（例如提示写到 stderr 或终端），并补充对整个 stdout 做 JSON 解析的测试。
+- **自定义 Writer 与进程 stderr 的终端属性可能不一致**（codex-review-033 NON-BLOCKER N1；不是已接受的风险）。
+  - `cli.Execute` 接受调用者传入的 stdout、stderr Writer，而 `confirm` 判断的是进程自己的 `os.Stderr` 是否为终端（`internal/cli/root.go`、`internal/cli/confirm.go`）。进程内的调用者把 stderr 换成另一个 Writer 时，带 `--json` 的确认提示写进该 Writer，人看不到，确认输入却仍会被读取。
+  - 审查方的复现：在真实 ConPTY 子进程中调用 `cli.Execute(ctx, args, os.Stdout, &hidden)` 执行 JSON 模式的 `question answer`，提示进入 `hidden`，预先输入的正确确认仍使操作成功。
+  - 正式二进制不受影响：唯一的生产调用 `cmd/specmetry/main.go` 传入的就是 `os.Stdout`、`os.Stderr`，检测对象与实际输出一致，没有命令行参数能替换 Writer。
+  - 使用约束：`cli.Execute` 用于交互时，stdout、stderr 必须是进程自己的终端流；不能把"进程 stderr 是终端"推广为"任意传入的 Writer 都能被人看到"。
+  - 修复方向：将来支持嵌入或包装输出时，把终端能力绑定到实际显示确认的 Writer。
 
 ### M7 隔离执行器（MVP 之后，不属于 v0.1.0）
 
