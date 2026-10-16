@@ -264,6 +264,31 @@ func TestHeadBranchAndCommit(t *testing.T) {
 	}
 }
 
+// ValidRefName asks git whether a name is a well-formed ref, without the
+// ref existing; an option-like name is never passed to git.
+func TestValidRefName(t *testing.T) {
+	repo := committedRepo(t)
+	for ref, want := range map[string]bool{
+		"refs/heads/main":         true,
+		"refs/heads/release/1.0":  true,
+		"refs/tags/v1.0.0":        true,
+		"refs/heads/not-yet-made": true,
+		"refs/heads/a..b":         false,
+		"refs/heads/a b":          false,
+		"refs/heads/a~1":          false,
+		"refs/heads/a:b":          false,
+		"refs/heads/.hidden":      false,
+		"refs/heads/a.lock":       false,
+		"refs/heads/a/":           false,
+		"-refs/heads/main":        false,
+		"":                        false,
+	} {
+		if got, err := ValidRefName(ctx, repo.Dir, ref); err != nil || got != want {
+			t.Errorf("ValidRefName(%q) = %v, %v; want %v", ref, got, err, want)
+		}
+	}
+}
+
 func TestGitPath(t *testing.T) {
 	repo := committedRepo(t)
 	wt := repo.AddWorktree("feature-x")
