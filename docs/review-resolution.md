@@ -1882,3 +1882,56 @@ MVP v0.1.0 不支持 SHA-256 格式的 git 对象 ID。§27 记录的现象（64
 - **修复前**（`4125dfe`）：`TestCommandLineErrorsQuoteNothing` 有 40 处回显、5 处错误地返回 0、11 处缺少 `error.v1`。
 
 **状态**：已修复，等待独立审查；审查通过之前，M6 中的这一项不关闭。
+
+## 36. 安全修复 PR #11 的代码审查（codex-review-029）的处理
+
+**审查结论**：NO-GO。审查目标 `9879c56`，有 1 项 BLOCKER、1 项 NON-BLOCKER。审查确认：已注册的根命令、命令组和叶子命令都受到统一控制；常规 JSON 错误模式正确；业务错误、人工通道和确认流程没有回归。本轮不需要新的产品决策。
+
+本轮只修复 B1 及直接相关的测试。数据模型、迁移、业务错误和人工通道都不变。审查原文按原样入库。
+
+### B1：cobra 动态加入的隐藏补全命令绕过统一脱敏
+
+**根因**：
+
+- cobra v1.10.2 在 `ExecuteC` 中调用 `initCompleteCmd`，临时加入隐藏命令 `__complete`（别名 `__completeNoDesc`）。只有 `root.Find(args)` 解析到这个名字时，它才保留这个命令。
+- 这个命令在 `secureCommandLine` 遍历之后才出现，所以不受统一处理。它自己解析剩余的命令行，用 `CompErrorln` 把原始错误直接写到 `os.Stderr`；设置 `BASH_COMP_DEBUG_FILE` 时还写入该文件。之后输出补全指令（`:0`），并以 0 退出。
+- `root.go` 的 `DisableDefaultCmd` 只关闭了可见的 `completion` 命令。
+
+**修复**：Specmetry 不提供 shell 补全，所以在 cobra 执行之前拒绝这类命令行（`completionRequest`，在 `executeAs` 调用 `ExecuteContextC` 之前执行）：
+
+- 判断方式与 cobra 的 `initCompleteCmd` 相同，并且在相同的状态下进行：
+  - 先加入 help 命令（`ExecuteC` 在 `initCompleteCmd` 之前同样会加入）；
+  - 再在根命令下加入一个同名、同别名、从不运行的占位命令；
+  - 然后调用 cobra 自己的 `Find`，根命令的 flag、flag 的值和 `--`，都按 cobra 的方式解析。
+- 解析到占位命令时，返回 `invalid_input`（退出码 2），消息为固定文本，不调用 `ExecuteContextC`。因此 cobra 的 `initCompleteCmd`、补全处理器和 `CompDebug` 都不会运行，不输出补全结果，也不写调试文件。占位命令随即移除。
+- JSON：只看补全命令之前的根级 flag（`--json`、`--json=true` 为 JSON，`--json=false` 或最后为 false 时为文本）。补全命令之后的内容是被补全的命令行，其中的 `--json` 不算。
+- `executeAs` 收到 nil 参数时改为空参数，不让 cobra 改读 `os.Args`，保证判断和 cobra 使用同一组参数。
+
+**为什么能在隐藏处理器运行前拦截所有受支持的调用形式**：
+
+- cobra 只在 `ExecuteC` 中、且只在 `Find(args)` 解析到这个名字时，才会运行补全处理器。
+- `completionRequest` 在调用 `ExecuteC` 之前，用同一组参数、同样的命令树状态和 cobra 自己的 `Find` 做这个判断。cobra 会运行补全的每一种形式都会被拒绝，包括根级 flag 在前、别名、`--json=<布尔值>`。
+- 判断为否时，cobra 的 `Find` 也不会解析到补全命令，`initCompleteCmd` 会立即移除它，补全处理器不会运行。
+- 没有复制 cobra 的私有代码，不修改环境变量，也不在事后过滤 stderr。
+
+**回归测试**（真实 CLI 二进制：测试中从 `cmd/specmetry` 构建，作为独立进程运行；合成密钥在运行时随机生成）：
+
+- `TestShellCompletionIsRefused`，14 种命令行：
+  - 审查中的 A、B；
+  - 根级 `--json`、`--json=true`、`--json=false`、`--json --json=false` 在前；
+  - `--json` 加 `question answer -m <canary>`；
+  - 补全行内部的 `--json`；
+  - 只有 `__completeNoDesc`；
+  - 设置 `BASH_COMP_DEBUG_FILE` 为新文件，或为已有文件。
+
+  每种都断言：退出码 2；没有补全结果（`:0`、`Completion ended`、`[Debug]`）；进程自己的 stdout 和 stderr 中都没有 canary；要求 JSON 时 stdout 是通过 schema 校验的 `error.v1` 且 stderr 为空，否则只有文本拒绝；新调试文件不存在，已有调试文件内容不变；数据目录逐个文件哈希不变。
+- `TestShellCompletionWordIsData`：业务参数恰好是 `__complete` 或 `__completeNoDesc` 时，命令照常执行并给出自己的错误，不被当作补全命令；没有写入。覆盖了 `-m` 的值、`proposal show` 和 `source add` 的参数、`--` 之后、未知 flag 之后、`help` 的主题。
+- **修复前**（`9879c56`）：每种补全形式都返回 0 并输出 `:0`，canary 出现在进程的 stderr 中，调试文件被创建，已有的调试文件被追加。
+- 直接回归：`TestCommandLineErrorsQuoteNothing`、`TestCommandLineStillWorks`、`TestQuestionCommandLineErrors`、`TestProposalShowDoesNotEchoItsArgument`、`TestUnknownCommandAndFlagAreInvalidInput`，以及人类专属命令的 PTY 测试，都通过。
+
+### NON-BLOCKER（登记，不在本轮修改）
+
+- **N1**：`TestCommandLineStillWorks` 对成功 JSON 输出只检查以 `{` 开头，断言偏弱。审查方已独立确认六类正常输出符合各自的 schema，当前没有功能缺陷。改为按具体 schema 校验，留待后续处理。
+- 其他命令文本输出中的终端控制字符、`doctor` 的 git 版本查询隔离、WP1.6 的 N1 和 N2，维持各自的安排。
+
+**状态**：B1 已修复，等待定向复审（codex-review-030）。审查通过之前，M6 中的这一项不关闭。

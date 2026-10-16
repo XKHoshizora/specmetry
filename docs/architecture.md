@@ -701,6 +701,11 @@ Agent 侧的安装位置（TD-03）：
 - 参数：命令自己的参数个数检查保留原来的规则，cobra 的消息换成固定文本和该命令的用法。
 - flag：未知的 flag 或简写、不合法的值、缺少值，都返回退出码 2 和固定消息。
 - cobra 的错误文本不作为原因保留，因此不会进入 `error.v1` 的 `message`、`details` 或 `current`。
+- Shell 补全：Specmetry 不提供 shell 补全（codex-review-029 B1）。cobra 在执行期间才加入隐藏的补全命令 `__complete`（别名 `__completeNoDesc`），它绕过上述处理，把含有命令行内容的错误直接写到进程的 stderr 和 `BASH_COMP_DEBUG_FILE`。
+  - 判断方式：cobra 只在 `root.Find(args)` 解析到这个名字时才保留它。所以在 cobra 执行之前，以相同的状态用 cobra 自己的 `Find` 做同样的判断：先加入 help 命令，再加入一个同名、同别名、从不运行的占位命令。
+  - 解析到补全命令时，返回 `invalid_input`（退出码 2），cobra 不执行，不输出补全结果，也不写调试文件。
+  - 它之前的根级 flag 要求 JSON 时，输出 `error.v1`；补全行内部的 `--json` 属于被补全的命令行，不算。
+  - 出现在 flag 的值中、`--` 之后，或其他命令参数中的 `__complete`，不是补全命令。
 - `--json` 时，错误输出完整的 `error.v1`，stderr 为空：
   - 根命令和命令组也接受 `--json`，所以它也可以写在命令之前（例如 `specmetry --json question list`）；
   - pflag 在出错的 flag 处停止解析，此时按 pflag 的规则从参数中判断是否要求了 JSON：`--json`、`--json=<布尔值>` 都算，以最后一个为准；取值 flag 的值（`-m x`、`-mx`、`-m=x`、`--message x`、`--file x`）不算；`--` 之后的参数不算；未知 flag 不取值，例如 `--unknown=--json` 不算。
