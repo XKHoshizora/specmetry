@@ -450,7 +450,7 @@ sequenceDiagram
    - 接受的 `update` 条目必须带审核者选择的 `change_class`（V-R01），提案中建议的类别不会被采用；其他类型的条目不接受 `change_class`；
    - `accepted` 不能带 `final_data`；`retire`、`reaffirm` 没有可编辑的数据，不能编辑后接受；
    - `final_data` 按该条目的数据定义校验（`proposal.v1`），并检查代码围栏、路径不越出仓库、本提案 `ref` 的类型。
-4. 携带 `scope`（范围确认）时，返回退出码 2（指向 `/scope`）。附带在审核中的范围确认随 WP1.8 实现，在此之前不会被静默忽略。
+4. 携带 `scope`（范围确认）时，在应用审核之后、同一写事务中确认范围（WP1.8，见 §6.1.7"附带在审核中"）。
 5. 演练：在一个总是回滚的写事务中完整应用一次。任何应用阶段的错误都在提示确认之前报告，人不会被要求确认一个无法应用的审核。
 6. 显示操作摘要（提案、将生成的版本号、每个条目的决定与修订类别、后续处理），要求输入提案 ID 确认。拒绝确认时返回退出码 3。
 7. 写事务（`BEGIN IMMEDIATE`）中重新做第 3 步的检查，再按 data-model §5.5 的固定顺序应用（下文"应用机制"）。
@@ -551,6 +551,92 @@ sequenceDiagram
 
 **命令行错误**：与其他命令相同，按 §9.1 的"命令行错误"处理，最初在 WP1.7 中为 `question` 命令实现（codex-review-027 B2、B3）。
 
+### 6.1.7 交付目标与交付范围（M1 实现）
+
+**命令**：
+
+- `target show [--json]`、`scope show [--json]`：查看交付目标、当前范围，以及新确认需要携带的值（任何通道）。两者的 `--json` 输出同一份 `target-scope.v1`，输出前按 schema 校验。
+- `target set --ref <ref> [--name <名称>]`：设置交付目标（人类专属）。
+- `scope confirm [--requirements <编号,…>] [--missing-goals-reviewed] [-m <备注>]`：交互式确认范围（人类专属）。也可以用 `--file` 传入 `scope.v1`，此时不能再给出 `--requirements`、`-m` 和 `--missing-goals-reviewed`。
+- 范围也可以附带在审核中确认（`review.v1` 的 `scope`，见下文"附带在审核中"）。
+
+**查看**：
+
+- `target`：活动目标的 ID、名称、ref、`created_seq`，以及读取时由 ref 解析得到的提交（`snapshot`）。
+  - 快照不入库（data-model §4.2）。ref 当前解析不到提交时，`snapshot` 为 null。
+  - 解析需要读取对象（PD-26）。ref 指向的提交无法读取时，返回退出码 6，不显示为 null。
+- `scope`：该目标 `seq` 最大的范围确认。给出需求及其确认时的修订、绑定的版本和来源集合哈希、声明、已确认的豁免，以及是否过期（`stale`：版本或来源集合哈希已经变化，data-model §5.3）。
+- `confirm_inputs`：新确认需要携带的当前值。
+  - `target_id`、`seen_scope_confirmation_id`、`baseline_version`、`source_set_hash`；
+  - `pending_items`：`pending` 与 `conflict` 条目的总数；
+  - `must_requirements`：交互式确认的默认选择；
+  - `effective_waivers`：全部 `active` 需求下的有效豁免，每条给出决定 ID、AC 及其修订、需求、理由和 `seq`。
+- 没有目标时，`target`、`scope` 和 `target_id` 都为 null。这包括非 git 项目、首次 `init` 时主 worktree 处于分离 HEAD 的项目，以及尚未设置目标的项目。
+- schema 中的条件约束：`target` 为 null 时，`scope` 和 `target_id` 为 null；`scope` 为 null 时，`seen_scope_confirmation_id` 为 null。ID 之间的一致性由输出一致性测试验证：`target_id` 等于 `target.id`，`seen_scope_confirmation_id` 等于 `scope.confirmation_id`。
+
+**设置目标**。拒绝为退出码 2，过期为退出码 5，都不写入，也不分配 `seq`：
+
+1. `agent_cli` 返回退出码 3，不检查其他输入。
+2. ref 和名称先做密钥扫描（§10.8），命中时不回显。
+3. 检查 ref 和名称：
+   - ref 必须是完整的 `refs/heads/<分支>` 或 `refs/tags/<标签>`（PD-19），并且能通过 `git check-ref-format`。`refs/remotes/*`、短名称（如 `main`）和不合法的 ref 名，都返回退出码 2，指向 `--ref`，不回显。
+   - 名称默认为去掉前缀的分支名或标签名。名称必须非空、单行、不含控制字符，并且不超过 200 个字符。
+4. 非 git 项目没有交付目标，返回退出码 2（FR-INIT-09）。
+5. ref 与当前活动目标相同、并且没有改名时，什么也不变：退出码 0，不分配 `seq`，范围确认保留。显式改名视为新目标。
+6. ref 当前不必能解析到提交（例如尚未创建的发布分支），摘要中如实说明。
+7. 显示操作摘要，要求输入 ref 确认。摘要包括新目标及其当前解析结果、将被归档的旧目标，以及旧目标的范围确认不会沿用。拒绝确认时返回退出码 3。
+8. 写事务（`BEGIN IMMEDIATE`）中确认活动目标仍是提示时看到的那个，然后用一个 `seq` 完成：
+   - 把旧目标的 `archived_seq` 设为该 `seq`；
+   - 新建目标，`created_seq` 为同一个 `seq`，操作者为人，通道为 `human_cli`。
+
+   确认期间目标已被其他连接更改时，返回退出码 5，`error.current.target` 给出当前目标，不归档任何目标。
+
+旧目标及其范围确认都保留在历史中。新目标没有范围确认，需要重新确认（`NO_SCOPE`，推导随 M2）。`init` 只在首次登记时创建默认目标，再次执行不会改变目标（data-model §4.2）。
+
+**确认范围**。前置条件按 data-model §7.1 检查。拒绝为退出码 2，过期为退出码 5，都不写入，也不分配 `seq`：
+
+1. `agent_cli` 返回退出码 3，不读取 `--file`。
+2. `--file` 按 `scope.v1` 严格校验，需求清单为空即为 schema 错误（退出码 2）。需求清单、备注和 `--file` 中的全部字符串都做密钥扫描。
+3. 在事务中读取当前状态。没有目标时，交互式确认返回退出码 2。交互式确认由当前状态构造：
+   - 需求默认为全部 `active` 的 `must` 需求（FR-TGT-07），`--requirements` 改为指定的需求；
+   - 目标、版本、来源集合哈希、待审条目数、该目标当前的范围确认，都取读到的值；
+   - 列入所选需求下的全部有效豁免。
+4. 依次检查（`scope.Check`）：
+   - 读取的值：任一已经变化即为过期（退出码 5），`error.current` 给出当前值。依次为 `target_id`、`baseline_version`、`source_set_hash`、`seen_scope_confirmation_id`、`pending_items_excluded`。
+     - `seen_scope_confirmation_id` 必须等于该目标当前的范围确认（V-T02）。首次确认时为 null；此时如果已经有确认，同样是过期。
+     - `pending_items_excluded` 必须等于 `pending` 与 `conflict` 条目的总数。
+   - 内容：没有基准版本、需求为空、需求不是 `active` 或重复、`complete_scope` 不为 true、`incomplete_docs` 项目缺少 `missing_goals_reviewed = true`，都返回退出码 2，指向对应字段。
+   - 豁免：`acknowledged_waivers` 必须恰好等于所确认需求下的有效豁免集合（V-T01）。少一项、多一项、列入已失效的豁免，都是过期（退出码 5），`error.current.effective_waivers` 给出当前集合。
+     - M1 中还没有验收决定（M2），所以有效豁免集合总是空的。
+     - 比较按集合进行，不假定集合为空；单元测试用非空集合验证。
+5. 显示操作摘要，要求输入版本确认（例如 `v3`）。拒绝确认时返回退出码 3。摘要包括：
+   - 目标及其快照，绑定的版本和来源集合哈希；
+   - 需求清单，每条给出修订和优先级；
+   - "这些是完整范围"的声明，以及排除的待审条目数；
+   - `missing_goals_reviewed` 的声明（如有）；
+   - 保留的豁免及其理由；
+   - 将被替换的确认，以及备注。
+6. 写事务（`BEGIN IMMEDIATE`）先取得写锁，再重新读取状态，重做第 4 步的全部检查，然后分配一个 `seq` 写入：
+   - `scope_confirmations` 一行，`seen_scope_confirmation_id` 为被替换的确认；
+   - `scope_items` 每个需求一行，带确认时的修订。
+
+   确认期间其他连接写入了新的确认，或者任何读取的值已经变化，都返回退出码 5，不覆盖。
+
+**附带在审核中**（data-model §5.5 第 11 步，FR-TGT-06）：
+
+- `review.v1` 的 `scope` 不再被拒绝。需求可以写现有编号，也可以写本次审核接受的"新增需求"条目的 `item_id`。
+- 在应用审核的同一写事务中、`baseline.Apply` 之后执行：
+  - `item_id` 必须是本次审核接受的新增需求条目，解析为它刚分配的编号。被拒绝、未处理、不是新增需求或不属于本审核的 ID，返回退出码 2，指向 `/scope/requirements/<i>`。
+  - 然后按上面第 4 步检查，状态取审核完成之后：绑定审核生成的版本（没有接受任何条目时为当前版本），待审条目数和有效豁免也以审核之后为准。错误指向 `/scope/...`。
+- 范围确认与基准版本使用同一个 `seq`。任何范围错误都使整次审核回滚：版本、变更、编号、条目状态和范围确认都不写入。
+- 演练（§6.1.5 第 5 步）同样包含范围，所以范围的错误在提示确认之前报告。确认摘要中列出范围的需求、版本和排除的待审条目数。
+- 不带 `scope` 的审核，行为不变；之后，已有的范围确认因为版本变化而过期。
+
+**终端显示与 JSON**：与其他命令相同，按 §9.1 处理。
+
+- 人类专属命令都通过 `confirm` 确认（§5.1 规则 4）。带 `--json` 时，确认在 stderr，stdout 只有 `error.v1` 或成功文本。stderr 不是终端，或确认无法完整显示时，返回退出码 6，不读取输入。
+- 目标名称、ref 和需求标题都按 `termtext` 转义后显示，JSON 中保持原值。
+
 ### 6.2 Hook 采集与入库
 
 ```mermaid
@@ -637,6 +723,8 @@ sequenceDiagram
    3. 写入 AC 的 `reaffirm` 或退役；
    4. 用新版本号写入范围确认（如果附带了的话）。
 4. 未附带范围确认时，范围变为 `SCOPE_STALE`，直到重新确认。
+
+M1 的实现（独立确认，以及附带在审核中的确认）见 §6.1.7。
 
 ### 6.7 git 扫描
 

@@ -2121,3 +2121,88 @@ MVP v0.1.0 不支持 SHA-256 格式的 git 对象 ID。§27 记录的现象（64
 **其他事项**：审查 031 N1、审查 029 N1、`doctor` 的 git 版本查询隔离（M6）、WP1.6 的 N1 和 N2、本地 Windows 测试超时，维持原安排。
 
 **M1 状态**：随后开始 WP1.8（M1 的最后一个工作包）；M1 尚未整体完成。
+
+## 43. WP1.8 交付目标与交付范围的实现
+
+**范围**：implementation-plan WP1.8，M1 的最后一个工作包。依据为 FR-TGT-01 ~ 07、data-model §4.2、§5.3、§5.5 第 11 步、§7.1。命令行为写入 architecture §6.1.7（新增）。
+
+**设计核对**：
+
+- 按已有决策（G2 冻结）实现，没有扩大产品语义，没有发现需要新增 PD 或 TD 的歧义。
+- 以下实现选择不改变产品语义，已写入 architecture §6.1.7：
+  - `target set` 允许当前解析不到提交的 ref（例如尚未创建的发布分支），摘要中如实说明；
+  - 非 git 项目执行 `target set`，返回退出码 2（FR-INIT-09）；
+  - ref 与活动目标相同、并且没有改名时，什么也不变（退出码 0，不分配 `seq`，保留范围）；显式改名视为新目标；
+  - 确认期间目标被其他连接更改，返回退出码 5；
+  - `--name` 默认为去掉前缀的分支名或标签名；
+  - `scope confirm` 的确认文本为 `v<版本>`，与 `propose --apply` 一致；
+  - 交互式确认自动列入所选需求下的全部有效豁免，并在摘要中逐条显示理由。`--file` 时由文件给出，按 V-T01 比较；
+  - "可以修改默认选择"（MVP-TGT-08）在 CLI 中用 `--requirements` 实现，逐条勾选的界面由 M5 的 Dashboard 提供。
+
+**实现**（提交）：
+
+- `2fce111` schemas：`target-scope.v1` 增加 `uniqueItems` 和字段之间的条件约束，新增两个有效示例和反例 SCH-140 ~ 146。
+- `e8e5ce6` 迁移 0006：新增两张表。已合并的迁移 0001 ~ 0005 没有修改。
+  - `scope_confirmations`：带声明的 CHECK、自引用的 `seen_scope_confirmation_id`、`(target_id, project_id)` 外键和只追加触发器；
+  - `scope_items`。
+- `1c98544` `internal/scope`，以及 `gitx.ValidRefName`：
+  - 目标的读取与设置：`SetTarget` 在一个 `seq` 内归档旧目标、新建目标；
+  - 状态读取：`Read`；
+  - 校验：`Check`，V-T01 按集合比较，V-T02 比较当前确认；
+  - 写入：`Write`；
+  - `target-scope.v1` 文档。
+- `b87a73e` CLI：`target show`、`target set`、`scope show`、`scope confirm`。
+- `101da05` 附带在审核中的范围确认：`review.ConfirmScope`。
+
+**安全约束**：
+
+- 两个人类专属命令都先调用 `RequireHuman`，再通过唯一的确认入口 `cli.confirm`（`TestHumanOnlyCommandsConfirmThroughConfirm` 通过）。没有第二套确认机制，没有 `--yes`。
+- Agent 通道下都返回退出码 3，不读取 `--file`，不显示确认。包括：设置了 Agent 变量的伪终端、stdout 重定向、stdin 不是终端，以及带 `--json` 的情形。通道识别不是身份认证（architecture §5.1 已知边界）。
+- 输入先做密钥扫描，命中时返回退出码 2，不回显；错误消息不引用输入。扫描范围包括 ref、名称、需求清单、备注，以及 `--file` 中的全部字符串。
+- 文本输出经过 `termtext.Writer`。JSON 输出经 `writeJSON` 按 schema 校验后写出。
+
+**验收覆盖**（测试先行：在旧代码 `1c98544` 上，新增和修改的 10 个 CLI 测试全部失败）：
+
+| 验收项 | 测试 |
+|---|---|
+| MVP-TGT-01（M1 部分）、TGT-02 | `TestTargetShowAndSet`、`TestTargetAndScopeNeedAPerson` |
+| MVP-TGT-03 | `TestScopeConfirm`、`TestTargetAndScopeNeedAPerson` |
+| MVP-TGT-04 | `TestScopeConfirm`（`--requirements ","`、需求为空的 `--file`）、`TestTargetWithoutOne` |
+| MVP-TGT-05、TGT-08 | `TestScopeConfirm` |
+| MVP-TGT-06 | `TestScopeConfirm`（计数包括 `conflict` 条目）、`TestScopeInReview`（以审核之后的计数为准） |
+| MVP-TGT-07 | `TestScopeInReview` |
+| MVP-TGT-10（M1 部分） | `TestScopeConfirm`、`TestScopeInReview`；`internal/scope` 的 `TestCheckWaivers` 用非空集合验证 |
+| MVP-TGT-11 | `TestScopeConfirmedMeanwhile`、`TestScopeInReview`；`internal/scope` 的 `TestConfirmRace`（两个连接） |
+| MVP-CH-01、CH-02（`target set`、`scope confirm`） | `TestTargetAndScopeNeedAPerson` |
+| `--json` 的确认规则、短写入 | `TestConfirmationWithJSON`（新增两个命令）、`TestTargetAndScopeConfirmationNotShownWhole` |
+
+- `TestScopeConfirmedMeanwhile` 覆盖三种并发：两个会话先后提交、同一进程中的另一个连接、在伪终端中确认的另一个进程。
+- `target show --json` 和 `scope show --json` 的每次成功输出，都按 `target-scope.v1` 整体校验。另外检查两个命令的输出完全相同，`target_id` 与 `target.id`、`seen_scope_confirmation_id` 与 `scope.confirmation_id` 一致。
+- 每次拒绝都比较以下状态，验证没有写入、没有分配 `seq`：`seq`、全部目标、范围确认及其条目、基准、待审条目。
+- 已有测试的调整：
+  - `TestReviewRefusals` 中的范围，原先期望退出码 2（指向 `/scope`，这是 WP1.6 的拒绝）。现在它表示另一个目标的范围，期望退出码 5（指向 `/scope/target_id`）。
+  - `state` 和 `confirmState` 增加了范围相关的表。
+
+**推迟到 M2**：
+
+- MVP-TGT-09：`status` 中的 `SCOPE_STALE`；
+- MVP-TGT-01 中 `NO_SCOPE` 的推导；
+- 真实豁免的生命周期，即 MVP-TGT-10 的 M2 部分；
+- `init_progress` 对范围的推导（MVP-INIT-07）。
+
+**范围外，不变**：`doctor` 的 git 版本查询隔离、审查 031 N1、审查 033 N1、审查 029 N1、WP1.6 的 N1 和 N2、M2 的推导、Claim、检查执行、验收决定、Dashboard、本地 Windows 测试超时。
+
+**验证**（本地）：
+
+- `scripts/check.sh` 中，`go mod tidy`、`go vet`、Markdown 链接检查、golangci-lint（0 issues）都通过。
+- `go test ./...`：`internal/cli` 以外的包全部通过。
+  - `internal/cli` 在本地 Windows 上触发 Go 默认的 10 分钟超时：运行到 `TestScopeInReview` 时超时，此前没有测试失败。
+  - 单独以 `-timeout 30m` 运行，通过（973 秒）。
+  - 脚本和全局超时都没有修改。
+- web 检查（`npm ci && npm run check`）、`go build -o dist/ ./cmd/specmetry`、`go test ./web/` 都通过。
+- golangci-lint 在三个平台（`GOOS=windows`、`linux`、`darwin`，`--build-tags nowebui`）都是 0 issues；`golangci-lint fmt --diff` 没有差异。
+- WSL Linux（git 2.43.0）：交叉编译的 19 个测试二进制全部通过，其中 `cli` 通过 138 项、跳过 2 项。
+  - `TestShellCompletion` 需要 go 工具链，因此不在其中；改用真实的 Linux 二进制重放补全拒绝：退出码 2，不输出 canary，不写调试文件，数据目录为空。
+- 三平台 CI 的结果记录在 PR 中。
+
+**状态**：已实现，等待 Codex 对 WP1.8 的首次独立代码审查。M1 尚未整体验收。
