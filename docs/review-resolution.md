@@ -1830,3 +1830,55 @@ MVP v0.1.0 不支持 SHA-256 格式的 git 对象 ID。§27 记录的现象（64
 **接受的风险**：没有新的风险接受。通道识别仍沿用已批准的防误操作边界，不是身份认证。
 
 审查原文按原样入库。
+
+## 35. 命令行错误回显不可信参数的独立安全修复（codex-review-027 N1）
+
+**来源**：codex-review-027 NON-BLOCKER N1，登记于 implementation-plan M6"发布前必须关闭的遗留安全问题"。这是隐私缺陷，不是已接受的风险。本修复不属于任何工作包，单独提交、单独审查。
+
+**范围**：只处理命令行本身的错误脱敏，以及直接相关的错误输出契约（architecture §9.1"命令行错误"）。以下内容不变：
+
+- 业务错误的语义；
+- 人类专属操作的通道防护；
+- 数据模型与迁移；
+- 其他命令文本输出中的终端控制字符（同在 M6 登记，另行处理）；
+- WP1.6 的 N1、N2；
+- `doctor` 的 git 版本查询隔离；
+- 本地 Windows 测试超时；
+- WP1.8。
+
+**根因**：cobra 和 pflag 的错误消息会原样引用它们无法使用的内容。`executeAs` 把这些错误作为原因包装，`printError` 和 `apperr.ToEnvelope` 都使用包含原因的 `Error()`，因此原值进入了 stderr 和 `error.v1.message`。本修复之前复现的问题：
+
+- 根命令的未知子命令（文本和 `--json`）；
+- `cobra.NoArgs` 命令多出的参数，例如 `proposal list <x>`；
+- 未知 flag、未知简写、不合法的布尔值，例如 `--pending=<x>`；`--json` 写在前面时，原值进入 `error.v1.message`。
+- 另外两个问题：`help <x>` 在 stdout 回显 `<x>` 并返回 0；命令组遇到未知子命令时显示帮助并返回 0。
+
+**修复**（`internal/cli/cmdline.go` 的 `secureCommandLine`，在 `newRoot` 中对整棵命令树调用一次）：
+
+- 所有命令的 flag 错误都使用固定消息（`flagError`），并标记为 `unparsedFlags`；`--json` 按 pflag 的规则从参数中判断（`jsonInArgs`，规则同 WP1.7）。
+- 根命令和每个命令组拒绝未知子命令（退出码 2），只建议已有命令的名字；单独输入时显示帮助并返回 0；为这个错误接受 `--json`。
+- 每个命令的参数个数检查保留原来的规则，cobra 的消息换成固定文本和该命令的用法。
+- `help` 遇到未知主题时返回退出码 2，不回显。
+- `executeAs` 不再保留 cobra 错误的文本。
+- WP1.7 中 `question` 命令组自己的那一份实现已经删除，统一由 `secureCommandLine` 提供。
+
+**行为变化**：
+
+- 根命令和命令组接受 `--json`，所以 `--json` 也可以写在命令之前，例如 `specmetry --json question list`。以前根命令不认识这个 flag，会拒绝这种写法。
+- 根命令的帮助中多了一行 `specmetry [flags]` 的用法。
+- 其余正常命令、`--help` 和业务错误不变。
+
+**回归测试**（经过真实的命令入口；合成密钥在运行时随机生成，`testutil.NewSecretCanary`，测试源码中没有形似密钥的固定字面量）：
+
+- `TestCommandLineErrorsQuoteNothing`，63 种命令行，覆盖：
+  - 根命令、`help`、四个命令组的未知子命令；
+  - 全部 `NoArgs` 命令，以及参数个数固定的命令；
+  - 未知 flag 和简写、不合法的布尔值、缺少值的 flag、`--since` 的非数字值；
+  - `--json` 在前、在后、为 `false`、重复出现；`--` 之后的 `--json`；作为字符串 flag 值的 `--json`。
+
+  每种都断言：退出码 2；stdout、stderr 中都没有 canary；要求 JSON 时 stdout 是通过 schema 校验的 `error.v1`、`code` 为 `invalid_input`、stderr 为空；否则 stdout 为空、只有文本错误；没有业务写入；数据目录中没有 canary。
+- `TestCommandLineStillWorks`：各层帮助返回 0；`version` 和 `--json` 读取命令正常；`--json` 写在命令之前也正常；拼写建议只包含已有命令名。
+- WP1.7 的 `question` 测试全部保留并通过。
+- **修复前**（`4125dfe`）：`TestCommandLineErrorsQuoteNothing` 有 40 处回显、5 处错误地返回 0、11 处缺少 `error.v1`。
+
+**状态**：已修复，等待独立审查；审查通过之前，M6 中的这一项不关闭。

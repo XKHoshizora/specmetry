@@ -204,7 +204,7 @@ SRC-08、TGT-10 的 M2 部分，以及 PRV-10，也在本里程碑验收。
     - 无法解析的 flag 值和未知 flag：`proposal list --pending=<x>`（`--json` 在前、在后都回显）、`source list --<x>`、`review -<x>`。
   - 机制相同、应一并处理的入口：其他使用 `cobra.NoArgs` 的命令（`init`、`doctor`、`version`、`source list`、`propose`、`review`、`baseline show`、`baseline history`），以及 `question` 之外的全部命令的 flag 错误。
   - 修复方向：在根命令上设置不引用参数的 flag 错误函数和 `Args` 校验，与 `question` 命令的 `noArgs`、`flagError` 相同；`error.v1` 的 `message` 不包含 cobra 的原因；补充覆盖全部命令、文本与 `--json` 两种模式的回归测试。
-  - `question` 命令已在 WP1.7 中处理。其他命令**尚未修复**，最晚在 v0.1.0 发布之前关闭。
+  - `question` 命令已在 WP1.7 中处理。其他命令已在独立的安全修复中统一处理（分支 `fix/cli-untrusted-argument-errors`，规则见 architecture §9.1"命令行错误"），**等待独立审查**；审查通过之前本项不关闭，最晚在 v0.1.0 发布之前关闭。
 - **其他命令的文本输出没有转义终端控制字符**（与 codex-review-027 B1 同类）。
   - Agent 提交的提案文本可以含有 ESC、CR、BEL 等控制字符。
   - 已按 027 B1 的方法在内存中确认原样输出的命令：`proposal list`、`proposal show`、`review` 的确认摘要、`baseline show`、`baseline history`。`propose --apply` 的确认摘要和 `source` 命令的文本输出可能同样受影响，修复时一并检查。
