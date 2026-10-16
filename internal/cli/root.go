@@ -27,7 +27,9 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 // handed to commands in the context; human-only commands pass it to
 // channel.Guard before writing anything.
 func executeRoot(ctx context.Context, root *cobra.Command, args []string, stderr io.Writer) int {
-	return executeAs(ctx, channel.Detect(os.Stdin, os.Stdout), root, args, stderr)
+	d := channel.Detect(os.Stdin, os.Stdout)
+	d.StderrTerminal = channel.IsTerminal(os.Stderr)
+	return executeAs(ctx, d, root, args, stderr)
 }
 
 // executeAs is executeRoot with the channel given.

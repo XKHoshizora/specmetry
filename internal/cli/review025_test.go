@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/XKHoshizora/specmetry/internal/apperr"
-	"github.com/XKHoshizora/specmetry/internal/channel"
 	"github.com/XKHoshizora/specmetry/internal/datadir"
 	"github.com/XKHoshizora/specmetry/internal/testutil"
 )
@@ -140,11 +139,11 @@ func TestReviewIsStaleAfterTheConfirmation(t *testing.T) {
 	}}
 	doc := reviewDoc(second.ProposalID, 1, decide(second.Items[0].ItemID, "accepted", "change_class", "editorial"))
 	code, stdout, stderr := asHumanWith(t, dir, in, "review", "--json", "--file", writeReview(t, doc))
-	if code != apperr.ExitStalePrecondition || !strings.Contains(stdout, "to confirm") {
-		t.Fatalf("exit %d, want 5 after the confirmation\n%s%s", code, stdout, stderr)
+	if code != apperr.ExitStalePrecondition || !strings.Contains(stderr, "to confirm") {
+		t.Fatalf("exit %d, want 5 after the confirmation (asked on stderr with --json)\n%s%s", code, stdout, stderr)
 	}
 	var env apperr.Envelope
-	if err := json.Unmarshal([]byte(jsonPart(stdout)), &env); err != nil {
+	if err := json.Unmarshal([]byte(wholeJSON(t, stdout)), &env); err != nil {
 		t.Fatal(err)
 	}
 	if v, _ := env.Error.Current["baseline_version"].(float64); v != 2 || len(env.Error.Details) == 0 || env.Error.Details[0].Pointer != "/seen_base_version" {
@@ -170,6 +169,6 @@ func asHumanWith(t *testing.T, dir string, in io.Reader, args ...string) (int, s
 	var out, errOut bytes.Buffer
 	root := newRoot(&out, &errOut)
 	root.SetIn(in)
-	code := executeAs(context.Background(), channel.Detection{Channel: channel.HumanCLI}, root, args, &errOut)
+	code := executeAs(context.Background(), atTerminal, root, args, &errOut)
 	return code, out.String(), errOut.String()
 }

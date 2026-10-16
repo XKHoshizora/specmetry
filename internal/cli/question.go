@@ -204,7 +204,7 @@ answer changes no baseline: a change it calls for goes through a proposal.`,
 			// configuration's texts: Guard escapes it for the terminal
 			// (codex-review-027 B1).
 			op := channel.Operation{Name: name, Summary: closeSummary(q, in, actor, d.Channel), Confirm: q.Key}
-			if err := channel.Guard(d, cmd.InOrStdin(), cmd.OutOrStdout(), op); err != nil {
+			if err := confirm(cmd, d, op); err != nil {
 				return err
 			}
 			// Close checks again that the question is open, under the write

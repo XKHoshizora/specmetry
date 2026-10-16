@@ -224,9 +224,10 @@ func TestDoctorReportsLoosenedPermissions(t *testing.T) {
 func TestMain(m *testing.M) {
 	testutil.DispatchFakeGit()
 	testutil.DispatchHelper(map[string]func() int{
-		"crash":          crashHelper,
-		"cli":            cliHelper,
-		"cli-redirected": cliRedirectedHelper,
+		"crash":                 crashHelper,
+		"cli":                   cliHelper,
+		"cli-redirected":        cliRedirectedHelper,
+		"cli-stderr-redirected": cliStderrRedirectedHelper,
 	})
 	os.Exit(m.Run())
 }

@@ -125,7 +125,7 @@ seen_base_version must be the current baseline version.`,
 				return err
 			}
 			op := channel.Operation{Name: "review", Summary: checked.Lines, Confirm: checked.Proposal.ID}
-			if err := channel.Guard(d, cmd.InOrStdin(), cmd.OutOrStdout(), op); err != nil {
+			if err := confirm(cmd, d, op); err != nil {
 				return err
 			}
 			if err := w.tx(ctx, apply); err != nil {

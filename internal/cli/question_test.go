@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/XKHoshizora/specmetry/internal/apperr"
-	"github.com/XKHoshizora/specmetry/internal/channel"
 	"github.com/XKHoshizora/specmetry/internal/datadir"
 	"github.com/XKHoshizora/specmetry/internal/testutil"
 )
@@ -237,7 +236,7 @@ func TestQuestionClosesOnce(t *testing.T) {
 	} {
 		key := c.args[1]
 		code, stdout, stderr := asHuman(t, dir, key, append(append([]string{"question"}, c.args...), "--json")...)
-		if code != apperr.ExitStalePrecondition || strings.Contains(stdout, "to confirm") {
+		if code != apperr.ExitStalePrecondition || strings.Contains(stdout+stderr, "to confirm") {
 			t.Errorf("%v: exit %d, want 5 before any prompt\n%s%s", c.args, code, stdout, stderr)
 			continue
 		}
@@ -316,7 +315,7 @@ func TestQuestionNeedsAPerson(t *testing.T) {
 		for _, asJSON := range []bool{false, true} {
 			run := slicesWith(args, asJSON)
 			code, stdout, stderr := specmetry(t, dir, "", run...)
-			if code != apperr.ExitHumanRequired || strings.Contains(stdout+stderr, canary) || strings.Contains(stdout, "to confirm") {
+			if code != apperr.ExitHumanRequired || strings.Contains(stdout+stderr, canary) || strings.Contains(stdout+stderr, "to confirm") {
 				t.Errorf("%v: exit %d\n%s%s", run, code, stdout, stderr)
 			}
 			if asJSON {
@@ -394,7 +393,7 @@ func closeIn(args ...string) (int, string) {
 	var out, errOut bytes.Buffer
 	root := newRoot(&out, &errOut)
 	root.SetIn(strings.NewReader(args[2] + "\n"))
-	code := executeAs(context.Background(), channel.Detection{Channel: channel.HumanCLI}, root, args, &errOut)
+	code := executeAs(context.Background(), atTerminal, root, args, &errOut)
 	return code, out.String() + errOut.String()
 }
 
@@ -415,11 +414,11 @@ func TestQuestionClosedWhileConfirming(t *testing.T) {
 	if other != apperr.ExitOK {
 		t.Fatalf("the other connection: exit %d\n%s", other, otherOut)
 	}
-	if code != apperr.ExitStalePrecondition || !strings.Contains(stdout, "to confirm") {
-		t.Fatalf("exit %d, want 5 after the confirmation\n%s%s", code, stdout, stderr)
+	if code != apperr.ExitStalePrecondition || !strings.Contains(stderr, "to confirm") {
+		t.Fatalf("exit %d, want 5 after the confirmation (asked on stderr with --json)\n%s%s", code, stdout, stderr)
 	}
 	var env apperr.Envelope
-	if err := json.Unmarshal([]byte(jsonPart(stdout)), &env); err != nil || env.Error.Current["status"] != "dismissed" {
+	if err := json.Unmarshal([]byte(wholeJSON(t, stdout)), &env); err != nil || env.Error.Current["status"] != "dismissed" {
 		t.Fatalf("error = %+v (%v)", env.Error, err)
 	}
 
@@ -496,7 +495,7 @@ func TestQuestionInputIsChecked(t *testing.T) {
 		for _, asJSON := range []bool{false, true} {
 			run := slicesWith(append([]string{"question"}, c.args...), asJSON)
 			code, stdout, stderr := asHuman(t, dir, noPrompt, run...)
-			if code != apperr.ExitInvalidInput || strings.Contains(stdout, "to confirm") {
+			if code != apperr.ExitInvalidInput || strings.Contains(stdout+stderr, "to confirm") {
 				t.Errorf("%v: exit %d, want 2 before any prompt\n%s%s", run, code, stdout, stderr)
 			}
 			if strings.Contains(stdout+stderr, token) {
