@@ -559,17 +559,7 @@ sequenceDiagram
 
 其他命令的文本输出尚未转义，作为发布前必须关闭的遗留问题登记（implementation-plan M6）。
 
-**命令行错误**：
-
-- `question` 的各个命令遇到多余的参数或无法解析的 flag 时，返回退出码 2，消息中不引用原值（codex-review-025 B1 的同类防线）。
-- 未知的子命令（例如 `question answr`）返回 `invalid_input`（退出码 2），不引用原值，只可能建议已有的子命令名（codex-review-027 B2）。只输入 `question` 或使用 `--help` 时，显示帮助并返回 0；`question --json` 不带子命令时返回退出码 2。
-- `--json` 时错误输出 `error.v1`，即使无法解析的 flag 在 `--json` 之前（codex-review-027 B3）。pflag 在出错的 flag 处停止解析，此时按 pflag 的规则从参数中判断是否要求了 JSON：
-  - `--json`、`--json=<布尔值>` 都算，以最后一个为准；
-  - 取值 flag 的值（`-m x`、`-mx`、`-m=x`、`--message x`、`--file x`）不算；
-  - `--` 之后的参数不算；
-  - 未知 flag 不取值，例如 `--unknown=--json` 不算。
-
-  正常解析的命令，以及其他命令，仍按已解析的 flag 判断。
+**命令行错误**：与其他命令相同，按 §9.1 的"命令行错误"处理，最初在 WP1.7 中为 `question` 命令实现（codex-review-027 B2、B3）。
 
 ### 6.2 Hook 采集与入库
 
@@ -704,6 +694,25 @@ Agent 侧的安装位置（TD-03）：
 - 输入通过 `--file <path|->` 传入。
 - 写命令在 JSON 中携带读取版本（[data-model.md §7.1](data-model.md#71-写入前置条件)）。
 - M1 的结果与读取模型输出：`source-add.v1`、`proposal-receipt.v1`、`source-list.v1`、`proposal-list.v1`、`proposal-show.v1`、`baseline-show.v1`、`baseline-history.v1`、`question-list.v1`、`target-scope.v1`（[data-model.md §8](data-model.md#8-交换格式)）。人类专属的写命令在 MVP 中只输出人类可读文本；出错时带 `--json` 仍输出 `error.v1`。
+
+**命令行错误**（codex-review-025 B1、codex-review-027 N1）：命令行本身的错误，不引用输入的任何内容。输入的内容尚未经过密钥扫描，可能是误粘贴的密钥。cobra 和 pflag 的消息会原样引用它们无法使用的内容，所以这些消息都不进入输出；所有命令统一在 `internal/cli/cmdline.go` 中处理：
+
+- 未知命令：根命令和每个命令组遇到未知子命令时，返回 `invalid_input`（退出码 2），不引用原值，只可能建议已有命令的名字。只输入命令组本身，或使用 `--help` 时，显示帮助并返回 0；`help` 遇到未知主题时返回退出码 2。
+- 参数：命令自己的参数个数检查保留原来的规则，cobra 的消息换成固定文本和该命令的用法。
+- flag：未知的 flag 或简写、不合法的值、缺少值，都返回退出码 2 和固定消息。
+- cobra 的错误文本不作为原因保留，因此不会进入 `error.v1` 的 `message`、`details` 或 `current`。
+- Shell 补全：Specmetry 不提供 shell 补全（codex-review-029 B1）。cobra 在执行期间才加入隐藏的补全命令 `__complete`（别名 `__completeNoDesc`），它绕过上述处理，把含有命令行内容的错误直接写到进程的 stderr 和 `BASH_COMP_DEBUG_FILE`。
+  - 判断方式：cobra 只在 `root.Find(args)` 解析到这个名字时才保留它。所以在 cobra 执行之前，以相同的状态用 cobra 自己的 `Find` 做同样的判断：先加入 help 命令，再加入一个同名、同别名、从不运行的占位命令。
+  - 解析到补全命令时，返回 `invalid_input`（退出码 2），cobra 不执行，不输出补全结果，也不写调试文件。
+  - 它之前的根级 flag 要求 JSON 时，输出 `error.v1`；补全行内部的 `--json` 属于被补全的命令行，不算。
+  - 出现在 flag 的值中、`--` 之后，或其他命令参数中的 `__complete`，不是补全命令。
+- `--json` 时，错误输出完整的 `error.v1`，stderr 为空：
+  - 根命令和命令组也接受 `--json`，所以它也可以写在命令之前（例如 `specmetry --json question list`）；
+  - pflag 在出错的 flag 处停止解析，此时按 pflag 的规则从参数中判断是否要求了 JSON：`--json`、`--json=<布尔值>` 都算，以最后一个为准；取值 flag 的值（`-m x`、`-mx`、`-m=x`、`--message x`、`--file x`）不算；`--` 之后的参数不算；未知 flag 不取值，例如 `--unknown=--json` 不算。
+  - 正常解析的命令，按已解析的 flag 判断。
+  - 没有 `--json` 的命令（`version`、`doctor`）只输出文本错误。
+
+命令执行之后产生的业务错误，不在此范围内。
 
 | 退出码 | 含义 |
 |---|---|

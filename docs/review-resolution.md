@@ -1795,3 +1795,143 @@ MVP v0.1.0 不支持 SHA-256 格式的 git 对象 ID。§27 记录的现象（64
 - WP1.6 的两项 NON-BLOCKER 保留：审核预览的修订类别可能与最终类别不同；`baseline history` 没有展示后续处理理由。
 
 **接受的风险**：沿用审查列出的既有边界，没有接受新的风险。
+
+## 34. WP1.7 最终定向复审（codex-review-028）与验收
+
+**审查结论**：**GO**，BLOCKER 为 0，没有新增 NON-BLOCKER。审查目标 `58659cd`，增量基准 `78ca882`；只复核审查 027 的 B1、B2、B3 及直接回归。
+
+- **审查 027 的 B1 关闭。** `internal/termtext` 转义 ESC、其他 C0、DEL、C1、双向控制字符和非 UTF-8 字节。`question` 的列表、确认摘要和结果行都接入了转义。JSON 解码后的值和数据库中的值保持原样，取消确认时不写入。审查方另外确认：CRLF 与缩进组合时，续行仍保持缩进，没有形成新的视觉边界问题。
+- **审查 027 的 B2 关闭。** 未知子命令返回 `invalid_input`（退出码 2），不回显，只建议已有的命令名；JSON 模式输出合法的 `error.v1`。只输入 `question` 或使用 `--help` 时返回 0。
+- **审查 027 的 B3 关闭。** 只对 `question` 命令解析未完成的 flag 错误重新判断 JSON 请求。审查方用独立的参数矩阵（46 组公开 `Execute` 调用）覆盖了参数顺序、布尔值、重复 flag、取值 flag、简写、未知 flag 和 `--`，没有误判，也没有回显。
+- 审查方在隔离的 `78ca882` 副本上重放同一组断言，复现了三项原始缺陷，失败发生在被测行为上。
+- 最终提交的三平台 CI 8/8 通过（运行 38803933170，Ubuntu 带 race detector）。
+
+**验收**：产品负责人于 2026-10-16 验收 WP1.7，PR #10 已合并（合并提交 `867bd60`）。M1 尚未整体完成，WP1.8 未开始。
+
+**WP1.7 的验收范围**（逐项证据见 PR #10 描述）：
+
+- MVP-BL-17（含 `question-list.v1` 的条件约束与反例 SCH-131 ~ SCH-139）；
+- `question answer`、`question dismiss` 的 MVP-CH-01、CH-02 验证；
+- 关闭问题的前置条件与双连接并发（data-model §7.1）；
+- MVP-BL-25 中"问题先关闭、条目后接受"时的关联显示；
+- `question` 命令的终端显示安全与命令行错误契约（审查 027 B1 ~ B3）。
+
+**仍未完成、随后续工作包验证**：
+
+- 阻塞问题的推导（`BLOCKING_QUESTION`、BL-25 的阻塞部分）：M2。
+- PreToolUse 对 `question answer`、`question dismiss` 的拦截（MVP-ACC-03、E2E-7）：M3。
+- `target set`、`scope confirm`、审核中附带的范围确认：WP1.8。
+
+**继续记录的事项**：
+
+- implementation-plan M6 中登记的两项发布前安全问题仍未关闭：其他命令回显不可信参数（审查 027 N1）；其他命令的文本输出没有转义控制字符。前者随后作为独立的安全修复处理（分支 `fix/cli-untrusted-argument-errors`）。
+- WP1.6 的两项 NON-BLOCKER、`doctor` 的 git 版本查询隔离、本地 Windows 测试超时，维持原安排。
+
+**接受的风险**：没有新的风险接受。通道识别仍沿用已批准的防误操作边界，不是身份认证。
+
+审查原文按原样入库。
+
+## 35. 命令行错误回显不可信参数的独立安全修复（codex-review-027 N1）
+
+**来源**：codex-review-027 NON-BLOCKER N1，登记于 implementation-plan M6"发布前必须关闭的遗留安全问题"。这是隐私缺陷，不是已接受的风险。本修复不属于任何工作包，单独提交、单独审查。
+
+**范围**：只处理命令行本身的错误脱敏，以及直接相关的错误输出契约（architecture §9.1"命令行错误"）。以下内容不变：
+
+- 业务错误的语义；
+- 人类专属操作的通道防护；
+- 数据模型与迁移；
+- 其他命令文本输出中的终端控制字符（同在 M6 登记，另行处理）；
+- WP1.6 的 N1、N2；
+- `doctor` 的 git 版本查询隔离；
+- 本地 Windows 测试超时；
+- WP1.8。
+
+**根因**：cobra 和 pflag 的错误消息会原样引用它们无法使用的内容。`executeAs` 把这些错误作为原因包装，`printError` 和 `apperr.ToEnvelope` 都使用包含原因的 `Error()`，因此原值进入了 stderr 和 `error.v1.message`。本修复之前复现的问题：
+
+- 根命令的未知子命令（文本和 `--json`）；
+- `cobra.NoArgs` 命令多出的参数，例如 `proposal list <x>`；
+- 未知 flag、未知简写、不合法的布尔值，例如 `--pending=<x>`；`--json` 写在前面时，原值进入 `error.v1.message`。
+- 另外两个问题：`help <x>` 在 stdout 回显 `<x>` 并返回 0；命令组遇到未知子命令时显示帮助并返回 0。
+
+**修复**（`internal/cli/cmdline.go` 的 `secureCommandLine`，在 `newRoot` 中对整棵命令树调用一次）：
+
+- 所有命令的 flag 错误都使用固定消息（`flagError`），并标记为 `unparsedFlags`；`--json` 按 pflag 的规则从参数中判断（`jsonInArgs`，规则同 WP1.7）。
+- 根命令和每个命令组拒绝未知子命令（退出码 2），只建议已有命令的名字；单独输入时显示帮助并返回 0；为这个错误接受 `--json`。
+- 每个命令的参数个数检查保留原来的规则，cobra 的消息换成固定文本和该命令的用法。
+- `help` 遇到未知主题时返回退出码 2，不回显。
+- `executeAs` 不再保留 cobra 错误的文本。
+- WP1.7 中 `question` 命令组自己的那一份实现已经删除，统一由 `secureCommandLine` 提供。
+
+**行为变化**：
+
+- 根命令和命令组接受 `--json`，所以 `--json` 也可以写在命令之前，例如 `specmetry --json question list`。以前根命令不认识这个 flag，会拒绝这种写法。
+- 根命令的帮助中多了一行 `specmetry [flags]` 的用法。
+- 其余正常命令、`--help` 和业务错误不变。
+
+**回归测试**（经过真实的命令入口；合成密钥在运行时随机生成，`testutil.NewSecretCanary`，测试源码中没有形似密钥的固定字面量）：
+
+- `TestCommandLineErrorsQuoteNothing`，63 种命令行，覆盖：
+  - 根命令、`help`、四个命令组的未知子命令；
+  - 全部 `NoArgs` 命令，以及参数个数固定的命令；
+  - 未知 flag 和简写、不合法的布尔值、缺少值的 flag、`--since` 的非数字值；
+  - `--json` 在前、在后、为 `false`、重复出现；`--` 之后的 `--json`；作为字符串 flag 值的 `--json`。
+
+  每种都断言：退出码 2；stdout、stderr 中都没有 canary；要求 JSON 时 stdout 是通过 schema 校验的 `error.v1`、`code` 为 `invalid_input`、stderr 为空；否则 stdout 为空、只有文本错误；没有业务写入；数据目录中没有 canary。
+- `TestCommandLineStillWorks`：各层帮助返回 0；`version` 和 `--json` 读取命令正常；`--json` 写在命令之前也正常；拼写建议只包含已有命令名。
+- WP1.7 的 `question` 测试全部保留并通过。
+- **修复前**（`4125dfe`）：`TestCommandLineErrorsQuoteNothing` 有 40 处回显、5 处错误地返回 0、11 处缺少 `error.v1`。
+
+**状态**：已修复，等待独立审查；审查通过之前，M6 中的这一项不关闭。
+
+## 36. 安全修复 PR #11 的代码审查（codex-review-029）的处理
+
+**审查结论**：NO-GO。审查目标 `9879c56`，有 1 项 BLOCKER、1 项 NON-BLOCKER。审查确认：已注册的根命令、命令组和叶子命令都受到统一控制；常规 JSON 错误模式正确；业务错误、人工通道和确认流程没有回归。本轮不需要新的产品决策。
+
+本轮只修复 B1 及直接相关的测试。数据模型、迁移、业务错误和人工通道都不变。审查原文按原样入库。
+
+### B1：cobra 动态加入的隐藏补全命令绕过统一脱敏
+
+**根因**：
+
+- cobra v1.10.2 在 `ExecuteC` 中调用 `initCompleteCmd`，临时加入隐藏命令 `__complete`（别名 `__completeNoDesc`）。只有 `root.Find(args)` 解析到这个名字时，它才保留这个命令。
+- 这个命令在 `secureCommandLine` 遍历之后才出现，所以不受统一处理。它自己解析剩余的命令行，用 `CompErrorln` 把原始错误直接写到 `os.Stderr`；设置 `BASH_COMP_DEBUG_FILE` 时还写入该文件。之后输出补全指令（`:0`），并以 0 退出。
+- `root.go` 的 `DisableDefaultCmd` 只关闭了可见的 `completion` 命令。
+
+**修复**：Specmetry 不提供 shell 补全，所以在 cobra 执行之前拒绝这类命令行（`completionRequest`，在 `executeAs` 调用 `ExecuteContextC` 之前执行）：
+
+- 判断方式与 cobra 的 `initCompleteCmd` 相同，并且在相同的状态下进行：
+  - 先加入 help 命令（`ExecuteC` 在 `initCompleteCmd` 之前同样会加入）；
+  - 再在根命令下加入一个同名、同别名、从不运行的占位命令；
+  - 然后调用 cobra 自己的 `Find`，根命令的 flag、flag 的值和 `--`，都按 cobra 的方式解析。
+- 解析到占位命令时，返回 `invalid_input`（退出码 2），消息为固定文本，不调用 `ExecuteContextC`。因此 cobra 的 `initCompleteCmd`、补全处理器和 `CompDebug` 都不会运行，不输出补全结果，也不写调试文件。占位命令随即移除。
+- JSON：只看补全命令之前的根级 flag（`--json`、`--json=true` 为 JSON，`--json=false` 或最后为 false 时为文本）。补全命令之后的内容是被补全的命令行，其中的 `--json` 不算。
+- `executeAs` 收到 nil 参数时改为空参数，不让 cobra 改读 `os.Args`，保证判断和 cobra 使用同一组参数。
+
+**为什么能在隐藏处理器运行前拦截所有受支持的调用形式**：
+
+- cobra 只在 `ExecuteC` 中、且只在 `Find(args)` 解析到这个名字时，才会运行补全处理器。
+- `completionRequest` 在调用 `ExecuteC` 之前，用同一组参数、同样的命令树状态和 cobra 自己的 `Find` 做这个判断。cobra 会运行补全的每一种形式都会被拒绝，包括根级 flag 在前、别名、`--json=<布尔值>`。
+- 判断为否时，cobra 的 `Find` 也不会解析到补全命令，`initCompleteCmd` 会立即移除它，补全处理器不会运行。
+- 没有复制 cobra 的私有代码，不修改环境变量，也不在事后过滤 stderr。
+
+**回归测试**（真实 CLI 二进制：测试中从 `cmd/specmetry` 构建，作为独立进程运行；合成密钥在运行时随机生成）：
+
+- `TestShellCompletionIsRefused`，14 种命令行：
+  - 审查中的 A、B；
+  - 根级 `--json`、`--json=true`、`--json=false`、`--json --json=false` 在前；
+  - `--json` 加 `question answer -m <canary>`；
+  - 补全行内部的 `--json`；
+  - 只有 `__completeNoDesc`；
+  - 设置 `BASH_COMP_DEBUG_FILE` 为新文件，或为已有文件。
+
+  每种都断言：退出码 2；没有补全结果（`:0`、`Completion ended`、`[Debug]`）；进程自己的 stdout 和 stderr 中都没有 canary；要求 JSON 时 stdout 是通过 schema 校验的 `error.v1` 且 stderr 为空，否则只有文本拒绝；新调试文件不存在，已有调试文件内容不变；数据目录逐个文件哈希不变。
+- `TestShellCompletionWordIsData`：业务参数恰好是 `__complete` 或 `__completeNoDesc` 时，命令照常执行并给出自己的错误，不被当作补全命令；没有写入。覆盖了 `-m` 的值、`proposal show` 和 `source add` 的参数、`--` 之后、未知 flag 之后、`help` 的主题。
+- **修复前**（`9879c56`）：每种补全形式都返回 0 并输出 `:0`，canary 出现在进程的 stderr 中，调试文件被创建，已有的调试文件被追加。
+- 直接回归：`TestCommandLineErrorsQuoteNothing`、`TestCommandLineStillWorks`、`TestQuestionCommandLineErrors`、`TestProposalShowDoesNotEchoItsArgument`、`TestUnknownCommandAndFlagAreInvalidInput`，以及人类专属命令的 PTY 测试，都通过。
+
+### NON-BLOCKER（登记，不在本轮修改）
+
+- **N1**：`TestCommandLineStillWorks` 对成功 JSON 输出只检查以 `{` 开头，断言偏弱。审查方已独立确认六类正常输出符合各自的 schema，当前没有功能缺陷。改为按具体 schema 校验，留待后续处理。
+- 其他命令文本输出中的终端控制字符、`doctor` 的 git 版本查询隔离、WP1.6 的 N1 和 N2，维持各自的安排。
+
+**状态**：B1 已修复，等待定向复审（codex-review-030）。审查通过之前，M6 中的这一项不关闭。
