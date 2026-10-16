@@ -214,7 +214,7 @@ SRC-08、TGT-10 的 M2 部分，以及 PRV-10，也在本里程碑验收。
   - Agent 提交的提案文本可以含有 ESC、CR、BEL 等控制字符。
   - 已按 027 B1 的方法在内存中确认原样输出的命令：`proposal list`、`proposal show`、`review` 的确认摘要、`baseline show`、`baseline history`。`propose --apply` 的确认摘要和 `source` 命令的文本输出可能同样受影响，修复时一并检查。
   - 修复方向：这些命令的文本输出和确认摘要统一使用 `internal/termtext`。
-  - `question` 命令已在 WP1.7 中处理。其他命令**尚未修复**，最晚在 v0.1.0 发布之前关闭。
+  - `question` 命令已在 WP1.7 中处理。其他命令已在独立的安全修复中统一处理（分支 `fix/cli-terminal-text-escaping`，规则见 architecture §9.1"终端显示"）：命令的 stdout、stderr 都经过 `termtext.Writer`，人工确认摘要由 `channel.Guard` 转义，JSON 文档保持标准编码。**等待独立审查**；审查通过之前本项不关闭，最晚在 v0.1.0 发布之前关闭。
 
 ### M7 隔离执行器（MVP 之后，不属于 v0.1.0）
 

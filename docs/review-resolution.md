@@ -1951,3 +1951,53 @@ MVP v0.1.0 不支持 SHA-256 格式的 git 对象 ID。§27 记录的现象（64
 **保留的 NON-BLOCKER**：审查 029 N1，`TestCommandLineStillWorks` 对成功的 JSON 输出只检查以 `{` 开头，待改为按具体 schema 校验。
 
 **M1 状态不变**：M1 尚未整体完成，WP1.8 尚未开始。M6 中仍未关闭的遗留问题：其他命令的文本输出没有转义终端控制字符（随后在分支 `fix/cli-terminal-text-escaping` 中处理）；`doctor` 的 git 版本查询隔离。WP1.6 的 N1、N2 维持原安排。
+
+## 38. 终端输出控制字符的独立安全修复（implementation-plan M6）
+
+**来源**：codex-review-027 B1 的同类问题，在审查 027 的处理中登记于 implementation-plan M6"发布前必须关闭的遗留安全问题"。本修复不属于任何工作包，单独提交、单独审查。
+
+**范围**：只处理命令显示给人的文本中的终端控制字符，以及直接相关的确认显示。以下内容不变：
+
+- 数据库、提案、基准、问题和来源中的原值；
+- JSON 输出及 schema 的业务字段；
+- 迁移与业务状态转换；
+- CLI 参数脱敏与补全拦截（§35 ~ §37）；
+- `doctor` 的 git 版本查询隔离；
+- WP1.6 的 N1、N2；
+- 本地 Windows 测试超时；
+- WP1.8、M2。
+
+**修复前的问题**（`a91016e`，在内存中逐字节检查）：`question` 之外的命令都把动态文本原样写到终端：
+
+- 已确认的入口：`proposal list` 和 `proposal show`（摘要、理由、来源与代码引用路径、标题）、`review` 的确认摘要与结果、`baseline show`（标题、AC 的陈述）、`baseline history`（摘要、操作者显示名）、`propose --apply` 的确认摘要、`source add`、`source list` 和 `source ack` 的确认摘要（路径、理由）、`init`（项目名中的双向控制字符）。
+- 原样输出的字节：ESC 序列（CSI、OSC）、CR、BEL、BS、DEL、C1、双向控制字符。
+- 确认字符串：来源路径中有控制字符时，`source ack` 和 `remove` 仍要求输入这个路径，人无法照着输入。
+
+**修复**（规则见 architecture §9.1"终端显示"）。两处边界，使用同一个 `termtext.Escape`：
+
+1. **命令输出**：`newRoot` 把 stdout、stderr 包装为 `termtext.Writer`。所有文本输出、错误文本和帮助都经过转义；新命令打印的文本也自动受保护。只有 `writeJSON` 通过 `termtext.Raw` 绕过这层转义，保持标准 JSON 编码。
+2. **人工确认**：`channel.Guard` 对任何 writer 都转义操作名和摘要，续行缩进在该行之下，多行文本因此无法伪装成摘要中的另一行。确认文本用 `%q` 显示，并按原值比较，比较语义不变。
+
+另外：
+
+- 单行文本（路径、显示名、项目名）使用新增的 `termtext.Line`，LF 和制表符也显示为转义。
+- 多行文本（摘要、理由、AC 的陈述）的续行缩进在字段之下。先缩进再规范化 CRLF，对齐不受影响。
+- `question` 命令改为依赖这两处边界，不再单独转义。`Escape` 是幂等的，输出不变，原有测试照常通过。
+- 路径中有控制字符、换行或制表符时，`source ack` 和 `remove` 改为要求输入来源的 ID（architecture §6.1.3）。这沿用了已有的规则：路径首尾有空格时也使用 ID。
+- `source` 命令的确认改为从命令的 stdin 读取，与 `review` 和 `question` 一致。真实进程中这是同一个 stdin，因此确认可以完全在内存中测试。
+
+**回归测试**（在内存中进行，不向真实终端发送控制序列）：
+
+- `TestTextOutputIsShownSafely`：
+  - 构造：通过公开命令登记一个路径含双向控制字符、中文、日文和 emoji 的来源；提交的提案中，摘要含 CSI、OSC、CR、BEL、BS、DEL、C1、双向控制字符和 CRLF 多行，标题含 OSC 和双向控制字符，AC 的陈述含 ESC、LF 和 CR，并带有来源引用和代码引用；配置中的显示名含 OSC 和双向控制字符。
+  - 输出：`proposal list`、`proposal show`、`review`（确认取消后再确认）、`baseline show`、`propose --apply`（确认取消后再确认）、`baseline history`、`source add`、`source list`、`source ack`（确认取消后再用 ID 确认）、`source remove` 的确认，以及引用参数的错误文本中，都没有原始控制字符；每一处都能看到明确的转义，多行文本的续行有缩进，中文、日文和 emoji 原样显示。
+  - 取消确认时不写入。
+  - `proposal show --json` 解码后，以及数据库中的摘要、陈述、操作者和路径，都是原值。
+- `TestInitTextIsShownSafely`：项目名中的双向控制字符被转义，`init --json` 保留原名。
+- `TestGuardShowsTheSummarySafely`（channel）：写到原始缓冲区的确认提示中没有控制字符，续行有缩进，完整提示逐字比对；输入转义后的文本不能完成确认。
+- `internal/termtext`：`Line`、`Writer`、`Raw`、`NewWriter` 的单元测试。
+- **修复前**（`a91016e`）：`TestTextOutputIsShownSafely` 在 `source add`、`source list`、`proposal list`、`proposal show`、`review` 确认摘要、`baseline show`、`propose --apply` 确认摘要、`baseline history` 上，都检出原始控制字符（例如 `proposal list` 中有 ESC、CR、BEL、BS、DEL、U+009B、U+202E），并在 `source ack` 要求输入原始路径处失败；`TestInitTextIsShownSafely` 检出 U+202E。
+- **变异检查**：去掉 writer 包装后 `TestTextOutputIsShownSafely` 失败；去掉 `Guard` 中的转义后 `TestGuardShowsTheSummarySafely` 失败。
+- 直接回归：`question`、`review`、`source`（包括真实 PTY 的确认测试）、`propose`、`init`、`doctor` 以及命令行错误的测试，全部通过。
+
+**状态**：已修复，等待独立审查；审查通过之前，M6 中的这一项不关闭。
