@@ -1,0 +1,14 @@
+{
+  "schema": "specmetry.target-scope/v1",
+  "target": null,
+  "scope": null,
+  "confirm_inputs": {
+    "target_id": null,
+    "seen_scope_confirmation_id": null,
+    "baseline_version": 0,
+    "source_set_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "pending_items": 3,
+    "must_requirements": [],
+    "effective_waivers": []
+  }
+}
