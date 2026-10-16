@@ -23,6 +23,7 @@ import (
 	"github.com/XKHoshizora/specmetry/internal/secrets"
 	"github.com/XKHoshizora/specmetry/internal/source"
 	"github.com/XKHoshizora/specmetry/internal/store/sqlite"
+	"github.com/XKHoshizora/specmetry/internal/termtext"
 )
 
 // The documents of source-list.v1 and source-add.v1.
@@ -180,9 +181,11 @@ func doc(s source.Source, obs *source.Observation, refs []source.Ref) sourceDoc 
 
 // confirmText is what a person types to confirm an operation on a source:
 // its path when it is in the repository, its ID otherwise (an absolute path
-// is long and may need an input method).
+// is long and may need an input method). A path the terminal shows escaped
+// (termtext), with a control character, a line break or a tab, cannot be
+// typed as shown: its ID is asked for instead.
 func confirmText(s source.Source) string {
-	if s.Location == source.InRepo && strings.TrimSpace(s.Path) == s.Path {
+	if s.Location == source.InRepo && strings.TrimSpace(s.Path) == s.Path && termtext.Line(s.Path) == s.Path {
 		return s.Path
 	}
 	return s.ID
@@ -254,7 +257,7 @@ nothing, not even its acknowledged hash: only source ack does that.`,
 				op := channel.Operation{
 					Name: "source add --allow-any-type",
 					Summary: []string{
-						"register " + r.Path + " as a source although it is not a document type",
+						"register " + termtext.Line(r.Path) + " as a source although it is not a document type",
 						"its content is read only to hash it; excerpts cited from it are checked against it",
 					},
 					Confirm: confirmText(source.Source{Location: r.Location, Path: r.Path}),
@@ -262,7 +265,7 @@ nothing, not even its acknowledged hash: only source ack does that.`,
 				if op.Confirm == "" {
 					op.Confirm = r.Path
 				}
-				if err := channel.Guard(d, os.Stdin, cmd.OutOrStdout(), op); err != nil {
+				if err := channel.Guard(d, cmd.InOrStdin(), cmd.OutOrStdout(), op); err != nil {
 					return err
 				}
 			}
@@ -303,10 +306,10 @@ nothing, not even its acknowledged hash: only source ack does that.`,
 			}
 			if out.Created {
 				return printf(cmd.OutOrStdout(), "Registered %s (%s) as a %s source\n  sha256 %s, %d bytes\n",
-					out.Source.Path, out.Source.ID, out.Source.Kind, out.Source.AckedSHA256, out.Source.SizeBytes)
+					termtext.Line(out.Source.Path), out.Source.ID, out.Source.Kind, out.Source.AckedSHA256, out.Source.SizeBytes)
 			}
 			return printf(cmd.OutOrStdout(), "%s is already a source (%s); nothing changed (state: %s)\n",
-				out.Source.Path, out.Source.ID, *out.Source.State)
+				termtext.Line(out.Source.Path), out.Source.ID, *out.Source.State)
 		}),
 	}
 	cmd.Flags().StringVar(&kindFlag, "kind", "other", "client_requirement, product_doc, design_doc, issue, note or other")
@@ -397,7 +400,7 @@ func printSources(w io.Writer, out sourceListDoc) error {
 		if s.State != nil {
 			state = string(*s.State)
 		}
-		fmt.Fprintf(&b, "%-9s %s (%s, %s)\n", state, s.Path, s.Kind, s.ID)
+		fmt.Fprintf(&b, "%-9s %s (%s, %s)\n", state, termtext.Line(s.Path), s.Kind, s.ID)
 		if s.State != nil && *s.State == source.Changed {
 			fmt.Fprintf(&b, "          acknowledged %s, on disk %s\n", s.AckedSHA256, *s.CurrentSHA256)
 		}
@@ -466,12 +469,12 @@ it, the rationale and who made it.`,
 				return err
 			}
 			if obs.State == source.Unchanged {
-				return printf(cmd.OutOrStdout(), "%s matches its acknowledged hash; nothing to acknowledge\n", s.Path)
+				return printf(cmd.OutOrStdout(), "%s matches its acknowledged hash; nothing to acknowledge\n", termtext.Line(s.Path))
 			}
 			op := channel.Operation{
 				Name: "source ack",
 				Summary: []string{
-					"source: " + s.Path + " (" + s.ID + ")",
+					"source: " + termtext.Line(s.Path) + " (" + s.ID + ")",
 					"acknowledged hash: " + s.AckedSHA256,
 					"new acknowledged hash: " + input.ObservedSHA256 + " (on disk now)",
 					"rationale: " + input.Rationale,
@@ -479,7 +482,7 @@ it, the rationale and who made it.`,
 				},
 				Confirm: confirmText(s),
 			}
-			if err := channel.Guard(d, os.Stdin, cmd.OutOrStdout(), op); err != nil {
+			if err := channel.Guard(d, cmd.InOrStdin(), cmd.OutOrStdout(), op); err != nil {
 				return err
 			}
 			// What counts is the disk when the acknowledgement is written,
@@ -508,7 +511,7 @@ it, the rationale and who made it.`,
 			}); err != nil {
 				return err
 			}
-			return printf(cmd.OutOrStdout(), "Acknowledged %s at %s (seq %d)\nsource set hash %s\n", s.Path, input.ObservedSHA256, seq, setHash)
+			return printf(cmd.OutOrStdout(), "Acknowledged %s at %s (seq %d)\nsource set hash %s\n", termtext.Line(s.Path), input.ObservedSHA256, seq, setHash)
 		}),
 	}
 	cmd.Flags().StringVar(&observed, "observed", "", "the sha256 now on disk, as source list shows it")
@@ -645,7 +648,7 @@ for its references; a hash_only project stores none.`,
 				return err
 			}
 			summary := []string{
-				"source: " + s.Path + " (" + s.ID + ", " + string(s.Kind) + ")",
+				"source: " + termtext.Line(s.Path) + " (" + s.ID + ", " + string(s.Kind) + ")",
 				"its references are kept and show the source as removed",
 				"the source set hash changes, so a confirmed delivery scope must be confirmed again",
 			}
@@ -658,7 +661,7 @@ for its references; a hash_only project stores none.`,
 				summary = append(summary, "--erase-excerpts: this project stores excerpts as hash_only, so no excerpt text is stored and there is nothing to erase")
 			}
 			op := channel.Operation{Name: "source remove", Summary: summary, Confirm: confirmText(s)}
-			if err := channel.Guard(d, os.Stdin, cmd.OutOrStdout(), op); err != nil {
+			if err := channel.Guard(d, cmd.InOrStdin(), cmd.OutOrStdout(), op); err != nil {
 				return err
 			}
 			var seq int64
@@ -679,7 +682,7 @@ for its references; a hash_only project stores none.`,
 			}); err != nil {
 				return err
 			}
-			return printf(cmd.OutOrStdout(), "Removed %s (seq %d)\nsource set hash %s\n", s.Path, seq, setHash)
+			return printf(cmd.OutOrStdout(), "Removed %s (seq %d)\nsource set hash %s\n", termtext.Line(s.Path), seq, setHash)
 		}),
 	}
 	cmd.Flags().BoolVar(&erase, "erase-excerpts", false, "also erase the excerpt text stored for its references")

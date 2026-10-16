@@ -13,6 +13,7 @@ import (
 	"github.com/XKHoshizora/specmetry/internal/apperr"
 	"github.com/XKHoshizora/specmetry/internal/baseline"
 	"github.com/XKHoshizora/specmetry/internal/project"
+	"github.com/XKHoshizora/specmetry/internal/termtext"
 )
 
 func newBaselineCmd() *cobra.Command {
@@ -88,7 +89,7 @@ func printBaseline(w io.Writer, doc baseline.ShowDoc) error {
 			if c.RequirementRevision < r.Revision {
 				note = fmt.Sprintf(" [confirmed for %s r%d: parent revised]", r.Key, c.RequirementRevision)
 			}
-			fmt.Fprintf(&b, "  %s r%d%s  %s%s  %s\n", c.Key, c.Revision, retired(c.Status), c.Verification, note, c.Statement)
+			fmt.Fprintf(&b, "  %s r%d%s  %s%s  %s\n", c.Key, c.Revision, retired(c.Status), c.Verification, note, indented(c.Statement))
 		}
 	}
 	_, err := io.WriteString(w, b.String())
@@ -148,7 +149,7 @@ func printHistory(w io.Writer, doc baseline.HistoryDoc) error {
 		if v.Summary != nil {
 			summary = *v.Summary
 		}
-		fmt.Fprintf(&b, "\nversion %d  seq %d  by %s (%s)  %s\n", v.Number, v.Seq, v.Actor, v.Channel, summary)
+		fmt.Fprintf(&b, "\nversion %d  seq %d  by %s (%s)  %s\n", v.Number, v.Seq, termtext.Line(v.Actor), v.Channel, indented(summary))
 		for _, c := range v.Changes {
 			class := ""
 			if c.ChangeClass != nil {

@@ -116,16 +116,16 @@ func printQuestions(w io.Writer, doc question.ListDoc, all bool) error {
 			if a.Action == question.Dismiss {
 				verb = "dismissed"
 			}
-			fmt.Fprintf(&b, "  %s by %s (%s) at seq %d: %s\n", verb, a.By, a.Channel, a.Seq, indented(a.Text))
+			fmt.Fprintf(&b, "  %s by %s (%s) at seq %d: %s\n", verb, termtext.Line(a.By), a.Channel, a.Seq, indented(a.Text))
 		}
 	}
 	if counts[question.Open] > 0 {
 		b.WriteString("\nOnly a person answers or dismisses a question, at a terminal:\n" +
 			"  specmetry question answer <key> -m <answer>\n  specmetry question dismiss <key> -m <reason>\n")
 	}
-	// The texts come from proposals and people: escaped where they reach
-	// the terminal, all at once (codex-review-027 B1).
-	_, err := io.WriteString(w, termtext.Escape(b.String()))
+	// The texts come from proposals and people: w escapes them where they
+	// reach the terminal (newRoot; codex-review-027 B1).
+	_, err := io.WriteString(w, b.String())
 	return err
 }
 
@@ -201,9 +201,9 @@ answer changes no baseline: a change it calls for goes through a proposal.`,
 				return err
 			}
 			// The summary holds the question's, the person's and the
-			// configuration's texts: escaped for the terminal
+			// configuration's texts: Guard escapes it for the terminal
 			// (codex-review-027 B1).
-			op := channel.Operation{Name: name, Summary: termtext.Lines(closeSummary(q, in, actor, d.Channel)), Confirm: q.Key}
+			op := channel.Operation{Name: name, Summary: closeSummary(q, in, actor, d.Channel), Confirm: q.Key}
 			if err := channel.Guard(d, cmd.InOrStdin(), cmd.OutOrStdout(), op); err != nil {
 				return err
 			}
@@ -221,7 +221,7 @@ answer changes no baseline: a change it calls for goes through a proposal.`,
 			if action == question.Dismiss {
 				past = "Dismissed"
 			}
-			return printf(cmd.OutOrStdout(), "%s", termtext.Escape(fmt.Sprintf("%s %s (seq %d). The baseline is unchanged.\n", past, q.Key, seq)))
+			return printf(cmd.OutOrStdout(), "%s %s (seq %d). The baseline is unchanged.\n", past, q.Key, seq)
 		}),
 	}
 	help := "the answer"
@@ -297,16 +297,17 @@ func questionInput(cmd *cobra.Command, action question.Action, args []string, te
 // closeSummary is what a person confirms: the question, the answer or
 // the reason, and what is recorded.
 func closeSummary(q question.Question, in questionAnswerDoc, actor string, ch channel.Channel) []string {
-	lines := []string{"question: " + q.Key + ", " + describeQuestion(q), "asks: " + indented(q.Text)}
+	// Guard indents the lines a text continues on.
+	lines := []string{"question: " + q.Key + ", " + describeQuestion(q), "asks: " + q.Text}
 	if q.Context != nil {
-		lines = append(lines, "context: "+indented(*q.Context))
+		lines = append(lines, "context: "+*q.Context)
 	}
 	if in.Action == question.Dismiss {
-		lines = append(lines, "dismissed because: "+indented(in.Rationale))
+		lines = append(lines, "dismissed because: "+in.Rationale)
 	} else {
-		lines = append(lines, "answer: "+indented(in.Answer))
+		lines = append(lines, "answer: "+in.Answer)
 	}
 	return append(lines,
-		"recorded as "+actor+" on "+string(ch)+"; the question then does not change",
+		"recorded as "+termtext.Line(actor)+" on "+string(ch)+"; the question then does not change",
 		"the baseline is unchanged: a change this calls for goes through a proposal")
 }

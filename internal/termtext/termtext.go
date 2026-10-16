@@ -9,6 +9,7 @@ package termtext
 
 import (
 	"fmt"
+	"io"
 	"strings"
 	"unicode/utf8"
 )
@@ -78,11 +79,43 @@ func ascii(r rune) string {
 	return fmt.Sprintf(`\x%02x`, r)
 }
 
-// Lines is Escape for each of lines.
-func Lines(lines []string) []string {
-	out := make([]string, len(lines))
-	for i, l := range lines {
-		out[i] = Escape(l)
+var lineBreaks = strings.NewReplacer(string(rune(0x0a)), `\n`, string(rune(0x09)), `\t`)
+
+// Line is Escape for a text that is one line by nature, such as a path or
+// a display name: a line feed and a tab are shown too (as LF and TAB
+// escapes), so that the text cannot pass for a line of its own.
+func Line(s string) string {
+	return lineBreaks.Replace(Escape(s))
+}
+
+// Writer is the boundary between a command's text output and the
+// terminal: everything written to it reaches W as Escape shows it. Each
+// Write is escaped on its own, so a CRLF or a UTF-8 sequence split across
+// two writes is shown as its two parts; output is written whole.
+type Writer struct{ W io.Writer }
+
+// NewWriter is a Writer to w, or w itself when it is one already.
+func NewWriter(w io.Writer) Writer {
+	if t, ok := w.(Writer); ok {
+		return t
 	}
-	return out
+	return Writer{W: w}
+}
+
+// Write writes Escape(p) to W, and reports p as written.
+func (w Writer) Write(p []byte) (int, error) {
+	if _, err := io.WriteString(w.W, Escape(string(p))); err != nil {
+		return 0, err
+	}
+	return len(p), nil
+}
+
+// Raw is the writer under w when w is a Writer, for output that is not
+// text for a person and keeps its own encoding (a JSON document); w
+// otherwise.
+func Raw(w io.Writer) io.Writer {
+	if t, ok := w.(Writer); ok {
+		return Raw(t.W)
+	}
+	return w
 }

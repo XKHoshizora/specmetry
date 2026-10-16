@@ -13,6 +13,7 @@ import (
 	"github.com/XKHoshizora/specmetry/internal/apperr"
 	"github.com/XKHoshizora/specmetry/internal/project"
 	"github.com/XKHoshizora/specmetry/internal/proposal"
+	"github.com/XKHoshizora/specmetry/internal/termtext"
 	"github.com/XKHoshizora/specmetry/internal/ulid"
 )
 
@@ -65,8 +66,8 @@ func printProposalList(w io.Writer, doc proposal.ListDoc) error {
 	for _, p := range doc.Proposals {
 		c := p.Counts
 		fmt.Fprintf(&b, "%s  seq %d  %s by %s  base v%d  pending %d, conflict %d, accepted %d, edited %d, rejected %d\n  %s\n",
-			p.ID, p.Seq, p.Origin, p.Actor, p.BaseVersion, c["pending"], c["conflict"], c["accepted"], c["accepted_with_edits"],
-			c["rejected"], p.Summary)
+			p.ID, p.Seq, p.Origin, termtext.Line(p.Actor), p.BaseVersion, c["pending"], c["conflict"], c["accepted"], c["accepted_with_edits"],
+			c["rejected"], indented(p.Summary))
 	}
 	_, err := io.WriteString(w, b.String())
 	return err
@@ -118,7 +119,7 @@ back as seen_base_version.`,
 func printProposalShow(w io.Writer, doc proposal.ShowDoc) error {
 	var b strings.Builder
 	p := doc.Proposal
-	fmt.Fprintf(&b, "Proposal %s  seq %d  %s by %s (%s)\n  %s\n", p.ID, p.Seq, p.Origin, p.Actor, p.Channel, p.Summary)
+	fmt.Fprintf(&b, "Proposal %s  seq %d  %s by %s (%s)\n  %s\n", p.ID, p.Seq, p.Origin, termtext.Line(p.Actor), p.Channel, indented(p.Summary))
 	fmt.Fprintf(&b, "Proposed against baseline version %d; the baseline is at version %d (review with seen_base_version %d).\n",
 		p.BaseVersion, doc.BaselineVersion, doc.BaselineVersion)
 	for _, it := range doc.Items {
@@ -139,17 +140,17 @@ func printProposalShow(w io.Writer, doc proposal.ShowDoc) error {
 			fmt.Fprintf(&b, "  proposed: %s\n", compact(it.Proposed))
 		}
 		if it.Rationale != "" {
-			fmt.Fprintf(&b, "  rationale: %s\n", it.Rationale)
+			fmt.Fprintf(&b, "  rationale: %s\n", indented(it.Rationale))
 		}
 		for _, s := range it.Sources {
-			fmt.Fprintf(&b, "  source %s: %s\n", s.Path, s.Verification)
+			fmt.Fprintf(&b, "  source %s: %s\n", termtext.Line(s.Path), s.Verification)
 		}
 		for _, c := range it.CodeRefs {
 			state := "found"
 			if !c.Exists {
 				state = "not found"
 			}
-			fmt.Fprintf(&b, "  code %s: %s\n", c.Path, state)
+			fmt.Fprintf(&b, "  code %s: %s\n", termtext.Line(c.Path), state)
 		}
 		if c := it.Conflict; c != nil {
 			fmt.Fprintf(&b, "  CONFLICT: changed since the proposal was made (revision %d then, %d and %s now)\n", c.BaseRevision,
@@ -157,7 +158,7 @@ func printProposalShow(w io.Writer, doc proposal.ShowDoc) error {
 			fmt.Fprintf(&b, "    base:     %s\n    current:  %s\n    proposed: %s\n", compact(c.Base), compact(c.Current), compact(c.Proposed))
 		}
 		if r := it.Review; r != nil {
-			fmt.Fprintf(&b, "  reviewed: %s by %s (%s) at seq %d", r.Decision, r.By, r.Channel, r.Seq)
+			fmt.Fprintf(&b, "  reviewed: %s by %s (%s) at seq %d", r.Decision, termtext.Line(r.By), r.Channel, r.Seq)
 			if r.ChangeClass != nil {
 				fmt.Fprintf(&b, ", %s", *r.ChangeClass)
 			}

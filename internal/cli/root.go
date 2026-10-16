@@ -14,6 +14,7 @@ import (
 
 	"github.com/XKHoshizora/specmetry/internal/apperr"
 	"github.com/XKHoshizora/specmetry/internal/channel"
+	"github.com/XKHoshizora/specmetry/internal/termtext"
 )
 
 // Execute runs the CLI with args and returns the process exit code.
@@ -85,8 +86,11 @@ func newRoot(stdout, stderr io.Writer) *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
-	root.SetOut(stdout)
-	root.SetErr(stderr)
+	// Every text a command writes reaches the terminal escaped (termtext):
+	// it may hold a proposal's, a person's or the configuration's text.
+	// JSON documents keep their own encoding (writeJSON).
+	root.SetOut(termtext.NewWriter(stdout))
+	root.SetErr(termtext.NewWriter(stderr))
 	root.CompletionOptions.DisableDefaultCmd = true
 	root.AddCommand(newVersionCmd(), newDoctorCmd(), newInitCmd(), newSourceCmd(), newProposeCmd(), newProposalCmd(),
 		newReviewCmd(), newBaselineCmd(), newQuestionCmd())
@@ -105,9 +109,11 @@ func run(fn func(cmd *cobra.Command, args []string) error) func(*cobra.Command, 
 	}
 }
 
-// printError writes a human-readable error. Commands run with --json print
-// the error.v1 envelope to stdout instead (printErrorJSON).
+// printError writes a human-readable error, escaped for the terminal: it may
+// quote an argument or a stored text. Commands run with --json print the
+// error.v1 envelope to stdout instead (printErrorJSON).
 func printError(w io.Writer, e *apperr.Error) {
+	w = termtext.NewWriter(w)
 	_, _ = fmt.Fprintf(w, "error: %s\n", e.Error())
 	for _, d := range e.Details {
 		if d.Pointer != "" {

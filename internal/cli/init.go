@@ -16,6 +16,7 @@ import (
 	"github.com/XKHoshizora/specmetry/internal/project"
 	"github.com/XKHoshizora/specmetry/internal/secrets"
 	"github.com/XKHoshizora/specmetry/internal/store/sqlite"
+	"github.com/XKHoshizora/specmetry/internal/termtext"
 )
 
 // initDoc is the init.v1 document.
@@ -169,9 +170,9 @@ func printInit(w io.Writer, res project.Result) error {
 	var b []byte
 	line := func(format string, args ...any) { b = fmt.Appendf(b, format+"\n", args...) }
 	if res.Created {
-		line("Initialized project %s (%s)", res.Name, res.ProjectID)
+		line("Initialized project %s (%s)", termtext.Line(res.Name), res.ProjectID)
 	} else {
-		line("Project %s (%s) is already initialized", res.Name, res.ProjectID)
+		line("Project %s (%s) is already initialized", termtext.Line(res.Name), res.ProjectID)
 	}
 	line("  stage: %s (detected: %s)", res.Stage, res.StageDetected)
 	line("  progress: %s", res.Progress)
@@ -188,11 +189,11 @@ func printInit(w io.Writer, res project.Result) error {
 	} else {
 		line("  candidate sources (not registered):")
 		for _, c := range res.Candidates {
-			line("    %s", c)
+			line("    %s", termtext.Line(c))
 		}
 	}
 	for _, h := range res.TestHints {
-		line("  test command: %s", h)
+		line("  test command: %s", termtext.Line(h))
 	}
 	for _, warn := range res.Warnings {
 		line("warning: %s", warningText[warn])
