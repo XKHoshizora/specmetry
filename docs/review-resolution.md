@@ -1935,3 +1935,19 @@ MVP v0.1.0 不支持 SHA-256 格式的 git 对象 ID。§27 记录的现象（64
 - 其他命令文本输出中的终端控制字符、`doctor` 的 git 版本查询隔离、WP1.6 的 N1 和 N2，维持各自的安排。
 
 **状态**：B1 已修复，等待定向复审（codex-review-030）。审查通过之前，M6 中的这一项不关闭。
+
+## 37. 安全修复 PR #11 的最终定向复审（codex-review-030）与关闭
+
+**审查结论**：**GO**，BLOCKER 为 0。审查目标 `30be825`。审查原文未提供文件，未入库；结论按产品负责人的通知记录。
+
+- **审查 029 的 B1 关闭。** cobra 的隐藏补全命令（`__complete`、`__completeNoDesc`）在 cobra 执行之前就被拒绝，不再把命令行写入进程的 stderr 或 `BASH_COMP_DEBUG_FILE`。
+- PR #11 已合并（合并提交 `a91016e`，2026-10-16）。
+
+**关闭**：implementation-plan M6 中"CLI 错误回显不可信参数"标记为已完成，原登记内容和关闭依据都保留在该条目中：
+
+- 修复：`secureCommandLine`（审查 027 N1，§35）和补全拒绝（审查 029 B1，§36）；
+- 证据：`TestCommandLineErrorsQuoteNothing`、`TestShellCompletionIsRefused`、`TestShellCompletionWordIsData` 在三平台 CI 中运行通过；修复前后的对照见 §35、§36。
+
+**保留的 NON-BLOCKER**：审查 029 N1，`TestCommandLineStillWorks` 对成功的 JSON 输出只检查以 `{` 开头，待改为按具体 schema 校验。
+
+**M1 状态不变**：M1 尚未整体完成，WP1.8 尚未开始。M6 中仍未关闭的遗留问题：其他命令的文本输出没有转义终端控制字符（随后在分支 `fix/cli-terminal-text-escaping` 中处理）；`doctor` 的 git 版本查询隔离。WP1.6 的 N1、N2 维持原安排。
