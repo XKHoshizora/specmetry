@@ -226,3 +226,24 @@ func TestNoConfirmationSkipFlag(t *testing.T) {
 		}
 	}
 }
+
+// cliStderrRedirectedHelper is cliHelper with stderr going to a file while
+// stdin and stdout stay the terminal, as in "specmetry ... 2> file": the
+// channel is human_cli, and stderr is not a terminal. It reports the exit
+// code and how many bytes reached stderr on stdout.
+func cliStderrRedirectedHelper() int {
+	f, err := os.CreateTemp("", "stderr")
+	if err != nil {
+		return 1
+	}
+	defer func() { _ = f.Close(); _ = os.Remove(f.Name()) }()
+	os.Stderr = f
+	root := newRoot(os.Stdout, f)
+	code := executeRoot(context.Background(), root, helperArgs(), f)
+	info, err := f.Stat()
+	if err != nil {
+		return 1
+	}
+	fmt.Fprintf(os.Stdout, "\nstderr=%d bytes\nexit=%d\n", info.Size(), code)
+	return code
+}

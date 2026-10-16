@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/XKHoshizora/specmetry/internal/apperr"
-	"github.com/XKHoshizora/specmetry/internal/channel"
 )
 
 // halfWriter takes half of each write and reports that, with no error, as
@@ -48,7 +47,7 @@ func TestConfirmationNotShownWholeWritesNothing(t *testing.T) {
 	root := newRoot(out, &errOut)
 	in := &readCounter{r: strings.NewReader("Q-001\n")}
 	root.SetIn(in)
-	code := executeAs(context.Background(), channel.Detection{Channel: channel.HumanCLI}, root, args, &errOut)
+	code := executeAs(context.Background(), atTerminal, root, args, &errOut)
 	if code != apperr.ExitEnvironment || in.reads != 0 || !strings.Contains(errOut.String(), "cannot show the confirmation") {
 		t.Fatalf("exit %d after %d confirmation reads, want 6 and none\n%s", code, in.reads, errOut.String())
 	}
@@ -67,7 +66,7 @@ func TestConfirmationNotShownWholeWritesNothing(t *testing.T) {
 	root = newRoot(&whole, &errOut)
 	in = &readCounter{r: strings.NewReader("Q-001\n")}
 	root.SetIn(in)
-	if code := executeAs(context.Background(), channel.Detection{Channel: channel.HumanCLI}, root, args, &errOut); code != apperr.ExitOK {
+	if code := executeAs(context.Background(), atTerminal, root, args, &errOut); code != apperr.ExitOK {
 		t.Fatalf("written whole: exit %d\n%s%s", code, whole.String(), errOut.String())
 	}
 	if got := rows(t, home, `SELECT status FROM questions WHERE key = 'Q-001'`); !equalRows(got, [][]string{{"answered"}}) {

@@ -48,6 +48,10 @@ type Detection struct {
 	// Agent names the Agent whose variable is set ("claude_code"), and is
 	// "" when none is: an actor is agent:<agent> (data-model §1).
 	Agent string
+	// StderrTerminal is whether stderr is a terminal. It plays no part in
+	// the channel; it tells whether a confirmation can be shown on stderr,
+	// where human-only commands show it with --json (architecture §5.1).
+	StderrTerminal bool
 }
 
 // Decide identifies the channel: human_cli when stdin and stdout are
@@ -146,6 +150,10 @@ func Guard(d Detection, in io.Reader, out io.Writer, op Operation) error {
 func Detect(stdin, stdout *os.File) Detection {
 	return Decide(isTerminal(stdin), isTerminal(stdout), os.LookupEnv)
 }
+
+// IsTerminal reports whether f is a terminal, as Detect judges stdin and
+// stdout.
+func IsTerminal(f *os.File) bool { return isTerminal(f) }
 
 func isTerminal(f *os.File) bool { return f != nil && term.IsTerminal(int(f.Fd())) }
 

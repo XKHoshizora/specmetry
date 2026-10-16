@@ -265,7 +265,7 @@ nothing, not even its acknowledged hash: only source ack does that.`,
 				if op.Confirm == "" {
 					op.Confirm = r.Path
 				}
-				if err := channel.Guard(d, cmd.InOrStdin(), cmd.OutOrStdout(), op); err != nil {
+				if err := confirm(cmd, d, op); err != nil {
 					return err
 				}
 			}
@@ -482,7 +482,7 @@ it, the rationale and who made it.`,
 				},
 				Confirm: confirmText(s),
 			}
-			if err := channel.Guard(d, cmd.InOrStdin(), cmd.OutOrStdout(), op); err != nil {
+			if err := confirm(cmd, d, op); err != nil {
 				return err
 			}
 			// What counts is the disk when the acknowledgement is written,
@@ -661,7 +661,7 @@ for its references; a hash_only project stores none.`,
 				summary = append(summary, "--erase-excerpts: this project stores excerpts as hash_only, so no excerpt text is stored and there is nothing to erase")
 			}
 			op := channel.Operation{Name: "source remove", Summary: summary, Confirm: confirmText(s)}
-			if err := channel.Guard(d, cmd.InOrStdin(), cmd.OutOrStdout(), op); err != nil {
+			if err := confirm(cmd, d, op); err != nil {
 				return err
 			}
 			var seq int64

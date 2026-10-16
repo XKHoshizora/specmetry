@@ -28,7 +28,7 @@ func applyEdit(t *testing.T, dir string, doc map[string]any) receiptOut {
 	if err != nil {
 		t.Fatal(err)
 	}
-	body := jsonPart(stdout)
+	body := wholeJSON(t, stdout)
 	if err := val.ValidateJSON("proposal-receipt.v1", []byte(body)); err != nil {
 		t.Fatalf("receipt does not conform: %v\n%s", err, body)
 	}
@@ -93,7 +93,7 @@ JOIN proposal_items i ON i.proposal_id = p.id JOIN baseline_versions v ON v.id =
 	} {
 		code, stdout, _ := asHuman(t, dir, "v3", "propose", "--apply", "--json", "--file", writeProposal(t, c.doc))
 		var env apperr.Envelope
-		_ = json.Unmarshal([]byte(jsonPart(stdout)), &env)
+		_ = json.Unmarshal([]byte(wholeJSON(t, stdout)), &env)
 		found := false
 		for _, d := range env.Error.Details {
 			found = found || d.Pointer == c.pointer

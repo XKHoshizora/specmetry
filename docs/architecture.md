@@ -145,11 +145,11 @@ PreToolUse 拦截规则（第二道防线，第一道是通道识别）。它适
    - stdin 和 stdout 都是终端（Windows 上是控制台）；stderr 不参与判断；
    - 没有设置任何已知的 Agent 环境变量。只检查变量是否存在且非空：取到的值只用于这一次判断，随即丢弃，**从不保存、记录或输出**（环境变量的值属于 C0，§10.1）。
 2. 人类专属操作在 `human_cli` 中还要通过交互式确认：在终端中显示操作摘要和前置条件，要求输入确认内容（例如对象编号或项目名）。确认只从终端读取，**不提供** `--yes` 之类的跳过参数。在 `agent_cli` 中执行人类专属操作，返回退出码 3，不写入任何数据。
-   - 确认时，在标准输出（`human_cli` 中它是终端）显示操作名称和摘要，然后从标准输入（同样是终端）读取一行。只有读到以回车结束的完整一行、且内容与确认内容完全一致（忽略首尾空白）才继续；内容不一致、直接回车或输入结束，都视为取消，返回退出码 3（`human_required`），不写入任何数据。输入结束时，即使已经读到完整的确认内容（只是没有回车），也视为取消。
+   - 确认时，在标准输出（`human_cli` 中它是终端）显示操作名称和摘要，然后从标准输入（同样是终端）读取一行。带 `--json` 时，stdout 只保留命令的输出（JSON 文档、成功文本或 `error.v1`），确认改为显示在标准错误上（codex-review-031 N2）；标准错误不是终端时，人看不到确认内容，因此不显示、不读取输入，返回退出码 6（`environment`），不写入任何数据。标准错误只在这里使用，不参与通道识别。只有读到以回车结束的完整一行、且内容与确认内容完全一致（忽略首尾空白）才继续；内容不一致、直接回车或输入结束，都视为取消，返回退出码 3（`human_required`），不写入任何数据。输入结束时，即使已经读到完整的确认内容（只是没有回车），也视为取消。
    - 操作名称、摘要或确认提示无法完整输出（写入出错，或只写入了一部分）时，不读取输入，返回退出码 6（`environment`），不写入任何数据：人没有看到完整的操作内容，就不能算作确认。读取确认输入出错时，同样返回退出码 6。
    - 在 `agent_cli` 中直接拒绝，不显示提示，也不读取输入。
 3. `--json` 和 `--file -` 不改变通道。只读命令在任何通道中都可以执行。用 `--file -` 从管道读入内容时，标准输入不是终端，因此是 `agent_cli`。
-4. 通道在每次执行命令时识别一次（`cli.Execute`），交给命令使用；没有识别结果时按 `agent_cli` 处理。实现位于 `internal/channel`：`Detect` 识别通道，`Guard` 是人类专属操作写入之前必须调用的拦截与确认。
+4. 通道在每次执行命令时识别一次（`cli.Execute`），交给命令使用；没有识别结果时按 `agent_cli` 处理。实现位于 `internal/channel`：`Detect` 识别通道，`Guard` 是人类专属操作写入之前必须调用的拦截与确认。CLI 的人类专属命令都通过 `internal/cli` 的 `confirm` 调用 `Guard`，由它按上一条的规则选择显示确认的输出流；命令不直接调用 `Guard`（有测试约束）。
 
 **已知的 Agent 环境变量**（内置清单，只随版本增加，不提供配置项）：
 
@@ -683,7 +683,7 @@ Agent 侧的安装位置（TD-03）：
 - 面向 Agent 的命令都支持 `--json`，输出符合 `schemas/`。
 - 输入通过 `--file <path|->` 传入。
 - 写命令在 JSON 中携带读取版本（[data-model.md §7.1](data-model.md#71-写入前置条件)）。
-- M1 的结果与读取模型输出：`source-add.v1`、`proposal-receipt.v1`、`source-list.v1`、`proposal-list.v1`、`proposal-show.v1`、`baseline-show.v1`、`baseline-history.v1`、`question-list.v1`、`target-scope.v1`（[data-model.md §8](data-model.md#8-交换格式)）。人类专属的写命令在 MVP 中只输出人类可读文本；出错时带 `--json` 仍输出 `error.v1`。
+- M1 的结果与读取模型输出：`source-add.v1`、`proposal-receipt.v1`、`source-list.v1`、`proposal-list.v1`、`proposal-show.v1`、`baseline-show.v1`、`baseline-history.v1`、`question-list.v1`、`target-scope.v1`（[data-model.md §8](data-model.md#8-交换格式)）。人类专属的写命令在 MVP 中只输出人类可读文本；出错时带 `--json` 仍输出 `error.v1`；已有成功 JSON 契约的（`propose --apply` 的 `proposal-receipt.v1`、`source add` 的 `source-add.v1`）成功时输出该文档。带 `--json` 时，stdout 中只有这些输出，确认提示在 stderr（§5.1 规则 2）。
 
 **命令行错误**（codex-review-025 B1、codex-review-027 N1）：命令行本身的错误，不引用输入的任何内容。输入的内容尚未经过密钥扫描，可能是误粘贴的密钥。cobra 和 pflag 的消息会原样引用它们无法使用的内容，所以这些消息都不进入输出；所有命令统一在 `internal/cli/cmdline.go` 中处理：
 
@@ -701,6 +701,7 @@ Agent 侧的安装位置（TD-03）：
   - pflag 在出错的 flag 处停止解析，此时按 pflag 的规则从参数中判断是否要求了 JSON：`--json`、`--json=<布尔值>` 都算，以最后一个为准；取值 flag 的值（`-m x`、`-mx`、`-m=x`、`--message x`、`--file x`）不算；`--` 之后的参数不算；未知 flag 不取值，例如 `--unknown=--json` 不算。
   - 正常解析的命令，按已解析的 flag 判断。
   - 没有 `--json` 的命令（`version`、`doctor`）只输出文本错误。
+  - 唯一的例外：人类专属命令带 `--json` 时，人在交互中看到的确认提示显示在 stderr（§5.1 规则 2）。所以确认之后的错误（取消、确认期间状态已变化）仍然在 stdout 输出一份完整的 `error.v1`，stderr 中是此前显示的确认提示。还没有显示确认就失败时（输入校验、前置条件），stderr 仍为空。
 
 命令执行之后产生的业务错误，不在此范围内。
 

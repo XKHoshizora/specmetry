@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -14,6 +16,10 @@ import (
 	"github.com/XKHoshizora/specmetry/internal/channel"
 	"github.com/XKHoshizora/specmetry/internal/datadir"
 )
+
+// atTerminal is the channel of a person at a terminal: stdin, stdout and
+// stderr are all the terminal.
+var atTerminal = channel.Detection{Channel: channel.HumanCLI, StderrTerminal: true}
 
 // asHuman runs the CLI in-process as a person at a terminal does: the
 // channel is human_cli, and confirm is the line typed at the confirmation
@@ -29,7 +35,7 @@ func asHuman(t *testing.T, dir, confirm string, args ...string) (int, string, st
 		in = confirm + "\n"
 	}
 	root.SetIn(strings.NewReader(in))
-	code := executeAs(context.Background(), channel.Detection{Channel: channel.HumanCLI}, root, args, &errOut)
+	code := executeAs(context.Background(), atTerminal, root, args, &errOut)
 	return code, out.String(), errOut.String()
 }
 
@@ -102,12 +108,12 @@ func reviewRefused(t *testing.T, home datadir.Dir, dir string, doc map[string]an
 	if got != code {
 		t.Errorf("exit %d, want %d (%s)\n%s%s", got, code, pointer, stdout, stderr)
 	}
-	// Refused before the person is asked anything.
-	if strings.Contains(stdout, "to confirm") {
+	// Refused before the person is asked anything, on either stream.
+	if strings.Contains(stdout+stderr, "to confirm") {
 		t.Errorf("%s: the person was asked to confirm a review that is refused", pointer)
 	}
 	var env apperr.Envelope
-	if err := json.Unmarshal([]byte(jsonPart(stdout)), &env); err != nil {
+	if err := json.Unmarshal([]byte(wholeJSON(t, stdout)), &env); err != nil {
 		t.Errorf("no error.v1: %v\n%s", err, stdout)
 	}
 	if pointer != "" {
@@ -297,11 +303,19 @@ func acceptAll(t *testing.T, dir string, r receiptOut, seen int, classes map[str
 	return reviewOK(t, dir, reviewDoc(r.ProposalID, seen, items...))
 }
 
-// jsonPart is the JSON document a command printed to stdout after any
-// confirmation prompt.
-func jsonPart(stdout string) string {
-	if i := strings.Index(stdout, "{"); i > 0 {
-		return stdout[i:]
+// wholeJSON checks that stdout is one JSON document and nothing else: with
+// --json a confirmation prompt goes to stderr (codex-review-031 N2), never
+// before the document. It returns stdout.
+func wholeJSON(t *testing.T, stdout string) string {
+	t.Helper()
+	dec := json.NewDecoder(strings.NewReader(stdout))
+	var v any
+	if err := dec.Decode(&v); err != nil {
+		t.Errorf("stdout is not a JSON document: %v\n%s", err, stdout)
+		return stdout
+	}
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
+		t.Errorf("stdout holds more than one JSON document:\n%s", stdout)
 	}
 	return stdout
 }

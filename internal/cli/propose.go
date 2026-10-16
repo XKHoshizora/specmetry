@@ -150,7 +150,7 @@ worktree; that a file is there is no evidence that a criterion is met.`,
 					return err
 				}
 				op := channel.Operation{Name: "propose --apply", Summary: edit.lines, Confirm: fmt.Sprintf("v%d", p.BaseVersion+1)}
-				if err := channel.Guard(d, cmd.InOrStdin(), cmd.OutOrStdout(), op); err != nil {
+				if err := confirm(cmd, d, op); err != nil {
 					return err
 				}
 			}
