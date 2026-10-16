@@ -8,6 +8,7 @@
 package termtext
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -102,13 +103,31 @@ func NewWriter(w io.Writer) Writer {
 	return Writer{W: w}
 }
 
-// Write writes Escape(p) to W, and reports p as written.
+// Write writes Escape(p) to W, and reports p written only when W took the
+// escaped text whole without an error (codex-review-031 B1): a caller such
+// as channel.Guard must learn that what it showed was cut off. The escaped
+// text may be longer than p, so what counts is its own length. A short
+// write without an error is io.ErrShortWrite, a count out of range is
+// errInvalidWrite, and W's error is passed on; in each case none of p is
+// reported written, since which part of p reached the terminal cannot be
+// told. A short write is not retried.
 func (w Writer) Write(p []byte) (int, error) {
-	if _, err := io.WriteString(w.W, Escape(string(p))); err != nil {
+	escaped := Escape(string(p))
+	n, err := io.WriteString(w.W, escaped)
+	switch {
+	case err != nil:
 		return 0, err
+	case n < 0 || n > len(escaped):
+		return 0, errInvalidWrite
+	case n != len(escaped):
+		return 0, io.ErrShortWrite
 	}
 	return len(p), nil
 }
+
+// errInvalidWrite is a write count out of range from the writer under a
+// Writer.
+var errInvalidWrite = errors.New("termtext: invalid write count")
 
 // Raw is the writer under w when w is a Writer, for output that is not
 // text for a person and keeps its own encoding (a JSON document); w
