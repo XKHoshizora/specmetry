@@ -2001,3 +2001,45 @@ MVP v0.1.0 不支持 SHA-256 格式的 git 对象 ID。§27 记录的现象（64
 - 直接回归：`question`、`review`、`source`（包括真实 PTY 的确认测试）、`propose`、`init`、`doctor` 以及命令行错误的测试，全部通过。
 
 **状态**：已修复，等待独立审查；审查通过之前，M6 中的这一项不关闭。
+
+## 39. 终端输出安全修复 PR #12 的代码审查（codex-review-031）的处理
+
+**审查结论**：NO-GO。审查目标 `db81f5a`，基准 `a91016e`，有 1 项 BLOCKER、2 项 NON-BLOCKER。审查确认：完整写入时统一转义边界有效，JSON 旁路只在 `writeJSON`，已登记来源的 ID 确认正确，没有新的绕过路径。本轮不需要新的产品决策。
+
+本轮只修复 B1 及直接回归。`channel.Guard` 的确认逻辑、`Escape`、`Line`、`Raw` 和 JSON 旁路的语义都不变。审查原文按原样入库。
+
+### B1：`termtext.Writer` 吞掉短写入，破坏人工确认的 fail-closed 保证
+
+**根因**：`Writer.Write` 把转义后的文本写到底层 writer，但忽略底层实际写入的字节数，总是返回 `len(p), nil`。底层短写入且没有错误时，`channel.Guard` 以为提示已完整显示，于是读取输入，业务操作得以执行。这违反了 architecture §5.1：提示只显示了一部分时，应返回退出码 6，不读取输入，不写入。PR #12 把所有命令的 stdout 都接入这个 Writer，所以这是本 PR 引入的回归。审查方的复现：经包装后，`question answer` 返回 0，读取一次输入，Q-001 从 `open` 变为 `answered`，seq 加一；基准提交在同一反例下返回 6，数据不变。
+
+**修复**（只改 `Writer.Write`）：
+
+- 先生成转义后的文本，写到底层 writer。
+- 底层返回错误时照原样传递。
+- 计数超出范围（负数，或大于转义后的长度）时返回错误。
+- 没有错误但写入字节数不等于转义后文本的长度时，返回 `io.ErrShortWrite`。按转义后的长度判断，因为转义后的文本可能比原文长。
+- 只有转义后的文本全部写入、且没有错误时，才返回 `len(p), nil`。失败时不报告原文的任何部分已写入（无法判断原文的哪一部分到达了终端），也不重试。
+
+**回归测试**：
+
+- **Writer 层**（`TestWriterReportsShortWrites`）：每种情况都检查返回的 `n`、错误，以及底层实际收到的字节。
+  - 普通 ASCII 只写入一半；
+  - 含 ESC 的文本，转义后变长、底层恰好写入 `len(p)` 字节；
+  - 5 字节转义为 8 字节、底层写入 4 字节（审查中的例子）；
+  - 零字节写入且没有错误；
+  - 完整写入；
+  - 部分写入并返回错误；
+  - 全部写入但返回错误；
+  - 底层多报、负数计数。
+- **Guard 层**（`TestGuardFailsWhenThePromptCannotBeShown`）：每种故障 writer 都分别直接传入、以及经 `termtext.NewWriter` 包装后传入。都必须返回退出码 6，不读取任何确认输入；完整写入时（直接或包装）正确确认仍能成功。
+- **公开 CLI 写事务**（`TestConfirmationNotShownWholeWritesNothing`）：通过真实命令入口执行 `question answer Q-001 -m review031-confirmation`，human 通道，stdout 每次只接收一半字节，正确的确认输入已经准备好。结果：退出码 6，确认输入读取 0 次；Q-001 仍为 `open`，`answered_seq` 不变，全局 seq 不变，基准、提案及其他业务事实不变。改为完整写入后，同一命令可以正常完成回答。
+- **修复前**（`db81f5a`）：Writer 层的短写入、零字节和计数异常都报告成功；Guard 层经包装的"短写入"和"零字节写入"放行了确认；CLI 层返回 0，读取 1 次，问题被错误回答。
+- 直接回归：文本安全显示、`review` 与 `propose --apply` 的确认、`source` 的真实 PTY 确认、取消与 Agent 拒绝、`error.v1` 与正常 JSON、数据库原值、命令行错误脱敏与补全拦截，都通过。
+
+### NON-BLOCKER（登记为独立维护事项，见 implementation-plan M6 之后的"独立维护事项"）
+
+- **N1**：首次登记特殊路径的非文档来源时，`source add --allow-any-type` 还没有来源 ID，部分路径无法用单行输入确认。没有错误放行。登记了复现证据和修复方向，本轮不重构 `source` 命令。
+- **N2**：在 human 通道使用 `--json` 时，取消确认后，确认提示与 `error.v1` 混在同一个 stdout 中。基准提交同样存在，不是本 PR 引入的回归，也不是已接受的风险。登记了复现证据和修复方向。
+- 其他遗留事项维持原安排：`doctor` 的 git 版本查询隔离、审查 029 N1、WP1.6 的 N1 和 N2。
+
+**状态**：B1 已修复，等待定向复审（codex-review-032）。审查通过之前，M6 中"其他命令的文本输出没有转义终端控制字符"这一项不关闭。
