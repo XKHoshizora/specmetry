@@ -28,6 +28,23 @@
         "channel": "dashboard",
         "seq": 45
       }
+    },
+    {
+      "key": "Q-003",
+      "text": "导出是否需要支持 Excel？",
+      "context": null,
+      "status": "dismissed",
+      "blocking": true,
+      "about": "r2",
+      "proposal_id": "01J9Z3K5Q8R2T4V6W8X0Y2Z4A5",
+      "created_seq": 20,
+      "answer": {
+        "action": "dismiss",
+        "text": "该问题针对的需求已被拒绝",
+        "by": "human:hoshi",
+        "channel": "human_cli",
+        "seq": 46
+      }
     }
   ]
 }

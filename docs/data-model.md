@@ -312,6 +312,8 @@ Question 在提案提交时立即创建（编号按 TD-14 分配），只能由�
 - 条目被**接受**时，在同一事务中把 `related_type` / `related_id` 回填为新条目（只回填仍为 `open` 的问题；已回答或驳回的问题保持指向条目）；
 - 条目被**拒绝**时，问题标记为"关联条目已拒绝"，此后不再计为阻塞问题（§6.8），但仍然保持 `open`，等人驳回。
 
+回答和驳回都在一个 `seq` 中写入 `status`、`answer`、`answered_by`、`answered_channel`、`answered_seq`。`answer` 存放回答，驳回时存放驳回理由；两者由 `status`（`answered` / `dismissed`）区分，`question-list.v1` 中的 `action` 由它推出。问题只能关闭一次，前置条件是问题仍为 `open`（§7.1）。命令行为见 [architecture.md §6.1.6](architecture.md#616-问题的查看回答与驳回m1-实现)。
+
 ### 4.9 `agent_sessions`、`events` 与 `hook_drops`
 
 `agent_sessions`（投影）：`id`、`project_id`、`worktree_id`、`agent`、`external_id`、`started_at`、`ended_at`、`end_reason`、`head_start` NULL、`head_start_source`（`hook_file_read` / `unknown`）、`last_event_seq`。`(project_id, agent, external_id)` 唯一。

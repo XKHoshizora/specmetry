@@ -44,8 +44,16 @@ func executeAs(ctx context.Context, d channel.Detection, root *cobra.Command, ar
 		e = apperr.Wrap(apperr.InvalidInput, err, "invalid command line")
 	}
 	// With --json the error is the error.v1 document on stdout
-	// (architecture §9.1).
-	if wantsJSON(cmd) {
+	// (architecture §9.1). After a flag error of the question commands,
+	// the flags after it were not parsed: whether --json was asked for is
+	// read from the arguments (codex-review-027 B3). Other commands are
+	// unchanged: their flag errors are not unparsedFlags.
+	asJSON := wantsJSON(cmd)
+	var unparsed unparsedFlags
+	if errors.As(err, &unparsed) {
+		asJSON = jsonInArgs(cmd, args)
+	}
+	if asJSON {
 		printErrorJSON(root.OutOrStdout(), stderr, e)
 	} else {
 		printError(stderr, e)
@@ -65,7 +73,7 @@ func newRoot(stdout, stderr io.Writer) *cobra.Command {
 	root.SetErr(stderr)
 	root.CompletionOptions.DisableDefaultCmd = true
 	root.AddCommand(newVersionCmd(), newDoctorCmd(), newInitCmd(), newSourceCmd(), newProposeCmd(), newProposalCmd(),
-		newReviewCmd(), newBaselineCmd())
+		newReviewCmd(), newBaselineCmd(), newQuestionCmd())
 	return root
 }
 

@@ -371,7 +371,7 @@
 | `propose --apply --file` | 人工编辑，立即应用 | 人 |
 | `review --file <path>` | 审核：提交审核决定（`review.v1`），显示摘要并由人交互式确认（附带范围确认随 WP1.8） | 人 |
 | `baseline show\|history` | 查看基准 | 任意 |
-| `question list` / `answer` / `dismiss` | 待澄清问题 | `list`：任意；其余：人 |
+| `question list [--all]` / `answer <Q> -m <回答>` / `dismiss <Q> -m <理由>`（也可以用 `--file` 传入 `question-answer.v1`） | 待澄清问题：查看；回答或驳回（交互式确认，只能一次） | `list`：任意；其余：人 |
 | `claim --file <path\|->` | 提交 Claim 批次 | 任意（`manual` 仅限人） |
 | `check run [AC...] [--all] [--isolation off\|required] [--json]` | 在当前 worktree 执行检查（观测级）；`--isolation required` 在 MVP 中返回退出码 6 | 任意 |
 | `accept\|reject\|waive <AC>` | 验收决定（交互式确认，显示前置条件；`accept --exception -m` 表示例外验收） | 人 |
