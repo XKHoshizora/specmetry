@@ -37,74 +37,16 @@ func (d questionAnswerDoc) text() string {
 }
 
 func newQuestionCmd() *cobra.Command {
-	var asJSON bool
 	cmd := &cobra.Command{
 		Use:   "question",
 		Short: "List, answer and dismiss the questions to clarify",
-		// Without Args and RunE, cobra shows the help for an unknown
-		// command and exits 0 (codex-review-027 B2).
-		Args: unknownQuestionCommand,
-		RunE: run(func(cmd *cobra.Command, _ []string) error {
-			if asJSON {
-				return apperr.New(apperr.InvalidInput, "name a question command: list, answer or dismiss (see specmetry question --help)")
-			}
-			return cmd.Help()
-		}),
 	}
-	cmd.Flags().BoolVar(&asJSON, "json", false, "print errors as error.v1")
-	cmd.SuggestionsMinimumDistance = 2 // cobra's default, which SuggestionsFor does not apply
-	// The question commands quote no flag they cannot parse (flagError);
-	// the subcommands inherit it.
-	cmd.SetFlagErrorFunc(flagError)
+	// An unknown question command, an argument or a flag that cannot be
+	// used are refused without quoting them, as for every command
+	// (secureCommandLine).
 	cmd.AddCommand(newQuestionListCmd(), newQuestionCloseCmd(question.Answer), newQuestionCloseCmd(question.Dismiss))
 	return cmd
 }
-
-// unknownQuestionCommand refuses a question command that does not exist,
-// without quoting it; it may suggest the names of those that do.
-func unknownQuestionCommand(cmd *cobra.Command, args []string) error {
-	if len(args) == 0 {
-		return nil
-	}
-	msg := "unknown question command"
-	if names := cmd.SuggestionsFor(args[0]); len(names) > 0 {
-		msg += "; did you mean " + strings.Join(names, " or ") + "?"
-	}
-	return apperr.New(apperr.InvalidInput, msg+" (see specmetry question --help)")
-}
-
-// noArgs refuses arguments without quoting them: they are input not yet
-// scanned for secrets, and cobra.NoArgs quotes the first.
-func noArgs(_ *cobra.Command, args []string) error {
-	if len(args) > 0 {
-		return apperr.New(apperr.InvalidInput, "this command takes no arguments (see --help)")
-	}
-	return nil
-}
-
-// flagError reports a flag that cannot be parsed without quoting the
-// command line, for the same reason as noArgs. pflag stops at that flag,
-// so the error is marked unparsedFlags: whether --json was asked for is
-// read from the arguments (codex-review-027 B3).
-func flagError(_ *cobra.Command, err error) error {
-	problem := "an unknown flag, or a flag without its value"
-	switch msg := err.Error(); {
-	case strings.HasPrefix(msg, "unknown"):
-		problem = "an unknown flag"
-	case strings.HasPrefix(msg, "flag needs an argument"):
-		problem = "a flag without its value"
-	case strings.HasPrefix(msg, "invalid argument"):
-		problem = "a flag with a value it does not take"
-	}
-	return unparsedFlags{apperr.New(apperr.InvalidInput, "invalid command line: "+problem+" (see --help)")}
-}
-
-// unparsedFlags is an error after which the command's flags were not all
-// parsed (flagError).
-type unparsedFlags struct{ err *apperr.Error }
-
-func (u unparsedFlags) Error() string { return u.err.Error() }
-func (u unparsedFlags) Unwrap() error { return u.err }
 
 func newQuestionListCmd() *cobra.Command {
 	var all, asJSON bool
@@ -117,7 +59,7 @@ the reason for dismissing, who gave it and on which channel. A question is
 about a requirement or criterion key, about an item of its proposal (the
 item's ref) while that item is not accepted, or about the project. Only a
 person answers or dismisses a question (question answer, question dismiss).`,
-		Args: noArgs,
+		Args: cobra.NoArgs,
 		RunE: run(func(cmd *cobra.Command, _ []string) error {
 			ctx := cmd.Context()
 			w, err := prepare(ctx)

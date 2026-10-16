@@ -21,6 +21,22 @@ func NewCanary(t testing.TB) string {
 	return "SPECMETRY-CANARY-" + hex.EncodeToString(b[:])
 }
 
+// NewSecretCanary returns a canary the secret rules take for a GitHub token
+// ("ghp_" and 36 letters and digits), made at random on each call, so that
+// no token-like literal is kept in the sources.
+func NewSecretCanary(t testing.TB) string {
+	t.Helper()
+	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+	var b [36]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		t.Fatal(err)
+	}
+	for i := range b {
+		b[i] = alphabet[int(b[i])%len(alphabet)]
+	}
+	return "ghp_" + string(b[:])
+}
+
 // FindInTree byte-searches every regular file under root (databases, WAL,
 // spool, logs, backups) and returns "path: needle" for each hit.
 func FindInTree(t testing.TB, root string, needles ...string) []string {

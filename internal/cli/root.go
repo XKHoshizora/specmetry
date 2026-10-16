@@ -39,15 +39,16 @@ func executeAs(ctx context.Context, d channel.Detection, root *cobra.Command, ar
 	}
 	var e *apperr.Error
 	if !errors.As(err, &e) {
-		// Errors that are not *apperr.Error come from cobra's own argument
-		// and flag parsing: unknown command, unknown flag, wrong arity.
-		e = apperr.Wrap(apperr.InvalidInput, err, "invalid command line")
+		// An error that is not an *apperr.Error is cobra's own about the
+		// command line, one secureCommandLine does not replace. Its text
+		// quotes what was typed, so it is dropped, not kept as the cause
+		// (codex-review-027 N1).
+		e = apperr.New(apperr.InvalidInput, "invalid command line (see specmetry --help)")
 	}
 	// With --json the error is the error.v1 document on stdout
-	// (architecture §9.1). After a flag error of the question commands,
-	// the flags after it were not parsed: whether --json was asked for is
-	// read from the arguments (codex-review-027 B3). Other commands are
-	// unchanged: their flag errors are not unparsedFlags.
+	// (architecture §9.1). After a flag error, the flags after it were not
+	// parsed: whether --json was asked for is read from the arguments
+	// (codex-review-027 B3).
 	asJSON := wantsJSON(cmd)
 	var unparsed unparsedFlags
 	if errors.As(err, &unparsed) {
@@ -74,6 +75,7 @@ func newRoot(stdout, stderr io.Writer) *cobra.Command {
 	root.CompletionOptions.DisableDefaultCmd = true
 	root.AddCommand(newVersionCmd(), newDoctorCmd(), newInitCmd(), newSourceCmd(), newProposeCmd(), newProposalCmd(),
 		newReviewCmd(), newBaselineCmd(), newQuestionCmd())
+	secureCommandLine(root)
 	return root
 }
 
