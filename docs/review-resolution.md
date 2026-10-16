@@ -1795,3 +1795,38 @@ MVP v0.1.0 不支持 SHA-256 格式的 git 对象 ID。§27 记录的现象（64
 - WP1.6 的两项 NON-BLOCKER 保留：审核预览的修订类别可能与最终类别不同；`baseline history` 没有展示后续处理理由。
 
 **接受的风险**：沿用审查列出的既有边界，没有接受新的风险。
+
+## 34. WP1.7 最终定向复审（codex-review-028）与验收
+
+**审查结论**：**GO**，BLOCKER 为 0，没有新增 NON-BLOCKER。审查目标 `58659cd`，增量基准 `78ca882`；只复核审查 027 的 B1、B2、B3 及直接回归。
+
+- **审查 027 的 B1 关闭。** `internal/termtext` 转义 ESC、其他 C0、DEL、C1、双向控制字符和非 UTF-8 字节。`question` 的列表、确认摘要和结果行都接入了转义。JSON 解码后的值和数据库中的值保持原样，取消确认时不写入。审查方另外确认：CRLF 与缩进组合时，续行仍保持缩进，没有形成新的视觉边界问题。
+- **审查 027 的 B2 关闭。** 未知子命令返回 `invalid_input`（退出码 2），不回显，只建议已有的命令名；JSON 模式输出合法的 `error.v1`。只输入 `question` 或使用 `--help` 时返回 0。
+- **审查 027 的 B3 关闭。** 只对 `question` 命令解析未完成的 flag 错误重新判断 JSON 请求。审查方用独立的参数矩阵（46 组公开 `Execute` 调用）覆盖了参数顺序、布尔值、重复 flag、取值 flag、简写、未知 flag 和 `--`，没有误判，也没有回显。
+- 审查方在隔离的 `78ca882` 副本上重放同一组断言，复现了三项原始缺陷，失败发生在被测行为上。
+- 最终提交的三平台 CI 8/8 通过（运行 38803933170，Ubuntu 带 race detector）。
+
+**验收**：产品负责人于 2026-10-16 验收 WP1.7，PR #10 已合并（合并提交 `867bd60`）。M1 尚未整体完成，WP1.8 未开始。
+
+**WP1.7 的验收范围**（逐项证据见 PR #10 描述）：
+
+- MVP-BL-17（含 `question-list.v1` 的条件约束与反例 SCH-131 ~ SCH-139）；
+- `question answer`、`question dismiss` 的 MVP-CH-01、CH-02 验证；
+- 关闭问题的前置条件与双连接并发（data-model §7.1）；
+- MVP-BL-25 中"问题先关闭、条目后接受"时的关联显示；
+- `question` 命令的终端显示安全与命令行错误契约（审查 027 B1 ~ B3）。
+
+**仍未完成、随后续工作包验证**：
+
+- 阻塞问题的推导（`BLOCKING_QUESTION`、BL-25 的阻塞部分）：M2。
+- PreToolUse 对 `question answer`、`question dismiss` 的拦截（MVP-ACC-03、E2E-7）：M3。
+- `target set`、`scope confirm`、审核中附带的范围确认：WP1.8。
+
+**继续记录的事项**：
+
+- implementation-plan M6 中登记的两项发布前安全问题仍未关闭：其他命令回显不可信参数（审查 027 N1）；其他命令的文本输出没有转义控制字符。前者随后作为独立的安全修复处理（分支 `fix/cli-untrusted-argument-errors`）。
+- WP1.6 的两项 NON-BLOCKER、`doctor` 的 git 版本查询隔离、本地 Windows 测试超时，维持原安排。
+
+**接受的风险**：没有新的风险接受。通道识别仍沿用已批准的防误操作边界，不是身份认证。
+
+审查原文按原样入库。
