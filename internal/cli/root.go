@@ -32,6 +32,21 @@ func executeRoot(ctx context.Context, root *cobra.Command, args []string, stderr
 // executeAs is executeRoot with the channel given.
 func executeAs(ctx context.Context, d channel.Detection, root *cobra.Command, args []string, stderr io.Writer) int {
 	ctx = channel.NewContext(ctx, d)
+	if args == nil {
+		args = []string{} // cobra would read os.Args instead
+	}
+	// cobra's hidden shell completion command would bypass every check
+	// above and write the command line to os.Stderr: it is refused before
+	// cobra executes (completionRequest; codex-review-029 B1).
+	if flags, ok := completionRequest(root, args); ok {
+		e := errNoCompletion()
+		if jsonInArgs(root, flags) {
+			printErrorJSON(root.OutOrStdout(), stderr, e)
+		} else {
+			printError(stderr, e)
+		}
+		return apperr.ExitCode(e)
+	}
 	root.SetArgs(args)
 	cmd, err := root.ExecuteContextC(ctx)
 	if err == nil {

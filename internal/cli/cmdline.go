@@ -112,6 +112,51 @@ type unparsedFlags struct{ err *apperr.Error }
 func (u unparsedFlags) Error() string { return u.err.Error() }
 func (u unparsedFlags) Unwrap() error { return u.err }
 
+// completionRequest reports whether cobra would run its hidden shell
+// completion command (__complete, or its alias __completeNoDesc) for args,
+// and returns the arguments before that command: the root's own flags
+// (codex-review-029 B1).
+//
+// cobra adds that command only while executing, after secureCommandLine
+// set the tree up, and it writes cobra's raw errors, quoting the command
+// line, to os.Stderr and to BASH_COMP_DEBUG_FILE. Specmetry provides no
+// shell completion, so such a command line must be refused before cobra
+// executes. cobra's initCompleteCmd keeps its command exactly when
+// root.Find(args) resolves to a command of that name; otherwise it removes
+// it again. completionRequest asks the same question in the same state:
+// the help command added as ExecuteC adds it first, and a stand-in of the
+// same name and alias at the root, then cobra's own Find, which reads the
+// root's flags, values and "--" as cobra does. The stand-in never runs and
+// is removed again. A word __complete elsewhere (a flag's value, after
+// "--", an argument of another command) does not resolve to it.
+func completionRequest(root *cobra.Command, args []string) ([]string, bool) {
+	root.InitDefaultHelpCmd()
+	probe := &cobra.Command{
+		Use:     cobra.ShellCompRequestCmd,
+		Aliases: []string{cobra.ShellCompNoDescRequestCmd},
+		Hidden:  true,
+	}
+	root.AddCommand(probe)
+	defer root.RemoveCommand(probe)
+	found, rest, err := root.Find(args)
+	if err != nil || found != probe {
+		return nil, false
+	}
+	// Find drops the command's name from args: what is before it are the
+	// root's flags. If the name follows itself, the prefix may hold one
+	// more of it, which is no flag.
+	pos := 0
+	for pos < len(rest) && rest[pos] == args[pos] {
+		pos++
+	}
+	return args[:pos], true
+}
+
+// errNoCompletion is the refusal of a completion request.
+func errNoCompletion() *apperr.Error {
+	return apperr.New(apperr.InvalidInput, "shell completion is not provided (see specmetry --help)")
+}
+
 // newHelpCmd is cobra's help command, refusing a topic it does not know:
 // cobra's quotes it and exits 0.
 func newHelpCmd() *cobra.Command {
