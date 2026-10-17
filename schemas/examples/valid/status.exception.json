@@ -71,6 +71,7 @@
       "priority": "must",
       "in_scope": true,
       "status": "accepted",
+      "flags": [],
       "criteria": [
         {
           "key": "AC-002-1",

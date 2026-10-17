@@ -79,6 +79,7 @@
       "priority": "must",
       "in_scope": true,
       "status": "ready_for_review",
+      "flags": [],
       "criteria": [
         {
           "key": "AC-002-1",

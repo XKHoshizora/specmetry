@@ -298,7 +298,8 @@
               "observed_evidence",
               "blocking_question",
               "ref_not_found",
-              "inferred"
+              "inferred",
+              "source_removed"
             ]
           }
         },
@@ -359,7 +360,7 @@
     "requirement": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["key", "revision", "goal", "title", "priority", "in_scope", "status", "criteria"],
+      "required": ["key", "revision", "goal", "title", "priority", "in_scope", "status", "flags", "criteria"],
       "properties": {
         "key": { "$ref": "common.v1.schema.json#/$defs/requirementKey" },
         "revision": { "$ref": "common.v1.schema.json#/$defs/revision" },
@@ -368,6 +369,12 @@
         "priority": { "enum": ["must", "should", "could", "wont"] },
         "in_scope": { "type": "boolean" },
         "status": { "$ref": "common.v1.schema.json#/$defs/requirementDeliveryStatus" },
+        "flags": {
+          "description": "Requirement-level flags (data-model §6.6, M2-Q8). Informational only: they never block and never change the delivery status.",
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "enum": ["inferred", "ref_not_found", "source_removed"] }
+        },
         "criteria": {
           "type": "array",
           "items": { "$ref": "#/$defs/criterion" }
