@@ -2,9 +2,13 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/XKHoshizora/specmetry/schemas/status.v1.schema.json",
   "title": "Specmetry status read model v1",
-  "description": "Output of `specmetry status --json` and of GET /api/v1/projects/{id}/status. Carries every version value a caller must send back as a precondition (baseline_version, revisions, snapshot, evidence ids, source hashes). Derived values are a pure function of: facts up to as_of_seq, target.snapshot, and sources[].current_sha256; all three are included so the result can be reproduced.",
+  "description": "Output of `specmetry status --json` and of GET /api/v1/projects/{id}/status. Carries every version value a caller must send back as a precondition (baseline_version, revisions, snapshot, evidence ids, source hashes). Derived values are a pure function of the complete input of data-model §6.13.1: the facts of project.id up to as_of_seq, which stay in that project's database (this output is not a backup of them), and the current-value inputs this derivation used, each taken once per command: target.snapshot, sources[].current_sha256, the project settings (project.stage, project.sources_skipped, project.inventory_skipped) and, for the workspace view only, the workspace context. A replay uses these recorded values with the same facts and never fills a missing value with a current one.",
   "type": "object",
   "additionalProperties": false,
+  "dependentRequired": {
+    "changes_since": ["diff_since_seq"],
+    "diff_since_seq": ["changes_since"]
+  },
   "required": [
     "schema",
     "as_of_seq",
@@ -26,13 +30,16 @@
     "schema": { "const": "specmetry.status/v1" },
     "as_of_seq": { "type": "integer", "minimum": 0 },
     "project": {
+      "description": "stage, sources_skipped and inventory_skipped are the project settings this derivation used (data-model §6.13), read once per command in the read transaction that fixes as_of_seq. Only these settings are output; the rest of settings_json is not a derivation input. name is for display only.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "name", "stage"],
+      "required": ["id", "name", "stage", "sources_skipped", "inventory_skipped"],
       "properties": {
         "id": { "$ref": "common.v1.schema.json#/$defs/ulid" },
         "name": { "type": "string", "maxLength": 200 },
-        "stage": { "enum": ["docs_only", "in_development", "incomplete_docs"] }
+        "stage": { "enum": ["docs_only", "in_development", "incomplete_docs"] },
+        "sources_skipped": { "description": "settings_json.sources_skipped as used by this derivation; false when unset.", "type": "boolean" },
+        "inventory_skipped": { "description": "settings_json.inventory_skipped as used by this derivation; false when unset.", "type": "boolean" }
       }
     },
     "baseline_version": { "$ref": "common.v1.schema.json#/$defs/baselineVersion" },
@@ -143,7 +150,7 @@
       }
     },
     "sources": {
-      "description": "Active (not removed) sources. current_sha256 is the on-disk observation used as a derivation input; it is what a human must send back as observed_sha256 when acknowledging a change.",
+      "description": "The source set at as_of_seq (sources not removed). current_sha256 is the on-disk observation used as a derivation input, null when the file was missing; it is what a human must send back as observed_sha256 when acknowledging a change.",
       "type": "array",
       "items": {
         "type": "object",
@@ -208,8 +215,13 @@
         "exception_acceptances": { "type": "integer", "minimum": 0 }
       }
     },
+    "diff_since_seq": {
+      "description": "Present with --diff-since <seq>, together with changes_since: the start cutoff <seq>. A replay of changes_since needs it (data-model §6.13.1).",
+      "type": "integer",
+      "minimum": 0
+    },
     "changes_since": {
-      "description": "Present with --diff-since <seq>: criteria whose delivery status or progress changed after that seq.",
+      "description": "Present with --diff-since <seq>, together with diff_since_seq: criteria whose delivery status or progress changed between the two cutoffs. Both derivations share this command's current-value inputs (target.snapshot, sources, project settings) and differ only in the fact cutoff, so this is not a replay of what an earlier status showed, and a settings change alone never appears here (data-model §6.13.1).",
       "type": "array",
       "items": {
         "type": "object",
