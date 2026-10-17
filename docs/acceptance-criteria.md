@@ -12,13 +12,25 @@
 | 验证方式 | 含义 |
 |---|---|
 | 单元 | Go 单元测试，不涉及 I/O |
-| 集成 | 在临时的 `SPECMETRY_HOME` 和临时仓库中运行真实的二进制；Windows、macOS、Linux 三个平台 |
+| 集成 | 在临时的 `SPECMETRY_HOME` 和临时仓库中，经由 CLI 的生产入口执行命令；Windows、macOS、Linux 三个平台。按能证明的内容分为三类，见下文"集成测试的三类证据" |
 | E2E | 完整场景回放（§5） |
 | UI | Playwright 运行内嵌服务和种子数据库 |
 | 基准 | 性能测试。参考机器为 4 核、16 GB、SSD；CI 使用 2 倍阈值 |
 | 评测 | 真实 Agent 运行；不是 CI 门槛，但是发布门槛 |
 | 审查 | 规格或代码审查清单 |
 | 人工 | 人工检查 |
+
+**集成测试的三类证据**（产品负责人 2026-10-17 确认）：
+
+| 类别 | 做法 | 能证明 | 不能证明 |
+|---|---|---|---|
+| 进程内 | 在测试进程中调用 CLI 的生产入口，即 `cli.Execute` 使用的同一个命令树（`newRoot` 与 `executeRoot`、`executeAs`）。使用真实的临时 SQLite 数据库与 git 仓库。通道可以由测试注入（例如 `human_cli`） | 命令的业务行为：参数与输入的校验、前置条件、写入的数据、退出码的取值、`--json` 输出与 schema、事务与回滚 | 进程的操作系统语义：终端检测、真实进程的环境变量、stdout 和 stderr 的重定向、进程退出码。也不能证明 `cmd/specmetry` 入口的接线。注入通道的测试，不证明通道识别本身 |
+| 进程级 | 把测试二进制作为子进程重新运行（helper `cli` 等），调用与正式二进制相同的生产入口。它在伪终端中运行（Windows 上为 ConPTY），或者重定向它的 stdout、stdin | 通道识别、Agent 环境变量、终端与重定向、人工确认的显示与读取、进程的退出码 | 不能等同于正式发布的二进制：helper 是测试二进制，可能额外注册测试专用的命令，也不经过 `cmd/specmetry/main.go` |
+| 正式二进制 | 用 `go build -tags nowebui ./cmd/specmetry` 编译的二进制，作为子进程运行（`TestBuiltBinary`、`TestShellCompletionIsRefused` 等）。需要终端时，由测试 helper `exec` 作为启动器，二进制自身的 stdin 与 stderr 是伪终端 | `main` 入口的接线、进程退出码、基本的 JSON 读取及其 schema、MVP-CH-01 与 CH-02 的关键进程边界 | 不能证明发布包本身：内嵌 Dashboard 的默认构建由 CI 的"Build with dashboard"另行冒烟，打包与分发在 M6（TD-15）。它是最小的冒烟集合，不代替逐项的业务验收 |
+
+- 涉及 TTY、Agent 环境变量、stdout 或 stderr 重定向、进程退出码的验收（例如 MVP-CH-01、CH-02），必须有进程级或正式二进制的证据。
+- 进程内测试可以作为业务行为的集成验证，但不能不加说明地称为进程级的集成测试。
+- 三类证据都在三个平台的 CI 中运行。
 
 ### 1.1 测试夹具（`testdata/fixtures/`）
 
@@ -65,7 +77,7 @@
 | MVP-SRC-04 | 非 TTY 执行 `source remove` → 退出码 3；在 TTY 中执行 → 写入 `removed_seq`，已有引用显示为 `source_removed`，来源集合哈希改变。WP1.4 验证其余部分；WP1.5 验证引用在移除后保留，并在 `source list --include-removed --refs` 中列在已移除的来源下；引用以 `source_removed` 的形式出现在状态与差距中，随 M2 验证 | 集成 | FR-SRC-04 | M1 |
 | MVP-SRC-05 | `source add` 一个不存在的路径 → 退出码 2，不写入 | 集成 | FR-SRC-01 | M1 |
 | MVP-SRC-06 | 同一组来源记录（`source_id` 与 `acked_sha256` 均相同）以不同顺序输入 → 来源集合哈希相同；`source_id` 改变（移除后重新登记），或人工 `ack` 更新了 `acked_sha256` → 哈希改变；文件发生变化、但尚未经人工确认 → 哈希不变（PD-25） | 单元 + 集成 | FR-SRC-05 | M1 |
-| MVP-SRC-07 | `source add internal/auth/login.go`（非文档类型）→ 退出码 2；在 TTY 中加上 `--allow-any-type` → 成功；修改已登记的来源后，Agent 再次 `source add` 同一路径 → 什么都不做，`acked_sha256` 不变，`SOURCE_CHANGED` 仍然存在。审查确认 Specmetry 只为引用校验读取文本，不解析文档语义。 | 集成 + 审查 | FR-SRC-01、FR-SRC-06 | M1 |
+| MVP-SRC-07 | `source add internal/auth/login.go`（非文档类型）→ 退出码 2；在 TTY 中加上 `--allow-any-type` → 成功；修改已登记的来源后，Agent 再次 `source add` 同一路径 → 什么都不做，`acked_sha256` 不变，状态仍为 `changed`（M1）；`SOURCE_CHANGED` 阻塞差距仍然存在，交付状态受其影响（M2）。审查确认 Specmetry 只为引用校验读取文本，不解析文档语义（M1，独立审查）。这一划分与 WP1.4 验收时的记录一致（review-resolution §24），不是新的推迟：M1 的来源登记与确认行为都在 M1 验证 | 集成 + 审查 | FR-SRC-01、FR-SRC-06 | M1 / M2 |
 | MVP-SRC-08 | **M1**（`hash_only` 项目）：在 TTY 中执行 `source remove --erase-excerpts` → 来源被移除，引用的 `locator` 和 `excerpt_sha256` 保留，`excerpt` 仍为 NULL，`source list --include-removed --refs --json` 中为 `excerpt_state = not_stored`；非 TTY 执行 → 退出码 3，不写入。**M2**（`full` 模式与 N1 修复之后）：该来源所有已保存的片段变为 NULL，`excerpt_erased_seq` 已写入，`excerpt_state = erased`；整理完成后，对数据库文件和 WAL 做字节搜索，找不到原片段；整理被其他连接的读事务阻塞时，保留 `.compaction-pending` 并报告"整理未完成"，之后的打开会完成整理。WP1.4 验证 M1 中移除、非 TTY 拒绝，以及 `hash_only` 下不擦除任何内容；引用的 `locator`、`excerpt_sha256` 与 `excerpt_state = not_stored` 需要 WP1.5 写入的引用，随 WP1.5 验证 | 集成 | FR-SRC-07 | M1 / M2 |
 
 ### 2.3 基准（BL）

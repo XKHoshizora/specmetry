@@ -228,6 +228,8 @@ func TestMain(m *testing.M) {
 		"cli":                   cliHelper,
 		"cli-redirected":        cliRedirectedHelper,
 		"cli-stderr-redirected": cliStderrRedirectedHelper,
+		"cli-stdout-to-file":    cliStdoutToFileHelper,
+		"exec":                  execHelper,
 	})
 	os.Exit(m.Run())
 }
