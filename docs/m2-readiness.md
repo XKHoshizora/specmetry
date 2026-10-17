@@ -1,6 +1,6 @@
 # M2 开工准备报告
 
-> 状态：**草案，开工准备，第 4 版**（2026-10-17）。第 1 版 `a81cc79` 经 [codex-review-040](reviews/codex-review-040.md) 审查为 NO-GO；第 2 版 `09caf95` 经 [codex-review-041](reviews/codex-review-041.md) 复审，仍为 NO-GO（B3、B5 各有一处残余问题）；第 3 版 `be660df` 经 [codex-review-042](reviews/codex-review-042.md) 复审，仍为 NO-GO（B3-R 已消除报告层面的阻塞，B5-R 只剩共享 `seq` 的定义问题）；本版只修正这一问题并补齐一处验收映射，待复审（修订记录见第 12 节）。本文只做资料核对、设计细化与任务规划，**不授权 M2 业务实现**。
+> 状态：**草案，开工准备，第 4 版**（2026-10-17）。第 1 版 `a81cc79` 经 [codex-review-040](reviews/codex-review-040.md) 审查为 NO-GO；第 2 版 `09caf95` 经 [codex-review-041](reviews/codex-review-041.md) 复审，仍为 NO-GO（B3、B5 各有一处残余问题）；第 3 版 `be660df` 经 [codex-review-042](reviews/codex-review-042.md) 复审，仍为 NO-GO（B3-R 已消除报告层面的阻塞，B5-R 只剩共享 `seq` 的定义问题）；第 4 版 `e1d9000` 经 [codex-review-043](reviews/codex-review-043.md) 复审为 **GO**，之后只按它的两项 NON-BLOCKER 收紧了第 8.5 节的措辞（修订记录见第 12 节）。准备报告 GO 不表示其中的方案获批，也不表示 F4、F5 已冻结。本文只做资料核对、设计细化与任务规划，**不授权 M2 业务实现**。
 > 基线：master `f904ab6`（PR #18 的合并提交，树 `705ce55`）；M1 验收对象 `7e77fd6`。审查 038、039 的结论保持有效，本文不重新打开 M1 验收。
 > 依据：[mvp.md](mvp.md)（范围）、[implementation-plan.md](implementation-plan.md)（里程碑、§3 设计细化截止点、§8.1 `db recover`）、[architecture.md](architecture.md)、[data-model.md](data-model.md)、[prd.md](prd.md)、[acceptance-criteria.md](acceptance-criteria.md)、[`schemas/`](../schemas/)、[m1-exit-evidence.md](m1-exit-evidence.md) 第 9 节。
 
@@ -821,13 +821,13 @@ M2-Q1、Q3、Q4、Q6、Q7、Q9 不影响推导与复核器：
 
      | 逻辑写入 | 共享同一个 `seq` 的事实 | 依据 |
      |---|---|---|
-     | 审核（`review`），可附带范围 | `baseline_versions` 一行；`baseline_changes` 一行或多行（版本内的顺序由 `change_index` 给出）；这次写入的 `source_refs`、`code_refs`；被审核条目的 `reviewed_seq`；被修改实体的 `revision_seq`、`updated_seq`；附带范围时的 `scope_confirmations` 一行 | data-model §1、§4.7、§5.5；architecture §6.1.5（"以一个 `seq` 完成以下工作"）、§6.1.7（"范围确认与基准版本使用同一个 `seq`"）；`internal/cli/review.go` 只调用一次 `NextSeq`，`baseline.Apply`（`internal/baseline/apply.go`）与 `review.ConfirmScope` → `scope.Write` 使用同一个值 |
-     | 人工编辑（`propose --apply`） | 提案、它的全部条目，以及应用产生的基准版本、变更与引用 | architecture §6.1.5（"提案与版本使用同一个 `seq`"）；`internal/cli/apply.go` 用提案回执的 `seq` 作为应用的 `seq` |
-     | 提交提案（`propose`） | 提案、全部条目、问题（`created_seq`）与问题的来源引用 | architecture §6.1.4（"分配一个 `seq`，写入提案、全部条目……问题和问题的来源引用"）；`internal/proposal/store.go` |
+     | 审核（`review`），可附带范围 | 本次实际写入或更新的序号字段：至少接受一个条目时，`baseline_versions` 一行与 `baseline_changes` 一行或多行（版本内的顺序由 `change_index` 给出；全部拒绝的审核不创建基准版本）；这次新写入的 `source_refs`、`code_refs`；被审核条目的 `reviewed_seq`；被修改实体的 `updated_seq`，以及按既有修订规则需要刷新时的 `revision_seq`（`editorial` 更新不刷新它）；附带范围时的 `scope_confirmations` 一行 | data-model §1、§4.7、§5.5；architecture §6.1.5（"以一个 `seq` 完成以下工作"）、§6.1.7（"范围确认与基准版本使用同一个 `seq`"）；`internal/cli/review.go` 只调用一次 `NextSeq`，`baseline.Apply`（`internal/baseline/apply.go`）与 `review.ConfirmScope` → `scope.Write` 使用同一个值 |
+     | 人工编辑（`propose --apply`） | 提案的 `seq`（条目经 `proposal_id` 归属于提案，条目表没有 `seq` 列），以及应用时实际写入或更新的序号字段（基准版本、变更、引用、条目的 `reviewed_seq` 等） | architecture §6.1.5（"提案与版本使用同一个 `seq`"）；`internal/cli/apply.go` 用提案回执的 `seq` 作为应用的 `seq` |
+     | 提交提案（`propose`） | 提案的 `seq`（条目经 `proposal_id` 归属于提案，不要求条目表有 `seq` 列）、问题的 `created_seq` 与问题的来源引用的 `seq` | architecture §6.1.4（"分配一个 `seq`，写入提案、全部条目……问题和问题的来源引用"）；`internal/proposal/store.go` |
      | 设置交付目标（`target set`） | 旧目标的 `archived_seq` 与新目标的 `created_seq` | architecture §6.1.7 第 8 步；`internal/scope/target.go` |
 
      - **范围限定**：
-       - `proposals`、`baseline_versions`、`scope_confirmations`、`source_acks` 的 `seq`，以及 `worktrees.registered_seq`、`delivery_targets.created_seq`、`sources.registered_seq` 与 `removed_seq`，在各自的表内唯一（迁移中的 `UNIQUE` 约束）：一次写入在这些表中至多写一行。
+       - `proposals`、`baseline_versions`、`scope_confirmations`、`source_acks` 的 `seq`，以及 `worktrees.registered_seq`、`delivery_targets.created_seq`、`sources.registered_seq` 与 `removed_seq`，各有迁移中的 `UNIQUE` 约束：**对同一个分配值，每个声明 `UNIQUE` 的序号列至多有一行**。这是列约束，不是"一个事务在每张表只改一行"：`target set` 同时修改旧行的 `archived_seq` 与新行的 `created_seq`；`init` 可以在同一事务中以不同的 `seq` 插入多个 worktree。
        - `baseline_changes`、`source_refs`、`code_refs` 等表中，同一个 `seq` 可以有多行。
        - 共享只发生在同一次逻辑写入之内，不能扩大为任意独立的记录都可以复用 `seq`。
      - **反方向**：一个写事务也可以分配多个 `seq`。例如 `init` 为每个新登记的 worktree 与默认目标各取一个；从新的 worktree 提交提案时，登记 worktree 与保存提案各取一个（m1-exit-evidence 第 6 节）。
@@ -849,7 +849,7 @@ M2-Q1、Q3、Q4、Q6、Q7、Q9 不影响推导与复核器：
 
 **两套转换器保留的内容**：两套转换器各自独立实现，只做原始事实的映射。
 
-- 每条事实的 `seq`，**包括共享同一个 `seq` 的全部关联事实**。生成器与转换器不按 `seq` 去重、合并或丢弃记录，不把 `seq` 当作事实行的唯一键；事实行由各自的 ID 标识。
+- 每条事实的 `seq`，**包括共享同一个 `seq` 的全部关联事实**。生成器与转换器不按 `seq` 去重、合并或丢弃记录，不把 `seq` 当作事实行的唯一键；记录按各表既有的主键、复合键或约定标识保留（例如 `scope_items` 的 `(confirmation_id, requirement_id)` 复合主键，条目经 `proposal_id` 归属于提案），不要求所有表新增独立的 `id` 列。
 - `as_of_seq` 作为参数分别交给两个实现，由它们各自过滤：保留 `seq ≤ as_of_seq` 的全部事实，同一个 `seq` 的关联事实一起保留或一起排除。转换器不预先过滤。
 - 同一个 `seq` 之内需要的结构顺序，沿用既有规则：版本内的变更按 `change_index`，提案内的条目按 `item_index`，一次审核的应用顺序按 data-model §5.5。不用 ULID、输入数组的顺序或新造的全局排序代替业务先后。
 - 不同写入之间的时序比较，各自依据现有契约，不统一改为非严格比较：例如 `V` 取 `runs(S)` 中 `seq` 最大的一条（data-model §6.1）；拒收的解除要求通过的 `seq` 大于拒收的 `seq`（§6.3 第 5 条）；`normal` 接受所依据的执行早于决定（上文）。检查执行与决定的 `seq` 分配，在 WP2.5、WP2.6 中按 data-model §4.11、§4.13 写明。
@@ -1010,7 +1010,8 @@ M2-Q1、Q3、Q4、Q6、Q7、Q9 不影响推导与复核器：
 | 第 1 版 | `a81cc79` | 首次提交。codex-review-040：NO-GO（B1 ~ B5，N1 ~ N3） |
 | 第 2 版 | `09caf95` | 按审查 040 修订，见下面第一张表。codex-review-041：NO-GO（B1、B2、B4 已消除报告层面的阻塞；B3-R、B5-R；N1、N2） |
 | 第 3 版 | `be660df` | 只按审查 041 修订，见下面第二张表。codex-review-042：NO-GO（B3-R 已消除报告层面的阻塞；B5-R 只剩共享 `seq` 的定义；N1） |
-| 第 4 版 | 本版 | 只按审查 042 修订，见下面第三张表 |
+| 第 4 版 | `e1d9000` | 只按审查 042 修订，见下面第三张表。codex-review-043：**GO**（没有 BLOCKER；N1、N2 两项措辞） |
+| 收尾 | 本版 | 只按审查 043 的 N1、N2 收紧第 8.5 节的措辞，见下面第四张表；不再触发同一轮准备报告的全面审查 |
 
 | 审查意见 | 第 2 版的处理 | 状态 |
 |---|---|---|
@@ -1040,3 +1041,10 @@ M2-Q1、Q3、Q4、Q6、Q7、Q9 不影响推导与复核器：
 |---|---|---|
 | B5-R：共享 `seq` 被误列为畸形 | 第 8.5 节：删除"`seq` 全局唯一"与"重复的 `seq`"属于畸形的表述；改为分配值唯一、单调递增，同一次逻辑写入的关联事实可以共享 `seq`，不同的逻辑写入从不共享；新增"共享 `seq`"表（审核附带范围、`propose --apply`、`propose`、`target set`），列出规范与调用链的依据，以及范围限定（表内唯一的表、多行的表、一个事务也可以分配多个 `seq`、M2 新事实表按对应工作包写明）；畸形示例只保留违反具体写入不变量的情形；生成器与转换器保留共享 `seq` 的全部关联事实，`as_of_seq` 的过滤保留截止序号内的全部事实，同一 `seq` 内的顺序沿用 `change_index`、`item_index` 与 data-model §5.5；时序比较各自依据现有契约；F4、F4-a、F5、F5-a、WP2.2-a、最小澄清建议与第 8.6 节的测试规划同步 | 已修订，待复审 |
 | N1：第 6.2 节的验收项映射 | 补入 STO-09a、09b、13b，以及只在 E4 获批时加入的 STO-14；都保持草案，批准并写入规范之后才计入 M2 | 已修订，待复审 |
+
+收尾的处理（审查 043 的 NON-BLOCKER）：
+
+| 审查意见 | 处理 | 状态 |
+|---|---|---|
+| N1：共享范围的概括按具体列与实际写入收紧 | 第 8.5 节："对同一个分配值，每个声明 `UNIQUE` 的序号列至多有一行"，并说明这是列约束，不是事务修改行数的约束；共享表改为"本次实际写入或更新的序号字段"：全部拒绝的审核不创建基准版本，`revision_seq` 只在既有修订规则要求时刷新，条目经 `proposal_id` 归属于提案 | 已修订 |
+| N2：记录身份 | 第 8.5 节："按各表既有的主键、复合键或约定标识保留"，例如 `scope_items` 的复合主键；不要求所有表新增独立的 `id` 列 | 已修订 |
