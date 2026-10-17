@@ -6,6 +6,7 @@ import (
 
 	"github.com/XKHoshizora/specmetry/internal/domain/derive"
 	"github.com/XKHoshizora/specmetry/internal/testutil/factgen"
+	"github.com/XKHoshizora/specmetry/internal/testutil/factgen/toderive"
 )
 
 // The counterexamples of acceptance-criteria §4, at the level of the
@@ -324,7 +325,7 @@ func TestNoTargetMeansNoSnapshot(t *testing.T) {
 	g := factgen.New(projectID)
 	var ac string
 	g.Review(func(r *factgen.Review) { ac = r.AddCriterion(r.AddRequirement("", "must"), "manual", nil) })
-	res := mustDerive(t, toInput(g, commitA))
+	res := mustDerive(t, toderive.Input(g.Dump(), g.Current(commitA, "in_development"), g.Seq()))
 	c := criterionOf(t, res, g.Key(ac))
 	if c.Status != derive.CriterionNotAssessed || res.Target != nil {
 		t.Errorf("criterion %s, target %+v", c.Status, res.Target)

@@ -5,14 +5,14 @@ import "slices"
 // criterionEval is one active criterion at a cutoff, with the symbols of
 // data-model §6.1 and the results of §6.2 to §6.5.
 type criterionEval struct {
-	ent, parent *entityAt
-	s           string // S at the cutoff; "" is NULL
-	r           int    // revision
-	h           string // check configuration hash; "" without a check
-	automated   bool
-	hasCheck    bool
-	inputs      bool // the check declares inputs
-	pr, ar      int
+	ent       *entityAt
+	s         string // S at the cutoff; "" is NULL
+	r         int    // revision
+	h         string // check configuration hash; "" without a check
+	automated bool
+	hasCheck  bool
+	inputs    bool // the check declares inputs
+	pr, ar    int
 
 	runsS        []*CheckRun // runs(S), by seq
 	v            string      // pass / fail / "" for none
@@ -47,7 +47,7 @@ func qualifying(r *CheckRun) bool {
 // evalCriterion evaluates a criterion: its runs, V, the current decision,
 // HIST, the progress and its delivery status (data-model §6.1 to §6.5).
 func evalCriterion(st *state, e, parent *entityAt, s string, settings Settings) *criterionEval {
-	c := &criterionEval{ent: e, parent: parent, s: s, r: e.Revision, ar: e.RequirementRevision}
+	c := &criterionEval{ent: e, s: s, r: e.Revision, ar: e.RequirementRevision}
 	c.automated = e.Verification == "automated"
 	if e.Check != nil {
 		c.hasCheck, c.h, c.inputs = true, CheckConfigHash(*e.Check), len(e.Check.Inputs) > 0

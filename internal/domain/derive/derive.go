@@ -37,9 +37,10 @@ func checkCommon(in *Input) []string {
 	if in.Current.Snapshot == nil {
 		problems = append(problems, "missing the snapshot S")
 	}
-	if in.Current.Settings == nil {
+	switch {
+	case in.Current.Settings == nil:
 		problems = append(problems, "missing the settings")
-	} else if !stages[in.Current.Settings.Stage] {
+	case !stages[in.Current.Settings.Stage]:
 		problems = append(problems, fmt.Sprintf("missing or unknown stage %q", in.Current.Settings.Stage))
 	}
 	return problems
@@ -107,9 +108,10 @@ func Derive(in Input) (*Result, error) {
 // which it does not depend on (§6.3, §6.5), so it needs neither.
 func ChangesSince(in Input, since int64) ([]Change, error) {
 	problems := checkCommon(&in)
-	if since < 0 {
+	switch {
+	case since < 0:
 		problems = append(problems, fmt.Sprintf("a negative start %d", since))
-	} else if since > in.AsOfSeq {
+	case since > in.AsOfSeq:
 		problems = append(problems, fmt.Sprintf("the start %d is after the cutoff %d", since, in.AsOfSeq))
 	}
 	if len(problems) > 0 {

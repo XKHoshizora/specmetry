@@ -67,12 +67,6 @@ func (f *fixture) derive(t *testing.T) *derive.Result {
 	return mustDerive(t, f.input())
 }
 
-// toInput is a history's input at its latest seq, with every source
-// observed unchanged.
-func toInput(h *factgen.History, s string) derive.Input {
-	return toderive.Input(h.Dump(), h.Current(s, "in_development"), h.Seq())
-}
-
 func mustDerive(t *testing.T, in derive.Input) *derive.Result {
 	t.Helper()
 	res, err := derive.Derive(in)
@@ -90,8 +84,8 @@ func (f *fixture) pass(ac, commit string) string {
 	return f.h.Run(ac, factgen.RunSpec{Head: commit})
 }
 
-func (f *fixture) fail(ac, commit string) string {
-	return f.h.Run(ac, factgen.RunSpec{Head: commit, Result: "fail", FailureKind: "nonzero_exit"})
+func (f *fixture) fail(ac, commit string) {
+	f.h.Run(ac, factgen.RunSpec{Head: commit, Result: "fail", FailureKind: "nonzero_exit"})
 }
 
 // accept is a normal acceptance on a commit relying on a run.

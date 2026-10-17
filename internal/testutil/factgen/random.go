@@ -263,7 +263,7 @@ func (g *gen) propose() {
 		case w == 0 && n > 0:
 			q.AboutItem = 1 + g.pick(n)
 		case w == 1:
-			if ents := append(g.active("requirement"), g.active("criterion")...); len(ents) > 0 {
+			if ents := slices.Concat(g.active("requirement"), g.active("criterion")); len(ents) > 0 {
 				q.AboutEntity = pickOne(g, ents)
 			}
 		}
@@ -437,7 +437,7 @@ func (g *gen) decide() {
 }
 
 func (g *gen) scan() {
-	ents := append(g.active("requirement"), g.active("criterion")...)
+	ents := slices.Concat(g.active("requirement"), g.active("criterion"))
 	if len(ents) == 0 {
 		return
 	}
