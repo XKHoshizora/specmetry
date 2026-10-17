@@ -40,6 +40,7 @@ func checkerVerdict(c factgen.Case, cur factgen.Current) readycheck.Verdict {
 // settings: R1 to R10 read none, so the engine's verdict must not change.
 func TestEngineAndCheckerAgree(t *testing.T) {
 	counts := map[string]int{}
+	failures := map[readycheck.Condition]int{}
 	for seed := range uint64(compareSeeds) {
 		general := seed%2 == 1
 		c := factgen.Random(seed, factgen.Options{Steps: 40, Deliver: 0.55, Cutoff: 0.15, Isolated: general})
@@ -57,6 +58,9 @@ func TestEngineAndCheckerAgree(t *testing.T) {
 				counts["ready, "+string(res.Delivery.EvidenceGrade)]++
 			} else {
 				counts["not ready"]++
+				for cond := range v.Failed {
+					failures[cond]++
+				}
 			}
 			for _, settings := range [][3]any{{"docs_only", true, false}, {"incomplete_docs", false, true}} {
 				cur := c.Current
@@ -67,7 +71,14 @@ func TestEngineAndCheckerAgree(t *testing.T) {
 			}
 		})
 	}
-	t.Logf("verdicts: %v", counts)
+	t.Logf("verdicts: %v; failed conditions of the histories that are not ready: %v", counts, failures)
+	// The legal histories that cannot be ready fail every condition (R1 at
+	// cutoffs before the first baseline version).
+	for _, cond := range []readycheck.Condition{readycheck.R1, readycheck.R2, readycheck.R3, readycheck.R4, readycheck.R5, readycheck.R6, readycheck.R7, readycheck.R8, readycheck.R9} {
+		if failures[cond] == 0 {
+			t.Errorf("no history failed %s: %v", cond, failures)
+		}
+	}
 	readyTotal := counts["ready, observed"] + counts["ready, none"] + counts["ready, snapshot_isolated"]
 	if readyTotal < compareSeeds/10 || counts["not ready"] < compareSeeds/10 {
 		t.Errorf("the comparison would run idle: %v", counts)

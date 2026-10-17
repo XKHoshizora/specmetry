@@ -124,6 +124,7 @@ go build -o dist/ ./cmd/specmetry
   - `LoosenPermissions`：放宽文件或目录的权限，用于检查拒绝写入和 `doctor` 的报告。
   - `SnapshotTree` / `AssertTreeUnchanged`：记录目录下每个条目的类型、权限、大小、修改时间和内容哈希，用于断言"拒绝时没有任何改动""只读检查前后完全一致"。`SettledSnapshot` 先等两次快照一致：Windows 的 NTFS 可能稍后才公布另一进程较早写入的修改时间。
   - `factgen`：推导测试的事实前端（WP2.1、WP2.2）。`History` 按生产写入的方式逐次写入事实（同一次逻辑写入共用一个 `seq`），产出与数据库行对应的转储：JSON 列为文本，NULL 为 nil，并带当前投影列，用来检查实现不拿当前投影冒充历史；`Random` 用固定种子生成满足写入前置条件的合法事实历史与当前值输入。`factgen/toderive` 把转储映射为推导引擎的输入，只做映射，不选择、不过滤、不计算。
+  - `readycheck`：独立的 `ready` 复核器（WP2.2，acceptance-criteria §3.1）。按谓词 R1 ~ R10 自行从事实判断交付是否 `ready`，只导入标准库，不导入推导引擎或任何生产包；`readycheck/fromdump` 是它自己的转换器，与 `factgen/toderive` 分别实现。两个方向的导入关系都由测试检查。
   - `testdir.New`：放数据目录的测试目录。Windows 上位于 `%LOCALAPPDATA%\specmetry-test`：`%TEMP%` 可能授予其他账户修改权限（例如编码代理的沙箱账户），按路径规则会被拒绝。
 - 存储包的测试用辅助子进程模拟崩溃（写入后不关闭数据库直接退出）、进行中的未提交事务、并发升级和持锁进程。
 - 跨用户测试（`crossuser_linux_test.go`）需要以 root 运行，以便启动两个不同用户的进程；普通用户运行时跳过。CI 在 Linux 上单独用 `sudo` 运行它们；本地可在 WSL 中用 `wsl -u root` 运行交叉编译的测试二进制。
