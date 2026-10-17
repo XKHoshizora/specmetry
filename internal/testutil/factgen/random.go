@@ -809,7 +809,7 @@ func (g *gen) deliver() {
 		switch {
 		case g.h.Verification(ac) == "manual":
 			g.h.Decide(ac, DecisionSpec{Decision: "accepted", Mode: "manual", Snapshot: g.s})
-		case !g.h.HasCheck(ac) || (len(g.snapshotRuns(ac)) == 0 && g.chance(0.2)):
+		case !g.h.HasCheck(ac) || (len(g.snapshotRuns(ac)) == 0 && g.chance(0.3)):
 			// No qualifying run on S (V = none): an exception (§7.3).
 			g.h.Decide(ac, DecisionSpec{Decision: "accepted", Mode: "exception", Snapshot: g.s})
 		default:
