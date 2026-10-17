@@ -1,6 +1,7 @@
 # M2 开工准备报告
 
 > 状态：**草案，开工准备，第 4 版**（2026-10-17）。第 1 版 `a81cc79` 经 [codex-review-040](reviews/codex-review-040.md) 审查为 NO-GO；第 2 版 `09caf95` 经 [codex-review-041](reviews/codex-review-041.md) 复审，仍为 NO-GO（B3、B5 各有一处残余问题）；第 3 版 `be660df` 经 [codex-review-042](reviews/codex-review-042.md) 复审，仍为 NO-GO（B3-R 已消除报告层面的阻塞，B5-R 只剩共享 `seq` 的定义问题）；第 4 版 `e1d9000` 经 [codex-review-043](reviews/codex-review-043.md) 复审为 **GO**，之后只按它的两项 NON-BLOCKER 收紧了第 8.5 节的措辞（修订记录见第 12 节）。准备报告 GO 不表示其中的方案获批，也不表示 F4、F5 已冻结。本文只做资料核对、设计细化与任务规划，**不授权 M2 业务实现**。
+> 后续：PR #19 已合并（`258fc50`）。产品负责人 2026-10-18 的决定与首批规范见 [review-resolution.md §55](review-resolution.md#55-产品负责人的-m2-决定与首批规范2026-10-18)；本文其余内容保持为合并时的记录。
 > 基线：master `f904ab6`（PR #18 的合并提交，树 `705ce55`）；M1 验收对象 `7e77fd6`。审查 038、039 的结论保持有效，本文不重新打开 M1 验收。
 > 依据：[mvp.md](mvp.md)（范围）、[implementation-plan.md](implementation-plan.md)（里程碑、§3 设计细化截止点、§8.1 `db recover`）、[architecture.md](architecture.md)、[data-model.md](data-model.md)、[prd.md](prd.md)、[acceptance-criteria.md](acceptance-criteria.md)、[`schemas/`](../schemas/)、[m1-exit-evidence.md](m1-exit-evidence.md) 第 9 节。
 

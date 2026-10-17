@@ -74,7 +74,7 @@
 | MVP-SRC-01 | 登记一个仓库内的文件，和一个仓库外、路径含空格和中文的文件 → 都记录了路径、类型、`acked_sha256` 和大小 | 集成 | FR-SRC-01 | M1 |
 | MVP-SRC-02 | 修改已登记的来源 → `source list --json`（`source-list.v1`）显示 `changed`，`current_sha256` 为新哈希；删除文件 → 显示 `missing`，`current_sha256 = null` | 集成 | FR-SRC-02 | M1 |
 | MVP-SRC-03 | 非 TTY 执行 `source ack` → 退出码 3；在 TTY 中执行，但 `observed_sha256` 与磁盘不一致 → 退出码 5；一致时 → 写入 `source_acks`（包括理由），`acked_sha256` 更新，来源集合哈希改变 | 集成 | FR-SRC-03 | M1 |
-| MVP-SRC-04 | 非 TTY 执行 `source remove` → 退出码 3；在 TTY 中执行 → 写入 `removed_seq`，已有引用显示为 `source_removed`，来源集合哈希改变。WP1.4 验证其余部分；WP1.5 验证引用在移除后保留，并在 `source list --include-removed --refs` 中列在已移除的来源下；引用以 `source_removed` 的形式出现在状态与差距中，随 M2 验证 | 集成 | FR-SRC-04 | M1 |
+| MVP-SRC-04 | 非 TTY 执行 `source remove` → 退出码 3；在 TTY 中执行 → 写入 `removed_seq`，已有引用显示为 `source_removed`，来源集合哈希改变。WP1.4 验证其余部分；WP1.5 验证引用在移除后保留，并在 `source list --include-removed --refs` 中列在已移除的来源下；引用以 `source_removed` 的形式出现在状态与差距中，随 M2 验证（M2-Q8，2026-10-18 批准）：引用了已移除来源的需求与 AC 在 `status --json` 中带 `source_removed` 标记，目标、需求与 AC 按范围筛选产生不阻塞的 `SOURCE_REMOVED` 警告；移除来源之后先出现阻塞的 `SCOPE_STALE`，重新确认范围之后只剩警告，警告不替代、消除或推迟 `SOURCE_CHANGED` 与 `SCOPE_STALE`（data-model §6.6、§6.10）。里程碑标签由 M1 改为 M1 / M2，只同步已有的 M2 义务，不重新打开 M1 | 集成 | FR-SRC-04 | M1 / M2 |
 | MVP-SRC-05 | `source add` 一个不存在的路径 → 退出码 2，不写入 | 集成 | FR-SRC-01 | M1 |
 | MVP-SRC-06 | 同一组来源记录（`source_id` 与 `acked_sha256` 均相同）以不同顺序输入 → 来源集合哈希相同；`source_id` 改变（移除后重新登记），或人工 `ack` 更新了 `acked_sha256` → 哈希改变；文件发生变化、但尚未经人工确认 → 哈希不变（PD-25） | 单元 + 集成 | FR-SRC-05 | M1 |
 | MVP-SRC-07 | `source add internal/auth/login.go`（非文档类型）→ 退出码 2；在 TTY 中加上 `--allow-any-type` → 成功；修改已登记的来源后，Agent 再次 `source add` 同一路径 → 什么都不做，`acked_sha256` 不变，状态仍为 `changed`（M1）；`SOURCE_CHANGED` 阻塞差距仍然存在，交付状态受其影响（M2）。审查确认 Specmetry 只为引用校验读取文本，不解析文档语义（M1，独立审查）。这一划分与 WP1.4 验收时的记录一致（review-resolution §24），不是新的推迟：M1 的来源登记与确认行为都在 M1 验证 | 集成 + 审查 | FR-SRC-01、FR-SRC-06 | M1 / M2 |
@@ -88,7 +88,7 @@
 | MVP-BL-02 | 每条"拒绝"规则（V-P01、V-P03 ~ V-P06、V-P08）各一个反例 → 都返回退出码 2，错误中带 JSON Pointer，不写入 | 集成 | FR-BL-01 | M1 |
 | MVP-BL-03 | `base_version` 过期，或任一 `target_revision` 过期 → 退出码 5，`error.current` 中给出当前值，不写入 | 集成 | FR-BL-01 | M1 |
 | MVP-BL-04 | 片段校验：只有空白或换行（含 CRLF）不同 → `verified`；改动一个字 → `not_found`；PDF → `not_checkable`；文件已删除 → `source_missing`；片段超过 500 字符 → 退出码 2 | 单元 + 集成 | FR-BL-02 | M1 |
-| MVP-BL-05 | 反推条目没有 `code_refs` → 退出码 2；有引用时 → 保存为 `inferred`（M1）；`status --json` 中带 `inferred` 标记（M2）；UI 中有标识（M5） | 集成 | FR-BL-03 | M1 / M2 / M5 |
+| MVP-BL-05 | 反推条目没有 `code_refs` → 退出码 2；有引用时 → 保存为 `inferred`（M1）；`status --json` 中带 `inferred` 标记，反推的需求标在需求的 `flags`、反推的 AC 标在 AC 的 `flags`（M2；M2-Q8）；UI 中有标识（M5） | 集成 | FR-BL-03 | M1 / M2 / M5 |
 | MVP-BL-06 | 5 个新增条目，接受 3 个、拒绝 2 个 → 生成版本 1，恰好包含这 3 个；编号按顺序分配 | 集成 | FR-BL-04 | M1 |
 | MVP-BL-07 | 拒绝提案内的某个需求，同时接受指向它的 AC → 整次审核提交失败，不写入 | 集成 | FR-BL-04 | M1 |
 | MVP-BL-08 | 编辑后接受 → 同时保存提议的值和最终值；基准使用最终值 | 集成 | FR-BL-04 | M1 |
@@ -174,7 +174,7 @@
 | MVP-EV-07 | 直接对任一只追加表执行 UPDATE、DELETE、REPLACE（主键冲突与 UNIQUE 冲突）或 UPSERT → 被触发器中止，原记录不变 | 集成 | FR-EV-05、FR-STO-05 | M2 |
 | MVP-EV-08 | 工作区有未跟踪的文件时执行检查 → `tree_state_start = dirty`，`qualifying = false` | 集成 | FR-EV-04 | M2 |
 | MVP-EV-09 | 检查在执行过程中写入一个未被忽略的文件 → `error` / `context_changed`；检查在执行过程中执行 `git commit` → `context_changed` | 集成 | FR-EV-04 | M2 |
-| MVP-EV-10 | 声明了 `inputs` → 记录对象 ID；某个输入路径在 HEAD 上不存在 → `error` / `input_missing` | 集成 | FR-EV-01 | M2 |
+| MVP-EV-10 | 声明了 `inputs` → 按 data-model §4.11.2 记录每个路径的保存原值、mode、类型与对象 ID（M2-Q2，2026-10-18 批准）；`./a`、`a/`、`a\b` 形式的已保存输入按 V-P04 的方式查找，保存的值与 `check_config_hash` 不变；某个输入路径在 HEAD 上不存在（含大小写不同、子模块内部的路径）→ `error` / `input_missing`，不执行命令；条目存在而叶对象缺失、子模块的 gitlink → 照常记录元数据；读取路径所需的提交或树对象失败、git 不具备安全读取能力（PD-26）→ 退出码 6，不执行检查，`check_runs` 不增加任何行 | 集成 | FR-EV-01 | M2 |
 | MVP-EV-11 | 提交的标题中有 canary 字符串 → 提交关联正常，数据库中只有 SHA 和时间 | 集成 | FR-EV-06 | M2 |
 | MVP-EV-12 | **`--json` 的输出流**：检查同时向 stdout 和 stderr 打印 canary → `check run --json` 的 stdout 恰好是一份能通过 `check-run.v1` 校验的 JSON，其中没有 canary；两个 canary 都出现在 stderr；数据目录中找不到 canary | 集成 | FR-EV-01 | M2 |
 | MVP-EV-13 | **证据等级**：MVP 中每条执行的 `evidence_grade` 都是 `observed`；`check run --isolation required` → 不执行检查，`check_runs` 不增加任何行，退出码 6，`error.details` 中有 `isolation_unavailable` | 集成 | FR-EV-08 | M2 |
@@ -203,7 +203,7 @@
 | MVP-ST-02 | 需求聚合表的 9 条规则，每条都有用例 | 单元 | FR-ST-02 | M2 |
 | MVP-ST-03 | 目标交付表的 6 条规则，每条都有用例；每个状态都同时输出全部阻塞差距 | 单元 | FR-ST-04、05 | M2 |
 | MVP-ST-04 | 进度表的 8 种情况，每种都有用例 | 单元 | FR-ST-03 | M2 |
-| MVP-ST-05 | 性质测试：生成随机事实序列，把行的物理顺序打乱 1000 次 → 推导结果完全相同 | 单元 | FR-ST-08、NFR-11 | M2 |
+| MVP-ST-05 | 性质测试：生成随机的合法事实序列（data-model §6.14），把行的物理顺序打乱 1000 次（包括共享同一个 `seq` 的记录之间的顺序）→ 推导结果完全相同 | 单元 | FR-ST-08、NFR-11 | M2 |
 | MVP-ST-06 | OpenAPI 规格和 CLI 命令树中，没有设置状态、执行检查（Dashboard）、删除事实的操作 | 审查 | FR-ST-01 | M5 |
 | MVP-ST-07 | 对每个项目夹具执行 `gaps --json` → 与 `expected-gaps.json` 一致 | 集成 | FR-ST-05 | M2 |
 | MVP-ST-08 | `fx-scale` 上执行 `status --json` → 少于 1 s | 基准 | NFR-04 | M2 |
@@ -211,7 +211,7 @@
 | MVP-ST-10 | 所有夹具上，`init --json`、`status --json`、`gaps --json`、`check run --json` 的输出分别通过 `init.v1`、`status.v1`、`gaps.v1`、`check-run.v1` 的校验；所有错误输出都通过 `error.v1` 的校验 | 集成 | FR-ST-06 | M2 |
 | MVP-ST-11 | `status --diff-since <seq>` → 用当前的 `S` 和观测哈希，只列出 `seq` 之后新增的事实带来的状态变化 | 集成 | FR-ST-06 | M2 |
 | MVP-ST-12 | [data-model.md §6.9](data-model.md#69-保守规则无法判断时) 中的每一行保守规则都有用例 | 单元 + 集成 | FR-ST-09 | M2 |
-| MVP-ST-13 | **差距与交付状态的一致性**（性质测试）：随机生成事实序列，每次都满足"交付状态为 `ready` ⇔ 没有阻塞差距"；每个 AC 至多有 1 个状态差距；有范围时，范围外的条目没有差距；`waived` 和 `accepted` 的 AC 没有状态差距 | 单元 | FR-ST-05 | M2 |
+| MVP-ST-13 | **差距与交付状态的一致性**（性质测试）：随机生成事实序列，每次都满足"交付状态为 `ready` ⇔ 没有阻塞差距"；每个 AC 至多有 1 个状态差距；有范围时，范围外的条目没有差距；`waived` 和 `accepted` 的 AC 没有状态差距；`SOURCE_REMOVED` 等标记类警告从不阻塞 | 单元 | FR-ST-05 | M2 |
 | MVP-ST-14 | **推导纯度**：在相同的事实、`S` 和观测哈希下，修改磁盘文件但不重新观测 → 推导结果不变；输出中的 `as_of_seq`、`snapshot`、`sources[].current_sha256` 可以复现原结果 | 单元 | FR-ST-08、NFR-11 | M2 |
 
 ### 2.11 采集（COL）
@@ -312,7 +312,7 @@
 每个 E2E 结束时都会自动断言以下性质：
 
 1. 不存在任何由 Agent 通道写入的 `decisions`、`scope_confirmations`、`source_acks` 或 `baseline_versions`；不存在由 Agent 通道回答或驳回的问题，也不存在由 Agent 通道修改的片段保存模式。
-2. 对每个 `ready` 的判定，由一个**独立实现的检查器**（测试代码，不复用推导引擎）重新核对：
+2. 对每个 `ready` 的判定，由一个**独立实现的检查器**（测试代码，不复用推导引擎；规格见 §3.1）重新核对：
    - `S` 不为 NULL；
    - 范围没有过期、不为空，也不是全部豁免；
    - 每个范围内的 AC 都有适用于 `S` 的决定；
@@ -328,6 +328,67 @@
 9. MVP 构建中，不存在 `evidence_grade = snapshot_isolated` 的执行；`delivery.evidence_grade` 只可能是 `observed` 或 `none`；没有任何 AC 在没有人参与的情况下，依据观测级证据变为 `accepted`。
 10. 每条决定的 `seen_decision_id`，都等于写入时该 AC 当前修订下的前一条最新决定（第一条为 NULL）。
 11. 每条范围确认的 `seen_scope_confirmation_id`，都等于写入时该目标的前一条范围确认（第一条为 NULL）；它的 `acknowledged_waivers` 等于写入时的有效豁免集合。
+
+### 3.1 独立 `ready` 复核器的规格（F5）
+
+> 状态：规格已写明（2026-10-18），**待独立审查**；审查通过之前不是已冻结的契约。复核器实现不变量 #2，只在测试代码中使用（WP2.2）。输入事实的规格见 [data-model.md §6.13](data-model.md#613-推导的输入f4)，合法事实域见 [§6.14](data-model.md#614-合法事实域与畸形输入)。
+
+**独立性**：
+
+1. 复核器放在单独的测试专用包中，不导入推导引擎（`internal/domain/derive`），也不导入 `scope`、`baseline` 等生产包的计算函数。核对逻辑只用标准库；E2E 中读取数据库的前端只额外使用 SQLite 驱动。由测试检查导入关系，两个方向都检查。
+2. 谓词按 prd §3.2 的 `ready` 定义、本节的不变量 #2 与 data-model §6.8 的文字写出（下表），反例从 data-model §6.3 的规则推出，而不是从推导引擎的代码推出。只检查导入图不能排除共享的错误假设，所以谓词与反例在实现之前接受独立审查。
+3. 不通过放宽 `ready` 的条件来消除两个实现之间的差异。
+
+**谓词**（全部成立才是 `ready`）：
+
+| # | 条件 |
+|---|---|
+| R1 | 存在基准版本 |
+| R2 | 存在活动的交付目标，并且 `S` 不为 NULL |
+| R3 | 该目标存在范围确认（`seq` 最大的一条），并且没有过期：它的基准版本等于当前版本，它的来源集合哈希等于由未移除的来源独立重算的哈希 |
+| R4 | `RS`（范围中仍为 `active` 的需求）不为空 |
+| R5 | `RS` 中每个需求至少有一个 `active` AC |
+| R6 | 对 `AS` 中的每个 AC：(a) `requirement_revision` 等于父需求的修订；(b) 当前决定 `D` 存在；(c) `D` 是豁免，或者是适用于 `S` 的接受：手动 AC 的 `manual` 接受且 `D.snapshot = S`；自动化 AC 的 `exception` 接受且 `D.snapshot = S`、`V` 不是失败；自动化 AC 的 `normal` 接受且 `V = pass`，并且 `D.snapshot = S`（直接）或满足沿用条件（只在通用合法事实域中出现） |
+| R7 | `AS` 不是全部豁免 |
+| R8 | 没有阻塞问题：关联到 `RS` 中需求、`AS` 中 AC 的，或没有关联任何条目的 `open` 且 `blocking` 的问题都不存在；关联条目已被拒绝的问题不计入 |
+| R9 | 没有未确认的来源变化：每个未移除的来源，观测哈希都等于已确认的哈希（文件缺失也是变化） |
+| R10 | 独立重算的 `evidence_grade` 与输出一致：取 `AS` 中 `normal` 接受所依据的执行的最弱等级（直接：`D.evidence_id` 对应的执行；沿用：`S` 上的隔离级执行）；没有 `normal` 接受时为 `none`。这是输出一致性断言 |
+
+**R6 与 data-model §6.3 第 6 条**：在合法事实历史中，直接适用的 `normal` 接受写入时，`S` 上已有当前修订与配置下的合格通过；检查配置的变化是强制的 `material` 修订，修订变化之后这条决定就不再是当前决定。所以 `V` 只能是 `pass` 或失败，失败由第 4 条先处理。"第 4 条加第 6 条"与 R6 在合法事实域上等价，不是规格冲突；差别只可能出现在畸形输入中。
+
+**输入域**：
+
+- 双向对照只在合法事实域上进行：MVP 合法事实域，以及（需要 data-model §4.11.2 的输入比较）通用合法事实域。
+- 生成器必须产生合法但不能 `ready` 的历史，以及共享 `seq` 的合法写入（至少包括"审核接受多个条目并附带范围"与 `propose --apply`），不能为了双向一致而预先排除。
+- 畸形输入另行测试：两个实现都不崩溃、结果确定；复核器按它自己的谓词给出结论；推导引擎不作业务结果的保证（data-model §6.14，选项 (a)）。
+
+**两套转换器**：各自独立实现，只做原始事实的映射。
+
+- 保留每条事实的 `seq`，包括共享同一个 `seq` 的全部关联事实；不按 `seq` 去重、合并或丢弃记录；记录按各表既有的主键、复合键或约定标识保留，不要求新增 `id` 列。
+- `as_of_seq` 分别交给两个实现，由它们各自过滤：保留 `seq ≤ as_of_seq` 的全部事实，同一个 `seq` 的关联事实一起保留或一起排除。转换器不预先过滤。
+- 同一个 `seq` 之内的顺序只用 `change_index`、`item_index` 与 data-model §5.5 的应用顺序。
+- 保留项目与实体的归属、修订与配置哈希、证据引用与时序（决定的 `evidence_id`、`snapshot`、`mode`、`seen_decision_id` 与 `seq`；执行的上下文、结果、等级与 `seq`），以及全部决定与执行，包括失败的、被取代的记录。
+- 不能提前选出当前决定、计算适用性或合格性，也不能合并同一 AC 的多条记录。
+
+**必须有的反例**：在合法事实历史中构造。每条以一个条件为目标，复核器必须在结果中指出该条件；条件之间有结构依赖时（例如没有基准版本就不可能有有效的范围确认），反例只需违反目标条件及其必然的连带条件。
+
+- 当前决定是拒收（即使更早有过接受）；
+- 在同一个 `S` 上接受之后，又有一次合格的失败；
+- 父需求已被实质修订，而 AC 没有后续处理；
+- 范围按版本过期；按来源集合过期；范围中的需求都已退役；需求没有 AC；`AS` 全部豁免；
+- 三类阻塞问题各一个，以及关联条目已拒绝、因而不阻塞的对照；
+- 来源内容变化；来源文件缺失；
+- `S` 为 NULL；决定针对另一个快照（手动、例外、没有沿用的 `normal` 各一个）；只有旧修订的决定。
+- 输出一致性：篡改输出的证据等级，R10 失败（不是事实的反例）。
+
+**必须有的正例**：
+
+- 依据观测级执行的 `normal` 接受 → `ready`，证据等级 `observed`；
+- 手动接受、例外接受与豁免的组合 → `ready`，证据等级 `none`；不能要求所有 AC 都有自动化的通过；
+- 共享 `seq` 的审核历史（一个版本、多条变更、引用与附带的范围确认共用一个 `seq`），`as_of_seq` 恰好等于这个 `seq`；
+- （通用合法事实域）依据合成的隔离级执行沿用 → `ready`，证据等级 `snapshot_isolated`。
+
+**双向对照**：推导为 `ready` ⇒ 复核器通过；复核器认为全部条件成立 ⇒ 推导为 `ready`。样本中要有足够数量的 `ready` 结果与合法的不能 `ready` 的历史，以免对照空转。不一致都要查明是哪一方或哪条规则的问题，不能为了一致而改动任意一方；真正的规格歧义报告并等待决定。
 
 ## 4. 反例与异常场景（CX）
 
@@ -353,7 +414,7 @@
 | **CX-16** | 检查结束时 HEAD 已变化，或工作区已被弄脏 | 见 MVP-EV-09 | `context_changed`，不合格 | M2 |
 | **CX-17** | Agent 自行确认来源变化 | 来源发生变化 → Agent 通道执行 `source ack` | 退出码 3；`SOURCE_CHANGED` 仍然存在；交付状态不是 `ready` | M1 / M2 |
 | **CX-18** | 范围过期 | 范围在 v3 上确认 → 审核生成 v4（新增一条 `must` 需求），但没有重新确认范围；或者 Agent 新登记了一个来源 | `SCOPE_STALE`，交付状态为 `needs_reverification`，**绝不**为 `ready` | M2 |
-| **CX-19** | 测试被削弱 | AC 声明了 `inputs`，在 A 上已验收 → 在 B 上修改测试文件（弱化断言），检查通过 | 不沿用验收：`ready_for_review`（`inputs_changed`），交付状态不是 `ready` | M2 |
+| **CX-19** | 测试被削弱 | AC 声明了 `inputs`，在 A 上已验收 → 在 B 上修改测试文件（弱化断言），检查通过 | 不沿用验收：`ready_for_review`（`inputs_changed`），交付状态不是 `ready`。只改变 mode、对象 ID 不变（例如可执行位，或把文件换成链接文本相同的符号链接）同样是 `inputs_changed`（data-model §4.11.2） | M2 |
 | **CX-20** | 例外验收不沿用 | 在 A 上作出例外验收 → 目标前进到 B | `needs_reverification`（`code_changed`） | M2 |
 | **CX-21** | 同一快照上结果不一致 | 在 A 上先 `pass` 后 `fail`，再 `pass`（不稳定的检查），之前在其他快照上有过验收 | 不沿用：`ready_for_review`（`inconsistent_results`），带 `INCONSISTENT_RESULTS` 警告 | M2 |
 | **CX-22** | 目标无法解析，或者不是 git 项目 | 删除目标分支；或者在非 git 目录中执行 | `not_assessed`，**绝不**为 `ready` | M2 |

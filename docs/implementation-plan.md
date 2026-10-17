@@ -35,10 +35,10 @@
 | 人类读取模型的 schema | `proposal show`（含三方对比和 `item_id`）、`baseline show/history`、`source list` 的 `--json` 输出 | M1 开工前 | 第二轮自检 #5；**已补齐**（连同 M1 的其他读取模型和 Agent 结果输出，data-model §8） |
 | `doctor --json` 的 schema | 版本、路径、权限、Hook 与 Skill、spool、兼容版本 | M3 开工前 | 第二轮自检 #5 |
 | 隔离执行器的后端 | TD-24：物化方式、只读强制机制、写入探测、执行后比对、子模块和 LFS | M7 开工前（MVP 之后） | codex-002 B1 |
-| Windows 上执行检查的 shell | 默认 shell 的探测顺序；`shell` 字段的取值映射 | M2 开工前 | TD-06 |
-| `inputs` 的对象 ID | 文件和目录的取值方式；子模块的处理 | M2 开工前 | TD-23 |
-| 备份恢复命令（P1） | `backup restore` 的锁、原子替换、恢复后的墓碑处理 | M2 开工前 | 审查 #12 |
-| 数据库恢复命令 | `db recover` 的备份方式、墓碑顺序、一致性检查、拒绝路径的文件副作用；§8.1 表中第 1 ~ 4 项的确认；补齐需求与验收项 | M2 开工前 | PD-23 |
+| Windows 上执行检查的 shell | 默认 shell 的探测顺序；`shell` 字段的取值映射 | WP2.5 开工前（2026-10-18 调整） | TD-06、M2-Q1 |
+| `inputs` 的对象 ID | 比较语义与错误边界：**已确认**（2026-10-18，data-model §4.11.2）；Git 读取机制（命令与调用方式） | Git 读取机制：WP2.3 开工前（2026-10-18 调整） | TD-23、M2-Q2 |
+| 备份恢复命令（P1） | `backup restore` 的锁、原子替换、恢复后的墓碑处理 | WP2.8 中该 P1 工作开工前（2026-10-18 调整） | 审查 #12 |
+| 数据库恢复命令 | `db recover` 的备份方式、墓碑顺序、一致性检查、拒绝路径的文件副作用；§8.1 表中第 1 ~ 4 项的确认；补齐需求与验收项；U1、U2 的明确结论 | WP2.10 开工前（2026-10-18 调整；仍不迟于 M4 自测） | PD-23、M2-Q3 |
 | Claude Code Hook 核实 | 事件名、输入字段、PreToolUse 拒绝协议、PowerShell 工具名；固定经过测试的版本范围；更新 architecture §12.1 | M3 开工前 | 审查 #10、TD-12 |
 | 其他 Agent 的约束 | Codex 等的沙箱可写路径、是否支持 Skill、受保护的 git 路径；更新兼容矩阵 | M4 开工前 | 审查 #11 |
 | Dashboard 技术细节 | OpenAPI 组织方式、SSE、UI 方案、端口 | M5 开工前 | TD-07、08、09、19 |
@@ -129,7 +129,7 @@ flowchart LR
 
 **目标**：审查 #1（检查侧）、#2、#3（执行与扫描）、#6（Claim、决定、检查）、#7、#9 和 #12（`purge`）的实现。**这是 MVP 的核心里程碑。**
 
-**状态（2026-10-17）**：开工准备中，见 [m2-readiness.md](m2-readiness.md)：开工条件的逐项状态、TD-06、TD-23、PD-23（§8.1 第 1 ~ 4 项）等待决事项的推荐方案（草案）与建议的实施顺序。第 1 版经 codex-review-040 审查为 NO-GO；第 2 版经 codex-review-041 复审仍为 NO-GO（B3、B5 各有一处残余问题）；第 3 版经 codex-review-042 复审仍为 NO-GO（只剩共享 `seq` 的定义问题）；第 4 版经 codex-review-043 复审为 GO，之后只收紧了两处措辞（review-resolution §51 ~ §54）。准备报告 GO 不表示其中的方案获批，也不表示 F4、F5 已冻结。§3 中标为"M2 开工前"的截止点仍然有效，调整需要负责人明确批准。等待产品负责人决定与独立审查；**尚未授权 M2 业务实现**。
+**状态（2026-10-18）**：开工准备报告已合并（PR #19，合并提交 `258fc50`；审查 043 GO，见 [m2-readiness.md](m2-readiness.md)）。产品负责人 2026-10-18 的决定（review-resolution §55）：首批为完整的 WP2.1、WP2.2；批准 M2-Q2 的比较语义、M2-Q5（PD-02）、M2-Q8、畸形输入的选项 (a)；按 M2-Q10 调整了 §3 中的截止点（见下表）。其余草案（M2-Q1、Q3、Q4、Q6、Q7、Q9，E1 ~ E5，恢复的退出码与交互）没有获批。首批规范 F4（data-model §6.13，与 §4.10 ~ §4.13 中的 M2 事实结构）、合法事实域（data-model §6.14）与 F5（acceptance-criteria §3.1）已写出，**尚待独立审查**。**首批的开工门槛**：F4、F5 通过独立审查，并由产品负责人明确授权实现；**尚未授权 M2 业务实现**。
 
 | 工作包 | 内容 |
 |---|---|
@@ -141,7 +141,7 @@ flowchart LR
 | WP2.6 | 决定：前置条件（含 `seen_decision_id`，在写事务中原子比较）、风险推导与确认（V-D01）、`normal` / `manual` / `exception`、交互式的 `accept` / `reject` / `waive`（收到退出码 5 后重新读取，不自动重试） |
 | WP2.7 | `status --json`（`status.v1`）、`gaps`、人类可读输出、`--diff-since <seq>` |
 | WP2.8 | `purge` 与墓碑生效；（P1）`backup create`、`backup restore` |
-| WP2.10 | 数据库恢复命令 `specmetry db recover`（PD-23，见 §8.1）；**必须在 M4 自测开始前完成**。需求与验收项在 M2 开工前补齐，并先确认 §8.1 表中第 1 ~ 4 项的调整 |
+| WP2.10 | 数据库恢复命令 `specmetry db recover`（PD-23，见 §8.1）；**必须在 M4 自测开始前完成**。需求与验收项在 WP2.10 开工前补齐，并先确认 §8.1 表中第 1 ~ 4 项的调整，U1、U2 有明确结论（2026-10-18 调整截止，不移除交付义务） |
 | WP2.9 | 夹具与 oracle：在 WP1.0 的基础上补齐 `fx-in-dev` 的失败测试和录制的 Claim，加上 `fx-scale` 和 oracle；完整的 CX 测试套件 |
 | WP2.11 | 片段原文的保存与擦除：`project set excerpt-storage`（仅限人）、`full` 模式；`source remove --erase-excerpts` 之后的整理（`wal_checkpoint(TRUNCATE)` 与 `VACUUM`，读取 checkpoint 的结果，与 `purge` 共用整理步骤和 `.compaction-pending`）；已保存原文的累计总量上限（V-P11，MVP-BL-26）。**依赖 N1 的修复**，与 WP2.8 一起完成 |
 
@@ -355,4 +355,4 @@ SRC-08、TGT-10 的 M2 部分，以及 PRV-10，也在本里程碑验收。
 | 6 | MVP-STO-05 / FR-STO-04（`backup create/restore` 是 P1，在 M2） | 如果恢复是 P0，它依赖的备份能力就要提前到 P0，与"备份命令是 P1"的优先级不一致。可以复用 M0 的内部备份函数，而不提前实现 `backup` 命令 |
 | 7 | M6 的退出条件（mvp.md §7） | 放在首次公开发布前不冲突，但需要写入 mvp.md 的范围和 §7 的完成清单。风险：从 M4 开始的 dogfooding 期间没有恢复手段 |
 
-**结论**：排期为 M2，不晚于 M4 自测。它与 M2 的 `purge`、`backup create/restore` 共用墓碑、备份和人工确认。开工前仍需确认上表第 1 ~ 4 项的调整；第 5 项（M1 退出条件）不再涉及，第 7 项的风险因排在 M4 之前而消除。
+**结论**：排期为 M2，不晚于 M4 自测。它与 M2 的 `purge`、`backup create/restore` 共用墓碑、备份和人工确认。WP2.10 开工前仍需确认上表第 1 ~ 4 项的调整（2026-10-18 产品负责人把截止由"M2 开工前"调整为 WP2.10 开工前；不移除交付义务，不批准降低安全保证，U1、U2 必须在那之前有明确结论）；第 5 项（M1 退出条件）不再涉及，第 7 项的风险因排在 M4 之前而消除。
