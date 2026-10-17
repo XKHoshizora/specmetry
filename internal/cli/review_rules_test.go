@@ -260,11 +260,12 @@ func TestReviewRefusals(t *testing.T) {
 	r := proposeOK(t, dir, small(0, addReq("r1", "sign up", nil), addReq("r2", "export", nil)))
 	other := proposeOK(t, dir, small(0, addReq("r1", "other", nil)))
 	ids := itemIDs(r)
+	// A scope for another target (WP1.8; TestScopeInReview has the rest).
 	scope := reviewDoc(r.ProposalID, 0, decide(ids["r1"], "accepted"))
 	scope["scope"] = map[string]any{"target_id": r.ProposalID, "source_set_hash": strings.Repeat("0", 64), "requirements": []any{"REQ-001"},
 		"attestations": map[string]any{"complete_scope": true, "pending_items_excluded": 0}, "acknowledged_waivers": []any{},
 		"seen_scope_confirmation_id": nil}
-	reviewRefused(t, home, dir, scope, apperr.ExitInvalidInput, "/scope")
+	reviewRefused(t, home, dir, scope, apperr.ExitStalePrecondition, "/scope/target_id")
 	reviewRefused(t, home, dir, reviewDoc(r.ProposalID, 0, decide(other.Items[0].ItemID, "accepted")), apperr.ExitInvalidInput, "/items/0/item_id")
 	reviewRefused(t, home, dir, reviewDoc(r.ProposalID, 0, decide(ids["r1"], "accepted_with_edits", "final_data", map[string]any{"title": "a\nb"})),
 		apperr.ExitInvalidInput, "/items/0/final_data/title")

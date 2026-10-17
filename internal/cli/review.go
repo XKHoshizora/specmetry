@@ -9,6 +9,7 @@ import (
 	"io"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -74,6 +75,10 @@ seen_base_version must be the current baseline version.`,
 			if err != nil {
 				return err
 			}
+			scopeIn, err := rv.ScopeInput()
+			if err != nil {
+				return err
+			}
 			actor, err := w.actor()
 			if err != nil {
 				return err
@@ -102,6 +107,7 @@ seen_base_version must be the current baseline version.`,
 				return err
 			}
 			var result baseline.Result
+			var scoped *review.ScopeResult
 			var rejected int
 			apply := func(tx *sql.Tx, p project.Registered) error {
 				c, err := review.Check(ctx, tx, p.ID, rv, val)
@@ -116,7 +122,14 @@ seen_base_version must be the current baseline version.`,
 				}
 				c.Plan.Actor, c.Plan.Channel = actor, string(d.Channel)
 				rejected = len(c.Plan.Rejected)
-				result, err = baseline.Apply(ctx, tx, c.Plan)
+				if result, err = baseline.Apply(ctx, tx, c.Plan); err != nil || scopeIn == nil {
+					return err
+				}
+				// A scope the review confirms: after the baseline changes, in
+				// the same transaction and at the same seq (data-model §5.5
+				// step 11); a problem rolls the whole review back.
+				sr, err := review.ConfirmScope(ctx, tx, p.ID, *scopeIn, c.Plan, result, time.Now().Unix())
+				scoped = &sr
 				return err
 			}
 			// A dry run first, rolled back: nobody is asked to confirm
@@ -124,14 +137,19 @@ seen_base_version must be the current baseline version.`,
 			if err := dryRun(ctx, w, apply); err != nil {
 				return err
 			}
-			op := channel.Operation{Name: "review", Summary: checked.Lines, Confirm: checked.Proposal.ID}
+			// The dry run resolved the scope, if any, to what it confirms.
+			lines := checked.Lines
+			if scoped != nil {
+				lines = append(slices.Clone(lines), scopeLines(*scoped)...)
+			}
+			op := channel.Operation{Name: "review", Summary: lines, Confirm: checked.Proposal.ID}
 			if err := confirm(cmd, d, op); err != nil {
 				return err
 			}
 			if err := w.tx(ctx, apply); err != nil {
 				return err
 			}
-			return printReviewResult(cmd.OutOrStdout(), result, rejected)
+			return printReviewResult(cmd.OutOrStdout(), result, rejected, scoped)
 		}),
 	}
 	cmd.Flags().StringVar(&file, "file", "", "the review.v1 document")
@@ -139,7 +157,19 @@ seen_base_version must be the current baseline version.`,
 	return cmd
 }
 
-func printReviewResult(w io.Writer, r baseline.Result, rejected int) error {
+// scopeLines summarize the scope a review confirms.
+func scopeLines(sr review.ScopeResult) []string {
+	keys := make([]string, len(sr.Requirements))
+	for i, r := range sr.Requirements {
+		keys[i] = r.Key
+	}
+	return []string{
+		fmt.Sprintf("delivery scope: %d requirements at baseline version %d: %s", len(keys), sr.BaselineVersion, strings.Join(keys, ", ")),
+		fmt.Sprintf("you confirm they are the complete scope of the target; %d proposal items pending or in conflict are not in it", sr.PendingItems),
+	}
+}
+
+func printReviewResult(w io.Writer, r baseline.Result, rejected int, scoped *review.ScopeResult) error {
 	var b strings.Builder
 	if r.Version == 0 {
 		fmt.Fprintf(&b, "%d items rejected. Nothing was accepted, so no baseline version was created.\n", rejected)
@@ -153,6 +183,9 @@ func printReviewResult(w io.Writer, r baseline.Result, rejected int) error {
 		if len(keys) > 0 {
 			fmt.Fprintf(&b, "New keys: %s\n", strings.Join(keys, ", "))
 		}
+	}
+	if scoped != nil {
+		fmt.Fprintf(&b, "Delivery scope confirmed: %d requirements at baseline version %d.\n", len(scoped.Requirements), scoped.BaselineVersion)
 	}
 	_, err := io.WriteString(w, b.String())
 	return err

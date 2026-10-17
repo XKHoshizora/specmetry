@@ -81,7 +81,8 @@ func reviewOK(t *testing.T, dir string, doc map[string]any) string {
 
 // state is everything a review may write, to compare before and after a
 // refusal: the seq counter, versions, changes, entities, references, key
-// counters, and reviewed or conflicting items.
+// counters, reviewed or conflicting items, and scope confirmations with
+// their items.
 func state(t *testing.T, home datadir.Dir) string {
 	t.Helper()
 	// One query: opening the database is what takes time.
@@ -96,7 +97,8 @@ func state(t *testing.T, home datadir.Dir) string {
     (SELECT count(*) FROM code_refs),
     (SELECT coalesce(sum(next_value), 0) FROM key_counters),
     (SELECT count(*) FROM proposal_items WHERE review_state <> 'pending'),
-    (SELECT count(*) FROM questions WHERE related_id IS NOT NULL)`)[0], " ")
+    (SELECT count(*) FROM questions WHERE related_id IS NOT NULL),
+    (SELECT count(*) FROM scope_confirmations), (SELECT count(*) FROM scope_items)`)[0], " ")
 }
 
 // reviewRefused runs a review that must be refused with code, with a

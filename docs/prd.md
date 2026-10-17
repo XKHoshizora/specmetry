@@ -365,7 +365,7 @@
 | `source ack\|remove` | 确认来源变化、移除来源 | 人 |
 | `project set excerpt-storage <hash_only\|full>` | 修改片段保存模式（PD-24；M2 起可用） | 人 |
 | `target show` / `target set --ref <ref>` | 查看、设置交付目标 | `show`：任意；`set`：人 |
-| `scope show` / `scope confirm [--file]` | 查看、确认范围 | `show`：任意；`confirm`：人 |
+| `scope show` / `scope confirm [--requirements] [--file]` | 查看、确认范围 | `show`：任意；`confirm`：人 |
 | `proposal list\|show` | 查看提案（含三方对比） | 任意 |
 | `propose --file <path\|->` | 提交提案 | 任意 |
 | `propose --apply --file` | 人工编辑，立即应用 | 人 |

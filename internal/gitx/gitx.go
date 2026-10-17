@@ -191,6 +191,20 @@ func HeadBranch(ctx context.Context, worktree string) (string, error) {
 	return ref, nil
 }
 
+// ValidRefName reports whether ref is a well-formed full ref name, as git
+// check-ref-format judges it. It reads no object and needs no repository;
+// whether the ref exists is not asked.
+func ValidRefName(ctx context.Context, dir, ref string) (bool, error) {
+	if ref == "" || strings.HasPrefix(ref, "-") {
+		return false, nil
+	}
+	_, code, err := runCode(ctx, dir, "check-ref-format", ref)
+	if err != nil {
+		return false, err
+	}
+	return code == 0, nil
+}
+
 // CommitOf resolves ref to the full ID of a commit, or "" when the ref does
 // not exist or has no commit yet (a branch without commits). A ref that
 // exists but whose commit cannot be read, because it is missing (as in a

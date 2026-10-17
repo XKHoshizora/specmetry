@@ -60,12 +60,15 @@ type humanOp struct {
 }
 
 // confirmState is everything the commands may write, read with SQL of its
-// own: closeState, and every source's acknowledged hash and removal.
+// own: closeState, every source's acknowledged hash and removal, the
+// targets, and the scope confirmations with their items.
 func confirmState(t *testing.T, home datadir.Dir) string {
 	t.Helper()
 	return strings.Join(closeState(t, home), " ") + " | " + strings.Join(rows(t, home, `SELECT
     (SELECT group_concat(path || ':' || acked_sha256 || ':' || coalesce(removed_seq, '-'), ' ') FROM (SELECT * FROM sources ORDER BY path)),
-    (SELECT count(*) FROM source_acks)`)[0], " ")
+    (SELECT count(*) FROM source_acks),
+    (SELECT group_concat(ref || ':' || coalesce(archived_seq, '-'), ' ') FROM (SELECT * FROM delivery_targets ORDER BY created_seq)),
+    (SELECT count(*) FROM scope_confirmations), (SELECT count(*) FROM scope_items)`)[0], " ")
 }
 
 // codex-review-031 N2, for every human-only confirmation, as a person at a
@@ -74,7 +77,7 @@ func confirmState(t *testing.T, home datadir.Dir) string {
 //     command's output: one whole error.v1 when it is cancelled, answered
 //     wrong, or the input ends (exit 3) or cannot be read (exit 6); one
 //     whole document (proposal-receipt.v1, source-add.v1) or the success
-//     text when it is confirmed;
+//     text when it is confirmed (target set and scope confirm too, WP1.8);
 //   - with --json and stderr not a terminal, or cut off, it is exit 6 before
 //     anything is read, with error.v1 on stdout;
 //   - --json=false and no flag keep the confirmation on stdout;
@@ -121,6 +124,8 @@ func TestConfirmationWithJSON(t *testing.T) {
 		}, fixed("docs/client-brief.md"), ""},
 		{"source remove", func() []string { return []string{"source", "remove", "docs/notes.md"} }, fixed("docs/notes.md"), ""},
 		{"source add --allow-any-type", func() []string { return []string{"source", "add", "assets/logo.bin", "--allow-any-type"} }, fixed("assets/logo.bin"), "source-add.v1"},
+		{"target set", func() []string { return []string{"target", "set", "--ref", "refs/heads/release"} }, fixed("refs/heads/release"), ""},
+		{"scope confirm", func() []string { return []string{"scope", "confirm"} }, func() string { return fmt.Sprintf("v%d", version()) }, ""},
 	}
 	before := confirmState(t, home)
 	t.Chdir(dir)
@@ -213,8 +218,11 @@ func TestConfirmationWithJSON(t *testing.T) {
     (SELECT acked_sha256 FROM sources WHERE path = 'docs/client-brief.md' AND removed_seq IS NULL),
     (SELECT count(*) FROM sources WHERE path = 'docs/notes.md' AND removed_seq IS NOT NULL),
     (SELECT count(*) FROM sources WHERE path = 'assets/logo.bin' AND removed_seq IS NULL),
-    (SELECT max(number) FROM baseline_versions)`)
-	if want := [][]string{{"Q-001:answered Q-002:dismissed", briefSHA, "1", "1", "4"}}; !equalRows(got, want) {
+    (SELECT max(number) FROM baseline_versions),
+    (SELECT ref FROM delivery_targets WHERE archived_seq IS NULL),
+    (SELECT group_concat(s, ' ') FROM (SELECT r.key || '@' || i.requirement_revision || ':' || c.baseline_version AS s FROM scope_confirmations c
+        JOIN scope_items i ON i.confirmation_id = c.id JOIN requirements r ON r.id = i.requirement_id ORDER BY r.key))`)
+	if want := [][]string{{"Q-001:answered Q-002:dismissed", briefSHA, "1", "1", "4", "refs/heads/release", "REQ-001@1:4 REQ-002@1:4 REQ-003@1:4"}}; !equalRows(got, want) {
 		t.Fatalf("after the confirmations: %v, want %v", got, want)
 	}
 }
