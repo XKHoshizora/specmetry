@@ -1,6 +1,6 @@
 # M1 退出条件证据核对
 
-- 核对日期：2026-10-17（第 2 版）
+- 核对日期：2026-10-17（第 2 版；codex-review-038 之后做了文档收尾，见修订记录）
 - 核对对象：master 上的合并提交 `5aad555`（PR #17 合并后），树 `13ee736`。证据来自三批提交，每批的适用提交如下：
 
   | 证据 | 来源 | 适用提交 | 审查 | master CI |
@@ -23,7 +23,11 @@
 - 结论在第 10 节。本文只整理证据，**不宣布 M1 完成**；M1 是否验收，由产品负责人决定。
 - 修订记录：
   - 第 1 版（提交 `cf72f20`）：59 个 P0 项中 53 项 PASS，6 项 INCOMPLETE（CH-01、CH-02、SRC-07、BL-21、BL-27、PRV-07），建议补齐证据后再验收。
-  - 第 2 版（本版）：6 项缺口由 PR #16 补齐，审查 036 GO（SRC-07 由审查方独立审查通过）；项目名称修复由 PR #17 完成，审查 037 GO。每项缺口如何关闭，见第 4 节与第 10 节。
+  - 第 2 版（提交 `9b8ea5d`，codex-review-038 的审查目标）：6 项缺口由 PR #16 补齐，审查 036 GO（SRC-07 由审查方独立审查通过）；项目名称修复由 PR #17 完成，审查 037 GO。每项缺口如何关闭，见第 4 节与第 10 节。
+  - 第 2 版的文档收尾（审查 038 之后，不改变结论）：
+    - 按审查 038 的建议，改写 PASS 的定义；
+    - CH-01、CH-02 的依据改写为证据链。第 2 版曾以"这两格不是第 1 版的缺口"和"按'或'可以接受"作为说明，这两句话本身不能证明验收成立，现已替换为审查 038 的裁定；
+    - 第 10 节的结论更新为审查 038 的 GO。
 
 ## 1. 退出条件
 
@@ -99,7 +103,7 @@
 
 状态的含义：
 
-- **PASS**：M1 要求的每一条都有断言，并在 CI 中运行通过；
+- **PASS**：M1 各项要求均有适用的测试、独立审查或规定的其他验证证据；自动化测试注明对应提交和 CI 结果。例如 SRC-07 的"不解析文档语义"来自 codex-review-036 的独立调用链审查，不是 CI 中的测试；
 - **INCOMPLETE**：有一条缺少验证证据（第 2 版中已没有这样的项；第 1 版中的 6 项如何关闭，在对应行中注明）；
 - **DEFERRED**：只用于"M1 / M2"等项中属于后续里程碑的部分，并注明依据。
 
@@ -181,8 +185,8 @@
 | MVP-TGT-08 | WP1.8 | `scopeInput`；`State.MustRequirements` | `TestScopeConfirm` | 默认只选中 `must` 需求（REQ-001、REQ-003，不含 should 的 REQ-002）；`--requirements` 改为指定的需求 | PPP | 034 | PASS |
 | MVP-TGT-10 | WP1.8 | `scope.State.WaiversUnder`；`scope.Check` 的集合比较 | 真实 CLI：`TestTargetShowAndSet`、`TestScopeConfirm`、`TestScopeInReview`；单元：`scope` `TestCheckWaivers` | 真实 CLI：`target-scope.v1` 的 `effective_waivers` 为 `[]`；多列一项：退出码 5，`error.current.effective_waivers = []`，不写入；一致时写入，`acknowledged_waivers_json = "[]"`。单元测试用合成的非空集合验证少一项、多一项、已失效和顺序无关（集合为空时无法在 CLI 中构造"少一项"）。注：审核路径没有断言 `error.current` | PPP | 034（V-T01 通过）、035 | PASS（M1）；真实豁免 DEFERRED（M2） |
 | MVP-TGT-11 | WP1.8 | 写事务以 `BEGIN IMMEDIATE` 开始，先取得写锁再重新读取和检查 | `TestScopeConfirmedMeanwhile`、`TestScopeInReview`；`scope` `TestConfirmRace`（两个独立连接） | 会话甲以 C1 确认、会话乙已写入 C2：退出码 5，不写入，`error.current` 给出 C2；首次确认为 null 而已有确认：退出码 5；重新读取后以 C2 确认：成功；同进程另一连接、伪终端中另一进程在确认期间写入：退出码 5。审核中：已有确认时为 null 返回退出码 5（current 为 C1），重新读取后成功。注：审核路径没有字面的"C1 对 C2"反例；确认期间过期的两个用例没有断言 `seq` | PPP | 034（另行用两个同时等待的 CLI 会话验证）、035 | PASS |
-| MVP-CH-01 | WP1.2、1.4、1.6、1.7、1.8；PR #16 | `channel.Detect`（`executeRoot` 中每次执行识别一次）；每个人类专属命令的执行体首先调用 `RequireHuman`；`confirm` 中的 `channel.Guard` | 见下文矩阵；PR #16：`TestAgentVariablesRefuseTheRemainingHumanOnlyCommands`（进程级）、`TestBuiltBinary`（正式二进制） | 全部 9 个人类专属命令：伪终端中设置 Agent 变量时退出码 3，没有提示，不写入，canary 不在输出和数据目录中；不设变量时显示确认，拒绝后不写入。`propose --apply`、`question dismiss`：两个变量、带与不带 `--json`，进程内另验证读取次数为 0；正式二进制对这两个命令验证了同样的边界。第 1 版为 INCOMPLETE（缺这两个命令的伪终端测试），由 PR #16 关闭 | PPP | 014、019、026、028、035、036 | PASS |
-| MVP-CH-02 | 同上 | 同上 | 见下文矩阵；PR #16：`TestRedirectionRefusesTheRemainingHumanOnlyCommands`（进程级）、`TestBuiltBinary`（正式二进制） | 全部 9 个人类专属命令：stdin 为终端、stdout 重定向时退出码 3，没有提示。`source ack`、`source add --allow-any-type`、`propose --apply`、`question dismiss`：stdout 写入文件并读回，带 `--json` 时文件恰好是一份 error.v1，不带时原因在终端、文件为空；stdin 不是终端（真实子进程）同样退出码 3；不写入。正式二进制对 `question dismiss` 验证了重定向与管道。第 1 版为 INCOMPLETE（缺这 4 个命令的重定向测试），由 PR #16 关闭。证据边界见第 8 节 | PPP | 同上 | PASS |
+| MVP-CH-01 | WP1.2、1.4、1.6、1.7、1.8；PR #16 | `channel.Detect`（`executeRoot` 中每次执行识别一次）；每个人类专属命令的执行体首先调用 `RequireHuman`；`confirm` 中的 `channel.Guard` | 见下文矩阵；PR #16：`TestAgentVariablesRefuseTheRemainingHumanOnlyCommands`（进程级）、`TestBuiltBinary`（正式二进制） | 全部 9 个人类专属命令：伪终端中设置 Agent 变量时退出码 3，没有提示，不写入，canary 不在输出和数据目录中；不设变量时显示确认，拒绝后不写入。`propose --apply`、`question dismiss`：两个变量、带与不带 `--json`，进程内另验证读取次数为 0；正式二进制对这两个命令验证了同样的边界。`question answer` 的仓库测试只设置了 `CLAUDECODE`。两个变量经同一个识别循环产生同一个 Detection，随后执行相同的防护；codex-review-038 另用正式二进制独立补验了 `CLAUDE_CODE_ENTRYPOINT`（拒绝，canary 不泄露；无变量、正确确认的对照成功）。补验在 Windows 上，没有进入仓库，也没有在三平台 CI 中运行。第 1 版为 INCOMPLETE（缺这两个命令的伪终端测试），由 PR #16 关闭 | PPP | 014、019、026、028、035、036、038 | PASS |
+| MVP-CH-02 | 同上 | 同上 | 见下文矩阵；PR #16：`TestRedirectionRefusesTheRemainingHumanOnlyCommands`（进程级）、`TestBuiltBinary`（正式二进制） | 全部 9 个人类专属命令：stdin 为终端、stdout 重定向时退出码 3，没有提示。`source ack`、`source add --allow-any-type`、`propose --apply`、`question dismiss`：stdout 写入文件并读回，带 `--json` 时文件恰好是一份 error.v1，不带时原因在终端、文件为空；stdin 不是终端（真实子进程）同样退出码 3；不写入。正式二进制对 `question dismiss` 验证了重定向与管道。`review`、`question answer` 的"stdin 不是终端"：按审查 038 的裁定，由证据链成立，见第 8 节第 3 条。第 1 版为 INCOMPLETE（缺这 4 个命令的重定向测试），由 PR #16 关闭 | PPP | 同上 | PASS |
 
 **CH-01 / CH-02 的命令 × 情形矩阵**（伪终端测试在三个平台都运行，没有跳过条件。"PR #16"表示由 PR #16 补上的格子）：
 
@@ -323,9 +327,25 @@ WP1.8 新增的命令也会解析 ref（`target show`、`scope show`、`target s
    - 进程级：测试二进制作为子进程。证明通道识别与进程边界，但不等同于正式发布的二进制。
    - 正式二进制：`go build -tags nowebui ./cmd/specmetry`（`TestBuiltBinary`、`TestShellCompletionIsRefused`）。证明 `main` 的接线、退出码、基本 JSON 读取与 CH-01/02 的关键边界，不证明发布包本身（内嵌 Dashboard 的构建由 CI 的"Build with dashboard"冒烟，打包在 M6）。
    - 规则：涉及 TTY、Agent 环境变量、重定向或进程退出码的验收，必须有进程级或正式二进制的证据。
-3. **需要最终审查注意的证据边界**（不改变状态）：
-   - CH-02 中 `review` 与 `question answer` 的"stdin 不是终端"，只有进程内证据，加上 WP1.2 替身命令的进程级通用证据。它们的 stdout 重定向有进程级证据，而通道在执行命令之前统一识别。第 1 版认定的 CH-02 缺口是 4 个命令的 stdout 重定向，审查 036 按此确认已补齐；这两格不是第 1 版的缺口，在此如实列出。
-   - CH-01 中 `question answer` 只测试了 `CLAUDECODE`；本行写的是"`CLAUDECODE` 或 `CLAUDE_CODE_ENTRYPOINT`"，按"或"可以接受。
+3. **证据边界与 CH-01、CH-02 的证据链**（codex-review-038 的裁定，不改变状态）：
+   - **CH-02：`review`、`question answer` 的"stdin 不是终端"，PASS**。证据链如下：
+     1. `executeRoot`（`internal/cli/root.go`）在命令执行之前，按进程的 `os.Stdin`、`os.Stdout` 统一识别通道。
+     2. `channel.Decide` 对不是终端的 stdin 一律给出 `agent_cli`。这一操作系统边界已有真实子进程的证据：WP1.2 的 `TestHumanOnlyCommandRefusesWithoutTerminal`，以及 PR #16 对其他命令的管道测试。
+     3. `review`（`internal/cli/review.go`）与 `question answer`（`internal/cli/question.go`）都在读取输入、打开数据库和人工确认之前调用同一个 `RequireHuman`，没有命令专属的旁路。
+     4. 这两个真实命令的 stdout 重定向有进程级证据。它们的进程内非终端测试调用生产的 `Execute`，没有注入通道，证明命令的接线与拒绝后的业务状态；进程内测试本身不代替真实进程的证据。
+     5. `TestBuiltBinary` 验证了正式的 `main` 入口、真实的退出码和关键的通道边界。
+
+     已批准的三类证据定义，不要求每个命令的每种组合都用正式二进制。
+   - **CH-01：`question answer` 的两个 Agent 变量**。仓库测试只设置了 `CLAUDECODE`；两个变量经同一个识别循环产生同一个 Detection，随后执行相同的防护。依据是这一共同机制与审查方的补验，而不只是验收文字中的"或"。
+   - **证据的来源要分开看**：
+     - 仓库中的测试，在三平台 CI 中运行（第 3 节、第 4 节的"CI"一列）；
+     - 作者在本地的运行，包括 Windows、WSL 与真实旧版 git 的重跑（第 3 节、第 7 节）。审查 038 没有独立重跑真实旧版 git，这些仍是作者提供的本地证据；
+     - 审查方的独立验证：
+       - 审查 036 的 SRC-07 调用链审查；
+       - 审查 037 的逐表比较；
+       - 审查 038 在 Windows 上用正式二进制直接补验 `review`、`question answer` 的真实 stdin 拒绝（stdin 接到保持写端打开、没有数据的管道，stdout 为 ConPTY；文本与 JSON 两种模式都是退出码 3，没有提示，业务状态不变，没有阻塞），以及 `question answer` 的 `CLAUDE_CODE_ENTRYPOINT`。
+
+       这些独立验证没有进入仓库，也没有在三平台 CI 中运行。
    - `TestBuiltBinary` 用 `nowebui` 构建，验证生产入口，不验证发布包。
    - PR #16 的变异检验是作者提供的辅助证据，审查 036 没有独立重跑。
 4. **测试强度不足的地方**（不影响状态，供后续改进）：
@@ -384,7 +404,7 @@ WP1.8 新增的命令也会解析 ref（`target show`、`scope show`、`target s
 - P1：INIT-08、INIT-10 通过；INV-05（`init --json` 输出提交数与最近提交时间）没有实现。它不阻塞 M1。
 - 维护事项：M-3、M-11 已关闭，M-12 已修复；其余见第 9 节，都没有作为已接受的风险。
 
-**结论：按退出条件，建议 M1 验收。** 是否交给 Codex 做 M1 最终退出条件审查（审查 038）、以及是否正式验收，由产品负责人决定。最终审查需要注意的证据边界，见第 8 节第 3 条。
+**结论：按退出条件，建议 M1 验收。** codex-review-038 的结论：PR #15 GO；固定代码快照 `5aad555` 的 M1 退出条件 GO，59 PASS、0 INCOMPLETE。**M1 等待产品负责人正式验收**，本文不宣布 M1 已验收。证据边界见第 8 节第 3 条。
 
 ## 11. 待决问题与已批准的决定
 
