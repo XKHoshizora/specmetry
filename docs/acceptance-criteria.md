@@ -209,10 +209,11 @@
 | MVP-ST-08 | `fx-scale` 上执行 `status --json` → 少于 1 s | 基准 | NFR-04 | M2 |
 | MVP-ST-09 | `status` 的人类可读输出与 golden 一致：包括目标、快照、交付状态、阻塞差距、工作区视图提示 | 集成 | FR-ST-06 | M2 |
 | MVP-ST-10 | 所有夹具上，`init --json`、`status --json`、`gaps --json`、`check run --json` 的输出分别通过 `init.v1`、`status.v1`、`gaps.v1`、`check-run.v1` 的校验；所有错误输出都通过 `error.v1` 的校验 | 集成 | FR-ST-06 | M2 |
-| MVP-ST-11 | `status --diff-since <seq>` → 用当前的 `S` 和观测哈希，只列出 `seq` 之后新增的事实带来的状态变化 | 集成 | FR-ST-06 | M2 |
+| MVP-ST-11 | `status --diff-since <seq>` → 两次推导共用本次命令一次取得的当前值输入（`S`、观测哈希、项目设置），只改变事实的截止序号；只列出 `seq` 之后新增的事实带来的状态变化；输出带 `diff_since_seq`，`project.*` 是两次推导共用的设置。在两次推导之间注入对设置的修改 → 结果与输出都不受影响。只修改设置、没有新事实（例如 `init --skip-sources`、`init --stage docs_only`）→ `as_of_seq` 不变，`status --diff-since <as_of_seq>` 的 `changes_since` 为空：不虚构事实序号或历史事实的变化（data-model §6.13.1） | 集成 | FR-ST-06 | M2 |
 | MVP-ST-12 | [data-model.md §6.9](data-model.md#69-保守规则无法判断时) 中的每一行保守规则都有用例 | 单元 + 集成 | FR-ST-09 | M2 |
 | MVP-ST-13 | **差距与交付状态的一致性**（性质测试）：随机生成事实序列，每次都满足"交付状态为 `ready` ⇔ 没有阻塞差距"；每个 AC 至多有 1 个状态差距；有范围时，范围外的条目没有差距；`waived` 和 `accepted` 的 AC 没有状态差距；`SOURCE_REMOVED` 等标记类警告从不阻塞 | 单元 | FR-ST-05 | M2 |
-| MVP-ST-14 | **推导纯度**：在相同的事实、`S` 和观测哈希下，修改磁盘文件但不重新观测 → 推导结果不变；输出中的 `as_of_seq`、`snapshot`、`sources[].current_sha256` 可以复现原结果 | 单元 | FR-ST-08、NFR-11 | M2 |
+| MVP-ST-14 | **推导纯度与重放**（data-model §6.13.1）：相同的完整输入（截止 `as_of_seq` 的事实、`S`、观测哈希、项目设置与参数）→ 推导结果相同；修改磁盘文件但不重新观测 → 推导结果不变。记录一次输出之后修改当前设置（例如在只完成初始化的项目上执行 `init --skip-sources`，即 `sources_skipped` 由 false 变为 true：`init_progress` 由 `initialized` 变为 `sources_registered`，`as_of_seq` 不变）→ 用原输出记录的设置与其他当前值输入，以及同一数据库中截止原 `as_of_seq` 的事实重放 → 仍得到原结果。缺少必要的重放输入（输出中没有项目设置；来源集合中的某个来源没有观测哈希；数据库中缺少截止 `as_of_seq` 的事实）→ 拒绝重放并报告缺少的项，不用当前值补齐；没有观测与观测到文件缺失（NULL）区分开。只凭 `as_of_seq`、`snapshot` 与 `baseline_version` 不构成完整输入；输出不是事实的备份 | 单元 + 集成 | FR-ST-08、NFR-11 | M2 |
+| MVP-ST-15 | **设置上下文**：`status --json`、`gaps --json` 中的 `project.stage`、`project.sources_skipped`、`project.inventory_skipped`，等于这次推导实际使用的值；设置与事实在同一个读事务中读取，在读取之后、输出之前注入对设置的修改 → 输出与推导结果都仍按读到的值。修改设置之前与之后各执行一次（其间没有其他写入）→ 两次输出的 `project.*` 各自反映当时的值，`as_of_seq` 相同。只输出这三项设置，`settings_json` 的其他键（例如 `excerpt_storage`）不出现在输出中（data-model §6.13、§6.13.1） | 集成 | FR-ST-08、NFR-11 | M2 |
 
 ### 2.11 采集（COL）
 
@@ -331,7 +332,7 @@
 
 ### 3.1 独立 `ready` 复核器的规格（F5）
 
-> 状态：规格已写明（2026-10-18），**待独立审查**；审查通过之前不是已冻结的契约。复核器实现不变量 #2，只在测试代码中使用（WP2.2）。输入事实的规格见 [data-model.md §6.13](data-model.md#613-推导的输入f4)，合法事实域见 [§6.14](data-model.md#614-合法事实域与畸形输入)。
+> 状态：规格已写明（2026-10-18），**待独立审查**；审查通过之前不是已冻结的契约。复核器实现不变量 #2，只在测试代码中使用（WP2.2）。输入事实的规格见 [data-model.md §6.13](data-model.md#613-推导的输入f4)，当前值输入与重放见 [§6.13.1](data-model.md#6131-当前值的取得重放与---diff-since)，合法事实域见 [§6.14](data-model.md#614-合法事实域与畸形输入)。审查 044 之后补齐了当前值输入的要求（B1），待定向复审。
 
 **独立性**：
 
@@ -360,6 +361,7 @@
 
 - 双向对照只在合法事实域上进行：MVP 合法事实域，以及（需要 data-model §4.11.2 的输入比较）通用合法事实域。
 - 生成器必须产生合法但不能 `ready` 的历史，以及共享 `seq` 的合法写入（至少包括"审核接受多个条目并附带范围"与 `propose --apply`），不能为了双向一致而预先排除。
+- 生成器同时变化当前值输入（data-model §6.14）：项目设置的各种取值、`S` 为 NULL、来源文件缺失。
 - 畸形输入另行测试：两个实现都不崩溃、结果确定；复核器按它自己的谓词给出结论；推导引擎不作业务结果的保证（data-model §6.14，选项 (a)）。
 
 **两套转换器**：各自独立实现，只做原始事实的映射。
@@ -369,6 +371,8 @@
 - 同一个 `seq` 之内的顺序只用 `change_index`、`item_index` 与 data-model §5.5 的应用顺序。
 - 保留项目与实体的归属、修订与配置哈希、证据引用与时序（决定的 `evidence_id`、`snapshot`、`mode`、`seen_decision_id` 与 `seq`；执行的上下文、结果、等级与 `seq`），以及全部决定与执行，包括失败的、被取代的记录。
 - 不能提前选出当前决定、计算适用性或合格性，也不能合并同一 AC 的多条记录。
+- 当前值输入（`S`、来源观测、项目设置）由测试前端取得一次，作为同一份记录交给两个实现；两个实现都不自行读取数据库中的设置、解析 ref 或观测磁盘（data-model §6.13.1）。
+- R1 ~ R10 不读取项目设置：设置不改变交付状态与阻塞差距（data-model §6.13），所以只有设置不同的两组输入，`ready` 的结论必须相同。样本中要有这样的输入对。
 
 **必须有的反例**：在合法事实历史中构造。每条以一个条件为目标，复核器必须在结果中指出该条件；条件之间有结构依赖时（例如没有基准版本就不可能有有效的范围确认），反例只需违反目标条件及其必然的连带条件。
 
@@ -436,7 +440,7 @@
 | E2E-3 | 文档不完整 | init（`incomplete_docs`）→ 提案中有反推条目 → 范围确认缺少 `missing_goals_reviewed` 时失败 → 补充之后成功 | 反推标识存在；范围确认的约束生效 |
 | E2E-4 | 日常循环与 worktree | 重放 Hook → 在 feature worktree 中 sync 并执行检查 → `main` 快进合并 → 在主 worktree 中执行检查 | 合并之前，feature 上的结果不影响交付；合并后，同一 SHA 上的合格执行生效 |
 | E2E-5 | 需求变更 | 来源变化（`SOURCE_CHANGED`）→ 人确认来源（来源集合改变，出现 `SCOPE_STALE`）→ Agent 提交需求的 `material` 修订 → 审核时对一个 AC 选择 `defer`，并重新确认范围（出现 `PARENT_REVISED`，`SCOPE_STALE` 消除）→ 人工编辑修订该 AC（`PARENT_REVISED` 消除） | 各差距按上述顺序出现和消除 |
-| E2E-6 | 交付 | 解决全部差距 → 逐条验收（确认观测级风险）→ `ready`（`evidence_grade = observed`）→ 目标前进到新提交 → `needs_reverification` → 执行 `check run --all` → 自动化 AC 为 `ready_for_review`（`observed_evidence`，MVP 中不沿用），手动 AC 为 `needs_reverification` → 人重新验收 → `ready` | 每一步的状态都与 oracle 一致；`ready` 的判定可以用同样的 `as_of_seq` 复现；任何输出都没有"快照已验证"的说法 |
+| E2E-6 | 交付 | 解决全部差距 → 逐条验收（确认观测级风险）→ `ready`（`evidence_grade = observed`）→ 目标前进到新提交 → `needs_reverification` → 执行 `check run --all` → 自动化 AC 为 `ready_for_review`（`observed_evidence`，MVP 中不沿用），手动 AC 为 `needs_reverification` → 人重新验收 → `ready` | 每一步的状态都与 oracle 一致；`ready` 的判定可以用输出记录的完整输入重放（同样的 `as_of_seq`、`S`、观测哈希与项目设置，加上同一数据库中的事实，data-model §6.13.1）；任何输出都没有"快照已验证"的说法 |
 | E2E-7 | 人类专属操作被阻止 | 重放拦截 payload；在非 TTY 中执行 `accept`、`review`、`scope confirm`、`source ack`、`target set`、`question answer`、`question dismiss` | 都被拒绝；没有新增决定、版本、范围确认或来源确认；有 `guard_denied` 事件 |
 | E2E-8 | 删除与恢复 | 见 CX-11，并加上 C0 canary | 不复活；没有残留 |
 
@@ -453,7 +457,7 @@
 | FR-CLM | CLM-01 ~ 05、CX-12、CX-13 |
 | FR-EV | EV-01 ~ 13、CX-02、CX-15、CX-16、CX-26 ~ 28 |
 | FR-ACC | ACC-01 ~ 11、CX-01、CX-08、CX-19 ~ 21、CX-25 ~ 27 |
-| FR-ST | ST-01 ~ 14、CLM-01（FR-ST-07）、CX-09、CX-12（FR-ST-07）、CX-22 |
+| FR-ST | ST-01 ~ 15、CLM-01（FR-ST-07）、CX-09、CX-12（FR-ST-07）、CX-22 |
 | FR-COL | COL-01 ~ 15 |
 | FR-UI | UI-01 ~ 16、CX-08 的 UI 部分（FR-UI-13）、CX-23 |
 | FR-PRV、FR-STO | PRV-01 ~ 10、STO-01 ~ 07、EV-05、EV-11、BL-23、BL-26、CX-11（FR-STO-03）、CX-24 |

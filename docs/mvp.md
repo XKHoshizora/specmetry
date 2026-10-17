@@ -71,7 +71,7 @@
 1. **首次使用**：`setup` → `/specmetry init` → 审核基准并确认范围 → `/specmetry init`（全量 audit 与检查）→ 查看交付状态。
 2. **日常循环**：Agent 在任意 worktree 中工作 → `/specmetry sync`（工作区视图）→ 代码合入交付分支后，在交付分支所在的干净 worktree 中运行检查 → `ready_for_review` → 人工验收。
 3. **需求变更**：处理来源变化 → `/specmetry goals` → 审核（包括 AC 后续处理和范围重新确认）。
-4. **交付**：交付状态为 `ready` 时，判定对象是"快照 `S` + 基准版本 + 范围确认 + `as_of_seq`"，可以复现，并且附带证据等级（MVP 中为观测级）。
+4. **交付**：交付状态为 `ready` 时，判定对象是"快照 `S` + 基准版本 + 范围确认 + `as_of_seq`"，可以复现（重放所需的完整输入见 [data-model.md §6.13.1](data-model.md#6131-当前值的取得重放与---diff-since)），并且附带证据等级（MVP 中为观测级）。
 
 ## 6. 里程碑
 
