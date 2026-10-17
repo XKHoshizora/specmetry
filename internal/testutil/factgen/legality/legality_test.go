@@ -2,6 +2,7 @@ package legality_test
 
 import (
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/XKHoshizora/specmetry/internal/testutil/factgen"
@@ -59,7 +60,8 @@ func TestReview046Seed3FollowsTheApplicationOrder(t *testing.T) {
 }
 
 // Every random history the derivation tests and the comparison use is
-// legal: the generator's claim is checked, not assumed.
+// legal: the generator's claim is checked, not assumed, by the checker and
+// by the scans of review047_test.go.
 func TestRandomHistoriesAreLegal(t *testing.T) {
 	sets := []struct {
 		name  string
@@ -79,10 +81,12 @@ func TestRandomHistoriesAreLegal(t *testing.T) {
 		bad := 0
 		for seed := range set.seeds {
 			o := set.opts(seed)
-			if p := problemsOf(factgen.Random(seed, o), o, ""); len(p) > 0 {
+			c := factgen.Random(seed, o)
+			p, scan := problemsOf(c, o, ""), independent(c.Dump)
+			if len(p) > 0 || len(scan) > 0 {
 				bad++
 				if bad <= 3 {
-					t.Errorf("%s seed=%d:\n%s", set.name, seed, legality.Report(p, nil))
+					t.Errorf("%s seed=%d:\n%s%s", set.name, seed, legality.Report(p, nil), strings.Join(scan, "\n"))
 				}
 			}
 		}
