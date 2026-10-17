@@ -304,8 +304,8 @@
 
 | ID | 前置 → 操作 → 期望 | 验证 | 需求 | 里程碑 |
 |---|---|---|---|---|
-| MVP-CH-01 | 在伪终端中执行人类专属命令（`review`、`source ack`、`scope confirm`），同时设置 `CLAUDECODE` 或 `CLAUDE_CODE_ENTRYPOINT`（值为 canary）→ 退出码 3，不写入；不设置时进入交互式确认，拒绝确认则不写入；数据目录、输出和日志中都找不到这个 canary。WP1.2 用只在测试中存在的替身命令验证通道识别、拦截、确认、取消和 canary（真实终端，三个平台）；`source ack`、`source remove`（以及 `source add --allow-any-type`）已在 WP1.4 用真实命令验证；`review`、`scope confirm` 随 WP1.6、WP1.8 完成 | 集成 | FR-BL-04、FR-SRC-03、FR-TGT-04 | M1 |
-| MVP-CH-02 | stdin 是终端但 stdout 被重定向，或者 stdin 不是终端 → `agent_cli`，人类专属命令返回退出码 3；加上 `--json` 不改变识别结果；只读命令在任何通道中都可以执行。WP1.2 已用替身命令和只读命令 `version`、`doctor` 验证；`source ack`、`source remove` 已在 WP1.4 验证（stdout 重定向、stdin 非终端、带 `--json`）；其余人类专属命令随其工作包验证 | 集成 | FR-BL-04、FR-SRC-03 | M1 |
+| MVP-CH-01 | 在伪终端中执行人类专属命令（`review`、`source ack`、`scope confirm`），同时设置 `CLAUDECODE` 或 `CLAUDE_CODE_ENTRYPOINT`（值为 canary）→ 退出码 3，不写入；不设置时进入交互式确认，拒绝确认则不写入；数据目录、输出和日志中都找不到这个 canary。WP1.2 用只在测试中存在的替身命令验证通道识别、拦截、确认、取消和 canary（真实终端，三个平台）；`source ack`、`source remove`（以及 `source add --allow-any-type`）已在 WP1.4 用真实命令验证；`review`、`scope confirm` 随 WP1.6、WP1.8 完成；`propose --apply`、`question dismiss` 在 M1 退出证据的补充中验证（PR #16） | 集成 | FR-BL-04、FR-SRC-03、FR-TGT-04 | M1 |
+| MVP-CH-02 | stdin 是终端但 stdout 被重定向，或者 stdin 不是终端 → `agent_cli`，人类专属命令返回退出码 3；加上 `--json` 不改变识别结果；只读命令在任何通道中都可以执行。WP1.2 已用替身命令和只读命令 `version`、`doctor` 验证；`source remove` 已在 WP1.4 验证（stdout 重定向、stdin 非终端、带 `--json`）；`source ack`、`source add --allow-any-type`、`propose --apply`、`question dismiss` 的 stdout 重定向与 stdin 非终端，在 M1 退出证据的补充中用真实子进程验证（PR #16）；其余人类专属命令随其工作包验证 | 集成 | FR-BL-04、FR-SRC-03 | M1 |
 
 ## 3. 关键不变量
 
