@@ -204,7 +204,8 @@ func Prepare(ctx context.Context, opts InitOptions, scanner *secrets.Scanner) (*
 }
 
 // validateName checks a project name: not blank, one line without control
-// characters, at most 200 characters (init.v1).
+// characters or a code fence, which no free text may hold (architecture
+// §10.2, as for a target's name), at most 200 characters (init.v1).
 func validateName(name, pointer string) error {
 	problem := ""
 	switch {
@@ -216,6 +217,8 @@ func validateName(name, pointer string) error {
 		problem = "longer than 200 characters"
 	case strings.ContainsFunc(name, unicode.IsControl):
 		problem = "contains a line break or another control character"
+	case strings.Contains(name, "```"):
+		problem = "contains a code fence (three backticks), which free text may not"
 	default:
 		return nil
 	}
@@ -469,6 +472,15 @@ VALUES (?, ?, 'default', ?, ?, 'system', 'system')`, ulid.New(), proj.id, p.bran
 // update brings an existing project up to date: the stage if --stage
 // changes it, the skip flags (only ever set), and the worktrees.
 func (p *Plan) update(ctx context.Context, tx *sql.Tx, proj *project, now time.Time) error {
+	// A project registered, before names were checked for code fences,
+	// under a name that holds one: init does not rename a project, and its
+	// output could not show the name, so it stops here. Nothing is written,
+	// the name is kept as it is, and it is not quoted.
+	if err := validateName(proj.name, "name (registered)"); err != nil {
+		return apperr.Newf(apperr.InvalidInput,
+			"project %s is registered under a name this version does not accept (%s); init does not rename a project, so nothing was changed",
+			proj.id, apperr.From(err).Details[0].Problem).WithDetails(apperr.Detail{Pointer: "name (registered)", Problem: apperr.From(err).Details[0].Problem})
+	}
 	if p.opts.NameGiven && p.opts.Name != proj.name {
 		return apperr.Newf(apperr.InvalidInput,
 			"project %s is registered as %q; init does not rename a project", proj.id, proj.name).
