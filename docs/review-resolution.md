@@ -2278,4 +2278,23 @@ MVP v0.1.0 不支持 SHA-256 格式的 git 对象 ID。§27 记录的现象（64
 - WSL Linux（git 2.43.0）：19 个测试二进制全部通过，其中 `cli` 140 项、`scope` 6 项。补全拒绝用真实的 Linux 二进制重放，结果不变。
 - 三平台 CI 的结果记录在 PR #14 中。
 
-**状态**：已修复，等待 Codex 定向复审（审查 035）。PR #14 未合并，M1 尚未整体验收。
+**状态**：已修复。定向复审为 codex-review-035（GO），见 §45。
+
+## 45. WP1.8 最终定向复审（codex-review-035）与验收
+
+**审查结论**：**GO**，BLOCKER 为 0，有 2 项 NON-BLOCKER。审查目标 `7f65408`，修复提交 `f0dab52`，修复前基准 `90beb48`；只复核审查 034 的 B1、B2 及直接回归。审查原文按原样入库（`docs/reviews/codex-review-035.md`）。
+
+- **审查 034 B1 关闭**：交互式范围确认与 `--file` 都按 `scope.v1` 校验。非法备注在确认之前拒绝；合法备注按原值保存；省略备注时保存为 SQL NULL；密钥扫描仍然有效。
+- **审查 034 B2 关闭**：`CheckName`、写入处的 `SetTarget` 和输出 schema 都禁止代码围栏名称。
+- 审查方在修复前的隔离副本中运行了新增的回归测试，复现了原缺陷。三平台 CI 的结论以 attempt 2 的日志为准（[run 38957016420，attempt 2](https://github.com/XKHoshizora/specmetry/actions/runs/38957016420/attempts/2)），attempt 1 的失败保留为独立事项（见下文 N2）。
+**验收**：产品负责人于 2026-10-17 确认 WP1.8 通过代码验收，PR #14 已合并（合并提交 `19600ec`；master 包含审查提交 `7f65408`，两者的树相同）。合并后 master 的三平台 CI 8/8 通过（[run 39000934831](https://github.com/XKHoshizora/specmetry/actions/runs/39000934831)）。至此 WP1.0 ~ WP1.8 全部验收完成。
+
+**N1**（沿用审查 034 N1）：跨项目需求外键的测试可能由另一条外键先拒绝。实际约束已验证正确。继续作为独立维护事项保留（implementation-plan"独立维护事项"）。
+
+**N2：Windows 首次创建数据库期间，权限检查偶发 `Access is denied`**。登记为独立的可靠性维护事项（implementation-plan"独立维护事项"），不是 WP1.8 的 BLOCKER，也不是已接受的风险。证据：
+
+- PR #14 的 CI [run 38957016420](https://github.com/XKHoshizora/specmetry/actions/runs/38957016420) attempt 1 中，`Go tests (windows-latest)` 失败：`internal/store/sqlite` 的 `TestCheckWhileTheDatabaseIsCreated` 在 round 17、check 11 返回 `Access is denied`。
+- 只重跑失败的 job（attempt 2），8/8 通过。重跑通过不能证明根因已消失。
+- 本地 Windows 上连续 30 次运行（每次 20 轮），全部通过。
+
+**M1 状态**：九个工作包都已验收，但 **M1 里程碑尚未整体验收**。M1 退出条件的证据核对见 [m1-exit-evidence.md](m1-exit-evidence.md)：59 个 P0 项中 53 项 PASS，6 项 INCOMPLETE（都是验证证据不足，没有发现行为缺陷），因此暂不满足退出条件。是否补齐证据、何时交给 Codex 做 M1 最终退出条件核查，由产品负责人决定。
