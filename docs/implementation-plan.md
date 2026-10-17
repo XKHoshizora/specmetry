@@ -123,6 +123,7 @@ flowchart LR
   - `init.v1` 中 `project.name` 的 schema；
   - 已存在的项目中不合法名称的兼容处理。
 - 不能静默修改已有项目的名称、marker 或数据库中的值。
+- **已实现，等待 Codex 审查 037**：分支 `fix/init-project-name-code-fence`。处理记录与旧项目的兼容方式见 review-resolution §47。旧项目的处理方式由产品负责人确认。
 
 ### M2 事实、检查执行与交付推导
 
