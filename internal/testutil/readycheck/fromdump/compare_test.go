@@ -21,13 +21,14 @@ import (
 
 const compareSeeds = 600
 
-// legalCase is a random history package legality confirms is legal: the
-// comparison runs on legal histories only (data-model §6.14, F5), and a
-// generated one that is not fails with its operation trace.
+// legalCase is a random history package legality confirms is legal, its
+// input records explained by the generator's commit trees: the comparison
+// runs on legal histories only (data-model §6.14, F5), and a generated one
+// that is not fails with its operation trace.
 func legalCase(t *testing.T, seed uint64, o factgen.Options) factgen.Case {
 	t.Helper()
 	c := factgen.Random(seed, o)
-	if p := legality.Check(c.Dump, legality.Options{Isolated: o.Isolated}); len(p) > 0 {
+	if p := append(legality.Check(c.Dump, legality.Options{Isolated: o.Isolated}), legality.CheckTrees(c.Dump, c.Trees)...); len(p) > 0 {
 		t.Fatalf("seed %d is not a legal history:\n%s", seed, legality.Report(p, c.History.Trace()))
 	}
 	return c

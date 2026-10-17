@@ -20,11 +20,11 @@ var (
 // source, one requirement in scope with one automated criterion that has a
 // check, entered by a person's edit with the scope attached. S is A.
 type world struct {
-	h        *factgen.History
-	req, ac  string
-	src      string
-	s        string
-	observed map[string]string // overrides of the observations
+	h             *factgen.History
+	goal, req, ac string
+	src           string
+	s             string
+	observed      map[string]string // overrides of the observations
 }
 
 func newWorld(t *testing.T) *world {
@@ -33,7 +33,8 @@ func newWorld(t *testing.T) *world {
 	w.h.SetTarget("default", "refs/heads/main")
 	w.src = w.h.AddSource("docs/brief.md", factgen.Hash("brief"))
 	w.h.Apply(func(r *factgen.Review) {
-		w.req = r.AddRequirement(r.AddGoal("Orders"), "must")
+		w.goal = r.AddGoal("Orders")
+		w.req = r.AddRequirement(w.goal, "must")
 		w.ac = r.AddCriterion(w.req, "automated", &baseline.Check{Command: "go test ./orders", Workdir: ".", TimeoutSec: 300, Rationale: "r"})
 		r.Scope(w.req)
 	})
@@ -305,6 +306,37 @@ func TestR10OutputConsistency(t *testing.T) {
 	if err := readycheck.Consistent(v, false, "observed"); err == nil {
 		t.Error("a ready verdict the output denies passed")
 	}
+}
+
+// Review 047 B1-R1: one edit retires the goal, whose cascade loses the
+// requirement its goal, and revises the requirement materially. The
+// checker reads both changes: the criterion no longer applies to the
+// requirement's revision (R6) until a reaffirmation, which makes the
+// delivery ready again on the same acceptance. The engine agrees on the
+// verdict and the grade at each step.
+func TestGoalCascadeThenARequirementRevision(t *testing.T) {
+	w := readyWorld(t)
+	agree := func(step string, ready bool, grade string, failed []readycheck.Condition) {
+		t.Helper()
+		v := w.verdict(t)
+		c := factgen.Case{Dump: legalDump(t, w.h), Current: w.current(), AsOf: w.h.Seq()}
+		engine, res := engineReady(t, c, c.Current)
+		if v.Ready() != ready || v.Grade != grade || !slices.Equal(failedConditions(v), failed) {
+			t.Errorf("%s: ready %v, grade %s, failed %v", step, v.Ready(), v.Grade, failedConditions(v))
+		}
+		if engine != v.Ready() || readycheck.GradeConsistent(v, string(res.Delivery.EvidenceGrade)) != nil {
+			t.Errorf("%s: the engine says %s, %s", step, res.Delivery.Status, res.Delivery.EvidenceGrade)
+		}
+	}
+	agree("accepted", true, "observed", nil)
+	w.h.Apply(func(r *factgen.Review) {
+		r.Retire(w.goal)
+		r.Update(w.req, true, func(f *factgen.Fields) { f.Title = "revised" })
+		r.Scope(w.req)
+	})
+	agree("the goal retired and the requirement revised", false, "none", []readycheck.Condition{readycheck.R6})
+	w.h.Apply(func(r *factgen.Review) { r.Reaffirm(w.ac); r.Scope(w.req) })
+	agree("reaffirmed", true, "observed", nil)
 }
 
 // Review 046 N2: a delivery that is not ready still reports the grade of
