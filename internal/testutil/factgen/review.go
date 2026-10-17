@@ -310,9 +310,11 @@ func (r *Review) finish() {
 	// The items: accepted with their change, or rejected.
 	for i := range h.d.ProposalItems {
 		it := &h.d.ProposalItems[i]
-		if _, ok := a.appliedItems[it.ID]; ok {
+		_, accepted := a.appliedItems[it.ID]
+		switch {
+		case accepted:
 			it.ReviewState, it.ReviewedSeq = "accepted", ptr(r.seq)
-		} else if slices.Contains(r.rejected, it.ID) {
+		case slices.Contains(r.rejected, it.ID):
 			it.ReviewState, it.ReviewedSeq = "rejected", ptr(r.seq)
 		}
 	}
@@ -457,9 +459,10 @@ func (a *applying) record(e *entity, op string, class *string, p *planned) {
 		ID: h.id(), Seq: a.r.seq, VersionID: a.versionID, ChangeIndex: a.changes,
 		EntityType: e.typ, EntityID: e.id, Op: op, ChangeClass: class, AfterJSON: h.snapshot(e),
 	}
-	if p.followup {
+	switch {
+	case p.followup:
 		row.Rationale = ptr(p.rationale)
-	} else if p.item != "" {
+	case p.item != "":
 		row.ProposalItemID = ptr(p.item)
 		a.appliedItems[p.item] = e.id
 		if op == "add" {
