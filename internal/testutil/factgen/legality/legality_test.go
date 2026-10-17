@@ -1,7 +1,9 @@
 package legality_test
 
 import (
+	"fmt"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/XKHoshizora/specmetry/internal/testutil/factgen"
@@ -21,7 +23,7 @@ var (
 
 func problemsOf(c factgen.Case, o factgen.Options, rule string) []legality.Problem {
 	var out []legality.Problem
-	for _, p := range legality.Check(c.Dump, legality.Options{Isolated: o.Isolated}) {
+	for _, p := range append(legality.Check(c.Dump, legality.Options{Isolated: o.Isolated}), legality.CheckTrees(c.Dump, c.Trees)...) {
 		if rule == "" || p.Rule == rule {
 			out = append(out, p)
 		}
@@ -59,7 +61,8 @@ func TestReview046Seed3FollowsTheApplicationOrder(t *testing.T) {
 }
 
 // Every random history the derivation tests and the comparison use is
-// legal: the generator's claim is checked, not assumed.
+// legal: the generator's claim is checked, not assumed, by the checker and
+// by the scans of review047_test.go.
 func TestRandomHistoriesAreLegal(t *testing.T) {
 	sets := []struct {
 		name  string
@@ -77,19 +80,67 @@ func TestRandomHistoriesAreLegal(t *testing.T) {
 	}
 	for _, set := range sets {
 		bad := 0
+		covered := map[string]int{}
 		for seed := range set.seeds {
 			o := set.opts(seed)
-			if p := problemsOf(factgen.Random(seed, o), o, ""); len(p) > 0 {
+			c := factgen.Random(seed, o)
+			p, scan := problemsOf(c, o, ""), independent(c.Dump)
+			if len(p) > 0 || len(scan) > 0 {
 				bad++
 				if bad <= 3 {
-					t.Errorf("%s seed=%d:\n%s", set.name, seed, legality.Report(p, nil))
+					t.Errorf("%s seed=%d:\n%s%s", set.name, seed, legality.Report(p, nil), strings.Join(scan, "\n"))
 				}
+			}
+			for k := range coverage(c.Dump) {
+				covered[k]++
 			}
 		}
 		if bad > 0 {
 			t.Errorf("%s: %d of %d histories are not legal", set.name, bad, set.seeds)
 		}
+		t.Logf("%s: histories with %v, of %d", set.name, covered, set.seeds)
+		// The legal combinations review 047 is about are generated, not
+		// avoided.
+		if set.seeds >= 200 {
+			for _, k := range []string{"a cascade then an item", "input_missing", "a question linked to its accepted item", "a question about a rejected item"} {
+				if covered[k] == 0 {
+					t.Errorf("%s: no history with %s", set.name, k)
+				}
+			}
+		}
 	}
+}
+
+// coverage names the legal combinations of review 047 B1 a history has.
+func coverage(d factgen.Dump) map[string]bool {
+	out := map[string]bool{}
+	seen := map[string]bool{}
+	for _, ch := range d.BaselineChanges {
+		k := fmt.Sprintf("%d/%s", ch.Seq, ch.EntityID)
+		if seen[k] && ch.ProposalItemID != nil {
+			out["a cascade then an item"] = true
+		}
+		seen[k] = true
+	}
+	for _, r := range d.CheckRuns {
+		if r.FailureKind != nil && *r.FailureKind == "input_missing" {
+			out["input_missing"] = true
+		}
+	}
+	state := map[string]string{}
+	for _, it := range d.ProposalItems {
+		state[it.ID] = it.ReviewState
+	}
+	for _, q := range d.Questions {
+		switch {
+		case q.ProposalItemID == nil:
+		case q.RelatedID != nil:
+			out["a question linked to its accepted item"] = true
+		case state[*q.ProposalItemID] == "rejected":
+			out["a question about a rejected item"] = true
+		}
+	}
+	return out
 }
 
 // The checker finds a broken rule when one is put into a legal history.

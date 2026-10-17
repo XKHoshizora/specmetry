@@ -17,12 +17,17 @@ import (
 //     item named with FromItem right after the change is planned; in an
 //     edit, a new item of the edit's proposal, in planning order;
 //   - one proposal is reviewed, and it names a target at most once
-//     (V-P03);
+//     (V-P03), an entity that existed before the write;
 //   - the changes apply by step (goals; requirements; criterion adds,
 //     updates, reaffirms, retires) and within a step by item_index, then
-//     the follow-ups of step 8; a cascade follows its cause;
+//     the follow-ups of step 8; a cascade follows its cause. Each change
+//     applies to the entity as the earlier ones left it, so an item can
+//     change a requirement its goal's cascade changed (V-P03 limits the
+//     targets, not the change rows), but not an entity a cascade retired;
+//   - a link names an entity active when its item applies;
 //   - references are written for the entities the write changes, at their
-//     new revision; questions about an accepted add item are linked to its
+//     new revision; questions about an accepted add item, a requirement or
+//     criterion (a question's local about names one), are linked to its
 //     entity if they are still open (step 9); an attached scope binds to
 //     the new version.
 //
@@ -240,7 +245,6 @@ type applying struct {
 	changes      int
 	changed      map[string]bool
 	material     map[string]bool // requirements revised materially here
-	touched      map[string]bool // criteria an item changes here
 	retiredHere  map[string]bool
 	appliedItems map[string]string // item ID -> entity it produced
 	addItems     map[string]bool
@@ -276,6 +280,9 @@ func (r *Review) finish() {
 			op.index = index[op.item]
 		}
 		if op.op != "add" {
+			if slices.ContainsFunc(r.ops, func(o *planned) bool { return o.op == "add" && o.e == op.e }) {
+				panic(fmt.Sprintf("factgen: a %s of an entity this write adds; an item names a target that exists", op.op))
+			}
 			if h.targeted[r.proposal][op.e.id] {
 				panic(fmt.Sprintf("factgen: the proposal names %s twice (V-P03)", op.e.key))
 			}
@@ -290,7 +297,7 @@ func (r *Review) finish() {
 		return cmp.Compare(a.index, b.index)
 	})
 	a := &applying{
-		r: r, versionID: h.id(), changed: map[string]bool{}, material: map[string]bool{}, touched: map[string]bool{},
+		r: r, versionID: h.id(), changed: map[string]bool{}, material: map[string]bool{},
 		retiredHere: map[string]bool{}, appliedItems: map[string]string{}, addItems: map[string]bool{},
 	}
 	var lines []string
@@ -319,8 +326,10 @@ func (r *Review) finish() {
 		}
 	}
 	// Step 9: an open question about an accepted add item is linked to its
-	// entity. A question about an item that is accepted as no add is no
-	// legal question (only an add item has a proposal-local ref).
+	// entity. A question about an item accepted as no add, or as a goal, is
+	// no legal question: only an add item has a proposal-local ref, and a
+	// question's local about names a requirement or criterion item
+	// (proposal.CheckStatic).
 	for i := range h.d.Questions {
 		q := &h.d.Questions[i]
 		if q.ProposalItemID == nil {
@@ -331,6 +340,8 @@ func (r *Review) finish() {
 		case !accepted:
 		case !a.addItems[*q.ProposalItemID]:
 			panic("factgen: a question about an item that is accepted as no add")
+		case h.ents[entity].typ == "goal":
+			panic("factgen: a question about an item that is accepted as a goal")
 		case q.AnsweredSeq == nil && q.RelatedID == nil:
 			q.RelatedType, q.RelatedID = ptr(h.ents[entity].typ), ptr(entity)
 		}
@@ -369,13 +380,13 @@ func (a *applying) apply(op *planned) {
 		a.addEntity(e)
 		a.record(e, "add", nil, op)
 	case "update":
-		if e.typ == "requirement" && e.goalID != "" && !h.Active(e.goalID) {
-			panic("factgen: an update of a requirement whose goal this write retires")
-		}
 		before := e.fields()
 		f := e.fields()
 		if op.edit != nil {
 			op.edit(&f)
+		}
+		if e.typ == "requirement" && f.Goal != before.Goal && f.Goal != "" && !h.Active(f.Goal) {
+			panic(fmt.Sprintf("factgen: an update links %s to a goal that is not active", e.key))
 		}
 		e.set(f)
 		material := op.material || before.Verification != f.Verification || !sameCheck(before.Check, f.Check)
@@ -447,12 +458,9 @@ func (a *applying) record(e *entity, op string, class *string, p *planned) {
 			panic("factgen: a follow-up reaffirms or retires")
 		case e.typ != "criterion" || !a.material[e.reqID]:
 			panic("factgen: a follow-up of a criterion whose requirement this review does not revise materially")
-		case a.touched[e.id] || a.changed[e.id]:
-			panic("factgen: a follow-up of a criterion an item changes")
+		case a.changed[e.id]:
+			panic("factgen: a follow-up of a criterion this write changes already (an item, or another follow-up)")
 		}
-	}
-	if a.changed[e.id] {
-		panic(fmt.Sprintf("factgen: %s changes twice in one write", e.key))
 	}
 	a.changed[e.id] = true
 	row := ChangeRow{
@@ -467,9 +475,6 @@ func (a *applying) record(e *entity, op string, class *string, p *planned) {
 		a.appliedItems[p.item] = e.id
 		if op == "add" {
 			a.addItems[p.item] = true
-		}
-		if e.typ == "criterion" {
-			a.touched[e.id] = true
 		}
 	}
 	h.d.BaselineChanges = append(h.d.BaselineChanges, row)
@@ -499,9 +504,6 @@ func (a *applying) cascade(e *entity) {
 
 func (a *applying) write(e *entity, op string, class *string) {
 	h := a.r.h
-	if a.changed[e.id] {
-		panic(fmt.Sprintf("factgen: %s changes twice in one write", e.key))
-	}
 	a.changed[e.id] = true
 	h.d.BaselineChanges = append(h.d.BaselineChanges, ChangeRow{
 		ID: h.id(), Seq: a.r.seq, VersionID: a.versionID, ChangeIndex: a.changes,

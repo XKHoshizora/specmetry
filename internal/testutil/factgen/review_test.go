@@ -1,6 +1,7 @@
 package factgen_test
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -10,15 +11,22 @@ import (
 
 func base(t *testing.T) (h *factgen.History, req, ac string) {
 	t.Helper()
+	h, _, req, ac = baseWithGoal(t)
+	return h, req, ac
+}
+
+// baseWithGoal is base, with the goal of its requirement.
+func baseWithGoal(t *testing.T) (h *factgen.History, goal, req, ac string) {
+	t.Helper()
 	h = factgen.New("01JAAAAAAAPR0JECT000000000")
 	h.SetTarget("default", "refs/heads/main")
 	h.Apply(func(r *factgen.Review) {
-		goal := r.AddGoal("g")
+		goal = r.AddGoal("g")
 		req = r.AddRequirement(goal, "must")
 		ac = r.AddCriterion(req, "manual", nil)
 		r.Scope(req)
 	})
-	return h, req, ac
+	return h, goal, req, ac
 }
 
 func legal(t *testing.T, h *factgen.History) {
@@ -90,6 +98,63 @@ func TestFollowUpsComeLast(t *testing.T) {
 	legal(t, h)
 }
 
+// Review 047 B1-R1: a goal's retirement loses its requirement the goal (a
+// cascade), and an item of the same write can still update or retire that
+// requirement: the requirement step follows the goal step (§5.5), and V-P03
+// limits the targets of the proposal, not the change rows of an entity.
+func TestGoalCascadeThenAnExplicitChange(t *testing.T) {
+	changes := func(h *factgen.History, seq int64) []string {
+		var got []string
+		for _, c := range h.Dump().BaselineChanges {
+			if c.Seq != seq {
+				continue
+			}
+			s := fmt.Sprintf("%d %s %s", c.ChangeIndex, c.EntityType, c.Op)
+			if c.ChangeClass != nil {
+				s += " " + *c.ChangeClass
+			}
+			if c.ProposalItemID == nil {
+				s += " (cascade)"
+			}
+			got = append(got, s)
+		}
+		return got
+	}
+	built := func(t *testing.T, write func(h *factgen.History, goal, req string) int64) (h *factgen.History, seq int64) {
+		t.Helper()
+		defer func() {
+			if r := recover(); r != nil {
+				t.Fatalf("the legal write panics: %v", r)
+			}
+		}()
+		h, goal, req, _ := baseWithGoal(t)
+		return h, write(h, goal, req)
+	}
+	t.Run("an update", func(t *testing.T) {
+		h, seq := built(t, func(h *factgen.History, goal, req string) int64 {
+			return h.Apply(func(r *factgen.Review) {
+				r.Update(req, true, func(f *factgen.Fields) { f.Title = "revised" })
+				r.Retire(goal)
+			})
+		})
+		want := []string{"0 goal retire", "1 requirement update editorial (cascade)", "2 requirement update material"}
+		if got := changes(h, seq); strings.Join(got, ", ") != strings.Join(want, ", ") {
+			t.Errorf("changes = %v\nwant %v", got, want)
+		}
+		legal(t, h)
+	})
+	t.Run("a retirement", func(t *testing.T) {
+		h, seq := built(t, func(h *factgen.History, goal, req string) int64 {
+			return h.Apply(func(r *factgen.Review) { r.Retire(goal); r.Retire(req) })
+		})
+		want := []string{"0 goal retire", "1 requirement update editorial (cascade)", "2 requirement retire", "3 criterion retire (cascade)"}
+		if got := changes(h, seq); strings.Join(got, ", ") != strings.Join(want, ", ") {
+			t.Errorf("changes = %v\nwant %v", got, want)
+		}
+		legal(t, h)
+	})
+}
+
 func mustPanic(t *testing.T, want string, fn func()) {
 	t.Helper()
 	defer func() {
@@ -155,6 +220,34 @@ func TestIllegalConstructionsPanic(t *testing.T) {
 		h, _, ac := base(t)
 		mustPanic(t, "no follow-ups", func() {
 			h.Apply(func(r *factgen.Review) { r.FollowUp(ac, "reaffirm") })
+		})
+	})
+	t.Run("a question about an item accepted as a goal", func(t *testing.T) {
+		h, _, _ := base(t)
+		items, _ := h.Propose(1, factgen.QuestionSpec{AboutItem: 1})
+		mustPanic(t, "as a goal", func() {
+			h.Review(func(r *factgen.Review) { r.AddGoal("g2"); r.FromItem(items[0]) })
+		})
+	})
+	t.Run("a target the write adds", func(t *testing.T) {
+		h, req, _ := base(t)
+		mustPanic(t, "this write adds", func() {
+			h.Apply(func(r *factgen.Review) { ac := r.AddCriterion(req, "manual", nil); r.Reaffirm(ac) })
+		})
+	})
+	t.Run("an update links a goal the write retires", func(t *testing.T) {
+		h, goal, req, _ := baseWithGoal(t)
+		mustPanic(t, "not active", func() {
+			h.Apply(func(r *factgen.Review) {
+				r.Retire(goal)
+				r.Update(req, false, func(f *factgen.Fields) { f.Goal = goal })
+			})
+		})
+	})
+	t.Run("an item changes a criterion its requirement's cascade retires", func(t *testing.T) {
+		h, req, ac := base(t)
+		mustPanic(t, "retired by this write", func() {
+			h.Apply(func(r *factgen.Review) { r.Retire(req); r.Reaffirm(ac) })
 		})
 	})
 	t.Run("a question about an item accepted as no add", func(t *testing.T) {

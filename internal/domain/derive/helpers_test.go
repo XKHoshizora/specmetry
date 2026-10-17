@@ -77,11 +77,15 @@ func legalDump(t *testing.T, h *factgen.History) factgen.Dump {
 
 // input is the fixture's input at its latest seq. The facts must be a
 // legal history (synthetic isolated runs allowed, as the general domain's
-// unit tests use them), unless the fixture says why not.
+// unit tests use them), unless the fixture says why not; then it must not
+// be one.
 func (f *fixture) input() derive.Input {
 	f.t.Helper()
-	if p := legality.Check(f.h.Dump(), legality.Options{Isolated: true}); len(p) > 0 && f.outsideLegalDomain == "" {
+	switch p := legality.Check(f.h.Dump(), legality.Options{Isolated: true}); {
+	case len(p) > 0 && f.outsideLegalDomain == "":
 		f.t.Fatalf("the fixture is not a legal history:\n%s", legality.Report(p, f.h.Trace()))
+	case len(p) == 0 && f.outsideLegalDomain != "":
+		f.t.Fatalf("the fixture is a legal history, though marked outside the legal domain: %s", f.outsideLegalDomain)
 	}
 	return toderive.Input(f.h.Dump(), f.current(), f.h.Seq())
 }
