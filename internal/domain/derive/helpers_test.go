@@ -7,6 +7,7 @@ import (
 	"github.com/XKHoshizora/specmetry/internal/baseline"
 	"github.com/XKHoshizora/specmetry/internal/domain/derive"
 	"github.com/XKHoshizora/specmetry/internal/testutil/factgen"
+	"github.com/XKHoshizora/specmetry/internal/testutil/factgen/legality"
 	"github.com/XKHoshizora/specmetry/internal/testutil/factgen/toderive"
 )
 
@@ -27,6 +28,7 @@ func check(command string, inputs ...string) *baseline.Check {
 // whose requirement has one automated criterion with a check, entered by a
 // person's edit (propose --apply) with the scope attached. S is commit A.
 type fixture struct {
+	t              *testing.T
 	h              *factgen.History
 	goal, req, ac  string
 	src            string
@@ -35,11 +37,15 @@ type fixture struct {
 	// inventorySkipped keeps INVENTORY_INCOMPLETE out of tests about
 	// other gaps.
 	inventorySkipped bool
+	// outsideLegalDomain says why a test of an unknown state writes facts
+	// the production writes cannot; every other fixture is checked to be a
+	// legal history (data-model §6.14) before it is derived.
+	outsideLegalDomain string
 }
 
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
-	f := &fixture{h: factgen.New(projectID), s: commitA, stage: "in_development"}
+	f := &fixture{t: t, h: factgen.New(projectID), s: commitA, stage: "in_development"}
 	f.h.SetTarget("default", "refs/heads/main")
 	f.src = f.h.AddSource("docs/brief.md", factgen.Hash("brief v1"))
 	f.h.Apply(func(r *factgen.Review) {
@@ -58,7 +64,25 @@ func (f *fixture) current() factgen.Current {
 	return c
 }
 
+// legalDump is a history's rows, checked to be a legal history (the
+// general domain, so synthetic isolated runs are allowed).
+func legalDump(t *testing.T, h *factgen.History) factgen.Dump {
+	t.Helper()
+	d := h.Dump()
+	if p := legality.Check(d, legality.Options{Isolated: true}); len(p) > 0 {
+		t.Fatalf("not a legal history:\n%s", legality.Report(p, h.Trace()))
+	}
+	return d
+}
+
+// input is the fixture's input at its latest seq. The facts must be a
+// legal history (synthetic isolated runs allowed, as the general domain's
+// unit tests use them), unless the fixture says why not.
 func (f *fixture) input() derive.Input {
+	f.t.Helper()
+	if p := legality.Check(f.h.Dump(), legality.Options{Isolated: true}); len(p) > 0 && f.outsideLegalDomain == "" {
+		f.t.Fatalf("the fixture is not a legal history:\n%s", legality.Report(p, f.h.Trace()))
+	}
 	return toderive.Input(f.h.Dump(), f.current(), f.h.Seq())
 }
 

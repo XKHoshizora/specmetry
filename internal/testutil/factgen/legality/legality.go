@@ -434,6 +434,7 @@ func (c *checker) checkReview(seq int64, cs []change, states map[string]state, t
 				c.fail(seq, "item", "item %s is not accepted in this write", item.ID)
 			}
 			usedItems[item.ID] = true
+			c.checkNames(seq, r, s, kind, item, cs)
 			if targeted[item.ProposalID] == nil {
 				targeted[item.ProposalID] = map[string]bool{}
 			}
@@ -499,6 +500,39 @@ func (c *checker) checkReview(seq int64, cs []change, states map[string]state, t
 			}
 		}
 		break
+	}
+}
+
+// checkNames checks what an item names (V-P03): a target is a key active
+// when the proposal was submitted; a criterion's requirement and a
+// requirement's goal are such a key, or an entity an add item of the same
+// proposal adds in the same write.
+func (c *checker) checkNames(seq int64, r factgen.ChangeRow, s state, kind string, item factgen.ProposalItemRow, cs []change) {
+	submitted := c.at(c.proposals[item.ProposalID] - 1)
+	activeThen := func(id string) bool { return submitted[id].Status == "active" }
+	addedHere := func(id string) bool {
+		return slices.ContainsFunc(cs, func(o change) bool {
+			return o.row.EntityID == id && o.row.Op == "add" && o.row.ProposalItemID != nil &&
+				c.items[*o.row.ProposalItemID].ProposalID == item.ProposalID
+		})
+	}
+	if r.Op != "add" {
+		if !activeThen(r.EntityID) {
+			c.fail(seq, "V-P03 target", "item %s names %s, which was not an active key when the proposal was submitted", item.ID, c.keyOf[r.EntityID])
+		}
+		return
+	}
+	link := ""
+	switch kind {
+	case "criterion":
+		link = c.parent[r.EntityID]
+	case "requirement":
+		if s.Values.Goal != nil {
+			link = c.idOfKey[*s.Values.Goal]
+		}
+	}
+	if link != "" && !activeThen(link) && !addedHere(link) {
+		c.fail(seq, "V-P03 target", "item %s links to %s, which is neither an active key of the submission nor added by the proposal here", item.ID, c.keyOf[link])
 	}
 }
 
@@ -662,13 +696,22 @@ func qualifying(r factgen.CheckRunRow) bool {
 // change is an error; the grade is the domain's.
 func (c *checker) checkRuns() {
 	for _, r := range c.d.CheckRuns {
-		st := c.at(r.Seq)[r.CriterionID]
-		switch {
-		case c.kind[r.CriterionID] != "criterion" || st.Status != "active" || st.Values.Check == nil:
-			c.fail(r.Seq, "run", "a run of %s, which is not an active criterion with a check", c.keyOf[r.CriterionID])
+		// The run binds the revision, configuration and requirement
+		// revision it read at its start, which can be before a revision
+		// written while it ran (CX-15): one of the criterion's states
+		// before the run's write, active with a check.
+		var st *state
+		for i := range c.changes {
+			ch := &c.changes[i]
+			if ch.row.Seq < r.Seq && ch.row.EntityID == r.CriterionID && ch.state.Status == "active" && ch.state.Values.Check != nil &&
+				ch.state.Revision == r.CriterionRevision && ch.state.checkHash() == r.CheckConfigHash &&
+				ch.state.RequirementRevision == r.RequirementRevision {
+				st = &ch.state
+			}
+		}
+		if c.kind[r.CriterionID] != "criterion" || st == nil {
+			c.fail(r.Seq, "run", "a run of %s that binds no revision and configuration it had", c.keyOf[r.CriterionID])
 			continue
-		case r.CriterionRevision != st.Revision || r.CheckConfigHash != st.checkHash() || r.RequirementRevision != st.RequirementRevision:
-			c.fail(r.Seq, "run", "a run of %s that does not bind its revision and configuration", c.keyOf[r.CriterionID])
 		}
 		kind := orEmpty(r.FailureKind)
 		// §7.4 step 4: clean at the start and not at the end, or another

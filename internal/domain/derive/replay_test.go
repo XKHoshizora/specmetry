@@ -89,7 +89,7 @@ func clone[T any](s []T) []T {
 func TestReplayWithTheRecordedSettings(t *testing.T) {
 	h := factgen.New(projectID)
 	h.SetTarget("default", "refs/heads/main") // a project only initialized
-	d := h.Dump()
+	d := legalDump(t, h)
 	cur := h.Current(commitA, "in_development")
 	original := mustDerive(t, toderive.Input(d, cur, h.Seq()))
 	if original.InitProgress != derive.Initialized {
@@ -130,7 +130,7 @@ func TestResultRecordsItsCurrentValues(t *testing.T) {
 	cur := f.current()
 	cur.InventorySkipped = true
 	cur.Observations = []factgen.Observation{{SourceID: other, SHA256: ""}, {SourceID: f.src, SHA256: factgen.Hash("brief v1")}}
-	res := mustDerive(t, toderive.Input(f.h.Dump(), cur, f.h.Seq()))
+	res := mustDerive(t, toderive.Input(legalDump(t, f.h), cur, f.h.Seq()))
 	if res.Settings != (derive.Settings{Stage: derive.IncompleteDocs, InventorySkipped: true}) {
 		t.Errorf("settings = %+v", res.Settings)
 	}

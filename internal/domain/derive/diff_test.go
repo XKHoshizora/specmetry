@@ -26,7 +26,7 @@ func TestChangesSince(t *testing.T) {
 	f.pass(f.ac, commitA)
 	f.h.Claims("sync", factgen.ClaimSpec{Criterion: f.ac, Assertion: "done"})
 	var added string
-	f.h.Review(func(r *factgen.Review) { added = r.AddCriterion(f.req, "manual", nil) })
+	f.h.Apply(func(r *factgen.Review) { added = r.AddCriterion(f.req, "manual", nil) })
 	got := changesSince(t, f.input(), since)
 	want := []derive.Change{
 		{Criterion: "AC-001-1", Field: "delivery_status", From: "in_progress", To: "ready_for_review"},

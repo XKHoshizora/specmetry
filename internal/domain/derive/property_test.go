@@ -9,6 +9,7 @@ import (
 
 	"github.com/XKHoshizora/specmetry/internal/domain/derive"
 	"github.com/XKHoshizora/specmetry/internal/testutil/factgen"
+	"github.com/XKHoshizora/specmetry/internal/testutil/factgen/legality"
 	"github.com/XKHoshizora/specmetry/internal/testutil/factgen/toderive"
 )
 
@@ -22,8 +23,28 @@ const (
 	shuffles      = 1000
 )
 
-func randomCase(seed uint64) factgen.Case {
-	return factgen.Random(seed, factgen.Options{Steps: 40, Deliver: 0.5, Cutoff: 0.2, Isolated: seed%3 == 0})
+func randomOptions(seed uint64) factgen.Options {
+	return factgen.Options{Steps: 40, Deliver: 0.5, Cutoff: 0.2, Isolated: seed%3 == 0}
+}
+
+// legalCase is a random history the legality checker confirms is legal
+// (data-model §6.14): the property tests run only on legal histories, and
+// a generated one that is not fails with its operation trace.
+func legalCase(t *testing.T, seed uint64, o factgen.Options) factgen.Case {
+	t.Helper()
+	c := factgen.Random(seed, o)
+	if p := legality.Check(c.Dump, legality.Options{Isolated: o.Isolated}); len(p) > 0 {
+		t.Fatalf("seed %d is not a legal history:\n%s", seed, legality.Report(p, c.History.Trace()))
+	}
+	return c
+}
+
+// domainOf names a case's legal domain.
+func domainOf(o factgen.Options) string {
+	if o.Isolated {
+		return "general"
+	}
+	return "MVP"
 }
 
 // shuffled is the input with the rows of every fact table and the
@@ -93,7 +114,7 @@ func deepCopyFacts(in derive.Input) derive.Input {
 func TestShuffledFactsGiveTheSameResult(t *testing.T) {
 	for seed := range uint64(shuffleSeeds) {
 		t.Run(fmt.Sprintf("seed=%d", seed), func(t *testing.T) {
-			c := factgen.Random(seed, factgen.Options{Steps: 60, Deliver: 0.5, Isolated: seed%2 == 0})
+			c := legalCase(t, seed, factgen.Options{Steps: 60, Deliver: 0.5, Isolated: seed%2 == 0})
 			in := toderive.Input(c.Dump, c.Current, c.AsOf)
 			want := mustDerive(t, in)
 			since := c.AsOf / 2
@@ -124,22 +145,29 @@ func TestShuffledFactsGiveTheSameResult(t *testing.T) {
 // have no state gap; warnings never block; the blocking gaps of the
 // delivery are the blocking gaps, in order.
 func TestGapsAndDelivery(t *testing.T) {
-	var ready, notReady int
+	counts := map[string]int{}
 	for seed := range uint64(propertySeeds) {
-		c := randomCase(seed)
+		o := randomOptions(seed)
 		t.Run(fmt.Sprintf("seed=%d", seed), func(t *testing.T) {
+			c := legalCase(t, seed, o)
 			res := mustDerive(t, toderive.Input(c.Dump, c.Current, c.AsOf))
+			verdict := "not ready"
 			if res.Delivery.Status == derive.TargetReady {
-				ready++
-			} else {
-				notReady++
+				verdict = "ready, " + string(res.Delivery.EvidenceGrade)
 			}
+			counts[domainOf(o)+": "+verdict]++
 			checkGapInvariants(t, res)
 		})
 	}
-	t.Logf("%d ready, %d not ready", ready, notReady)
-	if ready < propertySeeds/10 || notReady < propertySeeds/10 {
-		t.Errorf("the histories are not varied enough: %d ready, %d not ready", ready, notReady)
+	t.Logf("legal histories: %v", counts)
+	// Each domain has both verdicts, and the grades it can have.
+	for _, want := range []string{"MVP: not ready", "MVP: ready, observed", "MVP: ready, none", "general: not ready", "general: ready, snapshot_isolated"} {
+		if counts[want] < 5 {
+			t.Errorf("too few %q: %v", want, counts)
+		}
+	}
+	if counts["MVP: ready, snapshot_isolated"] > 0 {
+		t.Errorf("an isolated grade in the MVP domain: %v", counts)
 	}
 }
 
@@ -220,8 +248,8 @@ func checkGapInvariants(t *testing.T, res *derive.Result) {
 // result records gives the same result.
 func TestReplayOfRandomResults(t *testing.T) {
 	for seed := range uint64(propertySeeds / 4) {
-		c := randomCase(seed)
 		t.Run(fmt.Sprintf("seed=%d", seed), func(t *testing.T) {
+			c := legalCase(t, seed, randomOptions(seed))
 			in := toderive.Input(c.Dump, c.Current, c.AsOf)
 			res := mustDerive(t, in)
 			replay := derive.Input{
@@ -244,8 +272,8 @@ func TestReplayOfRandomResults(t *testing.T) {
 // start with the observations of its own source set).
 func TestChangesSinceAgreesWithTheDerivations(t *testing.T) {
 	for seed := range uint64(propertySeeds / 4) {
-		c := randomCase(seed)
 		t.Run(fmt.Sprintf("seed=%d", seed), func(t *testing.T) {
+			c := legalCase(t, seed, randomOptions(seed))
 			rng := rand.New(rand.NewPCG(seed, 11))
 			since := rng.Int64N(c.AsOf + 1)
 			in := toderive.Input(c.Dump, c.Current, c.AsOf)
@@ -291,8 +319,8 @@ func TestChangesSinceAgreesWithTheDerivations(t *testing.T) {
 // (they may change reason codes, so gap objects are not compared).
 func TestSettingsNeverChangeDelivery(t *testing.T) {
 	for seed := range uint64(propertySeeds / 4) {
-		c := randomCase(seed)
 		t.Run(fmt.Sprintf("seed=%d", seed), func(t *testing.T) {
+			c := legalCase(t, seed, randomOptions(seed))
 			base := mustDerive(t, toderive.Input(c.Dump, c.Current, c.AsOf))
 			for _, stage := range []string{"docs_only", "in_development", "incomplete_docs"} {
 				for _, skips := range [][2]bool{{false, false}, {true, false}, {false, true}, {true, true}} {
@@ -331,8 +359,10 @@ func blockingKinds(res *derive.Result) []string {
 // gives the same result, in any row order.
 func TestMalformedInputsAreDeterministic(t *testing.T) {
 	for seed := range uint64(propertySeeds / 2) {
-		c := randomCase(seed)
 		t.Run(fmt.Sprintf("seed=%d", seed), func(t *testing.T) {
+			// Malformed input is derived from a legal history broken on
+			// purpose; it is not counted in the legal domain.
+			c := legalCase(t, seed, randomOptions(seed))
 			rng := rand.New(rand.NewPCG(seed, 13))
 			in := corrupt(toderive.Input(c.Dump, c.Current, c.AsOf), rng)
 			first, err1 := derive.Derive(in)

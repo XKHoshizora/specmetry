@@ -68,15 +68,16 @@ func TestCX03TwoWorktrees(t *testing.T) {
 func TestCX05PartialBaseline(t *testing.T) {
 	g := factgen.New(projectID)
 	g.SetTarget("default", "refs/heads/main")
-	items, _ := g.Propose(8)
+	items, _ := g.Propose(9)
 	var req, ac string
 	g.Review(func(r *factgen.Review) {
 		req = r.AddRequirement("", "must")
 		r.FromItem(items[0])
 		ac = r.AddCriterion(req, "manual", nil)
+		r.FromItem(items[1])
 	})
 	g.Decide(ac, factgen.DecisionSpec{Decision: "accepted", Mode: "manual", Snapshot: commitA})
-	f := &fixture{h: g, req: req, ac: ac, s: commitA, stage: "in_development", inventorySkipped: true}
+	f := &fixture{t: t, h: g, req: req, ac: ac, s: commitA, stage: "in_development", inventorySkipped: true}
 	wantOutcome(t, "no scope", f.outcome(t), outcome{derive.CriterionAccepted, "manual", derive.TargetNotAssessed})
 	g.ConfirmScope(req)
 	got := f.outcome(t)
@@ -95,13 +96,13 @@ func TestCX07ParentRevised(t *testing.T) {
 	f.accept(second, commitA, f.pass(second, commitA))
 	f.inventorySkipped = true
 	wantOutcome(t, "accepted", f.outcome(t), outcome{derive.CriterionAccepted, "direct", derive.TargetReady})
-	f.h.Review(func(r *factgen.Review) { r.Update(f.req, true, nil); r.Scope(f.req) }) // defer both
+	f.h.Apply(func(r *factgen.Review) { r.Update(f.req, true, nil); r.Scope(f.req) }) // defer both
 	wantOutcome(t, "deferred", f.outcome(t), outcome{derive.CriterionNeedsReverification, "parent_revised", derive.TargetNeedsReverification})
 	if g := gapsOf(f.derive(t), derive.GapParentRevised); len(g) != 2 {
 		t.Errorf("PARENT_REVISED = %+v", g)
 	}
 	var added string
-	f.h.Review(func(r *factgen.Review) {
+	f.h.Apply(func(r *factgen.Review) {
 		r.Reaffirm(f.ac)
 		r.Retire(second)
 		added = r.AddCriterion(f.req, "automated", check("go test ./new"))
@@ -128,7 +129,7 @@ func TestCX09OrderIsSeq(t *testing.T) {
 func TestCX10PartialAudit(t *testing.T) {
 	f := newFixture(t)
 	var other, otherAC string
-	f.h.Review(func(r *factgen.Review) {
+	f.h.Apply(func(r *factgen.Review) {
 		other = r.AddRequirement(f.goal, "must")
 		otherAC = r.AddCriterion(other, "automated", check("go test ./other"))
 		r.Scope(f.req, other)
@@ -198,7 +199,7 @@ func TestCX12ClaimedWithoutEvidence(t *testing.T) {
 // revision.
 func TestCX15RevisedDuringARun(t *testing.T) {
 	f := newFixture(t)
-	f.h.Review(func(r *factgen.Review) { r.Update(f.ac, true, nil); r.Scope(f.req) })
+	f.h.Apply(func(r *factgen.Review) { r.Update(f.ac, true, nil); r.Scope(f.req) })
 	f.h.Run(f.ac, factgen.RunSpec{Head: commitA, Revision: 1, ConfigHash: f.h.ConfigHash(f.ac)})
 	c := criterionOf(t, f.derive(t), f.h.Key(f.ac))
 	if c.SnapshotRun != nil || c.Status != derive.CriterionNeedsReverification || c.Reason != "ac_revised" {
@@ -298,7 +299,7 @@ func TestACC08LatestDecision(t *testing.T) {
 func TestWorkspaceView(t *testing.T) {
 	f := newFixture(t)
 	f.pass(f.ac, commitB)
-	dirty := f.h.Run(f.ac, factgen.RunSpec{Head: commitB, TreeStart: "dirty", TreeEnd: "dirty", Result: "fail"})
+	dirty := f.h.Run(f.ac, factgen.RunSpec{Head: commitB, TreeStart: "dirty", TreeEnd: "dirty", Result: "fail", FailureKind: "nonzero_exit"})
 	f.h.Run(f.ac, factgen.RunSpec{Head: commitB, Worktree: factgen.FeatureWorktree})
 	in := f.input()
 	in.Current.Workspace = &derive.Workspace{WorktreeID: factgen.MainWorktree, Head: commitB, TreeState: "dirty"}
@@ -324,10 +325,48 @@ func TestWorkspaceView(t *testing.T) {
 func TestNoTargetMeansNoSnapshot(t *testing.T) {
 	g := factgen.New(projectID)
 	var ac string
-	g.Review(func(r *factgen.Review) { ac = r.AddCriterion(r.AddRequirement("", "must"), "manual", nil) })
-	res := mustDerive(t, toderive.Input(g.Dump(), g.Current(commitA, "in_development"), g.Seq()))
+	g.Apply(func(r *factgen.Review) { ac = r.AddCriterion(r.AddRequirement("", "must"), "manual", nil) })
+	res := mustDerive(t, toderive.Input(legalDump(t, g), g.Current(commitA, "in_development"), g.Seq()))
 	c := criterionOf(t, res, g.Key(ac))
 	if c.Status != derive.CriterionNotAssessed || res.Target != nil {
 		t.Errorf("criterion %s, target %+v", c.Status, res.Target)
+	}
+}
+
+// CX-07 through a review's follow-ups (data-model §5.5 step 8): a material
+// revision of the requirement, with one criterion reaffirmed, one retired
+// and one deferred.
+func TestCX07FollowUps(t *testing.T) {
+	f := newFixture(t)
+	retired, deferred := addAuto(f, f.req), addAuto(f, f.req)
+	f.h.ConfirmScope(f.req)
+	for _, ac := range []string{f.ac, retired, deferred} {
+		f.accept(ac, commitA, f.pass(ac, commitA))
+	}
+	f.inventorySkipped = true
+	items, _ := f.h.Propose(1)
+	f.h.Review(func(r *factgen.Review) {
+		r.Update(f.req, true, func(x *factgen.Fields) { x.Title = "revised" })
+		r.FromItem(items[0])
+		r.FollowUp(f.ac, "reaffirm")
+		r.FollowUp(retired, "retire")
+		r.Scope(f.req)
+	})
+	res := f.derive(t)
+	if c := criterionOf(t, res, f.h.Key(f.ac)); c.Status != derive.CriterionAccepted || c.Reason != "direct" {
+		t.Errorf("reaffirmed: %s/%s", c.Status, c.Reason)
+	}
+	if c := criterionOf(t, res, f.h.Key(deferred)); c.Status != derive.CriterionNeedsReverification || c.Reason != "parent_revised" {
+		t.Errorf("deferred: %s/%s", c.Status, c.Reason)
+	}
+	for _, r := range res.Requirements {
+		for _, c := range r.Criteria {
+			if c.Key == f.h.Key(retired) {
+				t.Errorf("the retired criterion is listed: %+v", c)
+			}
+		}
+	}
+	if res.Delivery.Status != derive.TargetNeedsReverification {
+		t.Errorf("delivery = %s", res.Delivery.Status)
 	}
 }

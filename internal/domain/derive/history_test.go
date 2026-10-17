@@ -19,7 +19,7 @@ func (f *fixture) at(t *testing.T, asOf int64, observe map[string]string) *deriv
 	for id, hash := range observe {
 		cur.Observations = append(cur.Observations, factgen.Observation{SourceID: id, SHA256: hash})
 	}
-	return mustDerive(t, toderive.Input(f.h.Dump(), cur, asOf))
+	return mustDerive(t, toderive.Input(legalDump(t, f.h), cur, asOf))
 }
 
 // data-model §6.13: the state at as_of_seq is rebuilt from the facts; the
@@ -31,7 +31,7 @@ func TestStateAtCutoff(t *testing.T) {
 	run := f.pass(f.ac, commitA)
 	accepted := f.accept(f.ac, commitA, run)
 	acceptedAt := f.h.Seq()
-	f.h.Review(func(r *factgen.Review) {
+	f.h.Apply(func(r *factgen.Review) {
 		r.Update(f.ac, true, func(x *factgen.Fields) { x.Statement = "stricter" })
 		r.Scope(f.req)
 	})
@@ -59,7 +59,7 @@ func TestStateAtCutoff(t *testing.T) {
 	// is the hash at registration.
 	items, _ := f.h.Propose(1, factgen.QuestionSpec{Blocking: true, AboutItem: 1})
 	f.h.Review(func(r *factgen.Review) { r.AddGoal("later"); r.FromItem(items[0]) })
-	d := f.h.Dump()
+	d := legalDump(t, f.h)
 	for i := range d.Criteria {
 		d.Criteria[i].Status, d.Criteria[i].Revision, d.Criteria[i].RequirementRevision = "retired", 9, 9
 	}
@@ -69,7 +69,7 @@ func TestStateAtCutoff(t *testing.T) {
 	for _, asOf := range []int64{acceptedAt, revisedAt, f.h.Seq()} {
 		cur := f.current()
 		got := mustDerive(t, toderive.Input(d, cur, asOf))
-		want := mustDerive(t, toderive.Input(f.h.Dump(), cur, asOf))
+		want := mustDerive(t, toderive.Input(legalDump(t, f.h), cur, asOf))
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("at %d the current projection changed the result", asOf)
 		}
@@ -83,22 +83,25 @@ func TestSharedSeqReview(t *testing.T) {
 	h := factgen.New(projectID)
 	h.SetTarget("default", "refs/heads/main")
 	src := h.AddSource("docs/a.md", factgen.Hash("a"))
+	items, _ := h.Propose(6)
 	var reqs []string
 	seq := h.Review(func(r *factgen.Review) {
-		for range 3 {
+		for i := range 3 {
 			req := r.AddRequirement("", "must")
+			r.FromItem(items[2*i])
 			r.AddCriterion(req, "manual", nil)
+			r.FromItem(items[2*i+1])
 			r.Ref(req, src, "verified")
 			reqs = append(reqs, req)
 		}
 		r.Scope(reqs...)
 	})
 	obs := h.Current(commitA, "in_development")
-	at := mustDerive(t, toderive.Input(h.Dump(), obs, seq))
+	at := mustDerive(t, toderive.Input(legalDump(t, h), obs, seq))
 	if at.BaselineVersion != 1 || len(at.Requirements) != 3 || at.Scope == nil || at.Scope.Stale || len(at.Scope.Requirements) != 3 {
 		t.Fatalf("at the review: version %d, %d requirements, scope %+v", at.BaselineVersion, len(at.Requirements), at.Scope)
 	}
-	before := mustDerive(t, toderive.Input(h.Dump(), obs, seq-1))
+	before := mustDerive(t, toderive.Input(legalDump(t, h), obs, seq-1))
 	if before.BaselineVersion != 0 || len(before.Requirements) != 0 || before.Scope != nil {
 		t.Errorf("before the review: version %d, requirements %d, scope %+v", before.BaselineVersion, len(before.Requirements), before.Scope)
 	}
@@ -138,12 +141,13 @@ func TestSourcesAtCutoff(t *testing.T) {
 func TestQuestionLinkAtCutoff(t *testing.T) {
 	f := readyFixture(t)
 	brief := map[string]string{f.src: factgen.Hash("brief v1")}
-	items, _ := f.h.Propose(1, factgen.QuestionSpec{Blocking: true, AboutItem: 1})
+	items, _ := f.h.Propose(2, factgen.QuestionSpec{Blocking: true, AboutItem: 1})
 	proposed := f.h.Seq()
 	f.h.Review(func(r *factgen.Review) {
 		n := r.AddRequirement(f.goal, "must")
 		r.FromItem(items[0])
 		r.AddCriterion(n, "manual", nil)
+		r.FromItem(items[1])
 		r.Scope(f.req, n)
 	})
 	reviewed := f.h.Seq()

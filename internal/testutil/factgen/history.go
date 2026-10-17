@@ -15,8 +15,16 @@ import (
 // History writes one project's facts in the order a test performs its
 // operations. Every operation is one logical write: it allocates one seq
 // and the facts it writes share it, as the production writes do
-// (data-model §6.13). History does not check write preconditions; the
-// random generator only performs legal operations.
+// (data-model §6.13).
+//
+// A review or a person's edit is built as the production write builds it:
+// every explicit change comes from a proposal item, a proposal names a
+// target at most once (V-P03), and the changes are applied in the order of
+// data-model §5.5 whatever order the test plans them in; a construction
+// that breaks these rules panics. The other operations do not check their
+// preconditions (decisions, claims, runs), so a test can still write a
+// malformed history on purpose; the random generator performs only legal
+// ones, which package legality checks independently.
 type History struct {
 	d       Dump
 	seq     int64
@@ -29,6 +37,10 @@ type History struct {
 	sources map[string]*SourceRow
 	runs    map[string]CheckRunRow
 	current map[string]string // criterion ID + revision -> latest decision ID
+
+	itemProposal map[string]string          // item ID -> its proposal
+	targeted     map[string]map[string]bool // proposal -> the targets its items named
+	trace        []string
 }
 
 type entity struct {
@@ -57,11 +69,33 @@ func New(projectID string) *History {
 		sources: map[string]*SourceRow{},
 		runs:    map[string]CheckRunRow{},
 		current: map[string]string{},
+
+		itemProposal: map[string]string{},
+		targeted:     map[string]map[string]bool{},
 	}
 }
 
 // Seq is the latest allocated seq.
 func (h *History) Seq() int64 { return h.seq }
+
+// Trace is the operations performed so far, one line per write, to locate
+// a failure in a generated history.
+func (h *History) Trace() []string { return slices.Clone(h.trace) }
+
+func (h *History) log(format string, args ...any) {
+	h.trace = append(h.trace, fmt.Sprintf("seq %d: ", h.seq)+fmt.Sprintf(format, args...))
+}
+
+// short is a commit or hash prefix for the trace.
+func short(s string) string {
+	if len(s) > 8 {
+		return s[:8]
+	}
+	if s == "" {
+		return "NULL"
+	}
+	return s
+}
 
 func (h *History) next() int64 {
 	h.seq++
@@ -94,7 +128,7 @@ func Hash(name string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// Key is an entity's key.
+// Key is an entity's key (assigned when the write that adds it applies).
 func (h *History) Key(id string) string { return h.ents[id].key }
 
 // Revision is an entity's current revision.
@@ -299,6 +333,7 @@ func (h *History) SetTarget(name, ref string) string {
 	id := h.id()
 	h.d.DeliveryTargets = append(h.d.DeliveryTargets, TargetRow{ID: id, Name: name, Ref: ref, CreatedSeq: seq})
 	h.target = id
+	h.log("target set %s %s", name, ref)
 	return id
 }
 
@@ -309,6 +344,7 @@ func (h *History) AddSource(path, hash string) string {
 	row := SourceRow{ID: id, Path: path, Kind: "product_doc", RegisteredSeq: seq, AckedSHA256: hash}
 	h.d.Sources = append(h.d.Sources, row)
 	h.sources[id] = &row
+	h.log("source add %s %s", path, short(hash))
 	return id
 }
 
@@ -318,17 +354,29 @@ func (h *History) AckSource(id, hash string) {
 	s := h.sources[id]
 	h.d.SourceAcks = append(h.d.SourceAcks, SourceAckRow{ID: h.id(), Seq: seq, SourceID: id, PreviousSHA256: s.AckedSHA256, AckedSHA256: hash})
 	s.AckedSHA256 = hash
+	h.log("source ack %s %s", s.Path, short(hash))
 }
 
 // RemoveSource removes a source; its references stay.
 func (h *History) RemoveSource(id string) {
 	h.sources[id].RemovedSeq = ptr(h.next())
+	h.log("source remove %s", h.sources[id].Path)
 }
 
 // ConfirmScope confirms the active target's scope at the current baseline
 // version and source set hash.
 func (h *History) ConfirmScope(requirements ...string) string {
-	return h.confirm(h.next(), requirements)
+	id := h.confirm(h.next(), requirements)
+	h.log("scope confirm %s", h.keysOf(requirements))
+	return id
+}
+
+func (h *History) keysOf(ids []string) []string {
+	var out []string
+	for _, id := range ids {
+		out = append(out, h.ents[id].key)
+	}
+	return out
 }
 
 func (h *History) confirm(seq int64, requirements []string) string {
@@ -359,6 +407,7 @@ func (h *History) Propose(items int, questions ...QuestionSpec) (itemIDs, questi
 	for i := range items {
 		id := h.id()
 		h.d.ProposalItems = append(h.d.ProposalItems, ProposalItemRow{ID: id, ProposalID: pid, ItemIndex: i, ReviewState: "pending"})
+		h.itemProposal[id] = pid
 		itemIDs = append(itemIDs, id)
 	}
 	for _, q := range questions {
@@ -373,6 +422,7 @@ func (h *History) Propose(items int, questions ...QuestionSpec) (itemIDs, questi
 		h.d.Questions = append(h.d.Questions, row)
 		questionIDs = append(questionIDs, row.ID)
 	}
+	h.log("propose %s: %d items, %d questions", pid, items, len(questions))
 	return itemIDs, questionIDs
 }
 
@@ -382,230 +432,9 @@ func (h *History) Answer(question string) {
 	for i := range h.d.Questions {
 		if h.d.Questions[i].ID == question {
 			h.d.Questions[i].AnsweredSeq, h.d.Questions[i].Status = ptr(seq), "answered"
+			h.log("question answer %s", h.d.Questions[i].Key)
 		}
 	}
-}
-
-// Review is one review (or person's edit) being applied: every change,
-// reference and the attached scope share its seq (data-model §5.5).
-type Review struct {
-	h         *History
-	seq       int64
-	versionID string
-	changes   int
-	scope     []string
-	scoped    bool
-	last      int   // index of the last item change row, or -1
-	primaries []int // indexes of the item change rows
-}
-
-// Review applies a review. A version is written when at least one change is
-// made.
-func (h *History) Review(fn func(r *Review)) int64 {
-	seq := h.next()
-	r := &Review{h: h, seq: seq, versionID: h.id(), last: -1}
-	fn(r)
-	if r.changes > 0 {
-		h.version++
-		h.d.BaselineVersions = append(h.d.BaselineVersions, VersionRow{ID: r.versionID, Seq: seq, Number: h.version})
-	}
-	if r.scoped {
-		h.confirm(seq, r.scope)
-	}
-	return seq
-}
-
-// Apply is a person's edit (propose --apply): the proposal, its accepted
-// items and the version share one seq (architecture §6.1.5).
-func (h *History) Apply(fn func(r *Review)) int64 {
-	return h.Review(func(r *Review) {
-		pid := h.id()
-		h.d.Proposals = append(h.d.Proposals, ProposalRow{ID: pid, Seq: r.seq})
-		fn(r)
-		for i, row := range r.primaries {
-			item := h.id()
-			h.d.ProposalItems = append(h.d.ProposalItems, ProposalItemRow{
-				ID: item, ProposalID: pid, ItemIndex: i, ReviewState: "accepted", ReviewedSeq: ptr(r.seq),
-			})
-			h.d.BaselineChanges[row].ProposalItemID = ptr(item)
-		}
-	})
-}
-
-// Seq is the review's seq.
-func (r *Review) Seq() int64 { return r.seq }
-
-// change writes the change of an item; FromItem applies to it.
-func (r *Review) change(e *entity, op string, class *string) {
-	r.cascade(e, op, class)
-	r.last = len(r.h.d.BaselineChanges) - 1
-	r.primaries = append(r.primaries, r.last)
-}
-
-// cascade writes a change no item applies (a cascade).
-func (r *Review) cascade(e *entity, op string, class *string) {
-	r.h.d.BaselineChanges = append(r.h.d.BaselineChanges, ChangeRow{
-		ID: r.h.id(), Seq: r.seq, VersionID: r.versionID, ChangeIndex: r.changes,
-		EntityType: e.typ, EntityID: e.id, Op: op, ChangeClass: class, AfterJSON: r.h.snapshot(e),
-	})
-	r.changes++
-}
-
-func (r *Review) add(e *entity) string {
-	e.id, e.status, e.revision, e.revisionSeq = r.h.id(), "active", 1, r.seq
-	if e.origin == "" {
-		e.origin = "extracted"
-	}
-	r.h.ents[e.id] = e
-	r.h.order = append(r.h.order, e.id)
-	r.change(e, "add", nil)
-	return e.id
-}
-
-// AddGoal adds a goal.
-func (r *Review) AddGoal(title string) string {
-	r.h.keys["goal"]++
-	return r.add(&entity{typ: "goal", key: fmt.Sprintf("GOAL-%d", r.h.keys["goal"]), title: title})
-}
-
-// AddRequirement adds a requirement, under a goal or none ("").
-func (r *Review) AddRequirement(goal, priority string) string {
-	return r.AddRequirementWithOrigin(goal, priority, "extracted")
-}
-
-// AddRequirementWithOrigin adds a requirement with an origin.
-func (r *Review) AddRequirementWithOrigin(goal, priority, origin string) string {
-	r.h.keys["requirement"]++
-	n := r.h.keys["requirement"]
-	return r.add(&entity{
-		typ: "requirement", key: fmt.Sprintf("REQ-%03d", n), reqNumber: n, origin: origin,
-		title: fmt.Sprintf("Requirement %d", n), goalID: goal, priority: priority,
-	})
-}
-
-// AddCriterion adds a criterion to a requirement; it applies to the
-// requirement's revision at this point of the review.
-func (r *Review) AddCriterion(requirement, verification string, check *baseline.Check) string {
-	return r.AddCriterionWithOrigin(requirement, verification, check, "extracted")
-}
-
-// AddCriterionWithOrigin adds a criterion with an origin.
-func (r *Review) AddCriterionWithOrigin(requirement, verification string, check *baseline.Check, origin string) string {
-	p := r.h.ents[requirement]
-	k := "criterion:" + requirement
-	r.h.keys[k]++
-	return r.add(&entity{
-		typ: "criterion", key: fmt.Sprintf("AC-%03d-%d", p.reqNumber, r.h.keys[k]), origin: origin,
-		reqID: requirement, reqRevision: p.revision, statement: "statement",
-		verification: verification, check: check,
-	})
-}
-
-// Fields are the editable fields of an entity.
-type Fields struct {
-	Title        string
-	Goal         string // requirements
-	Priority     string // requirements
-	Statement    string // criteria
-	Verification string // criteria
-	Check        *baseline.Check
-}
-
-func (e *entity) fields() Fields {
-	return Fields{Title: e.title, Goal: e.goalID, Priority: e.priority, Statement: e.statement, Verification: e.verification, Check: e.check}
-}
-
-func (e *entity) set(f Fields) {
-	e.title, e.goalID, e.priority, e.statement, e.verification, e.check = f.Title, f.Goal, f.Priority, f.Statement, f.Verification, f.Check
-}
-
-// Update updates an entity. A material update increases its revision; an
-// update of a criterion, either class, confirms it for its requirement's
-// current revision (data-model §5.5).
-func (r *Review) Update(id string, material bool, edit func(f *Fields)) {
-	e := r.h.ents[id]
-	f := e.fields()
-	if edit != nil {
-		edit(&f)
-	}
-	e.set(f)
-	class := "editorial"
-	if material {
-		class = "material"
-		e.revision++
-		e.revisionSeq = r.seq
-	}
-	if e.typ == "criterion" {
-		e.reqRevision = r.h.ents[e.reqID].revision
-	}
-	r.change(e, "update", ptr(class))
-}
-
-// Reaffirm confirms a criterion for its requirement's current revision.
-func (r *Review) Reaffirm(criterion string) {
-	e := r.h.ents[criterion]
-	e.reqRevision = r.h.ents[e.reqID].revision
-	r.change(e, "reaffirm", nil)
-}
-
-// Retire retires an entity, with the cascade of data-model §5.2: a
-// requirement's criteria are retired, a goal's requirements lose it.
-func (r *Review) Retire(id string) {
-	e := r.h.ents[id]
-	e.status = "retired"
-	r.change(e, "retire", nil)
-	for _, cid := range r.h.order {
-		c := r.h.ents[cid]
-		switch {
-		case e.typ == "requirement" && c.typ == "criterion" && c.reqID == id && c.status == "active":
-			c.status = "retired"
-			r.cascade(c, "retire", nil)
-		case e.typ == "goal" && c.typ == "requirement" && c.goalID == id && c.status == "active":
-			c.goalID = ""
-			r.cascade(c, "update", ptr("editorial"))
-		}
-	}
-}
-
-// Ref writes a source reference of an entity's current revision.
-func (r *Review) Ref(entity, src, verification string) {
-	e := r.h.ents[entity]
-	r.h.d.SourceRefs = append(r.h.d.SourceRefs, SourceRefRow{
-		ID: r.h.id(), Seq: r.seq, SourceID: src, EntityType: e.typ, EntityID: entity,
-		EntityRevision: e.revision, Verification: verification,
-	})
-}
-
-// FromItem marks the last change as the application of a pending proposal
-// item, which is accepted; open questions about it are linked to the entity
-// (the backfill of data-model §4.8).
-func (r *Review) FromItem(item string) {
-	ch := &r.h.d.BaselineChanges[r.last]
-	ch.ProposalItemID = ptr(item)
-	r.review(item, "accepted")
-	for i := range r.h.d.Questions {
-		q := &r.h.d.Questions[i]
-		if q.ProposalItemID != nil && *q.ProposalItemID == item && q.AnsweredSeq == nil {
-			q.RelatedType, q.RelatedID = ptr(ch.EntityType), ptr(ch.EntityID)
-		}
-	}
-}
-
-// RejectItem rejects a pending proposal item.
-func (r *Review) RejectItem(item string) { r.review(item, "rejected") }
-
-func (r *Review) review(item, state string) {
-	for i := range r.h.d.ProposalItems {
-		if r.h.d.ProposalItems[i].ID == item {
-			r.h.d.ProposalItems[i].ReviewState, r.h.d.ProposalItems[i].ReviewedSeq = state, ptr(r.seq)
-		}
-	}
-}
-
-// Scope attaches a scope confirmation of these requirements to the review,
-// confirmed after the review's changes.
-func (r *Review) Scope(requirements ...string) {
-	r.scoped, r.scope = true, requirements
 }
 
 // ClaimSpec is one claim of a batch. Criterion "" is unmapped work;
@@ -637,6 +466,7 @@ func (h *History) Claims(kind string, claims ...ClaimSpec) int64 {
 		}
 		h.d.Claims = append(h.d.Claims, claim)
 	}
+	h.log("claims %s %v", kind, claims)
 	return seq
 }
 
@@ -700,6 +530,7 @@ func (h *History) Run(criterion string, s RunSpec) string {
 	}
 	h.d.CheckRuns = append(h.d.CheckRuns, row)
 	h.runs[row.ID] = row
+	h.log("run %s %s at %s..%s %s/%s %s/%s %s", row.ID, e.key, short(s.Head), short(s.HeadEnd), s.TreeStart, s.TreeEnd, s.Result, s.FailureKind, s.Grade)
 	return row.ID
 }
 
@@ -790,6 +621,7 @@ func (h *History) Decide(criterion string, s DecisionSpec) string {
 	}
 	h.current[k] = row.ID
 	h.d.Decisions = append(h.d.Decisions, row)
+	h.log("decision %s %s %s %s on %s evidence %s", row.ID, e.key, s.Decision, s.Mode, short(s.Snapshot), s.Evidence)
 	return row.ID
 }
 
@@ -809,6 +641,7 @@ func (h *History) Scan(commits ...CommitSpec) int64 {
 		for _, l := range c.Links {
 			h.d.CommitLinks = append(h.d.CommitLinks, CommitLinkRow{CommitID: id, TargetType: h.ents[l].typ, TargetID: l, LinkSource: "trailer"})
 		}
+		h.log("scan %s %v", short(c.SHA), h.keysOf(c.Links))
 	}
 	return seq
 }
