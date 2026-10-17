@@ -149,6 +149,7 @@
     { "id": "SCH-146", "schema": "target-scope.v1", "base": "valid/target-scope.json", "patch": [{ "op": "replace", "path": "/scope/requirements", "value": [{ "key": "REQ-002", "revision": 2 }, { "key": "REQ-002", "revision": 2 }] }], "why": "a confirmed requirement is listed once" },
     { "id": "SCH-147", "schema": "target-scope.v1", "base": "valid/target-scope.json", "patch": [{ "op": "replace", "path": "/target/name", "value": "release ```go x``` " }], "why": "a target name is free text, which holds no code fence (architecture §10.2; codex-review-034 B2)" },
     { "id": "SCH-148", "schema": "scope.v1", "base": "valid/scope.json", "patch": [{ "op": "replace", "path": "/note", "value": "```go\nfunc f() {}\n```" }], "why": "a scope note is plain text without a code fence (codex-review-034 B1)" },
-    { "id": "SCH-149", "schema": "review.v1", "base": "valid/review.with-followups-and-scope.json", "patch": [{ "op": "add", "path": "/scope/note", "value": "```go\nfunc f() {}\n```" }], "why": "the note of a scope confirmed in a review is plain text without a code fence (codex-review-034 B1)" }
+    { "id": "SCH-149", "schema": "review.v1", "base": "valid/review.with-followups-and-scope.json", "patch": [{ "op": "add", "path": "/scope/note", "value": "```go\nfunc f() {}\n```" }], "why": "the note of a scope confirmed in a review is plain text without a code fence (codex-review-034 B1)" },
+    { "id": "SCH-150", "schema": "init.v1", "base": "valid/init.json", "patch": [{ "op": "replace", "path": "/project/name", "value": "demo ```go x``` " }], "why": "a project name is free text, which holds no code fence (architecture §10.2), as a target name (SCH-147)" }
   ]
 }

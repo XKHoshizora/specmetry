@@ -2298,3 +2298,103 @@ MVP v0.1.0 不支持 SHA-256 格式的 git 对象 ID。§27 记录的现象（64
 - 本地 Windows 上连续 30 次运行（每次 20 轮），全部通过。
 
 **M1 状态**：九个工作包都已验收，但 **M1 里程碑尚未整体验收**。M1 退出条件的证据核对见 [m1-exit-evidence.md](m1-exit-evidence.md)：59 个 P0 项中 53 项 PASS，6 项 INCOMPLETE（都是验证证据不足，没有发现行为缺陷），因此暂不满足退出条件。是否补齐证据、何时交给 Codex 做 M1 最终退出条件核查，由产品负责人决定。
+
+## 46. M1 退出证据补充 PR #16 的审查（codex-review-036）与合并
+
+§45（WP1.8 的最终复审与验收）的记录在尚未合并的 PR #15 中，所以本节编为 §46。
+
+**审查结论**：**GO**，BLOCKER 为 0。审查目标 `e1d2ea7`，基准 `19600ec`。审查原文按原样入库（`docs/reviews/codex-review-036.md`）。
+
+- M1 退出条件证据核对中 6 项 INCOMPLETE 的 P0 验收项，现在都有充分的证据：
+  - **MVP-CH-01、CH-02、BL-21、BL-27、PRV-07**：PR #16 补齐了测试。审查方核实了这些测试的前置条件与业务断言，并在隔离副本中独立运行，全部通过。
+  - **MVP-SRC-07**："只为引用校验读取文本、不解析文档语义"由审查方按实际的读取、校验、持久化和输出调用链独立审查，结论为 **PASS**。
+- 正式二进制测试（`TestBuiltBinary`）的证据有效。`nowebui` 构建与发布包的差异已如实说明。
+- acceptance-criteria §1 的三类集成测试证据定义，产品负责人已正式批准（审查原文中记录了这次确认）。SRC-07 的 M1 / M2 划分，与审查 019 和 review-resolution §24 的既有边界一致。两者都维持现有设计。
+- **合并**：PR #16 已合并，合并提交 `01bd50f`（2026-10-17），它的树与 `e1d2ea7` 相同。合并后 master 的三平台 CI 8/8 通过（[run 39012262429](https://github.com/XKHoshizora/specmetry/actions/runs/39012262429)）。
+- 审查方保留的事项：
+  - Windows 首次创建数据库期间偶发的 `Access is denied`：这次通过不代表已经解决；
+  - 项目名称的代码围栏修复：见 §47；
+  - M1 退出条件证据报告（PR #15）的更新：要引用合并后的提交和本次 SRC-07 的审查结论，不能把原来的 INCOMPLETE 无依据地改为 PASS。
+
+  这些都不是已接受的风险。
+
+**M1 状态**：九个工作包都已验收；6 项证据缺口已补齐。M1 里程碑尚未整体验收：项目名称的安全修复（§47）、证据报告的更新和里程碑的最终核查仍需单独完成。
+
+## 47. 项目名称禁止代码围栏的独立安全修复
+
+**来源**：implementation-plan M1"M1 最终验收之前必须完成的独立安全修复"。产品负责人已确定方向：项目名称与交付目标名称一样，禁止代码围栏（architecture §10.2；参照 codex-review-034 B2）。本修复单独提交、单独审查。
+
+**修复前的行为**（测试在 `01bd50f` 上的实际运行）：
+
+- `init --name` 中含代码围栏的名称被登记：退出码 0，写入数据库和 marker。
+- 主 worktree 的目录名含代码围栏时，不带 `--name` 也会照样登记。
+- `init.v1` 的 `project.name` 只限制长度，含代码围栏的名称能通过输出 schema 的校验。
+
+**修复**：
+
+- `project.validateName` 拒绝含三个连续反引号的名称，问题为"contains a code fence (three backticks)"。原有的非空、UTF-8、单行、控制字符与 200 字符限制保持不变，没有增加别的限制。
+- 显式的 `--name` 和由目录名生成的默认名称经过同一校验，都在打开数据库之前完成，返回退出码 2：
+  - `--name` 不合法时，指向 `--name`；
+  - 默认名称不合法时，消息给出原因并提示使用 `--name`（这个错误与以前一样没有 details）。
+
+  两种情形都不回显名称，不创建数据目录，不登记项目，不写 marker。
+- `init.v1` 的 `project.name` 增加相同的代码围栏限制，新增反例 SCH-150。
+- Git ref 的规则、交付目标名称的校验（WP1.8）、数据库结构和迁移都没有改变。
+
+**旧项目的兼容**（需要产品负责人确认）：
+
+- **问题**：早期的开发版本可能已把含代码围栏的名称登记进数据库和 marker。数据库的 CHECK 只限制非空和长度，所以这样的数据是可能存在的。`init` 不改名，`init.v1` 现在又不接受这个名称。
+- **只收紧 schema 的后果**：对这样的项目再次执行 `init --json`，会以 internal（退出码 1）失败，消息为"the init.v1 output does not conform to its schema"。带 `--stage` 或在新的关联 worktree 中执行时，阶段变更和 worktree 登记会**先提交，然后才失败**。在只应用 schema 改动的隔离副本中实测，`seq` 从 2 变为 3，阶段变为 `incomplete_docs`，worktree 从 1 个变为 2 个。
+- **采用的处理**：`init` 找到已登记的项目时，先用同一规则检查登记的名称；不合法时返回退出码 2（`invalid_input`，指向 `name (registered)`），说明这个名称不再被接受、`init` 不改名、什么都没有改变。
+  - 不引用这个名称。修复前，"不改名"的错误会用 `%q` 原样引用登记的名称。
+  - 名称、marker、worktree、阶段与 `seq` 都不变；不静默改名，不迁移。
+  - 主 worktree 的目录名含代码围栏、又没有给出 `--name` 的旧项目，在打开数据库之前就因目录名被拒绝；给出 `--name` 时，同样因登记的名称被拒绝。
+- **后果**：这样的项目不能再执行 `init`，包括登记新的关联 worktree 和修改阶段。其他命令不显示项目名称，照常工作（`source list`、`target show` 有测试）。现在没有改名的命令（`project set` 不在 M1）。
+- **备选方案**，由产品负责人决定：
+  1. 维持当前处理：有说明的拒绝，不写入，不改名。
+  2. 不在 `init.v1` 的输出中禁止代码围栏，只在登记新名称时拒绝。这样旧项目可以继续执行 `init`，但 schema 不能保证输出中没有代码围栏。
+  3. 把 v0.1.0 之前的开发版本数据定为不需要兼容，处理方式同第 1 种，并在文档中声明。
+
+  不建议迁移或改写旧数据，这需要修改冻结的数据模型。
+
+**Schema 与数据库**：
+
+- 新登记的名称由写入前的校验保证不含代码围栏，与 `init.v1` 一致。
+- 数据库没有对应的 CHECK（本次不改迁移），所以旧数据可能不符合 schema。对这样的数据，`init` 返回有说明的拒绝，而不是输出不合法的文档。
+- M2 的 `status.v1` 也有 `project.name`，实现时需要同样考虑。
+
+**回归测试**（测试先行，在 `01bd50f` 上都失败）：
+
+- `TestInitRefusesACodeFenceInTheProjectName` 覆盖以下情形：
+  - `--name` 含代码围栏（git 项目与非 git 项目）、名称中间含代码围栏；
+  - 目录名含代码围栏、不带 `--name`（git 与非 git）；
+  - 首次 `init`（不创建数据目录）与已有项目（数据目录逐字节不变）；
+  - JSON 与文本模式。
+
+  每种情形都是退出码 2，error.v1 合法，不回显，不写 marker，仓库不变，合成 canary 不进入输出和数据目录。
+  对照：
+  - 目录名含代码围栏、带合法 `--name` 时成功；
+  - 单个与两个连续的反引号、中文、日文、emoji、200 个字符，都能登记，并按原值保存在数据库与 marker 中；
+  - 201 个字符被拒绝；
+  - 成功输出通过 `init.v1` 校验。
+- `TestInitWithARegisteredNameThatHoldsACodeFence`：在数据库与 marker 中写入含代码围栏的旧名称，模拟早期版本的数据。
+  - 再次执行、带另一个名称、带 `--stage`、带登记的名称、在新的关联 worktree 中执行，都是退出码 2，而不是 internal，也不回显名称；
+  - 名称、marker、worktree、阶段与 `seq` 都不变；
+  - `source list`、`target show` 照常工作。
+- `internal/contract` 的 SCH-150。
+
+**范围外，不变**：Source、Proposal、Review、Question、Target、Scope 的行为，SQLite 迁移与数据库结构，Windows 首次创建数据库的竞争，`doctor` 的 `GIT_TRACE`，M2，PR #15 中的 M1 退出条件报告。
+
+**验证**（本地）：
+
+- 两个新测试在 `01bd50f` 上失败（RED），修复后通过。
+- `scripts/check.sh` 中，tidy、vet、Markdown 链接检查、golangci-lint（0 issues）都通过。
+- `go test ./...`：`internal/cli` 以外的包全部通过。
+  - `internal/cli` 触发本地 Windows 上 Go 默认的 10 分钟超时，此前没有测试失败。
+  - 单独以 `-timeout 30m` 运行，通过（1048 秒）。
+  - 脚本和全局超时都没有修改。
+- web 检查、带 Dashboard 的构建、三平台 lint 与格式检查都通过。
+- WSL Linux：19 个测试二进制全部通过，其中 `cli` 147 项。
+- 三平台 CI 的结果记录在 PR 中。
+
+**状态**：已实现，等待 Codex 审查 037；旧项目的处理方式待产品负责人确认。M1 尚未整体验收。
