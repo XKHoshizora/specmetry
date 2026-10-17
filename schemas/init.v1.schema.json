@@ -23,7 +23,12 @@
       "required": ["id", "name", "stage", "stage_detected"],
       "properties": {
         "id": { "$ref": "common.v1.schema.json#/$defs/ulid" },
-        "name": { "type": "string", "maxLength": 200 },
+        "name": {
+          "description": "No fenced code: free text (architecture §10.2), as a target's name.",
+          "type": "string",
+          "maxLength": 200,
+          "pattern": "^(?![\\s\\S]*```)[\\s\\S]*$"
+        },
         "stage": { "enum": ["docs_only", "in_development", "incomplete_docs"] },
         "stage_detected": { "enum": ["docs_only", "in_development", "incomplete_docs"] }
       }
