@@ -758,9 +758,9 @@ M1 的实现（独立确认，以及附带在审核中的确认）见 §6.1.7。
 ## 7. 推导引擎
 
 - 位于 `internal/domain/derive`，是不依赖 I/O 的纯函数包。
-- 输入：截止 `as_of_seq` 的全部事实（含基准和范围）、目标与 `S`、各来源的观测哈希，以及当前 worktree 的代码上下文（只用于工作区视图）。读取磁盘和 git 的工作由调用方在推导**之前**完成，并作为参数传入。
+- 输入：截止 `as_of_seq` 的全部事实（含基准和范围）、目标与 `S`、各来源的观测哈希、参与推导的项目设置（`stage`、`sources_skipped`、`inventory_skipped`），以及当前 worktree 的代码上下文（只用于工作区视图）。读取磁盘和 git 的工作由调用方在推导**之前**完成；项目设置在读取事实的同一个读事务中读取；这些当前值输入一次命令只取一次，都作为参数传入（[data-model.md §6.13.1](data-model.md#6131-当前值的取得重放与---diff-since)）。输入的具体规格（F4）见 [data-model.md §6.13](data-model.md#613-推导的输入f4)，合法事实域与畸形输入见 [§6.14](data-model.md#614-合法事实域与畸形输入)。
 - 规则以 [data-model.md §6](data-model.md#6-推导) 为准，**每条规则都有表驱动测试，以及对应的反例测试**。
-- 推导结果不入库。任何输出都附带 `as_of_seq`、`S` 和 `baseline_version`，因此可以复现。
+- 推导结果不入库。输出（`status.v1`、`gaps.v1`）附带 `as_of_seq` 与这次推导使用的全部当前值输入（`S`、来源观测、项目设置；`status.v1` 还有工作区视图的上下文）；事实仍在数据库中，输出不是事实的备份。用同一数据库中截止 `as_of_seq` 的事实与输出记录的当前值输入，可以重放结果；只凭 `as_of_seq`、`S` 和 `baseline_version` 不足以重放。重放不得用当前值替换或补齐缺失的输入（data-model §6.13.1）。
 
 ## 8. 本地文件布局
 
@@ -855,7 +855,7 @@ Agent 侧的安装位置（TD-03）：
 | 方法 | 路径 | 用途 | 请求体 / 响应 |
 |---|---|---|---|
 | GET | `/projects` | 项目列表 | — |
-| GET | `/projects/{id}/status` | 完整的读取模型：目标、`S`、范围、来源与观测哈希、交付状态、阻塞差距、`as_of_seq`。Dashboard 从这里取得写请求需要回传的全部版本值。 | 响应：`status.v1` |
+| GET | `/projects/{id}/status` | 完整的读取模型：目标、`S`、范围、来源与观测哈希、项目设置、交付状态、阻塞差距、`as_of_seq`。Dashboard 从这里取得写请求需要回传的全部版本值。 | 响应：`status.v1` |
 | GET | `/projects/{id}/overview` | 交付判定摘要、指标、最近的会话 | — |
 | GET | `/projects/{id}/baseline` | 基准树，含进度和交付状态 | — |
 | GET | `/projects/{id}/baseline/history` | 版本与变更 | — |
@@ -1289,7 +1289,7 @@ schemas/  skill/  web/  testdata/fixtures/  docs/
 | TD-03 | Skill 与 Hook 的安装范围 | 默认用户级，可选项目级 | M3 |
 | TD-04 | SQLite 驱动 | **已确认**：`modernc.org/sqlite`。spike（v1.60.1，Windows）验证了 WAL、`wal_checkpoint(TRUNCATE)`、`BEGIN IMMEDIATE` / `EXCLUSIVE`、触发器 `RAISE(ABORT)`、`VACUUM INTO`，以及两个连接各并发写 200 次时 `seq` 唯一且连续 | 已确认（2026-10-13） |
 | TD-05 | git 访问方式 | **已确认（2026-10-14，产品负责人）**：调用 `git` CLI；Hook 中只读文件 | 已确认（2026-10-14） |
-| TD-06 | Windows 上执行检查的 shell | 优先 `sh`（Git for Windows），找不到时用 `cmd /C`；AC 可以指定 `shell` | M2 |
+| TD-06 | Windows 上执行检查的 shell | 优先 `sh`（Git for Windows），找不到时用 `cmd /C`；AC 可以指定 `shell`。M2 开工准备报告第 5.1 节有修订后的草案（M2-Q1），尚未批准 | WP2.5 开工前（2026-10-18，产品负责人调整截止） |
 | TD-07 | API 契约与 TS 类型 | OpenAPI 引用 `schemas/` 作为请求体定义；生成 TS 类型 | M5 |
 | TD-08 | Dashboard 刷新 | SSE 通知，断线时退回轮询 | M5 |
 | TD-09 | 前端 UI 方案 | 待定；约束：资源全部内嵌 | M5 |
@@ -1306,7 +1306,8 @@ schemas/  skill/  web/  testdata/fixtures/  docs/
 | TD-20 | 交换格式的版本策略 | **已确认（2026-10-14，产品负责人）**：调整后的六条策略，见 §9.3（发布前可完善 v1，但须同步 schema、示例和测试；输出只用当前主版本；兼容上一个主版本的输入必须有实际转换和验证；Skill 与二进制配套） | 已确认（2026-10-14） |
 | TD-21 | 密钥识别规则集与误报处理 | **已确认（2026-10-14，产品负责人）**：§10.8 的 14 条内置规则及其正反样本；命中即拒绝持久化，不回显敏感内容；只能追加规则；误报时由用户改写文本（不提供绕过开关）；规则集只能降低泄露风险，不能保证检测出所有秘密 | 已确认（2026-10-14） |
 | TD-22 | Windows ACL 的具体授权对象 | **已确认**：当前用户 + SYSTEM，受保护的 DACL（关闭继承），子对象继承 | 已确认（2026-10-13） |
-| TD-23 | `check.inputs` 的对象 ID 粒度 | 文件取 blob ID，目录取 tree ID | M2 |
+| TD-23 | `check.inputs` 的对象 ID 粒度 | **比较语义与错误边界已确认（2026-10-18，产品负责人，M2-Q2）**：结构化的输入记录（保存的路径原值、mode、类型、对象 ID），查找按 V-P04 规范化，只要求路径元数据，区分路径不存在、读取路径所需对象失败、叶对象缺失与 gitlink，遵守 PD-26（[data-model.md §4.11.2](data-model.md#4112-检查输入的身份inputs_json)）。Git 读取机制（使用的命令与调用方式）待定 | 比较语义：已确认；Git 读取机制：WP2.3 开工前 |
 | TD-24 | 隔离执行器的后端与验证方法：物化方式（`git worktree add --detach` 或 `git archive`）；各平台的只读强制机制（容器只读挂载、Linux 上的 bubblewrap / Landlock、macOS 沙箱、Windows 待评估）；执行前写入探测与执行后树比对的实现；子模块、LFS 和依赖缓存的处理 | 待定；约束：不能依赖文件权限位；无法验证时绝不标为隔离级；普通项目不强制安装 | 隔离执行器开工前（MVP 之后） |
 | TD-25 | 仓库移动或复制后的项目身份：marker 与数据库不一致时，如何判断是原项目换了位置（应继承原项目），还是复制出的新项目 | M1（WP1.1）采取保守做法：拒绝并说明原因，不写入；由人删除 marker 后，登记为新项目（§6.1.2）。是否提供人类专属的"迁移项目位置"命令，待定 | M4（自测之前） |
 | TD-26 | Git SHA-256 对象格式的完整支持 | **v0.1.0 不支持（2026-10-15，产品负责人）**：SHA-256 仓库的 `init` 在任何写入之前返回退出码 6（§6.1.2）。完整支持需要同步调整 Schema（`commitSha` 等只接受 40 位 ID 的字段）、数据模型、Code Ref、Git Reader 与测试 | v0.1.0 之后 |
+| TD-27 | 项目设置的变化没有 `seq`：`init` 修改 `stage`、设置 `sources_skipped` 或 `inventory_skipped` 时不分配 `seq`（M1 的实现） | 分两部分记录。**（1）当前值输入、输出与重放的语义**（审查 044 B1，首批必须明确）：三项设置是显式的当前值输入，一次命令只读一次，`--diff-since` 的两次推导共用；`status.v1`、`gaps.v1` 输出这三项；重放使用原输出记录的设置，不用当前值替换或补齐（[data-model.md §6.13.1](data-model.md#6131-当前值的取得重放与---diff-since)）。2026-10-18 写明，经审查 045 GO，**已冻结**（review-resolution §57）；保留 M1 `init` 的行为，不增加设置的历史或 `seq`。**（2）是否提供完整的设置历史**（为设置的变化分配 `seq`，需要修改 M1 已验收的 `init`）：独立的设计问题，待定；它的结论如果改变（1）的语义（例如让 `--diff-since` 使用历史上的设置），需要另行决定，并同步修改规范与 schema | （1）已冻结（2026-10-18）；（2）M2 结束时的设计复核 |

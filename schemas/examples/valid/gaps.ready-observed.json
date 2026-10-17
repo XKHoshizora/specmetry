@@ -1,7 +1,19 @@
 {
   "schema": "specmetry.gaps/v1",
   "as_of_seq": 530,
+  "project": {
+    "id": "01J9Z3K5Q8R2T4V6W8X0Y2Z4C1",
+    "stage": "in_development",
+    "sources_skipped": false,
+    "inventory_skipped": false
+  },
   "snapshot": "8f3c2a1b9d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a",
+  "sources": [
+    {
+      "id": "01J9Z3K5Q8R2T4V6W8X0Y2Z4E0",
+      "current_sha256": "9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b"
+    }
+  ],
   "baseline_version": 4,
   "delivery_status": "ready",
   "evidence_grade": "observed",

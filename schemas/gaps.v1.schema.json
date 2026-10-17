@@ -2,14 +2,39 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/XKHoshizora/specmetry/schemas/gaps.v1.schema.json",
   "title": "Specmetry gaps v1",
-  "description": "Output of `specmetry gaps --json`: the gap list of status.v1 with its evaluation context. Invariant: delivery_status is 'ready' if and only if no gap has blocking=true. evidence_grade is always present so that a ready judgement is never shown without its evidence grade.",
+  "description": "Output of `specmetry gaps --json`: the gap list of status.v1 with its evaluation context. Invariant: delivery_status is 'ready' if and only if no gap has blocking=true. evidence_grade is always present so that a ready judgement is never shown without its evidence grade. Derived from the same complete input as status.v1 (data-model §6.13.1): the facts of project.id up to as_of_seq, which stay in that project's database (this output is not a backup of them), and the current-value inputs recorded here (snapshot, sources[].current_sha256, the project settings). The workspace context is not an input of gaps. A replay never fills a missing value with a current one.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema", "as_of_seq", "snapshot", "baseline_version", "delivery_status", "evidence_grade", "gaps"],
+  "required": ["schema", "as_of_seq", "project", "snapshot", "sources", "baseline_version", "delivery_status", "evidence_grade", "gaps"],
   "properties": {
     "schema": { "const": "specmetry.gaps/v1" },
     "as_of_seq": { "type": "integer", "minimum": 0 },
+    "project": {
+      "description": "The project, and the project settings this derivation used, read once per command (as status.v1 project). Only these settings are output.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "stage", "sources_skipped", "inventory_skipped"],
+      "properties": {
+        "id": { "$ref": "common.v1.schema.json#/$defs/ulid" },
+        "stage": { "enum": ["docs_only", "in_development", "incomplete_docs"] },
+        "sources_skipped": { "type": "boolean" },
+        "inventory_skipped": { "type": "boolean" }
+      }
+    },
     "snapshot": { "oneOf": [{ "$ref": "common.v1.schema.json#/$defs/commitSha" }, { "type": "null" }] },
+    "sources": {
+      "description": "One observation for each source in the source set at as_of_seq, as used by this derivation; current_sha256 is null when the file was missing.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "current_sha256"],
+        "properties": {
+          "id": { "$ref": "common.v1.schema.json#/$defs/ulid" },
+          "current_sha256": { "oneOf": [{ "$ref": "common.v1.schema.json#/$defs/sha256" }, { "type": "null" }] }
+        }
+      }
+    },
     "baseline_version": { "$ref": "common.v1.schema.json#/$defs/baselineVersion" },
     "delivery_status": { "$ref": "common.v1.schema.json#/$defs/targetDeliveryStatus" },
     "evidence_grade": { "$ref": "common.v1.schema.json#/$defs/deliveryEvidenceGrade" },

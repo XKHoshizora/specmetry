@@ -359,13 +359,15 @@ Question 在提案提交时立即创建（编号按 TD-14 分配），只能由�
 | summary | ≤ 500 字符，单段文字，不能包含代码块 |
 | refs_json, refs_check_json | 文件路径与行号、测试名、提交 SHA，以及各自的存在性校验结果 |
 
+**`seq` 与记录身份**（F4，§6.13）：一次 `claim` 提交是一次逻辑写入，分配一个 `seq`；批次与它的全部 Claim（含 `target_type = none` 的未映射工作）共用这个 `seq`。`claim_batches.seq` 在表内唯一，`claims.seq` 可以多行同值。批次与 Claim 各有 `id`，Claim 经 `batch_id` 归属批次。同一批次中同一 AC 至多一条 Claim（V-C03），所以按 AC 取"`seq` 最大的 Claim"没有并列。提交时当前 worktree 第一次出现的，登记 worktree 另取一个 `seq`，与提案相同。依据：批次是一次原子写入，与提案共用一个 `seq` 的方式相同（architecture §6.1.4）。
+
 ### 4.11 `check_runs`
 
 | 字段 | 说明 |
 |---|---|
 | id, seq, project_id, criterion_id | |
 | criterion_revision, requirement_revision, check_config_hash | **开始执行时**读取的值；之后不会重新绑定 |
-| inputs_json | 开始时 `inputs` 中每个路径在 HEAD 上的 git 对象 ID（`git rev-parse <head>:<path>`）；未声明时为 NULL |
+| inputs_json | 开始时 `inputs` 中每个路径在 `head_start` 上的输入记录：保存的路径原值、mode、类型与对象 ID（§4.11.2）；未声明 `inputs` 或非 git 项目时为 NULL |
 | worktree_id, workdir | 发起执行的 worktree，以及相对工作目录 |
 | evidence_grade | `observed` / `snapshot_isolated`（见下文）。**MVP 只产生 `observed`。** |
 | isolation_mode | 调用时请求的隔离模式：`off` / `required` / `auto`（`auto` 留给隔离执行器） |
@@ -379,6 +381,8 @@ Question 在提案提交时立即创建（编号按 TD-14 分配），只能由�
 | started_at, finished_at | 仅用于展示 |
 
 **不保存**命令文本（命令在基准中，可以由 `check_config_hash` 找到）、输出、输出尾部，也不保存输出的哈希。
+
+**`seq` 与记录身份**（F4，§6.13）：每次执行在结束之后单独写入（§7.4 第 5 步），分配一个 `seq`，`check_runs.seq` 在表内唯一；`check run --all` 串行执行，按结束的顺序得到递增的 `seq`。`seq` 表示记录写入的先后，不是开始的时刻；`started_at`、`finished_at` 只用于展示。记录身份为 `id`。依据：`V` 取 `runs(S)` 中 `seq` 最大的一条（§6.1），每次执行一个 `seq` 使它没有并列。
 
 #### 4.11.1 证据等级
 
@@ -403,11 +407,59 @@ Question 在提案提交时立即创建（编号按 TD-14 分配），只能由�
 
 合格执行的结果只对它的 `head` 这个提交有意义。观测级和隔离级的合格执行都参与 `V` 的计算（§6.1），但只有隔离级可以支撑**沿用**（§6.2），也只有隔离级可以让交付判定标为隔离级（§6.8）。
 
+#### 4.11.2 检查输入的身份（`inputs_json`）
+
+产品负责人于 2026-10-18 批准（M2-Q2，TD-23 的比较语义与错误边界）。读取所用的 git 命令与调用方式（TD-23 的 Git 读取机制）在 WP2.3 开工前确定，不改变本节的语义。
+
+**记录**：
+
+- 每个声明的输入一项 `{path, mode, type, oid}`：
+  - `path` 是检查配置中**保存的原值**；
+  - `mode`、`type`、`oid` 是 `head_start` 提交树中对应条目的 mode、对象类型与对象 ID。
+- 按 `path` 排序。没有声明 `inputs` 或非 git 项目时，`inputs_json` 为 NULL。
+- 示例：`[{"path":"src/a.go","mode":"100644","type":"blob","oid":"5626abf0f72e58d7a153368ba57db4c673c0e171"}]`。
+
+**查找**：
+
+- 在 `head_start`（完整的提交 ID，而不是 `HEAD`）的树中查找与路径**完全相同**的条目。
+- 查找所用的路径按 V-P04 的方式规范化：`\` 换成 `/`，再按字面规范化（`path.Clean`）。所以 `./src/a.go`、`src/dir/` 与 M1 校验时的含义一致，`.` 表示仓库根的树。
+- 不改写保存的值，也不改变 `check_config_hash`（§4.4），所以 M1 中已保存的配置含义不变。
+- git 的路径区分大小写。
+
+**相等**：
+
+- 两份记录的 `{path, mode, type, oid}` 集合完全相同时才相等。只比较对象 ID 不够：同一个 blob 可以同时是普通文件（`100644`）与符号链接（`120000`）。
+- AC 声明了 `inputs`，而任一方没有记录（NULL）时，视为不相等。AC 没有声明 `inputs` 时，沿用条件中的输入比较不适用（§6.2）。
+- 这一相等关系用于 §6.2 的沿用条件与 §6.3 第 7 条的 `inputs_changed`。
+
+**只要求路径元数据**：记录取自树条目，不要求条目所指的叶对象（文件的 blob、目录自身的树、子模块的提交）在本地可以读取。检查读取的是 worktree，不是对象库。
+
+**读取的层次与结果**：
+
+| 层次 | 例子 | 结果 |
+|---|---|---|
+| 读取路径所需的对象失败 | `head_start` 的提交或路径上的树对象缺失、损坏；git 不具备安全读取对象的能力（PD-26） | 环境失败：退出码 6，**不执行检查、不写执行记录**（PD-26 的 M2 原则）。能力不具备时，在运行任何读取对象的命令之前拒绝 |
+| 路径不存在 | 提交树中没有这个路径（不存在、未跟踪、只有被忽略的文件、空目录、大小写不同、子模块内部的路径）；`head_start` 为 NULL（分支还没有提交） | `error` / `input_missing`（§7.4 第 2 步），不执行命令，计为失败 |
+| 叶对象缺失 | 条目存在，但它所指的 blob 或目录树不在本地（例如部分克隆） | 照常记录条目的元数据，不视为缺失 |
+| 子模块（gitlink） | 条目类型为 `commit`（mode `160000`），所指的提交本来就不在上级仓库的对象库中 | 照常记录元数据，从不要求它可读 |
+
+**各类路径**：
+
+| 路径 | 记录的类型 | 说明 |
+|---|---|---|
+| 普通文件 | `blob`（`100644` / `100755`） | 可执行位的变化也算变化 |
+| 目录 | `tree`（`040000`） | 目录下任何受跟踪内容的变化都会改变它 |
+| 符号链接 | `blob`（`120000`） | 只反映链接文本，链接指向的文件变化不会被发现 |
+| 子模块 | `commit`（`160000`） | 子模块的提交决定它的内容；检出的提交不一致时工作区不是 `clean` |
+| LFS 管理的文件 | 指针文件的 `blob` | 指针含有内容的 sha256 与大小；Specmetry 不运行 LFS 或任何过滤器 |
+
 ### 4.12 `commits`、`commit_links`、`git_scan_cursors`
 
 - `commits`（只追加）：`id`、`seq`（发现时分配）、`project_id`、`sha`、`committed_at`。不保存标题和正文。`(project_id, sha)` 唯一。只保存至少引用了一个基准编号的提交。
 - `commit_links`（只追加）：`commit_id`、`project_id`、`target_type`（`requirement` / `criterion`）、`target_id`、`link_source`（`trailer` / `message`）。
 - `git_scan_cursors`（受控可变）：`project_id`、`ref`（每个本地分支，加上各 worktree 的分离 HEAD）、`last_tip`、`scanned_seq`。每次扫描只读取每个 ref 从 `last_tip` 到当前 tip 的增量；如果历史被改写（旧 tip 不再是新 tip 的祖先），就重新扫描该 ref，靠 SHA 去重。
+
+**`seq` 与记录身份**（F4，§6.13）：一次扫描中新写入的提交是一次逻辑写入，分配一个 `seq`，这次新写入的 `commits` 共用它，`git_scan_cursors.scanned_seq` 同时更新为它；`commits.seq` 可以多行同值。提交的身份为 `id`（`(project_id, sha)` 唯一）；`commit_links` 没有 `seq`，经 `commit_id` 归属提交，身份为 `(commit_id, target_type, target_id)`。推导只用"发现序号大于 `revision_seq`"（§6.5），与一次扫描是否共用 `seq` 无关；扫描的具体实现属于 WP2.3。关联的生命周期（旧提交的关联能否重算或补写、补写时如何记录发现时序、没有新提交的扫描如何更新 `scanned_seq`）在 WP2.3 开工前与 M2-Q7 一起冻结（审查 044 N1，implementation-plan §3）。
 
 ### 4.13 `decisions`（人工验收决定）
 
@@ -417,7 +469,7 @@ Question 在提案提交时立即创建（编号按 TD-14 分配），只能由�
 | decision | `accepted` / `rejected` / `waived` |
 | mode | `accepted` 时必填：`normal`（自动化 AC，基于快照上的合格通过）/ `manual`（手动 AC）/ `exception`（自动化 AC 在快照上没有合格执行时的人工例外） |
 | criterion_revision, requirement_revision | 人查看时的值（来自输入，必须等于当前值） |
-| check_config_hash, inputs_json | 自动化 AC：取自所依据的合格执行 |
+| check_config_hash, inputs_json | 自动化 AC：取自所依据的合格执行（输入记录的格式见 §4.11.2） |
 | target_id | 人查看时的交付目标，始终必填 |
 | snapshot | 人查看时的快照 `S`；只有 `waived` 可以为 NULL |
 | evidence_id | 人查看时，该 AC 在 `S` 上最新的合格执行；没有则为 NULL |
@@ -426,6 +478,8 @@ Question 在提案提交时立即创建（编号按 TD-14 分配），只能由�
 | acknowledged_risks_json | 人明确确认过的风险：`observed_evidence` / `inconsistent_results` / `no_automated_evidence`（§7.3） |
 | rationale | `rejected`、`waived` 和 `exception` 必填 |
 | actor, channel | `channel` 只能是 `human_cli` 或 `dashboard` |
+
+**`seq` 与记录身份**（F4，§6.13）：每次决定是一次单独的写入，分配一个 `seq`，`decisions.seq` 在表内唯一；记录身份为 `id`。依据：`decision.v1` 每次只针对一个 AC，`seen_decision_id` 按 AC 与修订成链（§7.1）；当前决定按 `seq` 取最大，没有并列。所依据的执行早于决定，它的 `seq` 严格小于决定的 `seq`。
 
 ### 4.14 `meta` 与 `key_counters`
 
@@ -500,16 +554,19 @@ stateDiagram-v2
 
 ## 6. 推导
 
-推导是纯函数，输入有四项：
+推导是纯函数，输入全部显式给出，共五项：
 
 - 一个项目截止序号 `as_of_seq` 的全部事实（含已确认的基准）；
-- 交付目标与快照 `S`；
+- 交付目标的 ref 当前解析出的快照 `S`（交付目标本身来自事实）；
 - 各来源在磁盘上的观测哈希 `current_sha256`（文件缺失时为 NULL）；
+- 参与推导的项目设置：`stage`、`sources_skipped`、`inventory_skipped`；
 - 当前 worktree 的代码上下文（只用于工作区视图）。
 
-**同一组输入，无论事实的插入顺序如何，结果都相同。** `S`、观测哈希和 `as_of_seq` 都会写进输出（`status.v1`），所以任何结论都可以复现。只有 `active` 的基准条目参与推导。
+事实以外的四项是**当前值输入**：它们没有 `seq`，一次命令只取一次。输入的具体规格（F4）见 §6.13，当前值的取得、重放与 `--diff-since` 见 §6.13.1，合法事实域与畸形输入见 §6.14。
 
-`--diff-since <seq>` 的含义：用**当前的** `S`、当前的观测哈希，分别在 `as_of_seq = <seq>` 和当前 `as_of_seq` 上各推导一次，然后输出差异。它只反映这段时间内**新增事实**带来的变化，不反映代码或来源文件本身的变化。
+**同一组完整输入，无论事实的插入顺序如何，结果都相同。** 输出（`status.v1`、`gaps.v1`）写明 `as_of_seq` 与这次推导使用的全部当前值输入；事实不在输出中，仍从同一项目的数据库读取。因此，结论可以用"同一数据库中截止 `as_of_seq` 的事实"加上"输出记录的当前值输入"重放；只凭 `as_of_seq`、`S` 和 `baseline_version` 不足以重放（§6.13.1）。只有 `active` 的基准条目参与推导。
+
+`--diff-since <seq>` 的含义：两次推导共用本次命令取得的同一份当前值输入（`S`、观测哈希、项目设置），只改变事实的截止序号，分别在 `as_of_seq = <seq>` 和当前 `as_of_seq` 上推导，然后输出差异。它只反映这段时间内**新增事实**带来的变化，不反映代码、来源文件或项目设置本身的变化，也不是过去某次 `status` 实际展示结果的回放（§6.13.1）。
 
 ### 6.1 符号
 
@@ -538,7 +595,7 @@ stateDiagram-v2
    - `V = pass`，并且不存在 `inconsistent`；
    - **`V.grade = snapshot_isolated`**：沿用是在没有人参与的情况下，把人的判断自动延伸到新代码上，所以必须有隔离级证据。观测级证据无法排除执行期间代码被改动，不能支撑沿用。**MVP 只产生观测级证据，因此 MVP 中沿用实际上不会发生**，目标前进后需要人重新验收（规则 7 的原因码 `observed_evidence`）。
    - `D.check_config_hash = h`；
-   - 如果声明了 `inputs`：`S` 上这些路径的对象 ID 等于 `D.inputs_json`。
+   - 如果声明了 `inputs`：`S` 上的输入记录（`V` 所在执行的 `inputs_json`）与 `D.inputs_json` 按 §4.11.2 相等：保存的路径原值、mode、类型与对象 ID 都相同。
 
 手动 AC 和例外验收**永远不沿用**。沿用不产生新的决定记录，只是推导结果。
 
@@ -569,6 +626,7 @@ stateDiagram-v2
 - **观测级证据只能把 AC 推到 `ready_for_review`，或者支撑人在同一快照上的直接验收**，永远不会让 AC 在没有人参与的情况下变为 `accepted`。
 - 在不同提交上通过、在旧代码上验收，都只会导致 `needs_reverification`，永远不会导致 `accepted`。
 - 被 git 忽略的文件和环境变量属于执行环境，不属于代码对象。合格执行会记录它所在的 worktree，供追溯。
+- 第 7 条的 `inputs_changed`：AC 声明了 `inputs`，并且 `V` 所在执行的输入记录与 `D.inputs_json` 按 §4.11.2 不相等（M2-Q2）。只改变 mode、对象 ID 不变，同样不相等。
 
 ### 6.4 交付状态转移（AC 层面）
 
@@ -617,6 +675,9 @@ stateDiagram-v2
 | `blocking_question` | 存在关联到该 AC 或其需求的、`open` 且 `blocking` 的 Question |
 | `ref_not_found` | 当前修订的引用中，有 `verification = not_found` 的 |
 | `inferred` | `origin = inferred_from_code` |
+| `source_removed` | 当前修订的来源引用中，有指向已移除来源的（来源的 `removed_seq ≤ as_of_seq`）。M2-Q8，2026-10-18 产品负责人批准 |
+
+**标记的层级**（M2-Q8）：上表是 AC 的标记。需求的标记只有 `inferred`（`origin = inferred_from_code`）、`ref_not_found`（需求当前修订的来源引用中有 `verification = not_found` 的）与 `source_removed`，输出在 `status.v1` 需求的 `flags` 中。目标没有标记字段；引用了已移除来源的目标只产生 `SOURCE_REMOVED` 警告（§6.10）。标记永不阻塞，不改变交付状态。
 
 ### 6.7 需求交付状态
 
@@ -730,7 +791,16 @@ stateDiagram-v2
 | AC `ready_for_review` | `AWAITING_REVIEW` | 人工验收 |
 | AC `accepted`、`waived`、`not_assessed` | 不产生状态差距（`not_assessed` 时，项目级的 `TARGET_UNRESOLVED` 已经阻塞） | — |
 
-标记类警告（永不阻塞）：`CONFLICT`（`conflict` 标记）、`EXCEPTION_ACCEPTANCE`（`exception_acceptance` 标记）、`INCONSISTENT_RESULTS`（`inconsistent_results` 标记）。
+标记类警告（永不阻塞）：`CONFLICT`（`conflict` 标记）、`EXCEPTION_ACCEPTANCE`（`exception_acceptance` 标记）、`INCONSISTENT_RESULTS`（`inconsistent_results` 标记）、`SOURCE_REMOVED`（见下文）。
+
+**`SOURCE_REMOVED`**（M2-Q8，2026-10-18 产品负责人批准）：
+
+- 条件：`active` 的目标、需求或 AC，当前修订的来源引用中有指向已移除来源的。每个这样的条目一个警告，`target_key` 为它的编号，`reason` 为 null，下一步为"检查条目的来源引用"。
+- 范围筛选，与条目级差距相同：
+  - 有范围确认时（包括已过期的），只为 `RS` 中的需求与 `AS` 中的 AC 产生；目标只在它至少含有一个 `RS` 中的需求时产生；
+  - 没有范围确认时，为全部 `active` 的目标、需求与 AC 产生。
+- 永不阻塞，不改变交付状态；不替代、消除或推迟既有的阻塞：未移除来源的内容变化仍是 `SOURCE_CHANGED`；移除来源改变了来源集合哈希，已有的范围确认仍是 `SCOPE_STALE`，直到人重新确认。
+- 典型过程：移除来源 → `SCOPE_STALE`（阻塞）→ 人重新确认范围 → 引用了已移除来源的条目只剩不阻塞的 `SOURCE_REMOVED`。
 
 **是否阻塞**：
 
@@ -744,7 +814,7 @@ stateDiagram-v2
 | 指标 | 定义 |
 |---|---|
 | `delivery_status`、`snapshot`、`baseline_version`、`scope_id`、`as_of_seq` | 判定对象 |
-| `scope_acceptance_ratio` | `RS` 中状态为 `accepted` 的需求数 ÷（`RS` 中状态不为 `waived` 的需求数）。分母为 0 时为 null（PD-02）。 |
+| `scope_acceptance_ratio` | `RS` 中状态为 `accepted` 的需求数 ÷（`RS` 中状态不为 `waived` 的需求数）。分母为 0 时为 null（PD-02，2026-10-18 产品负责人确认：主进度指标为范围内需求的验收率加 AC 状态计数）。 |
 | `ac_status_counts` | `AS` 中各交付状态的计数 |
 | `claimed_without_evidence` | 带该标记的 AC 数（范围内） |
 | `inventory_coverage` | `active` AC 中，当前 revision 至少有一条 `audit` Claim 的比例 |
@@ -764,6 +834,174 @@ stateDiagram-v2
 | `baseline_confirmed` | 存在基准版本 |
 | `scope_confirmed` | 当前目标有范围确认（不要求未过期） |
 | `inventoried` | `inventory_coverage = 100%`，或设置了 `inventory_skipped`，或 `stage = docs_only` |
+
+### 6.13 推导的输入（F4）
+
+> 状态：**已冻结**（2026-10-18，产品负责人；审查 045 GO，review-resolution §57），是完整首批（WP2.1、WP2.2）的依据。依据是本文 §1、§4、§6.1 ~ §6.12、§7，以及 M1 已实现的写入调用链。审查 044 的 B1 补齐了当前值输入、输出与重放的规则（下文第 2 类与 §6.13.1）。
+
+推导的输入分为三类：
+
+1. **截止 `as_of_seq` 的事实**：下表各类记录中 `seq ≤ as_of_seq` 的部分，以及由它们得到的、该时刻的状态。
+2. **当前值输入**：没有 `seq`，不随 `as_of_seq` 变化；一次命令只取一次，取得与重放的规则见 §6.13.1。
+   - 交付目标 ref 当前解析出的提交 `S`；
+   - 各来源的观测哈希 `current_sha256`（文件缺失时为 NULL）；
+   - 项目设置：`stage`，以及 `settings_json` 中的 `sources_skipped`、`inventory_skipped`（没有设置时为 false）：
+     - M1 的 `init` 修改这些设置时不分配 `seq`（architecture §6.1.2），所以设置没有历史，推导使用本次命令读到的值。本文不改变既有行为；将来是否提供设置的历史，是 TD-27 中单独的设计问题（architecture §16）。
+     - 只有这三项参与推导。`stage` 影响进度（§6.5）、`INVENTORY_INCOMPLETE`（§6.10）与初始化进度（§6.12）；经由进度，它还影响 `in_progress` 的原因码、`conflict` 标记与 `CONFLICT` 警告。`sources_skipped` 影响初始化进度；`inventory_skipped` 影响初始化进度与 `INVENTORY_INCOMPLETE`。三项都不改变任何交付状态，也不改变阻塞差距的存在性、类型与是否阻塞，因而不影响 `ready`；但可以改变诊断原因码（例如 `stage` 使 `in_progress` 的原因码在 `not_started` 与 `unknown` 之间变化），所以不保证差距对象逐字段相同。
+     - `settings_json` 的其他键不是推导输入：`excerpt_storage` 只决定保存什么（PD-24）；将来的 `commit_ref_mode`（TD-17）作用于扫描时写入的提交关联，推导读到的是这些事实。
+   - 当前 worktree 的代码上下文（只用于工作区视图）。
+3. **参数**：`as_of_seq`；`--diff-since <seq>` 时的起点 `seq`；`--session current`（只影响工作区视图）。
+
+**`seq` 的分配与共享**：
+
+- `seq` 由全库唯一的计数器在写事务中分配，分配值单调递增、从不重复分配（§1）。它表示已提交写入的先后，**不是事实行的唯一标识**。演练或失败的事务回滚计数器，不消耗 `seq`。
+- 同一次逻辑写入（调用链中的一次分配及其明确的复用范围）的关联事实可以共享它分到的 `seq`；不同的逻辑写入从不共享。一个写事务也可以分配多个 `seq`。
+- 对同一个分配值，每个声明 `UNIQUE` 的序号列至多有一行；这是列约束，不是"一个事务在每张表只改一行"。
+
+| 逻辑写入 | 共享同一个 `seq` 的字段 | 表内唯一的序号列 | 依据 |
+|---|---|---|---|
+| 提交提案（`propose`） | `proposals.seq`、问题的 `created_seq`、问题的来源引用的 `seq`；条目经 `proposal_id` 归属于提案 | `proposals.seq` | architecture §6.1.4 |
+| 审核（`review`），可附带范围 | 至少接受一个条目时：`baseline_versions.seq`、一条或多条 `baseline_changes.seq`；新写入的 `source_refs`、`code_refs` 的 `seq`；被审核条目的 `reviewed_seq`；被修改实体的 `updated_seq`，以及按修订规则需要刷新时的 `revision_seq`；附带范围时的 `scope_confirmations.seq` | `baseline_versions.seq`、`scope_confirmations.seq` | §5.5；architecture §6.1.5、§6.1.7 |
+| 人工编辑（`propose --apply`） | 提案的 `seq` 与应用时实际写入或更新的序号字段 | `proposals.seq`、`baseline_versions.seq` | architecture §6.1.5 |
+| 设置交付目标（`target set`） | 旧目标的 `archived_seq`、新目标的 `created_seq` | `delivery_targets.created_seq` | architecture §6.1.7 |
+| 确认范围（`scope confirm`） | `scope_confirmations.seq` | 同左 | architecture §6.1.7 |
+| 来源的登记、确认、移除 | 分别为 `sources.registered_seq`、`source_acks.seq`、`sources.removed_seq` | 都是 | architecture §6.1.3 |
+| 回答或驳回问题 | `questions.answered_seq` | — | architecture §6.1.6 |
+| 登记 worktree（`init`、首次出现） | 每个 worktree 各取一个：`worktrees.registered_seq` | 同左 | architecture §6.1.2 |
+| 提交 Claim 批次（`claim`，M2） | `claim_batches.seq` 与批次中全部 `claims.seq`（含 `target_type = none` 的未映射工作） | `claim_batches.seq` | §4.10 |
+| 记录一次检查执行（M2） | `check_runs.seq` | 同左 | §4.11、§7.4 |
+| 记录一次决定（M2） | `decisions.seq` | 同左 | §4.13 |
+| 一次 git 扫描新发现的提交（M2） | 这次新写入的 `commits.seq`，以及 `git_scan_cursors.scanned_seq` | — | §4.12 |
+
+表中标为 M2 的四行是 F4 的最小技术方案，依据写在 §4.10 ~ §4.13；这些表尚未建立，其中的 `UNIQUE` 约束在对应工作包的迁移中实现。它们不改变用户可见的行为。
+
+**状态在 `as_of_seq` 时的取法**（同一个 `seq` 的关联事实一起保留或一起排除；同一个 `seq` 之内的顺序只用 `change_index`、`item_index` 与 §5.5 的应用顺序，不用 ULID、输入数组的顺序或新造的全局排序）：
+
+| 输入 | 在 `as_of_seq` 时 | 记录身份 |
+|---|---|---|
+| 交付目标 | `created_seq ≤ as_of_seq`，并且 `archived_seq` 为 NULL 或大于 `as_of_seq` 的那一个是活动目标 | `id` |
+| 基准版本号 | `seq ≤ as_of_seq` 的版本中最大的 `number`；没有时为 0 | `id`（`seq` 表内唯一） |
+| 基准实体（目标、需求、AC） | 取 `seq ≤ as_of_seq` 的变更中，该实体最后一条（按 `seq`，同一 `seq` 内按 `change_index`）的变更后快照：状态、修订、AC 的 `requirement_revision` 与字段值。没有这样的变更时，该实体在这一时刻还不存在。编号、`origin`、AC 所属的需求在创建后不变，取实体行的值。`revision_seq` 是该修订首次出现的那条变更的 `seq`。检查配置哈希 `h` 按 §4.4 的公式由该修订的检查配置计算 | 实体的 `id`；变更为 `id`，版本内由 `change_index` 定序 |
+| 范围确认与条目 | `seq ≤ as_of_seq` 的确认；每个目标的当前范围是其中 `seq` 最大的一条 | 确认为 `id`；条目为复合主键 `(confirmation_id, requirement_id)` |
+| 来源与来源集合 | `registered_seq ≤ as_of_seq`，并且 `removed_seq` 为 NULL 或大于 `as_of_seq` 的来源属于来源集合。已确认的哈希：`seq ≤ as_of_seq` 的最后一条 `source_acks` 的 `acked_sha256`；没有时为登记时的哈希（存在确认记录时，是第一条确认的 `previous_sha256`；否则是 `sources.acked_sha256`）。来源集合哈希按 §4.3 由这些值重算 | 来源为 `id`；确认为 `id`（`seq` 表内唯一） |
+| 来源引用与代码引用 | `seq ≤ as_of_seq` 的引用；一条条目"当前的引用"是 `entity_revision` 等于它在这一时刻的修订的那些（§4.5） | `id` |
+| 提案与条目 | `proposals.seq ≤ as_of_seq` 的提案；条目的审核状态：`reviewed_seq ≤ as_of_seq` 时为记录的状态，否则为 `pending`；是否处于冲突按 architecture §6.1.5 的动态判断，只看 `seq ≤ as_of_seq` 的变更 | 提案为 `id`；条目为 `id`，提案内由 `item_index` 定序 |
+| 问题 | `created_seq ≤ as_of_seq` 的问题；`answered_seq` 为 NULL 或大于 `as_of_seq` 时为 `open`。关联：指向提案条目、并且该条目在这一时刻已被接受时，关联到该条目产生的实体；该条目在这一时刻已被拒绝时，问题不再计为阻塞（§6.8） | `id` |
+| Claim 批次与 Claim | `seq ≤ as_of_seq`；使用 `kind`、`audit_scope_json`、`criterion_id`、`criterion_revision`、`assertion` | 批次与 Claim 各自的 `id`；Claim 经 `batch_id` 归属批次 |
+| 检查执行 | `seq ≤ as_of_seq`；使用 `criterion_id`、`criterion_revision`、`check_config_hash`、`inputs_json`、`head_start`、`head_end`、`tree_state_start`、`tree_state_end`、`result`、`failure_kind`、`evidence_grade`、`worktree_id` | `id` |
+| 提交与关联 | `commits.seq ≤ as_of_seq` 的提交及其关联。这一取法只在关联与提交一起写入、之后不再补写时成立；旧提交的关联是否重算或补写、补写时如何记录发现时序，在 WP2.3 开工前与 M2-Q7 一起冻结（审查 044 N1，implementation-plan §3），本文不预先批准提交关联的方案 | 提交为 `id`（`(project_id, sha)` 唯一）；关联为 `(commit_id, target_type, target_id)` |
+| 决定 | `seq ≤ as_of_seq`；使用全部字段 | `id`（`seq` 表内唯一） |
+
+**未知状态**（都按保守方向处理，§6.9）：
+
+| 状态 | 处理 |
+|---|---|
+| `S` 为 NULL（ref 无法解析、没有目标、非 git 项目） | §6.3 第 1 条、§6.8 第 1 条 |
+| 执行的 `head_start` 或 `head_end` 为 NULL；`tree_state` 为 `unknown` | 执行不合格（§4.11.1） |
+| 来源的 `current_sha256` 为 NULL（文件缺失） | 视为变化：`SOURCE_CHANGED` |
+| 执行或决定没有 `inputs` 记录，而 AC 当前声明了 `inputs` | 输入记录视为不相等（§4.11.2） |
+| `evidence_grade` | MVP 中只有 `observed`；隔离级只出现在通用合法事实域的合成用例中（§6.14） |
+| 决定的 `snapshot` 为 NULL | 只允许豁免（§4.13） |
+
+**跨写入的时序约束**（各自依据现有规则，不统一改为非严格比较）：
+
+| 约束 | 比较 | 依据 |
+|---|---|---|
+| `V` 的取值 | `runs(S)` 中 `seq` 最大的一条 | §6.1 |
+| 当前决定 | 当前修订下 `seq` 最大的决定（`decisions.seq` 表内唯一，没有并列） | §5.4 |
+| 每个目标的当前范围 | `seq` 最大的范围确认（表内唯一） | §5.3 |
+| 进度所用的 Claim | 当前修订下 `seq` 最大的 Claim；同一批次中同一 AC 至多一条（V-C03），没有并列 | §6.5 |
+| 进度中的关联提交 | 发现序号 `>` 实体的 `revision_seq` | §6.5 |
+| 拒收的解除 | 自动化 AC：`V.seq > D.seq`；手动 AC：`done` Claim 的 `seq > D.seq` | §6.3 第 5 条 |
+| `regressed` | `D.seq` `<` 该失败执行的 `seq` | §6.3 第 4 条 |
+| `normal` 接受所依据的执行 | 执行的 `seq` `<` 决定的 `seq`（不同的逻辑写入） | §7.3（写入前置条件） |
+
+#### 6.13.1 当前值的取得、重放与 `--diff-since`
+
+> 状态：按审查 044 的 B1 写明，经审查 045 GO，**已冻结**（2026-10-18，review-resolution §57）。保留 M1 `init` 更新设置的行为，不增加设置的历史或 `seq`；不提供重放的 CLI、API 或持久化表。
+
+**一次命令的取值**：
+
+- 一次命令（`status`、`gaps`，或 Dashboard 的一次状态读取）对每项当前值输入只取一次；这次命令中的全部推导，包括 `--diff-since` 的两次，都使用这一份取值。
+- 项目设置在读取事实、确定 `as_of_seq` 的同一个读事务中读取，之后不再读取数据库中的设置。
+- `S`、来源观测与 worktree 上下文由调用方在推导之前取得（architecture §7）。
+- 推导函数不做 I/O，也没有缺省值：任何一项输入缺失都是调用错误，不由推导自行补齐。来源观测中，NULL 表示观测到文件缺失（`SOURCE_CHANGED`，§6.10），与"没有这个来源的观测"不同；后者是缺少输入。
+- 输出中的当前值输入，就是这次推导实际使用的值。设置只输出这三项，不透传整个 `settings_json`。
+
+**完整输入**：一个推导结果的完整输入是：
+
+- 项目（`project.id`）与截止 `as_of_seq` 的事实；
+- `S`；
+- `as_of_seq` 时来源集合中每个来源的观测哈希；
+- 三项项目设置；
+- 参数；
+- 只对工作区视图：worktree 上下文。
+
+在同一版本的推导规则下，同样的完整输入必须得到同样的结果。只凭 `seq`、`S` 和 `baseline_version`，不足以证明结果可以复现。
+
+**重放**：用原查询的完整输入重新推导。各项输入的来源：
+
+| 输入 | 正常查询时 | 重放时 |
+|---|---|---|
+| 项目与截止 `as_of_seq` 的事实 | 从数据库读取 | 输出的 `project.id` 与 `as_of_seq`；事实仍从同一项目的数据库读取，按 §6.13 的取法只取 `seq ≤ as_of_seq` 的部分。输出不包含事实，**不是事实的备份** |
+| `S` | 解析目标的 ref | `status.v1` 的 `target.snapshot`（`target` 为 null 时 `S` 为 NULL）；`gaps.v1` 的 `snapshot` |
+| 来源观测哈希 | 读取磁盘 | `sources[]` 的 `id` 与 `current_sha256`，覆盖 `as_of_seq` 时来源集合中的每个来源（两种输出都有） |
+| 项目设置 | 与事实在同一个读事务中读取 | `project.stage`、`project.sources_skipped`、`project.inventory_skipped`（两种输出都有） |
+| 参数 | 命令行 | `as_of_seq`；`--diff-since` 时为 `status.v1` 的 `diff_since_seq`；`--session current` 时，`workspace` 中有 `compare_from` |
+| worktree 上下文（只用于工作区视图） | 读取当前 worktree | `status.v1` 的 `workspace`：`worktree_id`、`head`、`tree_state`，以及 `--session current` 时的 `compare_from`、`changed_paths`。工作区视图不进入交付推导，`gaps.v1` 不需要它 |
+
+重放的规则：
+
+- **不得**用重放时的当前值替换原来的取值：不重新解析 `S`，不重新观测来源，不读取当前的项目设置。
+- 缺少必要的输入时不能重放，应报告缺少的项；**不得静默用当前值补齐**，也不得改用更小的截止序号。例如：
+  - 输出中没有项目设置；
+  - `as_of_seq` 时来源集合中的某个来源没有观测哈希，或 `sources[]` 中有不属于这个集合的来源；
+  - 数据库中没有这个项目，或缺少 `seq ≤ as_of_seq` 的事实（例如项目已被 `purge`，或数据库来自更早的备份）。
+- 当前设置后来改变时（例如 `init --skip-sources`、`init --stage`），用原输入重放仍得到原结果；用新的设置推导，得到的是另一组输入的结果。
+- `project.name` 等展示字段不是推导输入。
+- 本轮的重放是规格与测试中的操作（MVP-ST-14），不提供重放的 CLI、API 或持久化表。
+- 可重放的推导输出是 `status.v1` 与 `gaps.v1`。`init.v1` 的 `init_progress` 是 `init` 给出的引导提示，不带 `as_of_seq`，不属于可重放的推导输出（M1 已验收，不修改）。
+
+**`--diff-since <seq>`**：
+
+- 两次推导共用本次命令取得的同一份当前值输入（`S`、观测哈希、项目设置、worktree 上下文），只改变事实的截止序号：一次为 `as_of_seq = <seq>`，一次为当前的 `as_of_seq`。两次推导之间不重新读取设置。
+- `changes_since` 只比较 AC 的交付状态与进度。按 §6.3、§6.5，它们不依赖来源观测与 worktree 上下文，所以起点的推导不需要只属于起点来源集合的来源的观测，输出也不另列这些来源。
+- 它不比较历史上的设置，也不表示设置的变化已经纳入事实历史。只有设置改变、没有新事实时，`as_of_seq` 不变，`changes_since` 为空；不虚构事实序号或历史事实的变化。设置变化的影响只体现在两次独立命令的输出之间（`project.*` 的取值不同）。
+- 结果不是过去某次 `status` 实际展示结果的回放：过去那次使用的是当时的当前值输入。
+- 重放 `--diff-since` 的输出，需要 `diff_since_seq`、`as_of_seq`、共用的 `S` 与项目设置，以及截止 `as_of_seq` 的事实。
+
+### 6.14 合法事实域与畸形输入
+
+> 状态：选项 (a) 由产品负责人于 2026-10-18 批准；本节经审查 045 GO，**已冻结**（2026-10-18，review-resolution §57）。
+
+**合法事实历史**：生产写入能够产生的事实集合。§6 的规则与 acceptance-criteria §3 的不变量，对合法事实历史作出业务结果的保证。它满足：
+
+- 写入前置条件：§7.1 的读取版本、§7.3 的验收前置条件与 §8.3 的校验规则。例如：`normal` 接受所依据的执行是该 AC 当前修订、当前检查配置下 `runs(S)` 中最新的合格通过，并且早于决定；`exception` 接受时 `V = none`；`manual` 接受只针对手动 AC；拒收、豁免与例外都有理由；`seen_decision_id` 等于写入时的前一条决定。
+- 事实不变量：
+  - `seq` 的分配与共享按 §6.13；
+  - 事实只追加；每条事实属于一个项目，引用只指向同一项目的行（§1.1）；
+  - 检查执行绑定开始时的修订与配置（§7.4）；Claim 与决定绑定提交时的修订；
+  - 基准实体的修订只随基准版本变化（§7.2）；
+  - 范围确认的 `seen_scope_confirmation_id` 链与豁免集合满足 V-T01、V-T02。
+- 合法但不能 `ready` 的历史同样是合法事实历史，例如当前决定是拒收、接受之后又有合格的失败、父需求已修订而 AC 没有后续处理、范围过期、来源变化、阻塞问题。
+
+**两个输入域**：
+
+- **MVP 合法事实域**：只含观测级执行，因而没有沿用。集成测试、CX 集成测试与 E2E 使用它。
+- **通用合法事实域**：另含合成的隔离级执行，它们同样满足上述条件（例如 `head_start = head_end = S`）。只用于单元测试，验证将来适用的沿用规则；合成用例通过不表示 MVP 具有隔离执行或自动沿用的能力。
+
+**当前值输入的取值域**：
+
+- 项目设置没有 `seq`，`init` 可以在任何时候修改它们。所以 `stage` 的任一取值、两个跳过标记的任一组合，都可以与任一合法事实历史组成合法输入，例如已经登记了来源、又设置了 `sources_skipped`。
+- `S` 可以是 NULL 或任一提交；每个来源的观测哈希可以是任一值或 NULL。
+- 生成器应当变化这些取值，不能只用默认值（acceptance-criteria §3.1）。
+
+**畸形输入**（选项 (a)）：违反上述写入前置条件或事实不变量、生产写入无法产生的组合，例如 `S` 上没有任何合格执行的 `normal` 接受；`evidence_id` 指向另一个 AC、另一个快照或不早于决定的执行；跨项目的引用；在 `seq` 表内唯一的列中出现两行同一 `seq`。
+
+- 推导对畸形输入**不作业务结果的保证**；测试只要求不崩溃、结果确定（同样的输入得到同样的输出）。
+- §6.9 的保守规则与既有的错误处理保持不变，例如 schema 不兼容、推导需要的数据缺失时拒绝推导并报错。
+- 不能仅因 `seq` 相同就判为畸形：同一次逻辑写入共享 `seq` 是合法的（§6.13）。
+- 推导不额外校验这些不变量（选项 (b) 没有被采用）。
 
 ## 7. 版本前置条件与修订规则
 
@@ -827,7 +1065,7 @@ stateDiagram-v2
 **观测级执行**（`--isolation off`，MVP 唯一可用的执行方式）：
 
 1. 在执行器所在的 worktree `W`（由调用时的 cwd 决定）中，读取 AC 的 `r`、`ar`、`h` 和检查配置，**固定下来**。
-2. 记录 `head_start`、`tree_state_start`；如果声明了 `inputs`，记录各路径在 `head_start` 上的对象 ID。路径不存在时，结果为 `error` / `input_missing`。
+2. 记录 `head_start`、`tree_state_start`；如果声明了 `inputs`，记录各路径在 `head_start` 上的输入记录（§4.11.2）。路径不存在时，结果为 `error` / `input_missing`；读取路径所需的对象失败时，返回退出码 6，不执行检查、不写执行记录（PD-26）。
 3. 在 `W/<workdir>` 中执行。检查的输出实时转发给调用者，**不保存**：
    - 不带 `--json` 时，检查的 stdout 和 stderr 原样转发到 stdout 和 stderr；
    - 带 `--json` 时，stdout **只**输出一份 `check-run.v1` JSON，检查的 stdout 和 stderr 都转发到 stderr。
@@ -850,10 +1088,10 @@ stateDiagram-v2
 | `common.v1` | 共享定义：编号、SHA、代码上下文、错误 | — |
 | `proposal.v1` | 提案（含 `base_version`、`target_revision`） | Agent 或人 → CLI / API |
 | `claims.v1` | 自述批次（含 `base_version`、`target_revision`、`audit_scope`） | Agent → CLI |
-| `status.v1` | 状态读取模型（含所有需要回传的版本号、观测哈希、目标和来源） | CLI / API → Agent 或人 |
+| `status.v1` | 状态读取模型（含所有需要回传的版本号、观测哈希、目标和来源，以及重放所需的当前值输入，§6.13.1） | CLI / API → Agent 或人 |
 | `init.v1` | `init --json` 的输出 | CLI → Agent |
 | `check-run.v1` | `check run --json` 的输出（不含检查输出） | CLI → Agent |
-| `gaps.v1` | `gaps --json` 的输出 | CLI → Agent |
+| `gaps.v1` | `gaps --json` 的输出（含重放所需的当前值输入，§6.13.1） | CLI → Agent |
 | `review.v1` | 提案审核提交（含 `seen_base_version`、AC 的后续处理、可选的范围确认） | 人 → CLI / API |
 | `decision.v1` | 验收决定（含前置条件） | 人 → CLI / API |
 | `scope.v1` | 范围确认 | 人 → CLI / API |
@@ -985,4 +1223,4 @@ M0 的 CI 会校验这两者（WP0.4）。凡是需要数据库状态才能判�
 
 ## 10. 相关待决策事项
 
-已确认：PD-03、PD-04、PD-12、PD-16 ~ PD-22、PD-24、PD-25、PD-26；待确认：PD-02（[prd.md §9](prd.md#9-产品待决策事项)）。技术：TD-01、TD-14、TD-18、TD-20、TD-21、TD-26 已确认；TD-17、TD-24、TD-25 待确认（[architecture.md §16](architecture.md#16-技术待决策事项)）。
+已确认：PD-02（2026-10-18）、PD-03、PD-04、PD-12、PD-16 ~ PD-22、PD-24、PD-25、PD-26（[prd.md §9](prd.md#9-产品待决策事项)）。技术：TD-01、TD-14、TD-18、TD-20、TD-21、TD-26 已确认；TD-23 的比较语义与错误边界已确认（2026-10-18，§4.11.2），Git 读取机制待定；TD-06、TD-17、TD-24、TD-25 待确认（[architecture.md §16](architecture.md#16-技术待决策事项)）；TD-27 分两部分：当前值输入与重放的语义已冻结（§6.13.1，2026-10-18），是否提供设置的历史待定。M2-Q8 与畸形输入的选项 (a) 已批准（2026-10-18，review-resolution §55）。

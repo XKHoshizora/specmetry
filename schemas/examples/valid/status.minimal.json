@@ -4,7 +4,9 @@
   "project": {
     "id": "01J9Z3K5Q8R2T4V6W8X0Y2Z4C1",
     "name": "demo",
-    "stage": "in_development"
+    "stage": "in_development",
+    "sources_skipped": false,
+    "inventory_skipped": false
   },
   "baseline_version": 4,
   "init_progress": "inventoried",
@@ -79,6 +81,7 @@
       "priority": "must",
       "in_scope": true,
       "status": "ready_for_review",
+      "flags": [],
       "criteria": [
         {
           "key": "AC-002-1",
