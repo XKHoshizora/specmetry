@@ -8,17 +8,17 @@ import (
 	"github.com/XKHoshizora/specmetry/internal/testutil/factgen/legality"
 )
 
-func base(t *testing.T) (h *factgen.History, goal, req, ac string) {
+func base(t *testing.T) (h *factgen.History, req, ac string) {
 	t.Helper()
 	h = factgen.New("01JAAAAAAAPR0JECT000000000")
 	h.SetTarget("default", "refs/heads/main")
 	h.Apply(func(r *factgen.Review) {
-		goal = r.AddGoal("g")
+		goal := r.AddGoal("g")
 		req = r.AddRequirement(goal, "must")
 		ac = r.AddCriterion(req, "manual", nil)
 		r.Scope(req)
 	})
-	return h, goal, req, ac
+	return h, req, ac
 }
 
 func legal(t *testing.T, h *factgen.History) {
@@ -31,7 +31,7 @@ func legal(t *testing.T, h *factgen.History) {
 // data-model §5.5: the changes apply by step and item_index, whatever
 // order they are planned in; a cascade follows its cause.
 func TestPlannedChangesApplyInTheOrderOfSection55(t *testing.T) {
-	h, _, req, ac := base(t)
+	h, req, ac := base(t)
 	var g2 string
 	h.Apply(func(r *factgen.Review) { g2 = r.AddGoal("g2"); r.AddRequirement(g2, "should") })
 	seq := h.Apply(func(r *factgen.Review) {
@@ -65,7 +65,7 @@ func TestPlannedChangesApplyInTheOrderOfSection55(t *testing.T) {
 // Follow-ups (step 8) come after the items, with their rationale, for the
 // criteria of a requirement the review revises materially.
 func TestFollowUpsComeLast(t *testing.T) {
-	h, _, req, ac := base(t)
+	h, req, ac := base(t)
 	var second string
 	h.Apply(func(r *factgen.Review) { second = r.AddCriterion(req, "manual", nil) })
 	items, _ := h.Propose(1)
@@ -105,13 +105,13 @@ func mustPanic(t *testing.T, want string, fn func()) {
 // legal history.
 func TestIllegalConstructionsPanic(t *testing.T) {
 	t.Run("V-P03: a target named twice", func(t *testing.T) {
-		h, _, req, _ := base(t)
+		h, req, _ := base(t)
 		mustPanic(t, "V-P03", func() {
 			h.Apply(func(r *factgen.Review) { r.Update(req, false, nil); r.Update(req, true, nil) })
 		})
 	})
 	t.Run("V-P03: across two reviews of one proposal", func(t *testing.T) {
-		h, _, req, _ := base(t)
+		h, req, _ := base(t)
 		items, _ := h.Propose(2)
 		h.Review(func(r *factgen.Review) { r.Update(req, false, nil); r.FromItem(items[0]) })
 		mustPanic(t, "V-P03", func() {
@@ -119,13 +119,13 @@ func TestIllegalConstructionsPanic(t *testing.T) {
 		})
 	})
 	t.Run("a review's change without an item", func(t *testing.T) {
-		h, _, req, _ := base(t)
+		h, req, _ := base(t)
 		mustPanic(t, "needs a proposal item", func() {
 			h.Review(func(r *factgen.Review) { r.Update(req, false, nil) })
 		})
 	})
 	t.Run("two proposals in one review", func(t *testing.T) {
-		h, _, _, _ := base(t)
+		h, _, _ := base(t)
 		a, _ := h.Propose(1)
 		b, _ := h.Propose(1)
 		mustPanic(t, "one proposal", func() {
@@ -133,32 +133,32 @@ func TestIllegalConstructionsPanic(t *testing.T) {
 		})
 	})
 	t.Run("a change of an entity the write retires with its parent", func(t *testing.T) {
-		h, _, req, ac := base(t)
+		h, req, ac := base(t)
 		mustPanic(t, "retired by this write", func() {
 			h.Apply(func(r *factgen.Review) { r.Retire(req); r.Update(ac, false, nil) })
 		})
 	})
 	t.Run("a reference of an entity the write does not change", func(t *testing.T) {
-		h, _, req, _ := base(t)
+		h, req, _ := base(t)
 		mustPanic(t, "does not change", func() {
 			h.Apply(func(r *factgen.Review) { r.AddGoal("x"); r.Ref(req, "01JAAAAAAASRC0000000000000", "verified") })
 		})
 	})
 	t.Run("a follow-up of a requirement not revised materially", func(t *testing.T) {
-		h, _, req, ac := base(t)
+		h, req, ac := base(t)
 		items, _ := h.Propose(1)
 		mustPanic(t, "follow-up", func() {
 			h.Review(func(r *factgen.Review) { r.Update(req, false, nil); r.FromItem(items[0]); r.FollowUp(ac, "reaffirm") })
 		})
 	})
 	t.Run("a follow-up in a person's edit", func(t *testing.T) {
-		h, _, _, ac := base(t)
+		h, _, ac := base(t)
 		mustPanic(t, "no follow-ups", func() {
 			h.Apply(func(r *factgen.Review) { r.FollowUp(ac, "reaffirm") })
 		})
 	})
 	t.Run("a question about an item accepted as no add", func(t *testing.T) {
-		h, _, req, _ := base(t)
+		h, req, _ := base(t)
 		items, _ := h.Propose(1, factgen.QuestionSpec{AboutItem: 1})
 		mustPanic(t, "no add", func() {
 			h.Review(func(r *factgen.Review) { r.Update(req, false, nil); r.FromItem(items[0]) })
