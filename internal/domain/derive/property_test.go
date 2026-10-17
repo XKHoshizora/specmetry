@@ -28,12 +28,13 @@ func randomOptions(seed uint64) factgen.Options {
 }
 
 // legalCase is a random history the legality checker confirms is legal
-// (data-model §6.14): the property tests run only on legal histories, and
-// a generated one that is not fails with its operation trace.
+// (data-model §6.14), its input records explained by the generator's
+// commit trees: the property tests run only on legal histories, and a
+// generated one that is not fails with its operation trace.
 func legalCase(t *testing.T, seed uint64, o factgen.Options) factgen.Case {
 	t.Helper()
 	c := factgen.Random(seed, o)
-	if p := legality.Check(c.Dump, legality.Options{Isolated: o.Isolated}); len(p) > 0 {
+	if p := append(legality.Check(c.Dump, legality.Options{Isolated: o.Isolated}), legality.CheckTrees(c.Dump, c.Trees)...); len(p) > 0 {
 		t.Fatalf("seed %d is not a legal history:\n%s", seed, legality.Report(p, c.History.Trace()))
 	}
 	return c

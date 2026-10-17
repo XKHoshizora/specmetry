@@ -31,7 +31,19 @@ type Case struct {
 	Dump    Dump
 	Current Current
 	AsOf    int64
+	// Trees are the trees of the generated commits, which the runs read
+	// their inputs from: the generator's witness, for a test to check the
+	// input records against (legality.CheckTrees).
+	Trees Trees
 }
+
+// Trees are commit trees: for each commit, the entry of each lookup path
+// it has (data-model §4.11.2); a path a commit does not have is missing
+// there. A commit's tree never changes, whatever the worktree does.
+type Trees map[string]map[string]InputEntry
+
+// inputPaths are the paths the generated checks declare.
+var inputPaths = []string{"a", "b/c.go", "tests"}
 
 // FeatureWorktree is the second worktree of the generated histories.
 const FeatureWorktree = "01JAAAAAAAFEATVRE000000000"
@@ -50,8 +62,18 @@ func Random(seed uint64, o Options) Case {
 		eligible: map[string]map[string]bool{},
 	}
 	g.isolated = o.Isolated
+	g.trees = Trees{}
 	for i := range 5 {
-		g.commits = append(g.commits, Commit(fmt.Sprintf("commit %d", i)))
+		c := Commit(fmt.Sprintf("commit %d", i))
+		g.commits = append(g.commits, c)
+		// Each commit has most of the input paths: a run of a check whose
+		// input its HEAD lacks is input_missing (§7.4 step 2).
+		g.trees[c] = map[string]InputEntry{}
+		for _, p := range inputPaths {
+			if g.chance(0.85) {
+				g.trees[c][p] = treeEntry(c, p)
+			}
+		}
 	}
 	g.s = g.commits[0]
 	g.h.SetTarget("default", "refs/heads/main")
@@ -66,7 +88,7 @@ func Random(seed uint64, o Options) Case {
 			}
 		}
 	}
-	c := Case{Seed: seed, History: g.h, Dump: g.h.Dump(), AsOf: g.h.Seq()}
+	c := Case{Seed: seed, History: g.h, Dump: g.h.Dump(), AsOf: g.h.Seq(), Trees: g.trees}
 	if g.rng.Float64() < o.Cutoff {
 		c.AsOf = g.rng.Int64N(g.h.Seq() + 1)
 	}
@@ -79,6 +101,7 @@ type gen struct {
 	h        *History
 	isolated bool
 	commits  []string
+	trees    Trees
 	s        string // the commit the target's ref points to; "" unresolved
 
 	proposals []string                   // in submission order
@@ -146,23 +169,49 @@ func (g *gen) moveRef() {
 	g.s = pickOne(g, g.commits)
 }
 
-func (g *gen) randomCheck() *baseline.Check {
+func (g *gen) randomCheck() *baseline.Check { return g.checkOf(inputPaths) }
+
+// checkOf is a random check that declares one of paths as its input, or
+// none.
+func (g *gen) checkOf(paths []string) *baseline.Check {
 	c := &baseline.Check{Command: pickOne(g, []string{"go test ./a", "go test ./b", "make check"}), Workdir: ".", TimeoutSec: 300, Rationale: "r"}
-	if g.chance(0.3) {
-		c.Inputs = []string{pickOne(g, []string{"a", "b/c.go", "tests"})}
+	if len(paths) > 0 && g.chance(0.3) {
+		c.Inputs = []string{pickOne(g, paths)}
 	}
 	return c
+}
+
+// missingAt reports whether a criterion's check declares an input the
+// commit's tree does not have.
+func (g *gen) missingAt(ac, commit string) bool {
+	return slices.ContainsFunc(g.h.Inputs(ac), func(p string) bool {
+		_, ok := g.trees[commit][p]
+		return !ok
+	})
+}
+
+// pathsAt are the input paths a commit's tree has.
+func (g *gen) pathsAt(commit string) []string {
+	var out []string
+	for _, p := range inputPaths {
+		if _, ok := g.trees[commit][p]; ok {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // review is a review of one proposal's pending items, or a person's edit.
 // The plan is made phase by phase in the order of data-model §5.5, so that
 // each change is valid when its step applies: a proposal names each target
-// once (V-P03); no change of an entity the write retires, or of a
-// requirement under a goal it retires; criteria added to requirements that
-// are active then; questions only about add items; follow-ups only for the
-// criteria of a requirement the review revises materially. The planned
-// changes are handed to History in a shuffled order: History applies them
-// in the order of §5.5 by step and item_index.
+// once (V-P03); no change of an entity the write retires; a requirement
+// under a goal the write retires can still be updated or retired, after
+// the cascade that loses it the goal; criteria added to requirements that
+// are active then; an item a question is about becomes a requirement or
+// criterion add; follow-ups only for the criteria of a requirement the
+// review revises materially. The planned changes are handed to History in
+// a shuffled order: History applies them in the order of §5.5 by step and
+// item_index.
 func (g *gen) review(apply bool) {
 	var proposal string
 	var decided []string
@@ -217,10 +266,15 @@ func (g *gen) review(apply bool) {
 			}
 			slots = append(slots, slot{item: it, addOnly: g.asked[it]})
 		}
-		// Each slot gets a step; the steps are planned in order.
+		// Each slot gets a step; the steps are planned in order. A slot a
+		// question is about is a requirement or criterion add: a question's
+		// local about names one (proposal.CheckStatic).
 		phases := make([][]slot, 3)
 		for _, s := range slots {
 			n := g.pick(3)
+			if s.addOnly {
+				n = 1 + g.pick(2)
+			}
 			phases[n] = append(phases[n], s)
 		}
 		for _, s := range phases[0] {
@@ -271,7 +325,8 @@ func (g *gen) review(apply bool) {
 }
 
 // slot is one item of a write: a pending item of the reviewed proposal
-// (addOnly when a question is about it), or a new item of an edit.
+// (addOnly when a question is about it: a requirement or criterion add),
+// or a new item of an edit.
 type slot struct {
 	item    string
 	addOnly bool
@@ -333,7 +388,7 @@ func (p *plan) free(typ string, ok func(id string) bool) []string {
 
 func (p *plan) goal(s slot) {
 	goals := p.free("goal", nil)
-	if s.addOnly || len(goals) == 0 || p.g.chance(0.6) {
+	if len(goals) == 0 || p.g.chance(0.6) {
 		p.do(s, func() { p.newGoals = append(p.newGoals, p.r.AddGoal("goal")) })
 		return
 	}
@@ -345,7 +400,7 @@ func (p *plan) goal(s slot) {
 
 func (p *plan) requirement(s slot) {
 	g := p.g
-	reqs := p.free("requirement", func(id string) bool { return !p.retiredGoals[g.h.ents[id].goalID] })
+	reqs := p.free("requirement", nil)
 	w := g.pick(10)
 	if s.addOnly || len(reqs) == 0 || w < 5 {
 		var goals []string
@@ -586,16 +641,15 @@ func (g *gen) run() {
 	default:
 		s.Result, s.FailureKind = "error", pickOne(g, []string{"timeout", "not_found", "spawn_error"})
 	}
-	// A declared input missing on HEAD fails the run before the command
-	// runs (§7.4 step 2): no context change, no input record.
-	inputs := g.h.Inputs(ac)
-	if len(inputs) > 0 && g.chance(0.1) {
+	// A declared input the tree of HEAD lacks fails the run before the
+	// command runs (§7.4 step 2): no context change, no input record.
+	if g.missingAt(ac, head) {
 		s.Result, s.FailureKind = "error", "input_missing"
 		g.h.Run(ac, s)
 		return
 	}
-	for _, p := range inputs {
-		s.Inputs = append(s.Inputs, treeEntry(head, p))
+	for _, p := range g.h.Inputs(ac) {
+		s.Inputs = append(s.Inputs, g.trees[head][p])
 	}
 	// §7.4 step 4: another HEAD at the end, or clean at the start and not
 	// at the end, is error / context_changed; a run dirty from the start
@@ -706,6 +760,8 @@ func (g *gen) deliver() {
 	reqs := g.active("requirement")
 	var scoped []string
 	// A person's edit: reaffirm the criteria whose requirement was revised,
+	// give the criteria whose check declares an input S lacks a check S
+	// can run (an update, which confirms the requirement's revision too),
 	// give every requirement of the scope a criterion, attach the scope.
 	g.h.Apply(func(r *Review) {
 		if len(reqs) == 0 {
@@ -722,12 +778,16 @@ func (g *gen) deliver() {
 					continue
 				}
 				has = true
-				if g.h.ParentRevised(ac) {
+				switch {
+				case g.h.HasCheck(ac) && g.missingAt(ac, g.s):
+					check := g.checkOf(g.pathsAt(g.s))
+					r.Update(ac, true, func(f *Fields) { f.Check = check })
+				case g.h.ParentRevised(ac):
 					r.Reaffirm(ac)
 				}
 			}
 			if !has {
-				r.AddCriterion(req, "automated", g.randomCheck())
+				r.AddCriterion(req, "automated", g.checkOf(g.pathsAt(g.s)))
 			}
 		}
 		r.Scope(scoped...)
@@ -755,7 +815,7 @@ func (g *gen) deliver() {
 		default:
 			s := RunSpec{Head: g.s}
 			for _, p := range g.h.Inputs(ac) {
-				s.Inputs = append(s.Inputs, treeEntry(g.s, p))
+				s.Inputs = append(s.Inputs, g.trees[g.s][p])
 			}
 			if g.isolated && g.chance(0.8) {
 				s.Grade = "snapshot_isolated"

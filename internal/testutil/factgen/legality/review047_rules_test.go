@@ -246,3 +246,45 @@ func TestQuestionsAboutItemsAndEntities(t *testing.T) {
 		expect(t, c.name, d, "question")
 	}
 }
+
+// The generator's trees explain its input records (CheckTrees), and a
+// record or an input_missing run the trees contradict is found.
+func TestCheckTreesAgainstTheWitness(t *testing.T) {
+	var c factgen.Case
+	recorded, missing := -1, -1
+	for seed := uint64(0); recorded < 0 || missing < 0; seed++ {
+		c, recorded, missing = factgen.Random(seed, comparisonOptions(seed)), -1, -1
+		for i, r := range c.Dump.CheckRuns {
+			switch {
+			case r.InputsJSON != nil && r.HeadStart != nil:
+				recorded = i
+			case r.FailureKind != nil && *r.FailureKind == "input_missing":
+				missing = i
+			}
+		}
+	}
+	if p := legality.CheckTrees(c.Dump, c.Trees); len(p) > 0 {
+		t.Fatalf("seed %d:\n%s", c.Seed, legality.Report(p, nil))
+	}
+	d := c.Dump
+	d.CheckRuns = slices.Clone(d.CheckRuns)
+	other := `[{"path":"a","mode":"100644","type":"blob","oid":"0000000000000000000000000000000000000000"}]`
+	d.CheckRuns[recorded].InputsJSON = &other
+	if !hasRule(legality.CheckTrees(d, c.Trees), "commit tree") {
+		t.Errorf("seed %d: an entry that is not the tree's is not found", c.Seed)
+	}
+	// The tree of the missing run's commit gets the paths it lacks.
+	trees := factgen.Trees{}
+	for commit, tree := range c.Trees {
+		trees[commit] = map[string]factgen.InputEntry{}
+		for p, e := range tree {
+			trees[commit][p] = e
+		}
+	}
+	for _, p := range []string{"a", "b/c.go", "tests"} {
+		trees[*c.Dump.CheckRuns[missing].HeadStart][p] = factgen.InputEntry{Path: p, Mode: "100644", Type: "blob", OID: factgen.Commit(p)}
+	}
+	if !hasRule(legality.CheckTrees(c.Dump, trees), "commit tree") {
+		t.Errorf("seed %d: an input_missing run at a commit whose tree has the input is not found", c.Seed)
+	}
+}

@@ -1,8 +1,10 @@
 package derive_test
 
 import (
+	"fmt"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/XKHoshizora/specmetry/internal/domain/derive"
@@ -74,6 +76,72 @@ func TestStateAtCutoff(t *testing.T) {
 			t.Errorf("at %d the current projection changed the result", asOf)
 		}
 	}
+}
+
+// Review 047 B1-R1, data-model §5.2, §5.5: one edit retires the goal and
+// revises its requirement materially. The goal step applies first, with
+// its cascade (the requirement loses the goal, an editorial change at
+// revision 1), then the requirement step (revision 2): two changes of one
+// requirement in one version, both kept. Before the edit the target is
+// ready; at it the requirement is at revision 2 without a goal and its
+// accepted criterion is parent_revised; a later reaffirmation makes it
+// ready again, on the same acceptance.
+func TestGoalRetiredAndRequirementRevisedInOneWrite(t *testing.T) {
+	f := newFixture(t)
+	f.accept(f.ac, commitA, f.pass(f.ac, commitA))
+	f.inventorySkipped = true
+	brief := map[string]string{f.src: factgen.Hash("brief v1")}
+	before := f.h.Seq()
+	edit := f.h.Apply(func(r *factgen.Review) {
+		r.Update(f.req, true, func(x *factgen.Fields) { x.Title = "Orders, revised" })
+		r.Retire(f.goal)
+		r.Scope(f.req)
+	})
+	var rows []string
+	for _, c := range legalDump(t, f.h).BaselineChanges {
+		if c.Seq == edit {
+			rows = append(rows, fmt.Sprintf("%d %s %s %v item=%v %s", c.ChangeIndex, c.EntityType, c.Op, deref(c.ChangeClass), c.ProposalItemID != nil, c.AfterJSON))
+		}
+	}
+	reqKey := f.h.Key(f.req)
+	want := []string{
+		`0 goal retire  item=true {"revision":1,"status":"retired","values":{"title":"Orders"}}`,
+		`1 requirement update editorial item=false {"revision":1,"status":"active","values":{"goal":null,"kind":"functional","priority":"must","title":"Requirement 1"}}`,
+		`2 requirement update material item=true {"revision":2,"status":"active","values":{"goal":null,"kind":"functional","priority":"must","title":"Orders, revised"}}`,
+	}
+	if strings.Join(rows, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("the edit's changes:\n%s\nwant\n%s", strings.Join(rows, "\n"), strings.Join(want, "\n"))
+	}
+	ready := f.at(t, before, brief)
+	if ready.Delivery.Status != derive.TargetReady || ready.Delivery.EvidenceGrade != derive.Observed {
+		t.Errorf("before the edit: %s, %s", ready.Delivery.Status, ready.Delivery.EvidenceGrade)
+	}
+	at := f.at(t, edit, brief)
+	if r := requirementOf(t, at, reqKey); r.Revision != 2 || r.Goal != "" || r.Title != "Orders, revised" {
+		t.Errorf("at the edit, the requirement is %+v", r)
+	}
+	c := criterionOf(t, at, f.h.Key(f.ac))
+	if c.RequirementRevision != 1 || c.Status != derive.CriterionNeedsReverification || c.Reason != "parent_revised" {
+		t.Errorf("at the edit, the criterion is %+v", c)
+	}
+	if at.Delivery.Status != derive.TargetNeedsReverification || at.Delivery.EvidenceGrade != derive.NoEvidence {
+		t.Errorf("at the edit: %s, %s", at.Delivery.Status, at.Delivery.EvidenceGrade)
+	}
+	f.h.Apply(func(r *factgen.Review) { r.Reaffirm(f.ac); r.Scope(f.req) })
+	again := f.at(t, f.h.Seq(), brief)
+	if c := criterionOf(t, again, f.h.Key(f.ac)); c.RequirementRevision != 2 || c.Status != derive.CriterionAccepted {
+		t.Errorf("reaffirmed, the criterion is %+v", c)
+	}
+	if again.Delivery.Status != derive.TargetReady || again.Delivery.EvidenceGrade != derive.Observed {
+		t.Errorf("reaffirmed: %s, %s", again.Delivery.Status, again.Delivery.EvidenceGrade)
+	}
+}
+
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
 
 // F5 positive case, data-model §6.13: a review shares one seq between the
