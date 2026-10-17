@@ -65,6 +65,8 @@ type ChangeRow struct {
 	BeforeJSON     *string
 	AfterJSON      string
 	ProposalItemID *string
+	// Rationale is a criterion follow-up's reason (step 8 of §5.5).
+	Rationale *string
 }
 
 // EntityRow is a goals, requirements or acceptance_criteria row. The

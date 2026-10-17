@@ -28,13 +28,13 @@ func TestTargetDeliveryStatus(t *testing.T) {
 		blocking []derive.GapType
 	}{
 		{"1: no baseline", func(*testing.T, *fixture) *fixture {
-			f := &fixture{h: factgen.New(projectID), s: commitA, stage: "in_development"}
+			f := &fixture{t: t, h: factgen.New(projectID), s: commitA, stage: "in_development"}
 			f.h.SetTarget("default", "refs/heads/main")
 			return f
 		}, nil, derive.TargetNotAssessed, []derive.GapType{derive.GapNoBaseline, derive.GapNoScope}},
 		{"1: no target", func(*testing.T, *fixture) *fixture {
-			f := &fixture{h: factgen.New(projectID), stage: "in_development"}
-			f.h.Review(func(r *factgen.Review) { r.AddCriterion(r.AddRequirement("", "must"), "manual", nil) })
+			f := &fixture{t: t, h: factgen.New(projectID), stage: "in_development"}
+			f.h.Apply(func(r *factgen.Review) { r.AddCriterion(r.AddRequirement("", "must"), "manual", nil) })
 			return f
 		}, nil, derive.TargetNotAssessed, []derive.GapType{derive.GapNoTarget}},
 		{"1: the target does not resolve", func(_ *testing.T, f *fixture) *fixture {
@@ -46,17 +46,17 @@ func TestTargetDeliveryStatus(t *testing.T) {
 			return f
 		}, nil, derive.TargetNotAssessed, []derive.GapType{derive.GapNoScope}},
 		{"1: every requirement of the scope is retired", func(_ *testing.T, f *fixture) *fixture {
-			f.h.Review(func(r *factgen.Review) { r.Retire(f.req) })
+			f.h.Apply(func(r *factgen.Review) { r.Retire(f.req) })
 			return f
 		}, nil, derive.TargetNotAssessed, []derive.GapType{derive.GapEmptyScope, derive.GapScopeStale}},
 		{"2: a requirement of the scope without criteria", func(t *testing.T, _ *fixture) *fixture {
 			f := readyFixture(t)
 			var r string
-			f.h.Review(func(rv *factgen.Review) { r = rv.AddRequirement(f.goal, "must"); rv.Scope(f.req, r) })
+			f.h.Apply(func(rv *factgen.Review) { r = rv.AddRequirement(f.goal, "must"); rv.Scope(f.req, r) })
 			return f
 		}, nil, derive.TargetInProgress, []derive.GapType{derive.GapNeedsCriteria}},
 		{"2: a criterion in progress, with every other blocking gap", func(_ *testing.T, f *fixture) *fixture {
-			f.h.Review(func(r *factgen.Review) { r.AddCriterion(f.req, "manual", nil) }) // the scope is now stale
+			f.h.Apply(func(r *factgen.Review) { r.AddCriterion(f.req, "manual", nil) }) // the scope is now stale
 			return f
 		}, editedSource, derive.TargetInProgress, []derive.GapType{derive.GapScopeStale, derive.GapSourceChanged, derive.GapNotVerified, derive.GapNotVerified}},
 		{"2: a failing criterion", func(_ *testing.T, f *fixture) *fixture { f.fail(f.ac, commitA); return f }, nil,
@@ -72,7 +72,7 @@ func TestTargetDeliveryStatus(t *testing.T) {
 		}, nil, derive.TargetInProgress, []derive.GapType{derive.GapBlockingQuestion}},
 		{"3: CX-18: the scope is stale", func(t *testing.T, _ *fixture) *fixture {
 			f := readyFixture(t)
-			f.h.Review(func(r *factgen.Review) { r.AddRequirement(f.goal, "must") })
+			f.h.Apply(func(r *factgen.Review) { r.AddRequirement(f.goal, "must") })
 			return f
 		}, nil, derive.TargetNeedsReverification, []derive.GapType{derive.GapScopeStale}},
 		{"3: CX-18: a new source makes the scope stale", func(t *testing.T, _ *fixture) *fixture {
@@ -102,7 +102,7 @@ func TestTargetDeliveryStatus(t *testing.T) {
 			if c.edit != nil {
 				c.edit(f, &cur)
 			}
-			res := mustDerive(t, toderive.Input(f.h.Dump(), cur, f.h.Seq()))
+			res := mustDerive(t, toderive.Input(legalDump(t, f.h), cur, f.h.Seq()))
 			if res.Delivery.Status != c.want {
 				t.Errorf("delivery = %s, want %s", res.Delivery.Status, c.want)
 			}
@@ -193,7 +193,7 @@ func TestGaps(t *testing.T) {
 	t.Run("out of scope: no gaps; in scope: blocking", func(t *testing.T) {
 		f := newFixture(t)
 		var out string
-		f.h.Review(func(r *factgen.Review) { out = r.AddRequirement(f.goal, "should") })
+		f.h.Apply(func(r *factgen.Review) { out = r.AddRequirement(f.goal, "should") })
 		f.h.ConfirmScope(f.req)
 		res := f.derive(t)
 		for _, g := range res.Gaps {
@@ -207,10 +207,10 @@ func TestGaps(t *testing.T) {
 		}
 	})
 	t.Run("without a scope: listed, not blocking", func(t *testing.T) {
-		f := &fixture{h: factgen.New(projectID), s: commitA, stage: "in_development"}
+		f := &fixture{t: t, h: factgen.New(projectID), s: commitA, stage: "in_development"}
 		f.h.SetTarget("default", "refs/heads/main")
 		var req string
-		f.h.Review(func(r *factgen.Review) {
+		f.h.Apply(func(r *factgen.Review) {
 			req = r.AddRequirement("", "must")
 			r.AddRequirement("", "must")
 			r.AddCriterion(req, "automated", nil)
@@ -226,10 +226,26 @@ func TestGaps(t *testing.T) {
 			t.Errorf("gaps = %v", got)
 		}
 	})
+	t.Run("without a scope, project-level gaps keep their table's blocking (review 046 P1)", func(t *testing.T) {
+		f := &fixture{t: t, h: factgen.New(projectID), s: commitA, stage: "in_development", inventorySkipped: true}
+		f.h.SetTarget("default", "refs/heads/main")
+		f.src = f.h.AddSource("docs/a.md", factgen.Hash("a"))
+		f.h.Apply(func(r *factgen.Review) { r.AddCriterion(r.AddRequirement("", "must"), "manual", nil) })
+		cur := f.current()
+		cur.Observations[0].SHA256 = factgen.Hash("edited")
+		res := mustDerive(t, toderive.Input(legalDump(t, f.h), cur, f.h.Seq()))
+		want := []derive.GapType{derive.GapNoScope, derive.GapSourceChanged}
+		if got := gapTypes(res.Delivery.BlockingGaps); !slices.Equal(got, want) {
+			t.Errorf("blocking = %v, want %v", got, want)
+		}
+		if res.Delivery.Status != derive.TargetNotAssessed {
+			t.Errorf("delivery = %s", res.Delivery.Status)
+		}
+	})
 	t.Run("a stale scope still filters and blocks", func(t *testing.T) {
 		f := newFixture(t)
 		var out string
-		f.h.Review(func(r *factgen.Review) { out = r.AddRequirement(f.goal, "should") })
+		f.h.Apply(func(r *factgen.Review) { out = r.AddRequirement(f.goal, "should") })
 		res := f.derive(t)
 		for _, g := range res.Gaps {
 			if g.TargetKey == f.h.Key(out) {
@@ -265,14 +281,14 @@ func TestGaps(t *testing.T) {
 		reverify := mk(func(a string) { f.pass(a, commitB) })
 		review := mk(func(a string) { f.pass(a, commitA) })
 		var nocheck string
-		f.h.Review(func(r *factgen.Review) { nocheck = r.AddCriterion(f.req, "automated", nil) })
+		f.h.Apply(func(r *factgen.Review) { nocheck = r.AddCriterion(f.req, "automated", nil) })
 		var revised string
-		f.h.Review(func(r *factgen.Review) {
+		f.h.Apply(func(r *factgen.Review) {
 			revised = r.AddRequirement(f.goal, "must")
 			r.Scope(f.req, revised)
 		})
 		pr := addAuto(f, revised)
-		f.h.Review(func(r *factgen.Review) { r.Update(revised, true, nil) })
+		f.h.Apply(func(r *factgen.Review) { r.Update(revised, true, nil) })
 		f.h.ConfirmScope(f.req, revised)
 		res := f.derive(t)
 		want := map[string][2]string{
@@ -352,7 +368,7 @@ func TestGaps(t *testing.T) {
 				cur.Observations[i].SHA256 = factgen.Hash("other edited")
 			}
 		}
-		res := mustDerive(t, toderive.Input(f.h.Dump(), cur, f.h.Seq()))
+		res := mustDerive(t, toderive.Input(legalDump(t, f.h), cur, f.h.Seq()))
 		got := gapsOf(res, derive.GapSourceChanged)
 		if len(got) != 2 || got[0].TargetKey != "docs/brief.md" || got[0].Reason != "missing" ||
 			got[1].TargetKey != "docs/other.md" || got[1].Reason != "changed" || !got[0].Blocking {
@@ -383,7 +399,7 @@ func TestGaps(t *testing.T) {
 			}
 			cur := f.current()
 			cur.InventorySkipped = c.skip
-			res := mustDerive(t, toderive.Input(f.h.Dump(), cur, f.h.Seq()))
+			res := mustDerive(t, toderive.Input(legalDump(t, f.h), cur, f.h.Seq()))
 			if got := len(gapsOf(res, derive.GapInventoryIncomplete)) == 1; got != c.wantWarning {
 				t.Errorf("%s: INVENTORY_INCOMPLETE = %v", c.name, got)
 			}
@@ -411,7 +427,7 @@ func TestBlockingQuestions(t *testing.T) {
 		{"about a goal", func(f *fixture) { f.h.Propose(0, factgen.QuestionSpec{Blocking: true, AboutEntity: f.goal}) }, false},
 		{"about a requirement out of the scope", func(f *fixture) {
 			var out string
-			f.h.Review(func(r *factgen.Review) { out = r.AddRequirement("", "could") })
+			f.h.Apply(func(r *factgen.Review) { out = r.AddRequirement("", "could") })
 			f.h.ConfirmScope(f.req)
 			f.h.Propose(0, factgen.QuestionSpec{Blocking: true, AboutEntity: out})
 		}, false},
@@ -428,11 +444,12 @@ func TestBlockingQuestions(t *testing.T) {
 			f.h.Review(func(r *factgen.Review) { r.RejectItem(items[0]) })
 		}, false},
 		{"about an accepted item now in the scope", func(f *fixture) {
-			items, _ := f.h.Propose(1, factgen.QuestionSpec{Blocking: true, AboutItem: 1})
+			items, _ := f.h.Propose(2, factgen.QuestionSpec{Blocking: true, AboutItem: 1})
 			f.h.Review(func(r *factgen.Review) {
 				n := r.AddRequirement(f.goal, "must")
 				r.FromItem(items[0])
 				r.AddCriterion(n, "manual", nil)
+				r.FromItem(items[1])
 				r.Scope(f.req, n)
 			})
 		}, true},
@@ -460,8 +477,10 @@ func TestBlockingQuestions(t *testing.T) {
 func TestSourceRemoved(t *testing.T) {
 	f := readyFixture(t)
 	var out string
-	f.h.Review(func(r *factgen.Review) {
+	f.h.Apply(func(r *factgen.Review) {
+		r.Update(f.goal, false, func(x *factgen.Fields) { x.Title = "cited" })
 		r.Ref(f.goal, f.src, "verified")
+		r.Update(f.ac, false, func(x *factgen.Fields) { x.Statement = "cited" })
 		r.Ref(f.ac, f.src, "verified")
 		out = r.AddRequirement("", "could")
 		r.Ref(out, f.src, "verified")
@@ -491,14 +510,14 @@ func TestSourceRemoved(t *testing.T) {
 	g := factgen.New(projectID)
 	g.SetTarget("default", "refs/heads/main")
 	src := g.AddSource("docs/a.md", factgen.Hash("a"))
-	g.Review(func(r *factgen.Review) {
+	g.Apply(func(r *factgen.Review) {
 		goal := r.AddGoal("G")
 		r.Ref(goal, src, "verified")
 		req := r.AddRequirement("", "must")
 		r.Ref(req, src, "verified")
 	})
 	g.RemoveSource(src)
-	res = mustDerive(t, toderive.Input(g.Dump(), g.Current(commitA, "in_development"), g.Seq()))
+	res = mustDerive(t, toderive.Input(legalDump(t, g), g.Current(commitA, "in_development"), g.Seq()))
 	if n := len(gapsOf(res, derive.GapSourceRemoved)); n != 2 {
 		t.Errorf("SOURCE_REMOVED without a scope: %d, want 2", n)
 	}
@@ -511,7 +530,7 @@ func TestMetrics(t *testing.T) {
 	claimed := addAuto(f, f.req)
 	f.h.Claims("sync", factgen.ClaimSpec{Criterion: claimed, Assertion: "done"})
 	var r2, waivedReq string
-	f.h.Review(func(r *factgen.Review) {
+	f.h.Apply(func(r *factgen.Review) {
 		r2 = r.AddRequirement(f.goal, "must")
 		waivedReq = r.AddRequirement(f.goal, "must")
 	})
@@ -554,8 +573,8 @@ func TestMetrics(t *testing.T) {
 	})
 	t.Run("no coverage without an active criterion", func(t *testing.T) {
 		g := factgen.New(projectID)
-		g.Review(func(r *factgen.Review) { r.AddRequirement("", "must") })
-		res := mustDerive(t, toderive.Input(g.Dump(), g.Current("", "in_development"), g.Seq()))
+		g.Apply(func(r *factgen.Review) { r.AddRequirement("", "must") })
+		res := mustDerive(t, toderive.Input(legalDump(t, g), g.Current("", "in_development"), g.Seq()))
 		if res.InventoryCoverage != nil || len(gapsOf(res, derive.GapInventoryIncomplete)) != 0 {
 			t.Errorf("coverage = %+v, gaps %v", res.InventoryCoverage, gapTypes(res.Gaps))
 		}
@@ -569,13 +588,14 @@ func TestInitProgressFromFacts(t *testing.T) {
 	steps := []derive.InitProgress{derive.Initialized}
 	h.AddSource("docs/a.md", factgen.Hash("a"))
 	steps = append(steps, derive.SourcesRegistered)
-	items, _ := h.Propose(1)
+	items, _ := h.Propose(2)
 	steps = append(steps, derive.BaselineProposed)
 	var req, ac string
 	h.Review(func(r *factgen.Review) {
 		req = r.AddRequirement("", "must")
 		r.FromItem(items[0])
 		ac = r.AddCriterion(req, "manual", nil)
+		r.FromItem(items[1])
 	})
 	steps = append(steps, derive.BaselineConfirmed)
 	h.ConfirmScope(req)
@@ -584,7 +604,7 @@ func TestInitProgressFromFacts(t *testing.T) {
 	steps = append(steps, derive.Inventoried)
 	for i, want := range steps {
 		asOf := int64(i + 1)
-		d := h.Dump()
+		d := legalDump(t, h)
 		cur := h.Current(commitA, "in_development")
 		if asOf < 2 {
 			cur.Observations = nil // the source does not exist yet
@@ -599,11 +619,11 @@ func TestInitProgressFromFacts(t *testing.T) {
 	g := factgen.New(projectID)
 	g.Propose(0)
 	cur := g.Current("", "in_development")
-	if res := mustDerive(t, toderive.Input(g.Dump(), cur, g.Seq())); res.InitProgress != derive.Initialized {
+	if res := mustDerive(t, toderive.Input(legalDump(t, g), cur, g.Seq())); res.InitProgress != derive.Initialized {
 		t.Errorf("a proposal without a source: %s", res.InitProgress)
 	}
 	cur.SourcesSkipped = true
-	if res := mustDerive(t, toderive.Input(g.Dump(), cur, g.Seq())); res.InitProgress != derive.BaselineProposed {
+	if res := mustDerive(t, toderive.Input(legalDump(t, g), cur, g.Seq())); res.InitProgress != derive.BaselineProposed {
 		t.Errorf("sources skipped: %s", res.InitProgress)
 	}
 }

@@ -23,21 +23,21 @@ func TestCriterionDecisionTable(t *testing.T) {
 		{"1: S is NULL", func(f *fixture) { f.s = "" }, derive.CriterionNotAssessed, "target_unresolved"},
 		{"1 before 2: S is NULL and the parent is revised", func(f *fixture) {
 			f.s = ""
-			f.h.Review(func(r *factgen.Review) { r.Update(f.req, true, nil) })
+			f.h.Apply(func(r *factgen.Review) { r.Update(f.req, true, nil) })
 		}, derive.CriterionNotAssessed, "target_unresolved"},
 		// Rule 2.
 		{"2: the parent is revised (deferred)", func(f *fixture) {
-			f.h.Review(func(r *factgen.Review) { r.Update(f.req, true, nil) })
+			f.h.Apply(func(r *factgen.Review) { r.Update(f.req, true, nil) })
 		}, derive.CriterionNeedsReverification, "parent_revised"},
 		{"2 before 3: waived, then the parent is revised", func(f *fixture) {
 			f.h.Decide(f.ac, factgen.DecisionSpec{Decision: "waived"})
-			f.h.Review(func(r *factgen.Review) { r.Update(f.req, true, nil) })
+			f.h.Apply(func(r *factgen.Review) { r.Update(f.req, true, nil) })
 		}, derive.CriterionNeedsReverification, "parent_revised"},
 		{"an editorial parent update is not a revision", func(f *fixture) {
-			f.h.Review(func(r *factgen.Review) { r.Update(f.req, false, func(x *factgen.Fields) { x.Title = "Renamed" }) })
+			f.h.Apply(func(r *factgen.Review) { r.Update(f.req, false, func(x *factgen.Fields) { x.Title = "Renamed" }) })
 		}, derive.CriterionInProgress, "unknown"},
 		{"a reaffirmed criterion applies to the revised parent", func(f *fixture) {
-			f.h.Review(func(r *factgen.Review) { r.Update(f.req, true, nil); r.Reaffirm(f.ac) })
+			f.h.Apply(func(r *factgen.Review) { r.Update(f.req, true, nil); r.Reaffirm(f.ac) })
 		}, derive.CriterionInProgress, "unknown"},
 		// Rule 3.
 		{"3: waived", func(f *fixture) { f.h.Decide(f.ac, factgen.DecisionSpec{Decision: "waived"}) }, derive.CriterionWaived, ""},
@@ -176,24 +176,24 @@ func TestCriterionDecisionTable(t *testing.T) {
 		}, derive.CriterionNeedsReverification, "code_changed"},
 		{"10: a pass of an older revision is ac_revised", func(f *fixture) {
 			f.pass(f.ac, commitA)
-			f.h.Review(func(r *factgen.Review) {
+			f.h.Apply(func(r *factgen.Review) {
 				r.Update(f.ac, true, func(x *factgen.Fields) { x.Statement = "stricter" })
 			})
 		}, derive.CriterionNeedsReverification, "ac_revised"},
 		{"10: a pass of an older configuration is ac_revised before code_changed", func(f *fixture) {
 			f.pass(f.ac, commitB)
 			f.pass(f.ac, commitA)
-			f.h.Review(func(r *factgen.Review) {
+			f.h.Apply(func(r *factgen.Review) {
 				r.Update(f.ac, true, func(x *factgen.Fields) { x.Check = check("go test -race ./orders") })
 			})
 		}, derive.CriterionNeedsReverification, "ac_revised"},
 		{"10: an acceptance of an older revision is ac_revised", func(f *fixture) {
 			f.h.Decide(f.ac, factgen.DecisionSpec{Decision: "accepted", Mode: "exception", Snapshot: commitA})
-			f.h.Review(func(r *factgen.Review) { r.Update(f.ac, true, nil) })
+			f.h.Apply(func(r *factgen.Review) { r.Update(f.ac, true, nil) })
 		}, derive.CriterionNeedsReverification, "ac_revised"},
 		{"7: a pass of the new revision after an older acceptance is a first review", func(f *fixture) {
 			f.accept(f.ac, commitA, f.pass(f.ac, commitA))
-			f.h.Review(func(r *factgen.Review) { r.Update(f.ac, true, nil) })
+			f.h.Apply(func(r *factgen.Review) { r.Update(f.ac, true, nil) })
 			f.pass(f.ac, commitB)
 			f.s = commitB
 		}, derive.CriterionReadyForReview, "first_review"},
@@ -208,12 +208,12 @@ func TestCriterionDecisionTable(t *testing.T) {
 		// Rule 11.
 		{"11: no check", func(f *fixture) {
 			var a string
-			f.h.Review(func(r *factgen.Review) { a = r.AddCriterion(f.req, "automated", nil) })
+			f.h.Apply(func(r *factgen.Review) { a = r.AddCriterion(f.req, "automated", nil) })
 			f.ac = a
 		}, derive.CriterionInProgress, "no_check"},
 		{"11: no_check before the progress", func(f *fixture) {
 			var a string
-			f.h.Review(func(r *factgen.Review) { a = r.AddCriterion(f.req, "automated", nil) })
+			f.h.Apply(func(r *factgen.Review) { a = r.AddCriterion(f.req, "automated", nil) })
 			f.h.Claims("sync", factgen.ClaimSpec{Criterion: a, Assertion: "done"})
 			f.ac = a
 		}, derive.CriterionInProgress, "no_check"},
@@ -234,20 +234,20 @@ func TestCriterionDecisionTable(t *testing.T) {
 		{"11: a manual criterion without a claim", func(f *fixture) { f.ac = manualCriterion(f) }, derive.CriterionInProgress, "unknown"},
 		// Runs that are not qualifying, or of another revision, do not count.
 		{"a dirty run on S does not count", func(f *fixture) {
-			f.h.Run(f.ac, factgen.RunSpec{Head: commitA, TreeStart: "dirty", TreeEnd: "dirty", Result: "fail"})
+			f.h.Run(f.ac, factgen.RunSpec{Head: commitA, TreeStart: "dirty", TreeEnd: "dirty", Result: "fail", FailureKind: "nonzero_exit"})
 		}, derive.CriterionInProgress, "unknown"},
 		{"a context_changed run does not count", func(f *fixture) {
-			f.h.Run(f.ac, factgen.RunSpec{Head: commitA, Result: "error", FailureKind: "context_changed"})
+			f.h.Run(f.ac, factgen.RunSpec{Head: commitA, TreeEnd: "dirty", Result: "error", FailureKind: "context_changed"})
 		}, derive.CriterionInProgress, "unknown"},
 		{"a run whose HEAD changed does not count", func(f *fixture) {
-			f.h.Run(f.ac, factgen.RunSpec{Head: commitA, HeadEnd: commitB, Result: "fail"})
+			f.h.Run(f.ac, factgen.RunSpec{Head: commitA, HeadEnd: commitB, Result: "error", FailureKind: "context_changed"})
 		}, derive.CriterionInProgress, "unknown"},
 		{"an unknown tree state does not count", func(f *fixture) {
-			f.h.Run(f.ac, factgen.RunSpec{Head: commitA, TreeStart: "unknown", TreeEnd: "unknown", Result: "fail"})
+			f.h.Run(f.ac, factgen.RunSpec{Head: commitA, TreeStart: "unknown", TreeEnd: "unknown", Result: "fail", FailureKind: "nonzero_exit"})
 		}, derive.CriterionInProgress, "unknown"},
 		{"a run of an older revision does not count for V", func(f *fixture) {
 			f.fail(f.ac, commitA)
-			f.h.Review(func(r *factgen.Review) { r.Update(f.ac, true, nil) })
+			f.h.Apply(func(r *factgen.Review) { r.Update(f.ac, true, nil) })
 		}, derive.CriterionInProgress, "unknown"},
 		{"the latest run by seq decides V", func(f *fixture) {
 			f.fail(f.ac, commitA)
@@ -266,7 +266,7 @@ func TestCriterionDecisionTable(t *testing.T) {
 // manualCriterion adds a manual criterion to the fixture's requirement.
 func manualCriterion(f *fixture) string {
 	var m string
-	f.h.Review(func(r *factgen.Review) { m = r.AddCriterion(f.req, "manual", nil) })
+	f.h.Apply(func(r *factgen.Review) { m = r.AddCriterion(f.req, "manual", nil) })
 	return m
 }
 
@@ -276,7 +276,7 @@ func isolatedFixture(t *testing.T, inputsA, inputsB []factgen.InputEntry, onB fu
 	t.Helper()
 	f := newFixture(t)
 	if inputsA != nil {
-		f.h.Review(func(r *factgen.Review) {
+		f.h.Apply(func(r *factgen.Review) {
 			r.Update(f.ac, true, func(x *factgen.Fields) { x.Check = check("go test ./orders", "orders") })
 		})
 	}
@@ -316,12 +316,15 @@ func TestCarryForward(t *testing.T) {
 		wantStatus(t, f.statusOf(t, f.ac), derive.CriterionReadyForReview, "inputs_changed")
 	})
 	t.Run("a missing input record with declared inputs", func(t *testing.T) {
+		// An unknown state of §6.13, outside the legal domain: a run with
+		// declared inputs records them unless the input is missing.
 		f := isolatedFixture(t, ordersTree, nil, nil)
+		f.outsideLegalDomain = "a run without the input record of its declared inputs"
 		wantStatus(t, f.statusOf(t, f.ac), derive.CriterionReadyForReview, "inputs_changed")
 	})
 	t.Run("inputs_changed before observed_evidence", func(t *testing.T) {
 		f := newFixture(t)
-		f.h.Review(func(r *factgen.Review) {
+		f.h.Apply(func(r *factgen.Review) {
 			r.Update(f.ac, true, func(x *factgen.Fields) { x.Check = check("go test ./orders", "orders") })
 		})
 		f.accept(f.ac, commitA, f.h.Run(f.ac, factgen.RunSpec{Head: commitA, Inputs: ordersTree}))
@@ -374,15 +377,15 @@ func TestProgress(t *testing.T) {
 		}, derive.ProgressBlocked},
 		{"a claim of an older revision does not count", func(f *fixture) {
 			f.h.Claims("sync", factgen.ClaimSpec{Criterion: f.ac, Assertion: "done"})
-			f.h.Review(func(r *factgen.Review) { r.Update(f.ac, true, nil) })
+			f.h.Apply(func(r *factgen.Review) { r.Update(f.ac, true, nil) })
 		}, derive.ProgressUnknown},
 		{"a commit found before the revision does not count", func(f *fixture) {
 			f.h.Scan(factgen.CommitSpec{SHA: commitB, Links: []string{f.ac}})
-			f.h.Review(func(r *factgen.Review) { r.Update(f.ac, true, nil) })
+			f.h.Apply(func(r *factgen.Review) { r.Update(f.ac, true, nil) })
 		}, derive.ProgressUnknown},
 		{"an editorial update keeps the revision start", func(f *fixture) {
 			f.h.Scan(factgen.CommitSpec{SHA: commitB, Links: []string{f.ac}})
-			f.h.Review(func(r *factgen.Review) { r.Update(f.ac, false, func(x *factgen.Fields) { x.Statement = "reworded" }) })
+			f.h.Apply(func(r *factgen.Review) { r.Update(f.ac, false, func(x *factgen.Fields) { x.Statement = "reworded" }) })
 		}, derive.ProgressInProgress},
 		{"a commit linked only to the requirement does not count", func(f *fixture) {
 			f.h.Scan(factgen.CommitSpec{SHA: commitB, Links: []string{f.req}})
@@ -440,18 +443,27 @@ func TestCriterionFlags(t *testing.T) {
 		}, []derive.Flag{derive.FlagObservedEvidence}, nil},
 		{"BL-05: inferred", func(f *fixture) {
 			var a string
-			f.h.Review(func(r *factgen.Review) { a = r.AddCriterionWithOrigin(f.req, "manual", nil, "inferred_from_code") })
+			f.h.Apply(func(r *factgen.Review) { a = r.AddCriterionWithOrigin(f.req, "manual", nil, "inferred_from_code") })
 			f.ac = a
 		}, []derive.Flag{derive.FlagInferred}, nil},
 		{"ref_not_found", func(f *fixture) {
-			f.h.Review(func(r *factgen.Review) { r.Ref(f.ac, f.src, "not_found") })
+			f.h.Apply(func(r *factgen.Review) {
+				r.Update(f.ac, false, func(x *factgen.Fields) { x.Statement = "cited" })
+				r.Ref(f.ac, f.src, "not_found")
+			})
 		}, []derive.Flag{derive.FlagRefNotFound}, nil},
 		{"a reference of an older revision does not count", func(f *fixture) {
-			f.h.Review(func(r *factgen.Review) { r.Ref(f.ac, f.src, "not_found") })
-			f.h.Review(func(r *factgen.Review) { r.Update(f.ac, true, nil) })
+			f.h.Apply(func(r *factgen.Review) {
+				r.Update(f.ac, false, func(x *factgen.Fields) { x.Statement = "cited" })
+				r.Ref(f.ac, f.src, "not_found")
+			})
+			f.h.Apply(func(r *factgen.Review) { r.Update(f.ac, true, nil) })
 		}, nil, []derive.Flag{derive.FlagRefNotFound}},
 		{"SRC-04: source_removed", func(f *fixture) {
-			f.h.Review(func(r *factgen.Review) { r.Ref(f.ac, f.src, "verified") })
+			f.h.Apply(func(r *factgen.Review) {
+				r.Update(f.ac, false, func(x *factgen.Fields) { x.Statement = "cited" })
+				r.Ref(f.ac, f.src, "verified")
+			})
 			f.h.RemoveSource(f.src)
 		}, []derive.Flag{derive.FlagSourceRemoved}, nil},
 		{"blocking question about the criterion", func(f *fixture) {
@@ -491,7 +503,7 @@ func TestCriterionFlags(t *testing.T) {
 func TestRequirementFlags(t *testing.T) {
 	f := newFixture(t)
 	var inferred string
-	f.h.Review(func(r *factgen.Review) {
+	f.h.Apply(func(r *factgen.Review) {
 		inferred = r.AddRequirementWithOrigin(f.goal, "should", "inferred_from_code")
 		r.Ref(inferred, f.src, "not_found")
 		r.AddCriterion(inferred, "manual", nil)
@@ -526,7 +538,7 @@ func TestRequirementStatus(t *testing.T) {
 		{"1: no active criterion", commitA, func(*fixture, string) {}, derive.RequirementNeedsCriteria},
 		{"1: all criteria retired", commitA, func(f *fixture, r string) {
 			a := addAuto(f, r)
-			f.h.Review(func(rv *factgen.Review) { rv.Retire(a) })
+			f.h.Apply(func(rv *factgen.Review) { rv.Retire(a) })
 		}, derive.RequirementNeedsCriteria},
 		{"1 before 2", "", func(*fixture, string) {}, derive.RequirementNeedsCriteria},
 		{"2: S is NULL", "", func(f *fixture, r string) { addAuto(f, r) }, derive.RequirementNotAssessed},
@@ -565,7 +577,7 @@ func TestRequirementStatus(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			f := newFixture(t)
 			var r string
-			f.h.Review(func(rv *factgen.Review) { r = rv.AddRequirement(f.goal, "should") })
+			f.h.Apply(func(rv *factgen.Review) { r = rv.AddRequirement(f.goal, "should") })
 			c.build(f, r)
 			f.s = c.s
 			if got := requirementOf(t, f.derive(t), f.h.Key(r)).Status; got != c.want {
@@ -577,7 +589,7 @@ func TestRequirementStatus(t *testing.T) {
 
 func addAuto(f *fixture, requirement string) string {
 	var a string
-	f.h.Review(func(r *factgen.Review) { a = r.AddCriterion(requirement, "automated", check("go test ./x")) })
+	f.h.Apply(func(r *factgen.Review) { a = r.AddCriterion(requirement, "automated", check("go test ./x")) })
 	return a
 }
 
