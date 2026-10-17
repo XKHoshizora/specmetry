@@ -58,7 +58,7 @@ func TestStateAtCutoff(t *testing.T) {
 	// A source row's hash is not a projection: without acknowledgements it
 	// is the hash at registration.
 	items, _ := f.h.Propose(1, factgen.QuestionSpec{Blocking: true, AboutItem: 1})
-	f.h.Review(func(r *factgen.Review) { r.AddGoal("later"); r.FromItem(items[0]) })
+	f.h.Review(func(r *factgen.Review) { r.AddRequirement("", "could"); r.FromItem(items[0]) })
 	d := legalDump(t, f.h)
 	for i := range d.Criteria {
 		d.Criteria[i].Status, d.Criteria[i].Revision, d.Criteria[i].RequirementRevision = "retired", 9, 9

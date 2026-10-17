@@ -13,21 +13,41 @@
 //     change comes from one accepted item, reviewed in that write; a
 //     proposal names a target at most once (V-P03); the changes follow the
 //     order of §5.5, by step and item_index; a change without an item is a
-//     cascade right after its cause or a follow-up of step 8; the revision
-//     rules (§5.5, §7.2); questions are linked only to accepted add items
-//     (§4.8); an attached scope binds to the new version;
+//     cascade right after its cause, and every cascade a retirement owes
+//     is written (§5.2), or a follow-up of step 8; each change is valid on
+//     the entity as the earlier changes of the write left it, so an
+//     entity can change more than once in a write (a cascade, then an
+//     item), but by one item, one cascade and one follow-up at most; a
+//     link names an entity active when its item applies; the revision
+//     rules (§5.5, §7.2);
+//   - questions (§4.8): one about a proposal item names an item of its
+//     proposal and is linked only once the item is accepted as a
+//     requirement or criterion add (a question's local about names one,
+//     proposal.CheckStatic); one about an entity names an active
+//     requirement or criterion;
 //   - scope confirmations, claims, runs and decisions: their write
-//     preconditions (§7.1, §7.3, §7.4, V-C03).
+//     preconditions (§7.1, §7.3, §7.4, V-C03), with one immutable tree
+//     per commit: a normalized path at a head_start has one input entry,
+//     and an input_missing run there needs a declared path no record shows
+//     at that commit (§4.11.2, §7.4 step 2).
 //
 // Not checked, because the dump does not carry them: a scope's
 // acknowledged waivers and seen_scope_confirmation_id, a decision's
-// acknowledged risks, the actors and channels of human-only writes.
+// acknowledged risks, the actors and channels of human-only writes, and a
+// proposal item's op, type and target before it is accepted (so the type
+// of a pending or rejected item a question is about). Which paths a
+// commit's tree has is not in the dump either: the rows are checked for a
+// contradiction among themselves, and CheckTrees checks them against a
+// generator's trees.
 package legality
 
 import (
 	"cmp"
 	"encoding/json"
 	"fmt"
+	"maps"
+	"path"
+	"reflect"
 	"slices"
 	"strings"
 
@@ -64,9 +84,11 @@ type state struct {
 	RequirementRevision int    `json:"requirement_revision"`
 	Values              struct {
 		Goal         *string         `json:"goal"`
+		Requirement  *string         `json:"requirement"`
 		Verification string          `json:"verification"`
 		Check        *baseline.Check `json:"check"`
 	} `json:"values"`
+	values map[string]any // every value, to compare them
 }
 
 func (s state) checkHash() string {
@@ -117,10 +139,14 @@ func Check(d factgen.Dump, o Options) []Problem {
 	}
 	for _, r := range d.BaselineChanges {
 		var s state
-		if err := json.Unmarshal([]byte(r.AfterJSON), &s); err != nil {
+		var all struct {
+			Values map[string]any `json:"values"`
+		}
+		if err := cmp.Or(json.Unmarshal([]byte(r.AfterJSON), &s), json.Unmarshal([]byte(r.AfterJSON), &all)); err != nil {
 			c.fail(r.Seq, "after_json", "change %s: %v", r.ID, err)
 			continue
 		}
+		s.values = all.Values
 		c.changes = append(c.changes, change{row: r, state: s})
 	}
 	slices.SortFunc(c.changes, func(a, b change) int {
@@ -403,9 +429,18 @@ func (c *checker) checkReview(seq int64, cs []change, states map[string]state, t
 	step0, lastIndex := -1, -1
 	followups := false
 	changed := map[string]bool{}
+	origins := map[string]map[string]bool{} // entity -> an item / a cascade / a follow-up
 	materialReq := map[string]bool{}
 	touched := map[string]bool{} // criteria an item of this review changes
 	var cause *change            // the last item change, for its cascades
+	owed := map[string]bool{}    // the entities the cause's cascade has still to change
+	// settle ends the cause's cascade, which must change every entity it owes.
+	settle := func() {
+		for _, id := range slices.Sorted(maps.Keys(owed)) {
+			c.fail(seq, "cascade", "%s is retired, but its cascade does not change %s (§5.2)", c.keyOf[cause.row.EntityID], c.keyOf[id])
+		}
+		clear(owed)
+	}
 	for k := range cs {
 		ch := &cs[k]
 		r, s := ch.row, ch.state
@@ -417,13 +452,14 @@ func (c *checker) checkReview(seq int64, cs []change, states map[string]state, t
 		if r.ChangeIndex != k {
 			c.fail(seq, "change_index", "change %s has index %d, at position %d", r.ID, r.ChangeIndex, k)
 		}
-		if changed[r.EntityID] {
-			c.fail(seq, "one change per entity", "%s changes twice", c.keyOf[r.EntityID])
-		}
 		changed[r.EntityID] = true
+		// Each change applies to the entity as the earlier changes of this
+		// write left it: a cascade, then an item, is two valid changes.
 		prev, existed := states[r.EntityID]
 		c.checkRevision(seq, r, kind, prev, existed, s, states)
+		origin := "an item"
 		if r.ProposalItemID != nil {
+			settle()
 			item, ok := c.items[*r.ProposalItemID]
 			switch {
 			case !ok:
@@ -434,7 +470,7 @@ func (c *checker) checkReview(seq int64, cs []change, states map[string]state, t
 				c.fail(seq, "item", "item %s is not accepted in this write", item.ID)
 			}
 			usedItems[item.ID] = true
-			c.checkNames(seq, r, s, kind, item, cs)
+			c.checkNames(seq, r, prev, s, kind, item, cs, states)
 			if targeted[item.ProposalID] == nil {
 				targeted[item.ProposalID] = map[string]bool{}
 			}
@@ -460,23 +496,40 @@ func (c *checker) checkReview(seq int64, cs []change, states map[string]state, t
 				touched[r.EntityID] = true
 			}
 			cause = ch
+			if r.Op == "retire" {
+				owed = c.cascadeOf(r.EntityID, kind, states)
+			}
 		} else {
 			switch {
-			case kind == "criterion" && r.Op == "retire" && cause != nil && cause.row.Op == "retire" && cause.row.EntityID == c.parent[r.EntityID] && !followups:
-				// The cascade of a requirement's retirement.
-			case kind == "requirement" && r.Op == "update" && cause != nil && cause.row.Op == "retire" && c.kind[cause.row.EntityID] == "goal" &&
-				s.Values.Goal == nil && existed && prev.Values.Goal != nil && c.idOfKey[*prev.Values.Goal] == cause.row.EntityID &&
-				s.Revision == prev.Revision && !followups:
-				// The cascade of a goal's retirement.
+			case kind == "criterion" && r.Op == "retire" && owed[r.EntityID]:
+				// The cascade of its requirement's retirement.
+				origin = "a cascade"
+			case kind == "requirement" && r.Op == "update" && owed[r.EntityID] && r.ChangeClass != nil && *r.ChangeClass == "editorial" &&
+				s.Values.Goal == nil && s.Revision == prev.Revision && sameValues(prev.values, s.values, "goal"):
+				// The cascade of its goal's retirement: it loses the goal.
+				origin = "a cascade"
 			case kind == "criterion" && (r.Op == "reaffirm" || r.Op == "retire") && r.Rationale != nil &&
 				materialReq[c.parent[r.EntityID]] && !touched[r.EntityID]:
-				followups = true // step 8
+				settle()
+				origin, followups = "a follow-up", true // step 8
 			default:
 				c.fail(seq, "explicit change", "%s %s of %s without a proposal item is no cascade or follow-up", kind, r.Op, c.keyOf[r.EntityID])
+				origin = ""
 			}
+			delete(owed, r.EntityID)
 		}
+		// An entity changes by one item at most (V-P03, one proposal per
+		// review), by one cascade and by one follow-up.
+		if origins[r.EntityID] == nil {
+			origins[r.EntityID] = map[string]bool{}
+		}
+		if origin != "" && origins[r.EntityID][origin] {
+			c.fail(seq, "changes of an entity", "%s changes twice by %s", c.keyOf[r.EntityID], origin)
+		}
+		origins[r.EntityID][origin] = true
 		states[r.EntityID] = s
 	}
+	settle()
 	// References are written for the entities this write changes, at their
 	// new revision (§4.5).
 	for _, ref := range c.d.SourceRefs {
@@ -503,11 +556,42 @@ func (c *checker) checkReview(seq int64, cs []change, states map[string]state, t
 	}
 }
 
+// cascadeOf are the entities the cascade of a retirement changes (§5.2,
+// baseline.Apply): a goal's active requirements lose it, a requirement's
+// active criteria are retired with it.
+func (c *checker) cascadeOf(id, kind string, states map[string]state) map[string]bool {
+	out := map[string]bool{}
+	for e, st := range states {
+		switch {
+		case st.Status != "active":
+		case kind == "goal" && c.kind[e] == "requirement" && st.Values.Goal != nil && c.idOfKey[*st.Values.Goal] == id:
+			out[e] = true
+		case kind == "requirement" && c.kind[e] == "criterion" && c.parent[e] == id:
+			out[e] = true
+		}
+	}
+	return out
+}
+
+// sameValues reports whether two entity values are equal but for the
+// field except ("" for none).
+func sameValues(a, b map[string]any, except string) bool {
+	a, b = maps.Clone(a), maps.Clone(b)
+	delete(a, except)
+	delete(b, except)
+	return reflect.DeepEqual(a, b)
+}
+
+func sameKey(a, b *string) bool { return (a == nil) == (b == nil) && (a == nil || *a == *b) }
+
 // checkNames checks what an item names (V-P03): a target is a key active
-// when the proposal was submitted; a criterion's requirement and a
-// requirement's goal are such a key, or an entity an add item of the same
-// proposal adds in the same write.
-func (c *checker) checkNames(seq int64, r factgen.ChangeRow, s state, kind string, item factgen.ProposalItemRow, cs []change) {
+// when the proposal was submitted. A link (a criterion add's requirement,
+// the goal a requirement add or update sets) is such a key, or an entity an
+// add item of the same proposal adds in the same write; it must be active
+// when the item applies, so not retired by an earlier step of the write
+// (baseline.Apply's link). An update does not move a criterion to another
+// requirement.
+func (c *checker) checkNames(seq int64, r factgen.ChangeRow, prev, s state, kind string, item factgen.ProposalItemRow, cs []change, states map[string]state) {
 	submitted := c.at(c.proposals[item.ProposalID] - 1)
 	activeThen := func(id string) bool { return submitted[id].Status == "active" }
 	addedHere := func(id string) bool {
@@ -516,22 +600,25 @@ func (c *checker) checkNames(seq int64, r factgen.ChangeRow, s state, kind strin
 				c.items[*o.row.ProposalItemID].ProposalID == item.ProposalID
 		})
 	}
-	if r.Op != "add" {
-		if !activeThen(r.EntityID) {
-			c.fail(seq, "V-P03 target", "item %s names %s, which was not an active key when the proposal was submitted", item.ID, c.keyOf[r.EntityID])
-		}
-		return
+	if r.Op != "add" && !activeThen(r.EntityID) {
+		c.fail(seq, "V-P03 target", "item %s names %s, which was not an active key when the proposal was submitted", item.ID, c.keyOf[r.EntityID])
 	}
-	link := ""
-	switch kind {
-	case "criterion":
-		link = c.parent[r.EntityID]
-	case "requirement":
-		if s.Values.Goal != nil {
-			link = c.idOfKey[*s.Values.Goal]
-		}
+	var link, linkKind string
+	switch {
+	case kind == "criterion" && r.Op == "add":
+		link, linkKind = c.parent[r.EntityID], "requirement"
+	case kind == "criterion" && r.Op == "update" && !sameKey(prev.Values.Requirement, s.Values.Requirement):
+		c.fail(seq, "link", "item %s moves %s to another requirement", item.ID, c.keyOf[r.EntityID])
+	case kind == "requirement" && s.Values.Goal != nil && (r.Op == "add" || (r.Op == "update" && !sameKey(prev.Values.Goal, s.Values.Goal))):
+		link, linkKind = c.idOfKey[*s.Values.Goal], "goal"
 	}
-	if link != "" && !activeThen(link) && !addedHere(link) {
+	switch {
+	case link == "":
+	case c.kind[link] != linkKind:
+		c.fail(seq, "link", "item %s links %s to no %s", item.ID, c.keyOf[r.EntityID], linkKind)
+	case states[link].Status != "active":
+		c.fail(seq, "link", "item %s links %s to %s, which is not active when the item applies", item.ID, c.keyOf[r.EntityID], c.keyOf[link])
+	case !activeThen(link) && !addedHere(link):
 		c.fail(seq, "V-P03 target", "item %s links to %s, which is neither an active key of the submission nor added by the proposal here", item.ID, c.keyOf[link])
 	}
 }
@@ -553,9 +640,6 @@ func (c *checker) checkRevision(seq int64, r factgen.ChangeRow, kind string, pre
 		if kind == "criterion" && s.RequirementRevision != parentRevision() {
 			c.fail(seq, "add", "%s applies to revision %d of its requirement, at %d", key, s.RequirementRevision, parentRevision())
 		}
-		if kind == "criterion" && states[c.parent[r.EntityID]].Status != "active" {
-			c.fail(seq, "add", "%s is added to a requirement that is not active", key)
-		}
 	case "update":
 		switch {
 		case s.Status != "active" || (s.Revision != prev.Revision && s.Revision != prev.Revision+1):
@@ -567,21 +651,25 @@ func (c *checker) checkRevision(seq int64, r factgen.ChangeRow, kind string, pre
 			c.fail(seq, "update", "%s is updated without applying to revision %d of its requirement", key, parentRevision())
 		}
 	case "reaffirm":
-		if kind != "criterion" || s.Revision != prev.Revision || s.RequirementRevision != parentRevision() {
-			c.fail(seq, "reaffirm", "%s is not reaffirmed for its requirement's revision", key)
+		if kind != "criterion" || s.Revision != prev.Revision || s.RequirementRevision != parentRevision() || !sameValues(prev.values, s.values, "") {
+			c.fail(seq, "reaffirm", "%s is not reaffirmed for its requirement's revision, its values unchanged", key)
 		}
 	case "retire":
-		if s.Status != "retired" || s.Revision != prev.Revision {
-			c.fail(seq, "retire", "%s is not retired at its revision", key)
+		if s.Status != "retired" || s.Revision != prev.Revision || !sameValues(prev.values, s.values, "") {
+			c.fail(seq, "retire", "%s is not retired at its revision, its values unchanged", key)
 		}
 	default:
 		c.fail(seq, "op", "unknown op %s", r.Op)
 	}
 }
 
-// checkQuestions checks §4.8: a question about a proposal item names an
-// add item, and is linked to the entity only once the item is accepted,
-// if it is open then; a question about an entity names an active one.
+// checkQuestions checks §4.8. A question about a proposal item names an
+// item of its proposal, a requirement or criterion add: a question's
+// proposal-local about names one of those (proposal.CheckStatic), and only
+// an add item has a ref. It is linked to the entity only once the item is
+// accepted, if it is open then. A question about an entity names an active
+// requirement or criterion (proposal's store). The type of an item that is
+// not accepted is not in the dump.
 func (c *checker) checkQuestions() {
 	produced := map[string]change{}
 	for _, ch := range c.changes {
@@ -591,16 +679,25 @@ func (c *checker) checkQuestions() {
 	}
 	for _, q := range c.d.Questions {
 		if q.ProposalItemID == nil {
-			if q.RelatedID != nil && c.at(q.CreatedSeq)[*q.RelatedID].Status != "active" {
-				c.fail(q.CreatedSeq, "question", "%s is about an entity that is not active", q.Key)
+			if q.RelatedID == nil {
+				continue
+			}
+			kind := c.kind[*q.RelatedID]
+			if (kind != "requirement" && kind != "criterion") || orEmpty(q.RelatedType) != kind || c.at(q.CreatedSeq)[*q.RelatedID].Status != "active" {
+				c.fail(q.CreatedSeq, "question", "%s is about a %s that is not an active requirement or criterion", q.Key, kind)
 			}
 			continue
 		}
-		item := c.items[*q.ProposalItemID]
+		item, ok := c.items[*q.ProposalItemID]
+		if !ok || c.proposals[item.ProposalID] != q.CreatedSeq {
+			c.fail(q.CreatedSeq, "question", "%s is about an item of another proposal", q.Key)
+			continue
+		}
 		ch, accepted := produced[item.ID]
 		switch {
-		case accepted && ch.row.Op != "add":
-			c.fail(q.CreatedSeq, "question", "%s is about item %s, which is no add", q.Key, item.ID)
+		case accepted && (ch.row.Op != "add" || (c.kind[ch.row.EntityID] != "requirement" && c.kind[ch.row.EntityID] != "criterion")):
+			c.fail(q.CreatedSeq, "question", "%s is about item %s, accepted as a %s %s: a question's local about names a requirement or criterion add",
+				q.Key, item.ID, c.kind[ch.row.EntityID], ch.row.Op)
 		case accepted:
 			openThen := q.AnsweredSeq == nil || *q.AnsweredSeq > ch.row.Seq
 			linked := q.RelatedID != nil && *q.RelatedID == ch.row.EntityID
@@ -691,10 +788,48 @@ func qualifying(r factgen.CheckRunRow) bool {
 		r.TreeStateStart == "clean" && r.TreeStateEnd == "clean" && orEmpty(r.FailureKind) != "context_changed"
 }
 
+// lookupPath is the path an input is looked up by in a commit's tree
+// (data-model §4.11.2, as V-P04 normalizes it): \ as /, then path.Clean.
+func lookupPath(p string) string { return path.Clean(strings.ReplaceAll(p, `\`, "/")) }
+
+type treeKey struct{ commit, path string }
+
+// entries are the input entries the runs record, by commit and lookup
+// path; a commit's tree is immutable, so two records of one path at one
+// commit that differ are a problem whatever their seqs.
+func (c *checker) entries() map[treeKey]factgen.InputEntry {
+	runs := slices.Clone(c.d.CheckRuns)
+	slices.SortFunc(runs, func(a, b factgen.CheckRunRow) int { return cmp.Compare(a.Seq, b.Seq) })
+	out := map[treeKey]factgen.InputEntry{}
+	for _, r := range runs {
+		if r.HeadStart == nil || r.InputsJSON == nil {
+			continue
+		}
+		var entries []factgen.InputEntry
+		_ = json.Unmarshal([]byte(*r.InputsJSON), &entries)
+		for _, e := range entries {
+			k := treeKey{*r.HeadStart, lookupPath(e.Path)}
+			if was, ok := out[k]; ok && (was.Mode != e.Mode || was.Type != e.Type || was.OID != e.OID) {
+				c.fail(r.Seq, "commit tree", "%s at commit %s is recorded as %s %s %s, and before as %s %s %s", k.path, short(k.commit),
+					e.Mode, e.Type, e.OID, was.Mode, was.Type, was.OID)
+				continue
+			}
+			out[k] = e
+		}
+	}
+	return out
+}
+
+func short(s string) string { return s[:min(8, len(s))] }
+
 // checkRuns checks §7.4: the run binds the criterion's revision and
 // configuration of its start, records its declared inputs, and a context
-// change is an error; the grade is the domain's.
+// change is an error; the grade is the domain's. An input_missing run at a
+// head_start needs a declared input no record shows at that commit: the
+// tree of head_start, not the worktree, is read (§4.11.2), so a later
+// context change or a dirty worktree does not change it.
 func (c *checker) checkRuns() {
+	recorded := c.entries()
 	for _, r := range c.d.CheckRuns {
 		// The run binds the revision, configuration and requirement
 		// revision it read at its start, which can be before a revision
@@ -725,6 +860,12 @@ func (c *checker) checkRuns() {
 		}
 		declared := slices.Clone(st.Values.Check.Inputs)
 		slices.Sort(declared)
+		if kind == "input_missing" && r.HeadStart != nil && len(declared) > 0 && !slices.ContainsFunc(declared, func(p string) bool {
+			_, ok := recorded[treeKey{*r.HeadStart, lookupPath(p)}]
+			return !ok
+		}) {
+			c.fail(r.Seq, "commit tree", "input_missing at commit %s, where a record shows every declared input %v", short(*r.HeadStart), declared)
+		}
 		switch {
 		case kind == "input_missing" || len(declared) == 0:
 			if r.InputsJSON != nil {

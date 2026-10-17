@@ -424,7 +424,13 @@ func TestBlockingQuestions(t *testing.T) {
 			f.h.Propose(0, factgen.QuestionSpec{Blocking: true, AboutEntity: f.ac})
 		}, true},
 		{"about nothing", func(f *fixture) { f.h.Propose(0, factgen.QuestionSpec{Blocking: true}) }, true},
-		{"about a goal", func(f *fixture) { f.h.Propose(0, factgen.QuestionSpec{Blocking: true, AboutEntity: f.goal}) }, false},
+		{"about a goal", func(f *fixture) {
+			// The column allows it, so the derivation must treat it, but no
+			// production write does: proposal.v1's about is a requirement or
+			// criterion key or a local ref (review 047 B1-R3).
+			f.outsideLegalDomain = "a question about a goal"
+			f.h.Propose(0, factgen.QuestionSpec{Blocking: true, AboutEntity: f.goal})
+		}, false},
 		{"about a requirement out of the scope", func(f *fixture) {
 			var out string
 			f.h.Apply(func(r *factgen.Review) { out = r.AddRequirement("", "could") })
