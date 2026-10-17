@@ -57,7 +57,8 @@ func Facts(d factgen.Dump) readycheck.Facts {
 	}
 	for _, r := range d.CheckRuns {
 		f.Runs = append(f.Runs, readycheck.Run{
-			ID: r.ID, Seq: r.Seq, Criterion: r.CriterionID, Revision: r.CriterionRevision, ConfigHash: r.CheckConfigHash,
+			ID: r.ID, Seq: r.Seq, Criterion: r.CriterionID, Revision: r.CriterionRevision, RequirementRevision: r.RequirementRevision,
+			ConfigHash: r.CheckConfigHash, Worktree: r.WorktreeID,
 			Inputs: inputs(r.InputsJSON), HeadStart: orEmpty(r.HeadStart), HeadEnd: orEmpty(r.HeadEnd),
 			TreeStart: r.TreeStateStart, TreeEnd: r.TreeStateEnd, Result: r.Result, FailureKind: orEmpty(r.FailureKind), Grade: r.EvidenceGrade,
 		})
@@ -65,7 +66,8 @@ func Facts(d factgen.Dump) readycheck.Facts {
 	for _, x := range d.Decisions {
 		f.Decisions = append(f.Decisions, readycheck.Decision{
 			ID: x.ID, Seq: x.Seq, Criterion: x.CriterionID, Kind: x.Decision, Mode: orEmpty(x.Mode), Revision: x.CriterionRevision,
-			ConfigHash: orEmpty(x.CheckConfigHash), Inputs: inputs(x.InputsJSON), Snapshot: orEmpty(x.Snapshot), EvidenceID: orEmpty(x.EvidenceID),
+			RequirementRevision: x.RequirementRevision, ConfigHash: orEmpty(x.CheckConfigHash), Inputs: inputs(x.InputsJSON),
+			Snapshot: orEmpty(x.Snapshot), EvidenceID: orEmpty(x.EvidenceID), SeenDecision: orEmpty(x.SeenDecisionID),
 		})
 	}
 	return f

@@ -8,6 +8,7 @@ import (
 
 	"github.com/XKHoshizora/specmetry/internal/domain/derive"
 	"github.com/XKHoshizora/specmetry/internal/testutil/factgen"
+	"github.com/XKHoshizora/specmetry/internal/testutil/factgen/legality"
 	"github.com/XKHoshizora/specmetry/internal/testutil/factgen/toderive"
 	"github.com/XKHoshizora/specmetry/internal/testutil/readycheck"
 	"github.com/XKHoshizora/specmetry/internal/testutil/readycheck/fromdump"
@@ -19,6 +20,18 @@ import (
 // by one side reaches the other.
 
 const compareSeeds = 600
+
+// legalCase is a random history package legality confirms is legal: the
+// comparison runs on legal histories only (data-model §6.14, F5), and a
+// generated one that is not fails with its operation trace.
+func legalCase(t *testing.T, seed uint64, o factgen.Options) factgen.Case {
+	t.Helper()
+	c := factgen.Random(seed, o)
+	if p := legality.Check(c.Dump, legality.Options{Isolated: o.Isolated}); len(p) > 0 {
+		t.Fatalf("seed %d is not a legal history:\n%s", seed, legality.Report(p, c.History.Trace()))
+	}
+	return c
+}
 
 func engineReady(t *testing.T, c factgen.Case, cur factgen.Current) (bool, *derive.Result) {
 	t.Helper()
@@ -40,26 +53,31 @@ func checkerVerdict(c factgen.Case, cur factgen.Current) readycheck.Verdict {
 // settings: R1 to R10 read none, so the engine's verdict must not change.
 func TestEngineAndCheckerAgree(t *testing.T) {
 	counts := map[string]int{}
-	failures := map[readycheck.Condition]int{}
+	failures := map[string]map[readycheck.Condition]int{"MVP": {}, "general": {}}
 	for seed := range uint64(compareSeeds) {
 		general := seed%2 == 1
-		c := factgen.Random(seed, factgen.Options{Steps: 40, Deliver: 0.55, Cutoff: 0.15, Isolated: general})
+		domain := map[bool]string{false: "MVP", true: "general"}[general]
 		t.Run(fmt.Sprintf("seed=%d", seed), func(t *testing.T) {
+			c := legalCase(t, seed, factgen.Options{Steps: 40, Deliver: 0.55, Cutoff: 0.15, Isolated: general})
 			ready, res := engineReady(t, c, c.Current)
 			v := checkerVerdict(c, c.Current)
 			if ready != v.Ready() {
 				t.Fatalf("engine ready = %v (delivery %s, blocking %v); checker failed %v",
 					ready, res.Delivery.Status, res.Delivery.BlockingGaps, v.Failed)
 			}
+			if err := readycheck.Consistent(v, ready, string(res.Delivery.EvidenceGrade)); err != nil {
+				t.Fatal(err)
+			}
+			// Review 046 N2: the grade of every output, ready or not.
+			if err := readycheck.GradeConsistent(v, string(res.Delivery.EvidenceGrade)); err != nil {
+				t.Fatalf("ready = %v: %v", ready, err)
+			}
 			if ready {
-				if err := readycheck.Consistent(v, ready, string(res.Delivery.EvidenceGrade)); err != nil {
-					t.Fatal(err)
-				}
-				counts["ready, "+string(res.Delivery.EvidenceGrade)]++
+				counts[domain+": ready, "+string(res.Delivery.EvidenceGrade)]++
 			} else {
-				counts["not ready"]++
+				counts[domain+": not ready"]++
 				for cond := range v.Failed {
-					failures[cond]++
+					failures[domain][cond]++
 				}
 			}
 			for _, settings := range [][3]any{{"docs_only", true, false}, {"incomplete_docs", false, true}} {
@@ -71,20 +89,28 @@ func TestEngineAndCheckerAgree(t *testing.T) {
 			}
 		})
 	}
-	t.Logf("verdicts: %v; failed conditions of the histories that are not ready: %v", counts, failures)
-	// The legal histories that cannot be ready fail every condition (R1 at
-	// cutoffs before the first baseline version).
-	for _, cond := range []readycheck.Condition{readycheck.R1, readycheck.R2, readycheck.R3, readycheck.R4, readycheck.R5, readycheck.R6, readycheck.R7, readycheck.R8, readycheck.R9} {
-		if failures[cond] == 0 {
-			t.Errorf("no history failed %s: %v", cond, failures)
+	t.Logf("legal histories: %v", counts)
+	t.Logf("failed conditions of those not ready: MVP %v; general %v", failures["MVP"], failures["general"])
+	// The legal histories that cannot be ready fail every condition, in
+	// each domain (R1 at cutoffs before the first baseline version).
+	for _, domain := range []string{"MVP", "general"} {
+		for _, cond := range []readycheck.Condition{readycheck.R1, readycheck.R2, readycheck.R3, readycheck.R4, readycheck.R5,
+			readycheck.R6, readycheck.R7, readycheck.R8, readycheck.R9} {
+			if failures[domain][cond] == 0 {
+				t.Errorf("%s: no history failed %s: %v", domain, cond, failures[domain])
+			}
 		}
 	}
-	readyTotal := counts["ready, observed"] + counts["ready, none"] + counts["ready, snapshot_isolated"]
-	if readyTotal < compareSeeds/10 || counts["not ready"] < compareSeeds/10 {
-		t.Errorf("the comparison would run idle: %v", counts)
+	// Both verdicts in each domain, and the grades each one can have; no
+	// isolated grade in the MVP domain.
+	for _, want := range []string{"MVP: not ready", "MVP: ready, observed", "MVP: ready, none",
+		"general: not ready", "general: ready, snapshot_isolated"} {
+		if counts[want] < 10 {
+			t.Errorf("the comparison would run idle: too few %q in %v", want, counts)
+		}
 	}
-	if counts["ready, snapshot_isolated"] == 0 || counts["ready, observed"] == 0 || counts["ready, none"] == 0 {
-		t.Errorf("not every delivery grade was compared: %v", counts)
+	if counts["MVP: ready, snapshot_isolated"] > 0 {
+		t.Errorf("an isolated grade in the MVP domain: %v", counts)
 	}
 }
 
@@ -93,10 +119,12 @@ func TestEngineAndCheckerAgree(t *testing.T) {
 // compared (data-model §6.14).
 func TestMalformedInputsDoNotCrashEither(t *testing.T) {
 	for seed := range uint64(200) {
-		c := factgen.Random(seed, factgen.Options{Steps: 40, Deliver: 0.5, Isolated: seed%2 == 1})
-		rng := rand.New(rand.NewPCG(seed, 17))
-		corruptDump(&c.Dump, rng)
 		t.Run(fmt.Sprintf("seed=%d", seed), func(t *testing.T) {
+			// A legal history broken on purpose; not counted in the legal
+			// domain.
+			c := legalCase(t, seed, factgen.Options{Steps: 40, Deliver: 0.5, Isolated: seed%2 == 1})
+			rng := rand.New(rand.NewPCG(seed, 17))
+			corruptDump(&c.Dump, rng)
 			r1, e1 := derive.Derive(toderive.Input(c.Dump, c.Current, c.AsOf))
 			r2, e2 := derive.Derive(toderive.Input(c.Dump, c.Current, c.AsOf))
 			if (e1 == nil) != (e2 == nil) || !reflect.DeepEqual(r1, r2) {

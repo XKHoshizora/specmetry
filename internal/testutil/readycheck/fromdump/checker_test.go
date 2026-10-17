@@ -6,6 +6,7 @@ import (
 
 	"github.com/XKHoshizora/specmetry/internal/baseline"
 	"github.com/XKHoshizora/specmetry/internal/testutil/factgen"
+	"github.com/XKHoshizora/specmetry/internal/testutil/factgen/legality"
 	"github.com/XKHoshizora/specmetry/internal/testutil/readycheck"
 	"github.com/XKHoshizora/specmetry/internal/testutil/readycheck/fromdump"
 )
@@ -49,9 +50,21 @@ func (w *world) current() factgen.Current {
 	return c
 }
 
+// verdict is the checker's verdict on the world, which must be a legal
+// history: F5's counterexamples and positive cases are built from legal
+// histories (data-model §6.14).
 func (w *world) verdict(t *testing.T) readycheck.Verdict {
 	t.Helper()
-	return readycheck.Check(fromdump.Facts(w.h.Dump()), fromdump.Current(w.current()), w.h.Seq())
+	return readycheck.Check(fromdump.Facts(legalDump(t, w.h)), fromdump.Current(w.current()), w.h.Seq())
+}
+
+func legalDump(t *testing.T, h *factgen.History) factgen.Dump {
+	t.Helper()
+	d := h.Dump()
+	if p := legality.Check(d, legality.Options{Isolated: true}); len(p) > 0 {
+		t.Fatalf("not a legal history:\n%s", legality.Report(p, h.Trace()))
+	}
+	return d
 }
 
 func (w *world) pass(ac, commit string) string { return w.h.Run(ac, factgen.RunSpec{Head: commit}) }
@@ -70,7 +83,7 @@ func readyWorld(t *testing.T) *world {
 
 func addCriterion(w *world, verification string) string {
 	var a string
-	w.h.Review(func(r *factgen.Review) {
+	w.h.Apply(func(r *factgen.Review) {
 		var c *baseline.Check
 		if verification == "automated" {
 			c = &baseline.Check{Command: "go test ./x", Workdir: ".", TimeoutSec: 300, Rationale: "r"}
@@ -112,12 +125,12 @@ func TestCheckerFindsEachCounterexample(t *testing.T) {
 		}, readycheck.R6, nil},
 		{"the parent revised, the criterion not handled", func(t *testing.T) *world {
 			w := readyWorld(t)
-			w.h.Review(func(r *factgen.Review) { r.Update(w.req, true, nil); r.Scope(w.req) })
+			w.h.Apply(func(r *factgen.Review) { r.Update(w.req, true, nil); r.Scope(w.req) })
 			return w
 		}, readycheck.R6, nil},
 		{"the scope is stale by version", func(t *testing.T) *world {
 			w := readyWorld(t)
-			w.h.Review(func(r *factgen.Review) { r.AddRequirement("", "could") })
+			w.h.Apply(func(r *factgen.Review) { r.AddRequirement("", "could") })
 			return w
 		}, readycheck.R3, nil},
 		{"the scope is stale by the source set", func(t *testing.T) *world {
@@ -127,12 +140,12 @@ func TestCheckerFindsEachCounterexample(t *testing.T) {
 		}, readycheck.R3, nil},
 		{"every requirement of the scope is retired", func(t *testing.T) *world {
 			w := readyWorld(t)
-			w.h.Review(func(r *factgen.Review) { r.Retire(w.req) })
+			w.h.Apply(func(r *factgen.Review) { r.Retire(w.req) })
 			return w
 		}, readycheck.R4, []readycheck.Condition{readycheck.R3}},
 		{"a requirement without a criterion", func(t *testing.T) *world {
 			w := readyWorld(t)
-			w.h.Review(func(r *factgen.Review) { r.Scope(w.req, r.AddRequirement("", "must")) })
+			w.h.Apply(func(r *factgen.Review) { r.Scope(w.req, r.AddRequirement("", "must")) })
 			return w
 		}, readycheck.R5, nil},
 		{"AS all waived", func(t *testing.T) *world {
@@ -192,7 +205,7 @@ func TestCheckerFindsEachCounterexample(t *testing.T) {
 		}, readycheck.R6, nil},
 		{"only a decision of an older revision", func(t *testing.T) *world {
 			w := readyWorld(t)
-			w.h.Review(func(r *factgen.Review) { r.Update(w.ac, true, nil); r.Scope(w.req) })
+			w.h.Apply(func(r *factgen.Review) { r.Update(w.ac, true, nil); r.Scope(w.req) })
 			w.pass(w.ac, commitA)
 			return w
 		}, readycheck.R6, nil},
@@ -251,15 +264,18 @@ func TestCheckerPositiveCases(t *testing.T) {
 	t.Run("a review sharing one seq, at that seq", func(t *testing.T) {
 		w := readyWorld(t)
 		before := w.h.Seq()
+		items, _ := w.h.Propose(2)
 		seq := w.h.Review(func(r *factgen.Review) {
 			r.Update(w.req, false, func(f *factgen.Fields) { f.Title = "renamed" })
+			r.FromItem(items[0])
 			r.Update(w.ac, false, func(f *factgen.Fields) { f.Statement = "reworded" })
+			r.FromItem(items[1])
 			r.Ref(w.req, w.src, "verified")
 			r.Ref(w.ac, w.src, "verified")
 			r.Scope(w.req)
 		})
 		for _, asOf := range []int64{before, seq} {
-			v := readycheck.Check(fromdump.Facts(w.h.Dump()), fromdump.Current(w.current()), asOf)
+			v := readycheck.Check(fromdump.Facts(legalDump(t, w.h)), fromdump.Current(w.current()), asOf)
 			if !v.Ready() {
 				t.Errorf("at %d: failed %v", asOf, failedConditions(v))
 			}
@@ -288,6 +304,57 @@ func TestR10OutputConsistency(t *testing.T) {
 	}
 	if err := readycheck.Consistent(v, false, "observed"); err == nil {
 		t.Error("a ready verdict the output denies passed")
+	}
+}
+
+// Review 046 N2: a delivery that is not ready still reports the grade of
+// its normal acceptances; GradeConsistent checks it.
+func TestGradeOfADeliveryThatIsNotReady(t *testing.T) {
+	w := readyWorld(t)
+	w.observed[w.src] = factgen.Hash("edited") // R9 fails; the acceptance still applies
+	v := w.verdict(t)
+	if v.Ready() || v.Grade != "observed" {
+		t.Fatalf("ready %v, grade %s, failed %v", v.Ready(), v.Grade, failedConditions(v))
+	}
+	if err := readycheck.GradeConsistent(v, "observed"); err != nil {
+		t.Error(err)
+	}
+	if err := readycheck.GradeConsistent(v, "none"); err == nil {
+		t.Error("a wrong grade of a delivery that is not ready passed")
+	}
+}
+
+// F5: the checker's converter keeps every row the predicate reads and the
+// timing F5 lists, NULL apart from a value.
+func TestConverterKeepsTheTiming(t *testing.T) {
+	var nullSeen, seen int
+	for seed := range uint64(100) {
+		c := factgen.Random(seed, factgen.Options{Steps: 40, Deliver: 0.5, Isolated: seed%2 == 1})
+		f := fromdump.Facts(c.Dump)
+		if len(f.Decisions) != len(c.Dump.Decisions) || len(f.Runs) != len(c.Dump.CheckRuns) || len(f.Changes) != len(c.Dump.BaselineChanges) {
+			t.Fatalf("seed %d: rows are lost", seed)
+		}
+		for i, x := range c.Dump.Decisions {
+			y := f.Decisions[i]
+			want := ""
+			if x.SeenDecisionID != nil {
+				want = *x.SeenDecisionID
+				seen++
+			} else {
+				nullSeen++
+			}
+			if y.SeenDecision != want || y.Seq != x.Seq || y.RequirementRevision != x.RequirementRevision {
+				t.Fatalf("seed %d: decision %s is not kept: %+v", seed, x.ID, y)
+			}
+		}
+		for i, r := range c.Dump.CheckRuns {
+			if y := f.Runs[i]; y.Worktree != r.WorktreeID || y.RequirementRevision != r.RequirementRevision || y.Seq != r.Seq {
+				t.Fatalf("seed %d: run %s is not kept: %+v", seed, r.ID, y)
+			}
+		}
+	}
+	if nullSeen == 0 || seen == 0 {
+		t.Errorf("decisions: %d with no predecessor, %d with one", nullSeen, seen)
 	}
 }
 

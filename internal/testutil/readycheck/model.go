@@ -113,19 +113,21 @@ type Question struct {
 	About             string
 }
 
-// Run is a check run.
+// Run is a check run, with the execution context F5 lists.
 type Run struct {
-	ID                 string
-	Seq                int64
-	Criterion          string
-	Revision           int
-	ConfigHash         string
-	Inputs             []InputEntry // nil: NULL
-	HeadStart, HeadEnd string
-	TreeStart, TreeEnd string
-	Result             string
-	FailureKind        string
-	Grade              string
+	ID                  string
+	Seq                 int64
+	Criterion           string
+	Revision            int
+	RequirementRevision int
+	ConfigHash          string
+	Worktree            string
+	Inputs              []InputEntry // nil: NULL
+	HeadStart, HeadEnd  string
+	TreeStart, TreeEnd  string
+	Result              string
+	FailureKind         string
+	Grade               string
 }
 
 // InputEntry is one entry of an input record.
@@ -133,18 +135,23 @@ type InputEntry struct {
 	Path, Mode, Type, OID string
 }
 
-// Decision is a person's decision.
+// Decision is a person's decision, with the timing F5 lists: the
+// evidence, the snapshot, the mode, the seq and the decision the person
+// saw as current ("" when none). The predicate does not read SeenDecision
+// or RequirementRevision.
 type Decision struct {
-	ID         string
-	Seq        int64
-	Criterion  string
-	Kind       string // accepted / rejected / waived
-	Mode       string
-	Revision   int
-	ConfigHash string
-	Inputs     []InputEntry
-	Snapshot   string
-	EvidenceID string
+	ID                  string
+	Seq                 int64
+	Criterion           string
+	Kind                string // accepted / rejected / waived
+	Mode                string
+	Revision            int
+	RequirementRevision int
+	ConfigHash          string
+	Inputs              []InputEntry
+	Snapshot            string
+	EvidenceID          string
+	SeenDecision        string
 }
 
 // Current is the current-value input the checker needs: S and the

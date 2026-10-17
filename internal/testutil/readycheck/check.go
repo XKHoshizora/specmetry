@@ -369,13 +369,25 @@ func Check(f Facts, cur Current, asOf int64) Verdict {
 	return v
 }
 
-// Consistent is R10: an output's ready verdict and delivery evidence grade
-// agree with the checker's.
+// Consistent is R10 for a ready verdict: an output's ready verdict agrees
+// with the checker's, and when ready its delivery evidence grade too. The
+// grade of an output that is not ready is checked by GradeConsistent.
 func Consistent(v Verdict, ready bool, grade string) error {
 	if v.Ready() != ready {
 		return fmt.Errorf("the output says ready = %v, the checker %v (failed %v)", ready, v.Ready(), v.Failed)
 	}
-	if ready && grade != v.Grade {
+	if ready {
+		return GradeConsistent(v, grade)
+	}
+	return nil
+}
+
+// GradeConsistent compares an output's delivery evidence grade with the
+// checker's for any output, ready or not: the grade of the runs the normal
+// acceptances of AS that apply on S rely on (data-model §6.8), which a
+// delivery that is not ready also reports.
+func GradeConsistent(v Verdict, grade string) error {
+	if grade != v.Grade {
 		return fmt.Errorf("the output's evidence grade is %s, the checker recomputes %s", grade, v.Grade)
 	}
 	return nil
