@@ -272,6 +272,11 @@ type Decision struct {
 	EvidenceID          string
 	EvidenceGrade       Grade
 	Rationale           string
+	// SeenDecisionID is the decision the person saw as current, the write
+	// precondition of §7.1 ("" when there was none). The derivation does
+	// not read it; it is kept so that a converter keeps every field F5
+	// lists.
+	SeenDecisionID string
 }
 
 // Current holds the current-value inputs of one command (data-model

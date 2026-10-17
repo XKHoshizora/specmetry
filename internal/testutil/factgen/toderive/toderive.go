@@ -122,7 +122,7 @@ func Facts(d factgen.Dump) derive.Facts {
 			CriterionRevision: x.CriterionRevision, RequirementRevision: x.RequirementRevision,
 			CheckConfigHash: str(x.CheckConfigHash), Inputs: inputs(x.InputsJSON), TargetID: x.TargetID,
 			Snapshot: str(x.Snapshot), EvidenceID: str(x.EvidenceID), EvidenceGrade: derive.Grade(str(x.EvidenceGrade)),
-			Rationale: str(x.Rationale),
+			Rationale: str(x.Rationale), SeenDecisionID: str(x.SeenDecisionID),
 		})
 	}
 	return f
