@@ -123,7 +123,8 @@ func (d *derivation) sourceState(s sourceAt) SourceState {
 // status.v1): a normal acceptance's or a rejection's evidence; none for
 // manual, exception and waived decisions, and without evidence.
 func (d *derivation) grade(dec *Decision) Grade {
-	if dec.EvidenceID == "" || !(dec.Decision == "rejected" || (dec.Decision == "accepted" && dec.Mode == "normal")) {
+	normal := dec.Decision == "accepted" && dec.Mode == "normal"
+	if dec.EvidenceID == "" || (dec.Decision != "rejected" && !normal) {
 		return NoEvidence
 	}
 	if dec.EvidenceGrade != "" {

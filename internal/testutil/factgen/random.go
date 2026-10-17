@@ -536,10 +536,10 @@ func (g *gen) current(d Dump, asOf int64) Current {
 		InventorySkipped: g.chance(0.3),
 	}
 	for _, o := range ObservationsAt(d, asOf) {
-		switch w := g.pick(20); {
-		case w == 0:
+		switch g.pick(20) {
+		case 0:
 			o.SHA256 = ""
-		case w == 1:
+		case 1:
 			o.SHA256 = Hash("edited")
 		}
 		c.Observations = append(c.Observations, o)
