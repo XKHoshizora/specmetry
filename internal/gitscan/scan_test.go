@@ -565,7 +565,7 @@ func TestScanFailuresWriteNothing(t *testing.T) {
 			}
 			return nil
 		}},
-		{"a commit of the range missing (the ancestry check reads it)", func(t *testing.T, e *env, a, b, cc string) func() {
+		{"a commit of the range missing (is-ancestor fails, or says no and the whole history is read)", func(t *testing.T, e *env, a, b, cc string) func() {
 			mid := e.commit("", "D REQ-001")
 			e.commit("", "E REQ-001")
 			removeObject(t, e.repo, mid)

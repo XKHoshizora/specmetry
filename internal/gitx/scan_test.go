@@ -495,7 +495,8 @@ func TestClassifyWithUnreadableStorage(t *testing.T) {
 		mode  os.FileMode
 		packd bool
 	}{
-		{"K10 a loose object's directory unreadable", func(r *testutil.GitRepo, _, tip string) string { return filepath.Dir(loose(r, tip)) }, 0o300, false},
+		{"K10 a loose object's directory unreadable", func(r *testutil.GitRepo, _, tip string) string { return filepath.Dir(loose(r, tip)) }, 0, false},
+		{"K11 a loose object unreadable (present, not readable)", func(r *testutil.GitRepo, _, tip string) string { return loose(r, tip) }, 0, false},
 		{"K12 a .pack unreadable", func(_ *testutil.GitRepo, pack, _ string) string { return pack + ".pack" }, 0, true},
 		{"K13 an .idx unreadable", func(_ *testutil.GitRepo, pack, _ string) string { return pack + ".idx" }, 0, true},
 		{"K14 the pack directory unreadable", func(_ *testutil.GitRepo, pack, _ string) string { return filepath.Dir(pack) }, 0o300, true},
@@ -538,7 +539,11 @@ func TestClassifyWithUnreadableStorage(t *testing.T) {
 }
 
 // WP2.3 spec §5.2 step 3: is-ancestor's 0 and 1 are yes and no, read
-// with the commit-graph out of use; anything else is an error.
+// with the commit-graph out of use; anything else is an error (G2: the
+// ancestor's object gone). A commit missing on the way is never a yes:
+// git 2.56 fails, while git 2.43 and 2.32 answer no (scratchpad experiment
+// g2.sh); a no makes the scan read the ref's whole history, which the
+// strict log then fails on (gitscan's TestScanFailuresWriteNothing).
 func TestIsAncestor(t *testing.T) {
 	requireSafeGit(t)
 	repo, shas := chain(t, 3)
@@ -552,14 +557,27 @@ func TestIsAncestor(t *testing.T) {
 	if _, err := IsAncestor(ctx, repo.Dir, strings.Repeat("e", 40), shas[2]); apperr.ExitCode(err) != apperr.ExitEnvironment {
 		t.Errorf("R4 a missing ancestor: %v", err)
 	}
-	// G2: B's object gone, the commit-graph still knows it.
+	// B's object gone, the commit-graph still knows it.
 	p := loose(repo, shas[1])
 	writable(t, p)
 	if err := os.Remove(p); err != nil {
 		t.Fatal(err)
 	}
+	if yes, err := IsAncestor(ctx, repo.Dir, shas[0], shas[2]); yes {
+		t.Errorf("a missing commit on the way: IsAncestor = yes, %v", err)
+	} else {
+		t.Logf("a missing commit on the way: IsAncestor = no, %v", err)
+	}
+	// G2: A's object gone.
+	repo, shas = chain(t, 3)
+	repo.Git("commit-graph", "write", "--reachable")
+	p = loose(repo, shas[0])
+	writable(t, p)
+	if err := os.Remove(p); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := IsAncestor(ctx, repo.Dir, shas[0], shas[2]); apperr.ExitCode(err) != apperr.ExitEnvironment {
-		t.Errorf("G2 a missing commit on the way: %v", err)
+		t.Errorf("G2 the ancestor's object gone: %v", err)
 	}
 	if _, err := IsAncestor(ctx, repo.Dir, "HEAD", shas[2]); apperr.ExitCode(err) != apperr.ExitInternal {
 		t.Errorf("IsAncestor(HEAD) = %v; want an internal error", err)
@@ -720,6 +738,29 @@ func TestLogIsStrict(t *testing.T) {
 	}
 }
 
+// G4 and G7: the read needs only the commits it visits (an ancestor of
+// an exclusion may be missing), and with nothing missing a commit-graph and
+// a multi-pack-index change nothing.
+func TestLogReadsWhatItVisits(t *testing.T) {
+	requireSafeGit(t)
+	repo, shas := chain(t, 4)
+	p := loose(repo, shas[1])
+	writable(t, p)
+	if err := os.Remove(p); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := logAll(t, repo.Dir, shas[3], shas[2]); err != nil || !slices.Equal(shasOf(got), []string{shas[3]}) {
+		t.Errorf("G4 Log(Z ^Y), X gone: %v, %v", shasOf(got), err)
+	}
+	repo, shas = chain(t, 3)
+	packOnly(t, repo)
+	repo.Git("multi-pack-index", "write")
+	repo.Git("commit-graph", "write", "--reachable")
+	if got, err := logAll(t, repo.Dir, shas[2], shas[0]); err != nil || !slices.Equal(shasOf(got), []string{shas[2], shas[1]}) {
+		t.Errorf("G7 with a commit-graph and a multi-pack-index: %v, %v", shasOf(got), err)
+	}
+}
+
 // architecture §6.1.2 (no program runs): log.showSignature in the
 // repository's configuration makes git log run gpg.program for a signed
 // commit (the control, plain git log); the scan's read does not.
@@ -836,5 +877,38 @@ func TestScanReadsNeedASafeGit(t *testing.T) {
 		if slices.Contains(c.Args, "cat-file") && !slices.ContainsFunc(c.Args, func(a string) bool { return strings.HasPrefix(a, "--git-dir=") }) {
 			t.Errorf("cat-file ran in the repository: %q", c.Args)
 		}
+	}
+}
+
+// PD-26 with the real git on PATH (WP2.3 spec §11, maintenance item M-9):
+// run with SPECMETRY_TEST_GIT_OBJECTS=unsafe and a git that would fetch a
+// missing object (git 2.32.0), every WP2.3 read that may read an object is
+// refused before it runs (exit 6), and nothing in the repository changes.
+func TestWP23ReadsWithAGitThatFetches(t *testing.T) {
+	if os.Getenv(gitObjectsEnv) != "unsafe" {
+		t.Skip("needs " + gitObjectsEnv + "=unsafe and a git that fetches")
+	}
+	repo := testutil.NewGitRepo(t)
+	repo.WriteFile("a.txt", "a\n")
+	first := repo.Commit("one")
+	repo.WriteFile("b.txt", "b\n")
+	second := repo.Commit("two REQ-001")
+	gitDir := filepath.Join(repo.Dir, ".git")
+	before := testutil.SettledSnapshot(t, gitDir)
+	for name, read := range map[string]func() error{
+		"TreeEntry":  func() error { _, _, err := TreeEntry(ctx, repo.Dir, second, "a.txt"); return err },
+		"Tips":       func() error { _, err := Tips(ctx, repo.Dir); return err },
+		"Classify":   func() error { _, err := Classify(ctx, repo.Dir, []string{first}); return err },
+		"IsAncestor": func() error { _, err := IsAncestor(ctx, repo.Dir, first, second); return err },
+		"Log":        func() error { _, err := logAll(t, repo.Dir, second); return err },
+		"Clean":      func() error { _, err := Clean(ctx, repo.Dir); return err },
+	} {
+		if err := read(); apperr.ExitCode(err) != apperr.ExitEnvironment || !strings.Contains(err.Error(), "GIT_NO_LAZY_FETCH") {
+			t.Errorf("%s = %v; want the object reads refused", name, err)
+		}
+	}
+	testutil.AssertTreeUnchanged(t, gitDir, before)
+	if err := CheckShallow(ctx, repo.Dir); err != nil {
+		t.Errorf("CheckShallow reads no object and works: %v", err)
 	}
 }
