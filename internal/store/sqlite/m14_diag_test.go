@@ -34,6 +34,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -418,7 +419,9 @@ func m14Tail(s string) string {
 }
 
 // m14Parse reads a helper's stdout: exactly one JSON outcome, with no field
-// it does not know.
+// it does not know, and then the end of the input. dec.More() cannot tell
+// that: it is false before a stray ']' or '}' (codex-review-054 B1-R), so a
+// second Decode must meet io.EOF.
 func m14Parse(stdout []byte) (m14Outcome, string) {
 	var o m14Outcome
 	line := bytes.TrimSpace(stdout)
@@ -427,7 +430,8 @@ func m14Parse(stdout []byte) (m14Outcome, string) {
 	}
 	dec := json.NewDecoder(bytes.NewReader(line))
 	dec.DisallowUnknownFields()
-	if bytes.ContainsRune(line, '\n') || dec.Decode(&o) != nil || dec.More() {
+	var rest json.RawMessage
+	if bytes.ContainsRune(line, '\n') || dec.Decode(&o) != nil || !errors.Is(dec.Decode(&rest), io.EOF) {
 		if len(line) > 80 {
 			line = line[:80]
 		}
