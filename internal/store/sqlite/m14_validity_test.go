@@ -189,6 +189,11 @@ func TestValidityOfM14Diagnostics(t *testing.T) {
 		{"open path, the helpers print no result", openTest, with(openPath, "M14_FAULT=silent"), false, 0, m14RecordsInvalid},
 		{"open path, the helpers fail in their setup", openTest, with(openPath, "M14_FAULT=setup"), false, 0, m14RecordsInvalid},
 		{"open path, the helpers hang", openTest, with(openPath, "M14_FAULT=hang", "M14_ROUND_TIMEOUT=2"), false, 15 * time.Second, m14RecordsInvalid},
+		// A valid result with a stray closing token after it: the helpers
+		// really Open and commit (codex-review-054 B1-R).
+		{"open path, the helpers append ] to a valid result", openTest, with(openPath, "M14_FAULT=trailing-bracket"), false, 0, m14RecordsInvalid},
+		{"open path, the helpers append } to a valid result", openTest, with(openPath, "M14_FAULT=trailing-brace"), false, 0, m14RecordsInvalid},
+		{"read-only probe, the helpers append ] to a valid result", probeTest, with(probe, "M14_FAULT=trailing-bracket"), false, 0, m14RecordsInvalid},
 		// Bounds that would make no work, or other work than reported.
 		{"read-only probe, zero seconds", probeTest, []string{"M14_SECONDS=0", "M14_WRITERS=2", "M14_PROBERS=1"}, false, 0, m14RecordsBound("M14_SECONDS")},
 		{"read-only probe, zero probers", probeTest, []string{"M14_SECONDS=2", "M14_WRITERS=2", "M14_PROBERS=0"}, false, 0, m14RecordsBound("M14_PROBERS")},
@@ -287,6 +292,44 @@ func TestValidityOfM14Overlap(t *testing.T) {
 	} {
 		if got := m14Overlap(c.writers, c.probers); got != c.want {
 			t.Errorf("%s: overlap %d, want %d", c.name, got, c.want)
+		}
+	}
+}
+
+// codex-review-054 B1-R: a helper's stdout is accepted only if it is
+// exactly one JSON value, with only white space around it. A valid result
+// followed by anything else (a stray ']' or '}', another character, a
+// truncated or a second value) is malformed.
+func TestValidityOfM14Parse(t *testing.T) {
+	const valid = `{"helper":"m14open","stage":"done","open_called":true,"committed":1}`
+	for _, c := range []struct {
+		name, stdout string
+		ok           bool
+	}{
+		{"a valid result", valid, true},
+		{"with the newline that Println writes", valid + "\n", true},
+		{"with white space around it", " \t\n" + valid + " \t\r\n", true},
+		{"followed by ]", valid + "]", false},
+		{"followed by }", valid + "}", false},
+		{"followed by }]", valid + "}]", false},
+		{"followed by another character", valid + "x", false},
+		{"followed by a comma", valid + ",", false},
+		{"followed by a truncated value", valid + `{"helper"`, false},
+		{"followed by a second value", valid + valid, false},
+		{"followed by a second value after a space", valid + " " + valid, false},
+		{"followed by a number", valid + " 1", false},
+		{"truncated", valid[:len(valid)-5], false},
+		{"with an unknown field", `{"helper":"m14open","stage":"done","open_called":true,"committed":1,"extra":1}`, false},
+		{"empty", "", false},
+		{"not JSON", "not-json", false},
+	} {
+		o, invalid := m14Parse([]byte(c.stdout))
+		if got := invalid == ""; got != c.ok {
+			t.Errorf("%s: accepted = %v (%q), want %v", c.name, got, invalid, c.ok)
+			continue
+		}
+		if c.ok && (o.Helper != "m14open" || o.Stage != "done" || !o.OpenCalled || o.Committed != 1) {
+			t.Errorf("%s: decoded %+v", c.name, o)
 		}
 	}
 }

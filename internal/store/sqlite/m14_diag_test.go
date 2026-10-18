@@ -181,6 +181,14 @@ type m14Outcome struct {
 // so that a crash is told apart from a failure it reports.
 func m14Print(o m14Outcome) {
 	b, _ := json.Marshal(o)
+	// Faults for the validity regressions: a valid result with a stray
+	// closing token after it (codex-review-054 B1-R).
+	switch os.Getenv("M14_FAULT") {
+	case "trailing-bracket":
+		b = append(b, ']')
+	case "trailing-brace":
+		b = append(b, '}')
+	}
 	fmt.Println(string(b))
 }
 
