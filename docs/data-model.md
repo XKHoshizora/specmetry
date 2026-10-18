@@ -13,7 +13,7 @@
 | 时间 | INTEGER，UTC Unix 毫秒，仅用于展示 |
 | actor | `agent:<agent>`（如 `agent:claude_code`）、`human:<显示名>`、`system` |
 | channel | `agent_cli`、`human_cli`、`dashboard`、`hook`、`system` |
-| 代码上下文 | 由三项组成：`worktree_id`、`head`（40 位提交 SHA；未知时为 NULL）、`tree_state`（`clean` / `dirty` / `unknown`）。`clean` 指 `git status --porcelain --untracked-files=all -- . ':(exclude).specmetry'` 输出为空：被 git 忽略的文件不计入；未跟踪文件计入；**Specmetry 自己的 `.specmetry/` 始终排除**，不管有没有写入 `.git/info/exclude`。项目级安装只写入已被 git 忽略的 `.claude/settings.local.json`（[architecture.md §10.6](architecture.md#106-对仓库的写入)），所以它也不会让工作区变脏。 |
+| 代码上下文 | 由三项组成：`worktree_id`、`head`（40 位提交 SHA；未知时为 NULL）、`tree_state`（`clean` / `dirty` / `unknown`）。`clean` 指 `git status --porcelain --untracked-files=all --ignore-submodules=none -- . ':(exclude).specmetry'` 输出为空（`--ignore-submodules=none`：产品负责人 2026-10-18 决定 D1）：被 git 忽略的文件不计入；未跟踪文件计入；子模块的变化始终计入，仓库配置（如 `diff.ignoreSubmodules`）不能隐藏；**Specmetry 自己的 `.specmetry/` 始终排除**，不管有没有写入 `.git/info/exclude`。项目级安装只写入已被 git 忽略的 `.claude/settings.local.json`（[architecture.md §10.6](architecture.md#106-对仓库的写入)），所以它也不会让工作区变脏。这条命令只定义判断的语义，Specmetry 不在用户的仓库上直接运行它：读取方式不执行仓库配置的任何程序（过滤器等），见 [WP2.3 规范 §4.3](wp2.3-git-reader.md)（待复审）。由此有一个保守的差异：属性指定了过滤器、并且 stat 信息发生了变化的文件，按未经过滤器的工作区内容与索引比较，不一致即为 `dirty`；这只会把 `clean` 变成 `dirty`，不会把真实的变化报告为 `clean`。 |
 | project_id | 每张保存项目数据的表都有，用于按项目删除和未来的同步（`projects` 以 `id` 作为项目 ID；`meta`、`maintenance` 是全库表）。见 §1.1 |
 | JSON 列 | 应用层按 schema 校验 |
 | 自由文本 | 写入前做密钥扫描，命中则**拒绝写入**（不做替换），见 [architecture.md §10](architecture.md#10-隐私与数据保留契约) |
@@ -456,7 +456,7 @@ Question 在提案提交时立即创建（编号按 TD-14 分配），只能由�
 ### 4.12 `commits`、`commit_links`、`git_scan_cursors`
 
 - `commits`（只追加）：
-  - 字段：`id`、`seq`（发现时分配）、`project_id`、`sha`、`committed_at`。
+  - 字段：`id`、`seq`（发现时分配）、`project_id`、`sha`、`committed_at`（提交者时间，UTC Unix 毫秒，只用于显示）。
   - 不保存标题和正文。`(project_id, sha)` 唯一。
   - 只保存至少引用了一个基准编号的提交。
 - `commit_links`（只追加）：
@@ -465,8 +465,11 @@ Question 在提案提交时立即创建（编号按 TD-14 分配），只能由�
 - `git_scan_cursors`（受控可变）：
   - 字段：`project_id`、`ref`（每个本地分支，加上各 worktree 的分离 HEAD）、`last_tip`、`scanned_seq`。
   - 每次扫描只读取每个 ref 从 `last_tip` 到当前 tip 的增量。
-  - 如果历史被改写（旧 tip 不再是新 tip 的祖先），就重新扫描该 ref，靠 SHA 去重。
-  - 列的设计与分离 HEAD 的识别方式，见 [WP2.3 规范 §7](wp2.3-git-reader.md)（待独立审查）。
+  - 如果历史被改写（旧 tip 不再是新 tip 的祖先），就重新扫描该 ref，靠 SHA 去重。旧 tip 可靠地不存在（例如被回收）时同样按改写处理；旧 tip 存在但不可读、或无法确认时，本次扫描失败（退出码 6），不写入。
+  - 读取是严格的：必需读取的 tip 或对象读取失败时，整次扫描失败，游标不前进；不因命令返回成功或输出为空就推进游标。
+  - 分离 HEAD 的游标以规范化的 worktree 路径为身份，所有 worktree 都包括在内，不限于已登记的（产品负责人 2026-10-18 决定 D2）。
+  - 要写进游标的 ref 名称或路径命中密钥规则时，拒绝整次扫描（`invalid_input`，退出码 2），不写提交、关联、`seq` 或游标，不回显（产品负责人 2026-10-18 决定 D7）。
+  - 列的设计、读取步骤、路径移动与重用等细节，见 [WP2.3 规范 §5.1、§5.2、§7](wp2.3-git-reader.md)（待复审）。
 
 **`seq` 与记录身份**（F4，§6.13）：
 
