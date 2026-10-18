@@ -293,21 +293,20 @@ func TestCleanFilterRule(t *testing.T) {
 }
 
 // subRepo makes a superproject with an initialized submodule at sub (its
-// git directory absorbed into .git/modules/sub, the .git a gitfile) and
-// returns both.
-func subRepo(t *testing.T) (super, sub *testutil.GitRepo) {
+// git directory absorbed into .git/modules/sub, the .git a gitfile).
+func subRepo(t *testing.T) *testutil.GitRepo {
 	t.Helper()
-	sub = testutil.NewGitRepo(t)
+	sub := testutil.NewGitRepo(t)
 	sub.WriteFile("a/s.txt", "s\n")
 	sub.WriteFile("b/t.txt", "t\n")
 	sub.Commit("sub")
-	super = baseRepo(t)
+	super := baseRepo(t)
 	super.Git("-c", "protocol.file.allow=always", "submodule", "add", "-q", filepath.ToSlash(sub.Dir), "sub")
 	super.Commit("add sub")
 	if fi, err := os.Lstat(filepath.Join(super.Dir, "sub", ".git")); err != nil || !fi.Mode().IsRegular() {
 		t.Fatalf("the submodule's .git is not a gitfile: %v", err)
 	}
-	return super, sub
+	return super
 }
 
 // D1 and WP2.3 spec §4.3 step 4 (C9 to C11, N1-g): an initialized
@@ -373,7 +372,7 @@ func TestCleanSubmodules(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			marker := filepath.Join(t.TempDir(), "ran")
 			t.Setenv("SPECMETRY_FAKE_REMOTE_HELPER_MARKER", marker)
-			super, _ := subRepo(t)
+			super := subRepo(t)
 			c.change(t, super)
 			forget(t, marker)
 			check := unchanged(t, filepath.Join(super.Dir, ".git"))
@@ -395,7 +394,7 @@ func TestCleanSubmodulesAgreeWithTheDefinition(t *testing.T) {
 	definition := func(s *testutil.GitRepo) string {
 		return s.Git("status", "--porcelain", "--untracked-files=all", "--ignore-submodules=none", "--", ".", ":(exclude).specmetry")
 	}
-	super, _ := subRepo(t)
+	super := subRepo(t)
 	super.GitIn(filepath.Join(super.Dir, "sub"), "commit", "-q", "--allow-empty", "-m", "more")
 	super.Git("add", "sub")
 	if got := definition(super); got != "M  sub" {
@@ -404,14 +403,14 @@ func TestCleanSubmodulesAgreeWithTheDefinition(t *testing.T) {
 	if hidden := super.Git("status", "--porcelain", "--ignore-submodules=all"); hidden != "" {
 		t.Logf("this git's --ignore-submodules=all shows a staged gitlink: %q", hidden)
 	}
-	super, _ = subRepo(t)
+	super = subRepo(t)
 	if err := os.RemoveAll(filepath.Join(super.Dir, "sub")); err != nil {
 		t.Fatal(err)
 	}
 	if got := definition(super); got != "D sub" && got != " D sub" {
 		t.Errorf("a removed submodule directory: %q", got)
 	}
-	super, _ = subRepo(t)
+	super = subRepo(t)
 	super.Git("submodule", "deinit", "-q", "-f", "sub")
 	if got := definition(super); got != "" {
 		t.Errorf("a deinitialized submodule: %q", got)
@@ -474,7 +473,7 @@ func TestCleanSparseGate(t *testing.T) {
 	}
 
 	t.Run("S18b a sparse submodule", func(t *testing.T) {
-		super, _ := subRepo(t)
+		super := subRepo(t)
 		subDir := filepath.Join(super.Dir, "sub")
 		super.GitIn(subDir, "sparse-checkout", "init", "--cone", "--sparse-index")
 		super.GitIn(subDir, "sparse-checkout", "set", "a")
@@ -501,7 +500,7 @@ func TestCleanSparseGate(t *testing.T) {
 	t.Run("X6 the superproject's diff-files and a sparse submodule", func(t *testing.T) {
 		marker := filepath.Join(t.TempDir(), "ran")
 		t.Setenv("SPECMETRY_FAKE_REMOTE_HELPER_MARKER", marker)
-		super, _ := subRepo(t)
+		super := subRepo(t)
 		super.WriteFile(".gitattributes", "f.txt filter=x\n")
 		super.WriteFile("f.txt", "raw\n")
 		super.Commit("filtered")
@@ -741,7 +740,7 @@ func isolateTemp(t *testing.T) {
 func TestCleanPrivateDirectories(t *testing.T) {
 	requireSafeGit(t)
 	isolateTemp(t)
-	super, _ := subRepo(t)
+	super := subRepo(t)
 	wantState(t, "a read that succeeds", super.Dir, StateClean)
 	if left := privateDirs(t); len(left) != 0 {
 		t.Errorf("left after success: %v", left)

@@ -49,9 +49,9 @@ func writable(t *testing.T, p string) {
 
 // packOnly packs every object into one pack, removes the loose copies and
 // returns the pack's path without its extension.
-func packOnly(t *testing.T, repo *testutil.GitRepo, extra ...string) string {
+func packOnly(t *testing.T, repo *testutil.GitRepo) string {
 	t.Helper()
-	repo.Git(append([]string{"repack", "-adq"}, extra...)...)
+	repo.Git("repack", "-adq")
 	repo.Git("prune-packed")
 	packs, err := filepath.Glob(filepath.Join(objectsDir(repo), "pack", "pack-*.pack"))
 	if err != nil || len(packs) != 1 {

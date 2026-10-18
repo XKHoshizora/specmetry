@@ -103,11 +103,11 @@ func varint(v uint64) []byte {
 	return out
 }
 
-// ewah writes an EWAH bitmap of words 64-bit words with its running-length
-// word at rlw.
-func ewah(bits, words, rlw uint32) []byte {
+// ewah writes an EWAH bitmap of 3 bits in words 64-bit words with its
+// running-length word at rlw.
+func ewah(words, rlw uint32) []byte {
 	var b bytes.Buffer
-	_ = binary.Write(&b, binary.BigEndian, bits)
+	_ = binary.Write(&b, binary.BigEndian, uint32(3))
 	_ = binary.Write(&b, binary.BigEndian, words)
 	b.Write(make([]byte, 8*int(words)))
 	_ = binary.Write(&b, binary.BigEndian, rlw)
@@ -294,21 +294,21 @@ func TestIndexIsSparseReadsTheSharedIndex(t *testing.T) {
 		{name: "a sparse directory entry in the shared index", shared: ixFile(3, -1, withSparseDir, nil, false), want: true},
 		{name: "sdir in the shared index", shared: ixFile(2, -1, plain, []ixExt{{"sdir", nil}}, false), want: true},
 		{name: "with the delete and replace bitmaps", shared: shared,
-			link: func(s []byte) []byte { return append(append(trailer(s), ewah(3, 1, 0)...), ewah(3, 0, 0)...) }},
+			link: func(s []byte) []byte { return append(append(trailer(s), ewah(1, 0)...), ewah(0, 0)...) }},
 		{name: "the shared index missing", link: named(0xAB), fails: true},
 		{name: "a damaged shared index", shared: shared[:30], link: named(0xCD), fails: true},
 		{name: "a shared index with another checksum", shared: shared, link: named(0xEF), fails: true},
 		{name: "a shared index that is linked itself", shared: ixFile(2, -1, plain, []ixExt{{"link", make([]byte, 20)}}, false), fails: true},
 		{name: "a truncated bitmap", shared: shared, fails: true,
-			link: func(s []byte) []byte { return append(trailer(s), ewah(3, 2, 0)[:20]...) }},
+			link: func(s []byte) []byte { return append(trailer(s), ewah(2, 0)[:20]...) }},
 		{name: "only the delete bitmap", shared: shared, fails: true,
-			link: func(s []byte) []byte { return append(trailer(s), ewah(3, 1, 0)...) }},
+			link: func(s []byte) []byte { return append(trailer(s), ewah(1, 0)...) }},
 		{name: "bytes after the bitmaps", shared: shared, fails: true,
 			link: func(s []byte) []byte {
-				return append(append(append(trailer(s), ewah(3, 1, 0)...), ewah(3, 0, 0)...), 0)
+				return append(append(append(trailer(s), ewah(1, 0)...), ewah(0, 0)...), 0)
 			}},
 		{name: "a running-length word out of the bitmap", shared: shared, fails: true,
-			link: func(s []byte) []byte { return append(append(trailer(s), ewah(3, 1, 1)...), ewah(3, 0, 0)...) }},
+			link: func(s []byte) []byte { return append(append(trailer(s), ewah(1, 1)...), ewah(0, 0)...) }},
 	} {
 		dir := t.TempDir()
 		var link []byte

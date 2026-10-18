@@ -47,7 +47,7 @@ func checkObjects(dir string, depth int, seen map[string]bool) error {
 	seen[key] = true
 	// 1. Every directory under objects/ can be listed, and every entry in
 	// it can be looked at.
-	if err := filepath.WalkDir(dir, func(_ string, d fs.DirEntry, err error) error {
+	if err := filepath.WalkDir(dir, func(_ string, d fs.DirEntry, err error) error { //nolint:gosec // the object directories git reads, alternates included; only read
 		if err != nil {
 			return err
 		}
@@ -61,7 +61,7 @@ func checkObjects(dir string, depth int, seen map[string]bool) error {
 		return err
 	}
 	// 5. The alternates, as deep as git reads them.
-	alts, err := os.ReadFile(filepath.Join(dir, "info", "alternates"))
+	alts, err := os.ReadFile(filepath.Join(dir, "info", "alternates")) //nolint:gosec // as above
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil
 	}
@@ -79,7 +79,7 @@ func checkObjects(dir string, depth int, seen map[string]bool) error {
 		if !filepath.IsAbs(alt) {
 			alt = filepath.Join(dir, alt)
 		}
-		if fi, err := os.Stat(alt); err != nil || !fi.IsDir() {
+		if fi, err := os.Stat(alt); err != nil || !fi.IsDir() { //nolint:gosec // an alternate git reads too
 			return errStorage
 		}
 		if err := checkObjects(alt, depth+1, seen); err != nil {

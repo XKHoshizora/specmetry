@@ -138,7 +138,7 @@ func readPaths(ctx context.Context, worktree string) (repoPaths, error) {
 	if len(lines) != 5+len(infos) {
 		return repoPaths{}, apperr.New(apperr.Environment, "git rev-parse printed paths Specmetry cannot read")
 	}
-	path := func(s string) string { return filepath.FromSlash(s) }
+	path := filepath.FromSlash
 	p := repoPaths{top: path(lines[0]), gitDir: path(lines[1]), objects: path(lines[2]), index: path(lines[3]),
 		info: map[string]string{}, format: lines[len(lines)-1]}
 	for i, f := range infos {
