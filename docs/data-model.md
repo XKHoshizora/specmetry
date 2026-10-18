@@ -13,7 +13,7 @@
 | 时间 | INTEGER，UTC Unix 毫秒，仅用于展示 |
 | actor | `agent:<agent>`（如 `agent:claude_code`）、`human:<显示名>`、`system` |
 | channel | `agent_cli`、`human_cli`、`dashboard`、`hook`、`system` |
-| 代码上下文 | 由三项组成：`worktree_id`、`head`（40 位提交 SHA；未知时为 NULL）、`tree_state`（`clean` / `dirty` / `unknown`）。`clean` 指 `git status --porcelain --untracked-files=all -- . ':(exclude).specmetry'` 输出为空：被 git 忽略的文件不计入；未跟踪文件计入；**Specmetry 自己的 `.specmetry/` 始终排除**，不管有没有写入 `.git/info/exclude`。项目级安装只写入已被 git 忽略的 `.claude/settings.local.json`（[architecture.md §10.6](architecture.md#106-对仓库的写入)），所以它也不会让工作区变脏。 |
+| 代码上下文 | 由三项组成：`worktree_id`、`head`（40 位提交 SHA；未知时为 NULL）、`tree_state`（`clean` / `dirty` / `unknown`）。`clean` 指 `git status --porcelain --untracked-files=all --ignore-submodules=none -- . ':(exclude).specmetry'` 输出为空（`--ignore-submodules=none`：产品负责人 2026-10-18 决定 D1）：被 git 忽略的文件不计入；未跟踪文件计入；子模块的变化始终计入，仓库配置（如 `diff.ignoreSubmodules`）不能隐藏；**Specmetry 自己的 `.specmetry/` 始终排除**，不管有没有写入 `.git/info/exclude`。项目级安装只写入已被 git 忽略的 `.claude/settings.local.json`（[architecture.md §10.6](architecture.md#106-对仓库的写入)），所以它也不会让工作区变脏。这条命令在 Specmetry 的受控环境中定义语义（只有仓库自己的配置，architecture §6.1.2），并且只定义语义：Specmetry 不在用户的仓库上直接运行它，读取方式不执行仓库配置的任何程序（过滤器等），也不改变仓库中任何文件的内容或修改时间，见 [WP2.3 规范 §4.3](wp2.3-git-reader.md)（已冻结）。不执行程序就无法与定义一致地判断的情形（受本地过滤器驱动影响、需要比较内容的文件；带稀疏目录条目的索引），结果为"不可判定"，记为 **`unknown`，绝不报告为 `clean`**（产品负责人 2026-10-19 决定 P1）。带稀疏目录条目的索引一律不可判定，并且在任何可能展开索引的命令运行之前就判定，不扩大到所有稀疏检出（P2）。这些是范围的限制，不是允许误报 `clean` 或修改原对象的豁免。此前"差异只会把 `clean` 变成 `dirty`"的说法不成立，已撤回（审查 052 B3-R1）。 |
 | project_id | 每张保存项目数据的表都有，用于按项目删除和未来的同步（`projects` 以 `id` 作为项目 ID；`meta`、`maintenance` 是全库表）。见 §1.1 |
 | JSON 列 | 应用层按 schema 校验 |
 | 自由文本 | 写入前做密钥扫描，命中则**拒绝写入**（不做替换），见 [architecture.md §10](architecture.md#10-隐私与数据保留契约) |
@@ -128,7 +128,7 @@ erDiagram
 | git_common_dir | TEXT NULL | 共享的 git 公共目录；非 git 项目为 NULL |
 | main_worktree_id | ULID | |
 | stage | TEXT | `docs_only` / `in_development` / `incomplete_docs` |
-| settings_json | TEXT | `sources_skipped`、`inventory_skipped`、`commit_ref_mode`（TD-17）、`excerpt_storage`（`hash_only` 默认 / `full`，PD-24） |
+| settings_json | TEXT | `sources_skipped`、`inventory_skipped`、`excerpt_storage`（`hash_only` 默认 / `full`，PD-24）。不提供 `commit_ref_mode`：MVP 固定匹配 trailer 与正文中的编号（TD-17，产品负责人 2026-10-18 决定） |
 | created_at | INTEGER | |
 
 `worktrees`：
@@ -145,7 +145,7 @@ erDiagram
 
 CLI 或 Hook 第一次在某个 worktree 中出现时，系统会自动登记它：从 cwd 解析出 `git_common_dir`，匹配到对应项目，再登记该 worktree。目录已不存在的 worktree 在读取时标记为 `missing`，历史事实保留。
 
-`init` 的登记规则（项目的识别、marker 与数据库不一致时的处理、再次执行的行为）见 [architecture.md §6.1.2](architecture.md#612-init-的登记规则m1-实现)。`settings_json` 由 `init` 创建：`sources_skipped`、`inventory_skipped`（`--skip-sources`、`--skip-inventory`，只会被设置，不会被清除），以及 `excerpt_storage = hash_only`；`commit_ref_mode` 在 TD-17 确定后加入。
+`init` 的登记规则（项目的识别、marker 与数据库不一致时的处理、再次执行的行为）见 [architecture.md §6.1.2](architecture.md#612-init-的登记规则m1-实现)。`settings_json` 由 `init` 创建：`sources_skipped`、`inventory_skipped`（`--skip-sources`、`--skip-inventory`，只会被设置，不会被清除），以及 `excerpt_storage = hash_only`。TD-17 已决定不提供 `commit_ref_mode`（2026-10-18），所以不加入这个键。
 
 ### 4.2 `delivery_targets`、`scope_confirmations`、`scope_items`
 
@@ -409,7 +409,7 @@ Question 在提案提交时立即创建（编号按 TD-14 分配），只能由�
 
 #### 4.11.2 检查输入的身份（`inputs_json`）
 
-产品负责人于 2026-10-18 批准（M2-Q2，TD-23 的比较语义与错误边界）。读取所用的 git 命令与调用方式（TD-23 的 Git 读取机制）在 WP2.3 开工前确定，不改变本节的语义。
+产品负责人于 2026-10-18 批准（M2-Q2，TD-23 的比较语义与错误边界）。读取所用的 git 命令与调用方式（TD-23 的 Git 读取机制）写在 [WP2.3 规范 §4](wp2.3-git-reader.md)（已冻结，2026-10-19），不改变本节的语义。
 
 **记录**：
 
@@ -455,11 +455,52 @@ Question 在提案提交时立即创建（编号按 TD-14 分配），只能由�
 
 ### 4.12 `commits`、`commit_links`、`git_scan_cursors`
 
-- `commits`（只追加）：`id`、`seq`（发现时分配）、`project_id`、`sha`、`committed_at`。不保存标题和正文。`(project_id, sha)` 唯一。只保存至少引用了一个基准编号的提交。
-- `commit_links`（只追加）：`commit_id`、`project_id`、`target_type`（`requirement` / `criterion`）、`target_id`、`link_source`（`trailer` / `message`）。
-- `git_scan_cursors`（受控可变）：`project_id`、`ref`（每个本地分支，加上各 worktree 的分离 HEAD）、`last_tip`、`scanned_seq`。每次扫描只读取每个 ref 从 `last_tip` 到当前 tip 的增量；如果历史被改写（旧 tip 不再是新 tip 的祖先），就重新扫描该 ref，靠 SHA 去重。
+- `commits`（只追加）：
+  - 字段：`id`、`seq`（发现时分配）、`project_id`、`sha`、`committed_at`（提交者时间，UTC Unix 毫秒，只用于显示）。
+  - 不保存标题和正文。`(project_id, sha)` 唯一。
+  - 只保存至少引用了一个基准编号的提交。
+- `commit_links`（只追加）：
+  - 字段：`commit_id`、`project_id`、`target_type`（`requirement` / `criterion`）、`target_id`、`link_source`（`trailer` / `message`）。
+  - 同一提交对同一实体只有一条，`(commit_id, target_type, target_id)` 唯一。
+- `git_scan_cursors`（受控可变）：
+  - 字段：`project_id`、`ref`（每个本地分支，加上各 worktree 的分离 HEAD）、`last_tip`、`scanned_seq`。
+  - 每次扫描只读取每个 ref 从 `last_tip` 到当前 tip 的增量。
+  - 如果历史被改写（旧 tip 不再是新 tip 的祖先），就重新扫描该 ref，靠 SHA 去重。旧 tip 可靠地不存在（例如被回收）时同样按改写处理；旧 tip 存在但不可读、或无法确认时，本次扫描失败（退出码 6），不写入。"可靠地不存在"要求 git 的协议输出与退出码一致、没有任何 stderr 输出，并通过对包索引、包文件与对象目录的存储检查；包索引损坏、对象库不可读等都属于无法确认（审查 052 B2-R）。存储检查要求包与索引双向配对：一个 `.pack` 失去了 `.idx`，或者有不可识别的文件，都是存储不完整，不是正常回收（审查 055 B2-R2）。检查不写入任何文件，不重建索引或修复包。
+  - 读取是严格的：必需读取的 tip 或对象读取失败时，整次扫描失败，游标不前进；不因命令返回成功或输出为空就推进游标。遍历不借 commit-graph、grafts 或 multi-pack-index 绕过对象的读取；读取中途失败时，已读到的部分结果一律丢弃（审查 052 B1-R）。
+  - **浅克隆**（产品负责人 2026-10-19 决定 P3）：MVP 暂不支持浅克隆的提交扫描。扫描之前只读地检测；是浅克隆，或检测无法确认，都返回环境错误（退出码 6），不写提交、关联、`seq` 或游标，不伪装成成功的空扫描，不自动拉取或修改浅边界。浅克隆期间不建立、不推进游标；恢复为完整仓库之后按既有规则扫描。将来支持时另行设计 deepen / unshallow 与游标的生命周期。
+  - 缺少 `worktree list -z` 能力的 git 上，扫描返回环境错误（退出码 6），不增加按行解析的回退（产品负责人 2026-10-19 决定）。
+  - 分离 HEAD 的游标以规范化的 worktree 路径为身份，所有 worktree 都包括在内，不限于已登记的（产品负责人 2026-10-18 决定 D2）。
+  - 要写进游标的 ref 名称或路径命中密钥规则时，拒绝整次扫描（`invalid_input`，退出码 2），不写提交、关联、`seq` 或游标，不回显（产品负责人 2026-10-18 决定 D7）。
+  - 列的设计、读取步骤、路径移动与重用等细节，见 [WP2.3 规范 §5.1、§5.2、§7](wp2.3-git-reader.md)（已冻结）。
 
-**`seq` 与记录身份**（F4，§6.13）：一次扫描中新写入的提交是一次逻辑写入，分配一个 `seq`，这次新写入的 `commits` 共用它，`git_scan_cursors.scanned_seq` 同时更新为它；`commits.seq` 可以多行同值。提交的身份为 `id`（`(project_id, sha)` 唯一）；`commit_links` 没有 `seq`，经 `commit_id` 归属提交，身份为 `(commit_id, target_type, target_id)`。推导只用"发现序号大于 `revision_seq`"（§6.5），与一次扫描是否共用 `seq` 无关；扫描的具体实现属于 WP2.3。关联的生命周期（旧提交的关联能否重算或补写、补写时如何记录发现时序、没有新提交的扫描如何更新 `scanned_seq`）在 WP2.3 开工前与 M2-Q7 一起冻结（审查 044 N1，implementation-plan §3）。
+**`seq` 与记录身份**（F4，§6.13）：
+
+- 一次扫描中新写入的提交是一次逻辑写入，分配一个 `seq`。这次新写入的 `commits` 共用它，`git_scan_cursors.scanned_seq` 同时更新为它；`commits.seq` 可以多行同值。
+- 提交的身份为 `id`（`(project_id, sha)` 唯一）。`commit_links` 没有 `seq`，经 `commit_id` 归属提交，身份为 `(commit_id, target_type, target_id)`。
+- 推导只用"发现序号大于 `revision_seq`"（§6.5），与一次扫描是否共用 `seq` 无关。
+
+**关联规则**（M2-Q7 / TD-17，产品负责人 2026-10-18 决定）：
+
+- MVP 固定匹配 `Specmetry-Ref` trailer 与正文中的编号，不提供关闭正文匹配的开关。
+- trailer 键不区分大小写；编号按 TD-14 与 `common.v1` 的格式完全匹配，不放宽格式，也不扩大类型（只有需求与 AC）。
+- 只关联本项目已有的需求与 AC，包括已退役的；本项目没有的编号忽略。
+- 同一提交对同一实体只保留一个关联，trailer 优先。
+- 关联只提供参考进度（§6.5），不代表完成、检查通过或验收。
+- 匹配的细节（词的边界、trailer 的识别、跨项目的同名编号）见 [WP2.3 规范 §5.3](wp2.3-git-reader.md)。
+
+**关联的生命周期**（审查 044 N1，产品负责人 2026-10-18 决定）：
+
+- 已入库 SHA 的关联在首次入库时固定，MVP 不重算、不补写。
+- 没有入库的提交，以后重扫时如果首次满足入库条件，按这次的发现序号入库，不回填旧序号。
+- 常规增量扫描不主动回头重算没有入库的旧提交。
+- 代价：后来新增的编号，不保证能与此前扫描过的提交建立关联；重扫后的首次入库，可能产生新的参考进度。
+- 不保存"所有已见 SHA"，`commit_links` 不增加 `seq`。
+
+**没有新入库提交的扫描**（产品负责人 2026-10-18 决定）：
+
+- 不分配业务 `seq`，可以更新游标（`last_tip` 等），`scanned_seq` 不变。
+- `scanned_seq` 是最近一次"有新入库提交、并且写过这个游标"的扫描的 `seq`，从来没有这样的扫描时为 NULL。它只用于诊断，不是推导的输入。
+- 首次扫描没有匹配的提交、不同 ref 共用 SHA 等情形的规则，见 [WP2.3 规范 §5.5](wp2.3-git-reader.md)。
 
 ### 4.13 `decisions`（人工验收决定）
 
@@ -848,7 +889,7 @@ stateDiagram-v2
    - 项目设置：`stage`，以及 `settings_json` 中的 `sources_skipped`、`inventory_skipped`（没有设置时为 false）：
      - M1 的 `init` 修改这些设置时不分配 `seq`（architecture §6.1.2），所以设置没有历史，推导使用本次命令读到的值。本文不改变既有行为；将来是否提供设置的历史，是 TD-27 中单独的设计问题（architecture §16）。
      - 只有这三项参与推导。`stage` 影响进度（§6.5）、`INVENTORY_INCOMPLETE`（§6.10）与初始化进度（§6.12）；经由进度，它还影响 `in_progress` 的原因码、`conflict` 标记与 `CONFLICT` 警告。`sources_skipped` 影响初始化进度；`inventory_skipped` 影响初始化进度与 `INVENTORY_INCOMPLETE`。三项都不改变任何交付状态，也不改变阻塞差距的存在性、类型与是否阻塞，因而不影响 `ready`；但可以改变诊断原因码（例如 `stage` 使 `in_progress` 的原因码在 `not_started` 与 `unknown` 之间变化），所以不保证差距对象逐字段相同。
-     - `settings_json` 的其他键不是推导输入：`excerpt_storage` 只决定保存什么（PD-24）；将来的 `commit_ref_mode`（TD-17）作用于扫描时写入的提交关联，推导读到的是这些事实。
+     - `settings_json` 的其他键不是推导输入：`excerpt_storage` 只决定保存什么（PD-24）。提交关联在扫描时按固定的规则写入（TD-17，§4.12），没有对应的设置，推导读到的是这些事实。
    - 当前 worktree 的代码上下文（只用于工作区视图）。
 3. **参数**：`as_of_seq`；`--diff-since <seq>` 时的起点 `seq`；`--session current`（只影响工作区视图）。
 
@@ -889,7 +930,7 @@ stateDiagram-v2
 | 问题 | `created_seq ≤ as_of_seq` 的问题；`answered_seq` 为 NULL 或大于 `as_of_seq` 时为 `open`。关联：指向提案条目、并且该条目在这一时刻已被接受时，关联到该条目产生的实体；该条目在这一时刻已被拒绝时，问题不再计为阻塞（§6.8） | `id` |
 | Claim 批次与 Claim | `seq ≤ as_of_seq`；使用 `kind`、`audit_scope_json`、`criterion_id`、`criterion_revision`、`assertion` | 批次与 Claim 各自的 `id`；Claim 经 `batch_id` 归属批次 |
 | 检查执行 | `seq ≤ as_of_seq`；使用 `criterion_id`、`criterion_revision`、`check_config_hash`、`inputs_json`、`head_start`、`head_end`、`tree_state_start`、`tree_state_end`、`result`、`failure_kind`、`evidence_grade`、`worktree_id` | `id` |
-| 提交与关联 | `commits.seq ≤ as_of_seq` 的提交及其关联。这一取法只在关联与提交一起写入、之后不再补写时成立；旧提交的关联是否重算或补写、补写时如何记录发现时序，在 WP2.3 开工前与 M2-Q7 一起冻结（审查 044 N1，implementation-plan §3），本文不预先批准提交关联的方案 | 提交为 `id`（`(project_id, sha)` 唯一）；关联为 `(commit_id, target_type, target_id)` |
+| 提交与关联 | `commits.seq ≤ as_of_seq` 的提交及其关联。这一取法成立的前提是关联与提交一起写入、之后不再补写：产品负责人 2026-10-18 决定已入库提交的关联在首次入库时固定，不重算、不补写；首次满足条件的未入库提交按入库时的 `seq` 写入，不回填旧序号（§4.12，审查 044 N1） | 提交为 `id`（`(project_id, sha)` 唯一）；关联为 `(commit_id, target_type, target_id)` |
 | 决定 | `seq ≤ as_of_seq`；使用全部字段 | `id`（`seq` 表内唯一） |
 
 **未知状态**（都按保守方向处理，§6.9）：
