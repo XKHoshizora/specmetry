@@ -14,14 +14,18 @@ import (
 )
 
 // GitRepo is a throwaway git repository isolated from the user's git setup:
-// git runs without any inherited GIT_* variable, without system or global
-// configuration, templates or hooks, with a fixed identity and SHA-1
-// objects unless made by NewSHA256GitRepo (codex-review-012 B1).
+// git runs without any inherited GIT_* variable, without system
+// configuration, templates or hooks, with a global configuration of its own
+// that only turns automatic maintenance and gc off, with a fixed identity
+// and SHA-1 objects unless made by NewSHA256GitRepo (codex-review-012 B1).
 type GitRepo struct {
 	t   testing.TB
 	Dir string
 	env []string
 }
+
+// fixtureGitConfig is the isolated global configuration of every GitRepo.
+const fixtureGitConfig = "[maintenance]\n\tauto = false\n[gc]\n\tauto = 0\n"
 
 // NewGitRepo creates an empty repository on branch main.
 func NewGitRepo(t testing.TB) *GitRepo {
@@ -51,8 +55,15 @@ func newGitRepo(t testing.TB, format string) *GitRepo {
 	if err := os.MkdirAll(gitHome, 0o700); err != nil {
 		t.Fatal(err)
 	}
+	// No automatic maintenance or gc: after a commit, git may start
+	// `git maintenance run --auto`, which takes and removes
+	// objects/maintenance.lock. Gits with maintenance.autoDetach detach it by
+	// default where the platform allows, so it may outlive the commit. The
+	// failure of CI run 39121984050 is consistent with a snapshot racing that
+	// lock; that race itself was not reproduced. This removes the automatic
+	// start that was shown to happen.
 	globalConfig := filepath.Join(gitHome, "gitconfig")
-	if err := os.WriteFile(globalConfig, nil, 0o600); err != nil {
+	if err := os.WriteFile(globalConfig, []byte(fixtureGitConfig), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	template := filepath.Join(root, "git-template")
