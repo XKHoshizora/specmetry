@@ -157,6 +157,25 @@ func m14Until() time.Time {
 // M14_UNTIL. It reports the step that failed, with its codes.
 func m14OpenHelper() int {
 	var o m14Outcome
+	// Faults for the validity regressions (m14_validity_test.go): a helper
+	// that crashes, prints a corrupt result or none, fails in its own setup,
+	// or hangs. The diagnostics workflow never sets M14_FAULT.
+	switch os.Getenv("M14_FAULT") {
+	case "crash":
+		os.Exit(42)
+	case "corrupt":
+		fmt.Println("not-json")
+		return 0
+	case "silent":
+		return 0
+	case "setup":
+		o.Stage, o.Error = "resolve", "an injected setup failure"
+		m14Print(o)
+		return 0
+	case "hang":
+		time.Sleep(20 * time.Second)
+		return 0
+	}
 	dir, err := datadir.Resolve()
 	if err != nil {
 		o.Stage, o.Error = "resolve", err.Error()
@@ -370,6 +389,13 @@ func TestM14OpenPath(t *testing.T) {
 		}
 		if r == 0 {
 			platform = m14PlatformOf(t, db)
+		}
+		// A validity regression: every helper's writes fail with a real
+		// SQLite error (SQLITE_CONSTRAINT_TRIGGER), after a real Open.
+		if os.Getenv("M14_INJECT") == "reject-writes" {
+			if _, err := db.sql.ExecContext(ctx, `CREATE TRIGGER m14_reject BEFORE INSERT ON facts BEGIN SELECT RAISE(ABORT, 'm14: an injected rejection'); END`); err != nil {
+				t.Fatal(err)
+			}
 		}
 		var cmds []*exec.Cmd
 		for range procs {
