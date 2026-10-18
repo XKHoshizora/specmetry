@@ -14,12 +14,15 @@ import (
 // Private directories (WP2.3 spec §4.3, "the temporary directory's
 // lifecycle"): Clean's private git directories, and the directory that
 // holds the missing grafts and shallow files of the scan's reads. Each is
-// a new directory in the system's temporary directory, readable only by
-// the current user, named with privatePrefix, and locked by the process
-// that uses it for as long as it does, so that a directory left behind by
-// a process that crashed can be told from one still in use: the next
-// Clean removes the first kind, never the second. Nothing in them is a
-// project fact; they never reach a log, an error or a backup.
+// a new directory in the system's temporary directory, named with
+// privatePrefix, that only the current user can read or write (0700; on
+// Windows the data directory's protected DACL, since the temporary
+// directory may grant other accounts access), found empty before anything
+// is made in it, with every file in it made new (O_EXCL), and locked by
+// the process that uses it for as long as it does, so that a directory
+// left behind by a process that crashed can be told from one still in
+// use: the next Clean removes the first kind, never the second. Nothing in
+// them is a project fact; they never reach a log, an error or a backup.
 
 const (
 	privatePrefix = "specmetry-private-"
@@ -44,6 +47,15 @@ func newPrivateDir() (*privateDir, error) {
 	dir, err := os.MkdirTemp("", privatePrefix)
 	if err != nil {
 		return nil, apperr.New(apperr.Environment, "cannot make a temporary directory to read git with ("+osProblem(err)+")")
+	}
+	if err := securePrivateDir(dir); err != nil {
+		_ = removeAll(dir)
+		return nil, apperr.New(apperr.Environment, "cannot make a temporary directory to read git with private ("+osProblem(err)+")")
+	}
+	// Nothing may have been put in it before it was private.
+	if entries, err := os.ReadDir(dir); err != nil || len(entries) != 0 {
+		_ = removeAll(dir)
+		return nil, apperr.New(apperr.Environment, "a temporary directory Specmetry made to read git with was not empty")
 	}
 	lock, err := os.OpenFile(filepath.Join(dir, privateLock), os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
 	if err == nil {

@@ -338,7 +338,7 @@ func (p *privateRepo) fill(paths repoPaths, head headState, config []byte) error
 		"config":                  config,
 		"objects/info/alternates": []byte(objects + "\n"),
 	} {
-		if err := os.WriteFile(p.dir.join(filepath.FromSlash(name)), data, 0o600); err != nil {
+		if err := writeNew(p.dir.join(filepath.FromSlash(name)), data); err != nil {
 			return privateProblem(err)
 		}
 	}
@@ -369,6 +369,19 @@ func (p *privateRepo) fill(paths repoPaths, head headState, config []byte) error
 		return indexProblem("the shared index of a split index is missing")
 	}
 	return nil
+}
+
+// writeNew writes a file that must not exist yet, owner-only.
+func writeNew(path string, data []byte) error {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		return err
+	}
+	return f.Close()
 }
 
 // copied is what copyIfExists found.

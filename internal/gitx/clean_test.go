@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/XKHoshizora/specmetry/internal/apperr"
+	"github.com/XKHoshizora/specmetry/internal/datadir"
 	"github.com/XKHoshizora/specmetry/internal/testutil"
 )
 
@@ -816,5 +817,34 @@ func TestCleanPrivateDirectories(t *testing.T) {
 	}
 	if err := held.remove(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// WP2.3 spec §4.3 (the private directory "only the current user can read
+// or write"): a private directory and everything Clean writes in it have
+// the data directory's owner-only permissions (0700 and 0600; on Windows
+// a protected DACL for the current user and SYSTEM, TD-22), as datadir's
+// own check judges them. The directories above it are not Clean's.
+func TestPrivateDirectoriesArePrivate(t *testing.T) {
+	requireSafeGit(t)
+	repo, _ := filterRepo(t)
+	repo.Git("update-index", "--split-index")
+	p, err := prepare(ctx, repo.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = p.close() }()
+	problems, err := datadir.Check(datadir.Dir{Path: p.gitDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, problem := range problems {
+		if strings.HasPrefix(problem, p.gitDir) {
+			t.Errorf("not private: %s", problem)
+		}
+	}
+	entries, err := os.ReadDir(p.gitDir)
+	if err != nil || len(entries) < 5 {
+		t.Fatalf("the private directory holds %d entries: %v", len(entries), err)
 	}
 }
