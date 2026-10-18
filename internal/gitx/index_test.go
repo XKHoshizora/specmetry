@@ -2,7 +2,7 @@ package gitx
 
 import (
 	"bytes"
-	"crypto/sha1" //nolint:gosec // the index format's checksum, not a security use
+	"crypto/sha1"
 	"encoding/binary"
 	"encoding/hex"
 	"os"
@@ -85,7 +85,7 @@ func ixFile(version uint32, count int, entries []ixEntry, exts []ixExt, zeroHash
 }
 
 func withChecksum(body []byte, zero bool) []byte {
-	sum := sha1.Sum(body) //nolint:gosec // see the import
+	sum := sha1.Sum(body)
 	if zero {
 		sum = [20]byte{}
 	}

@@ -110,10 +110,10 @@ func TestCleanStates(t *testing.T) {
 		{"C8 only a modification time", func(t *testing.T, r *testutil.GitRepo) {
 			touch(t, filepath.Join(r.Dir, "dir", "x.txt"), time.Now().Add(time.Hour))
 		}, StateClean},
-		{"C2 a modified file", func(t *testing.T, r *testutil.GitRepo) { r.WriteFile("dir/x.txt", "changed\n") }, StateDirty},
-		{"C3 an untracked file", func(t *testing.T, r *testutil.GitRepo) { r.WriteFile("new/deep/u.txt", "u\n") }, StateDirty},
-		{"C4 an ignored file only", func(t *testing.T, r *testutil.GitRepo) { r.WriteFile("build.log", "l\n") }, StateClean},
-		{"C5 a staged change", func(t *testing.T, r *testutil.GitRepo) {
+		{"C2 a modified file", func(_ *testing.T, r *testutil.GitRepo) { r.WriteFile("dir/x.txt", "changed\n") }, StateDirty},
+		{"C3 an untracked file", func(_ *testing.T, r *testutil.GitRepo) { r.WriteFile("new/deep/u.txt", "u\n") }, StateDirty},
+		{"C4 an ignored file only", func(_ *testing.T, r *testutil.GitRepo) { r.WriteFile("build.log", "l\n") }, StateClean},
+		{"C5 a staged change", func(_ *testing.T, r *testutil.GitRepo) {
 			r.WriteFile("dir/x.txt", "staged\n")
 			r.Git("add", "dir/x.txt")
 		}, StateDirty},
@@ -122,12 +122,12 @@ func TestCleanStates(t *testing.T) {
 				t.Fatal(err)
 			}
 		}, StateDirty},
-		{"Specmetry's own .specmetry/", func(t *testing.T, r *testutil.GitRepo) { r.WriteFile(".specmetry/marker.json", "{}\n") }, StateClean},
-		{"an untracked file beside .specmetry/", func(t *testing.T, r *testutil.GitRepo) {
+		{"Specmetry's own .specmetry/", func(_ *testing.T, r *testutil.GitRepo) { r.WriteFile(".specmetry/marker.json", "{}\n") }, StateClean},
+		{"an untracked file beside .specmetry/", func(_ *testing.T, r *testutil.GitRepo) {
 			r.WriteFile(".specmetry/marker.json", "{}\n")
 			r.WriteFile(".specmetry-not/x", "x\n")
 		}, StateDirty},
-		{"an exclude in info/exclude", func(t *testing.T, r *testutil.GitRepo) {
+		{"an exclude in info/exclude", func(_ *testing.T, r *testutil.GitRepo) {
 			r.WriteFile(".git/info/exclude", "secret.txt\n")
 			r.WriteFile("secret.txt", "s\n")
 		}, StateClean},
@@ -231,7 +231,7 @@ func TestCleanFilterRule(t *testing.T) {
 		{"F1 stat changed, same raw content", func(t *testing.T, r *testutil.GitRepo) {
 			touch(t, filepath.Join(r.Dir, "f.txt"), future)
 		}, StateUndecidable},
-		{"F2 stat changed, other raw content", func(t *testing.T, r *testutil.GitRepo) {
+		{"F2 stat changed, other raw content", func(_ *testing.T, r *testutil.GitRepo) {
 			r.WriteFile("f.txt", "RAW\n")
 		}, StateUndecidable},
 		{"F3 stat as in the index, not racy", func(*testing.T, *testutil.GitRepo) {}, StateClean},
@@ -263,7 +263,7 @@ func TestCleanFilterRule(t *testing.T) {
 			r.Git("config", "--remove-section", "filter.x")
 			touch(t, filepath.Join(r.Dir, "f.txt"), future)
 		}, StateClean},
-		{"F6 only an unfiltered file changed", func(t *testing.T, r *testutil.GitRepo) {
+		{"F6 only an unfiltered file changed", func(_ *testing.T, r *testutil.GitRepo) {
 			r.WriteFile("plain.txt", "changed\n")
 		}, StateDirty},
 		{"a required driver without clean or process", func(t *testing.T, r *testutil.GitRepo) {
@@ -325,19 +325,19 @@ func TestCleanSubmodules(t *testing.T) {
 		want   State
 	}{
 		{"nothing changed", func(*testing.T, *testutil.GitRepo) {}, StateClean},
-		{"C10 the submodule's HEAD moved", func(t *testing.T, s *testutil.GitRepo) {
+		{"C10 the submodule's HEAD moved", func(_ *testing.T, s *testutil.GitRepo) {
 			s.GitIn(filepath.Join(s.Dir, "sub"), "commit", "-q", "--allow-empty", "-m", "more")
 		}, StateDirty},
-		{"C11 the same with diff.ignoreSubmodules=all", func(t *testing.T, s *testutil.GitRepo) {
+		{"C11 the same with diff.ignoreSubmodules=all", func(_ *testing.T, s *testutil.GitRepo) {
 			s.Git("config", "diff.ignoreSubmodules", "all")
 			s.GitIn(filepath.Join(s.Dir, "sub"), "commit", "-q", "--allow-empty", "-m", "more")
 		}, StateDirty},
-		{"the submodule's HEAD moved and staged", func(t *testing.T, s *testutil.GitRepo) {
+		{"the submodule's HEAD moved and staged", func(_ *testing.T, s *testutil.GitRepo) {
 			s.GitIn(filepath.Join(s.Dir, "sub"), "commit", "-q", "--allow-empty", "-m", "more")
 			s.Git("add", "sub")
 		}, StateDirty},
-		{"a modified file in the submodule", func(t *testing.T, s *testutil.GitRepo) { s.WriteFile("sub/a/s.txt", "changed\n") }, StateDirty},
-		{"an untracked file in the submodule", func(t *testing.T, s *testutil.GitRepo) { s.WriteFile("sub/new.txt", "n\n") }, StateDirty},
+		{"a modified file in the submodule", func(_ *testing.T, s *testutil.GitRepo) { s.WriteFile("sub/a/s.txt", "changed\n") }, StateDirty},
+		{"an untracked file in the submodule", func(_ *testing.T, s *testutil.GitRepo) { s.WriteFile("sub/new.txt", "n\n") }, StateDirty},
 		{"the submodule's directory removed", func(t *testing.T, s *testutil.GitRepo) {
 			if err := os.RemoveAll(filepath.Join(s.Dir, "sub")); err != nil {
 				t.Fatal(err)
@@ -355,7 +355,7 @@ func TestCleanSubmodules(t *testing.T) {
 				t.Fatal(err)
 			}
 		}, StateDirty},
-		{"deinitialized: an empty directory", func(t *testing.T, s *testutil.GitRepo) {
+		{"deinitialized: an empty directory", func(_ *testing.T, s *testutil.GitRepo) {
 			s.Git("submodule", "deinit", "-q", "-f", "sub")
 		}, StateClean},
 		{"C9 a filter in the submodule, only a modification time changed", func(t *testing.T, s *testutil.GitRepo) {
@@ -427,7 +427,7 @@ func TestCleanSubmodulesAgreeWithTheDefinition(t *testing.T) {
 // changes. A submodule's own gate comes before its own commands.
 func TestCleanSparseGate(t *testing.T) {
 	requireSafeGit(t)
-	withOut := func(t *testing.T, repo *testutil.GitRepo) {
+	withOut := func(_ *testing.T, repo *testutil.GitRepo) {
 		repo.WriteFile("b/untracked.txt", "u\n") // b/ is the sparse directory
 	}
 	// The control: the old order (status on the private copy, no gate).

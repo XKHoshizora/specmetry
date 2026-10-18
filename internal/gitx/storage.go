@@ -47,7 +47,7 @@ func checkObjects(dir string, depth int, seen map[string]bool) error {
 	seen[key] = true
 	// 1. Every directory under objects/ can be listed, and every entry in
 	// it can be looked at.
-	if err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+	if err := filepath.WalkDir(dir, func(_ string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}

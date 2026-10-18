@@ -534,7 +534,7 @@ func TestScanFailuresWriteNothing(t *testing.T) {
 		// (REQ-001, the cursor's tip), with C (REQ-001) committed on top.
 		damage func(t *testing.T, e *env, a, b, cc string) (undo func())
 	}{
-		{"L10 a git without worktree list -z", func(t *testing.T, e *env, a, b, cc string) func() {
+		{"L10 a git without worktree list -z", func(t *testing.T, _ *env, _, _, _ string) func() {
 			dir, env, _ := testutil.PassthroughGit(t, testutil.PassWithoutWorktreeListZ)
 			for _, kv := range env {
 				k, v, _ := strings.Cut(kv, "=")
@@ -544,7 +544,7 @@ func TestScanFailuresWriteNothing(t *testing.T) {
 			t.Setenv("PATH", dir+string(os.PathListSeparator)+path)
 			return func() { t.Setenv("PATH", path) }
 		}},
-		{"L14 the branch's tip unreadable", func(t *testing.T, e *env, a, b, cc string) func() {
+		{"L14 the branch's tip unreadable", func(t *testing.T, e *env, _, _, cc string) func() {
 			saved, err := os.ReadFile(loose(e.repo, cc))
 			if err != nil {
 				t.Fatal(err)
@@ -556,7 +556,7 @@ func TestScanFailuresWriteNothing(t *testing.T) {
 				}
 			}
 		}},
-		{"L16 the cursor's old tip a damaged loose object", func(t *testing.T, e *env, a, b, cc string) func() {
+		{"L16 the cursor's old tip a damaged loose object", func(t *testing.T, e *env, _, b, _ string) func() {
 			if err := os.Chmod(loose(e.repo, b), 0o644); err != nil {
 				t.Fatal(err)
 			}
@@ -565,13 +565,13 @@ func TestScanFailuresWriteNothing(t *testing.T) {
 			}
 			return nil
 		}},
-		{"a commit of the range missing (is-ancestor fails, or says no and the whole history is read)", func(t *testing.T, e *env, a, b, cc string) func() {
+		{"a commit of the range missing (is-ancestor fails, or says no and the whole history is read)", func(t *testing.T, e *env, _, _, _ string) func() {
 			mid := e.commit("", "D REQ-001")
 			e.commit("", "E REQ-001")
 			removeObject(t, e.repo, mid)
 			return nil
 		}},
-		{"L22 the old tip's .pack lost its .idx", func(t *testing.T, e *env, a, b, cc string) func() {
+		{"L22 the old tip's .pack lost its .idx", func(t *testing.T, e *env, _, _, _ string) func() {
 			e.repo.Git("repack", "-adq")
 			e.repo.Git("prune-packed")
 			idx, _ := filepath.Glob(filepath.Join(e.repo.Dir, ".git", "objects", "pack", "*.idx"))
@@ -588,7 +588,7 @@ func TestScanFailuresWriteNothing(t *testing.T) {
 				}
 			}
 		}},
-		{"L23 grafts hiding a missing parent", func(t *testing.T, e *env, a, b, cc string) func() {
+		{"L23 grafts hiding a missing parent", func(t *testing.T, e *env, _, _, _ string) func() {
 			// A rewritten branch (no ancestor of the cursor) is read whole:
 			// grafts that cut it at its tip would hide a missing root.
 			e.repo.Git("checkout", "-q", "--orphan", "other")
@@ -606,7 +606,7 @@ func TestScanFailuresWriteNothing(t *testing.T) {
 			removeObject(t, e.repo, root)
 			return nil
 		}},
-		{"L24 a shallow clone", func(t *testing.T, e *env, a, b, cc string) func() {
+		{"L24 a shallow clone", func(t *testing.T, e *env, _, b, _ string) func() {
 			p := filepath.Join(e.repo.Dir, ".git", "shallow")
 			if err := os.WriteFile(p, []byte(b+"\n"), 0o644); err != nil {
 				t.Fatal(err)
@@ -617,7 +617,7 @@ func TestScanFailuresWriteNothing(t *testing.T) {
 				}
 			}
 		}},
-		{"L25 a shallow entry that is a directory", func(t *testing.T, e *env, a, b, cc string) func() {
+		{"L25 a shallow entry that is a directory", func(t *testing.T, e *env, _, _, _ string) func() {
 			if err := os.Mkdir(filepath.Join(e.repo.Dir, ".git", "shallow"), 0o755); err != nil {
 				t.Fatal(err)
 			}

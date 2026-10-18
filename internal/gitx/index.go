@@ -118,10 +118,10 @@ func parseIndex(data []byte) (indexInfo, error) {
 	if info.checksum != ([indexHashSize]byte{}) && sha1.Sum(body) != info.checksum { //nolint:gosec // see the import
 		return info, indexProblem("its checksum is wrong")
 	}
-	count := uint64(binary.BigEndian.Uint32(data[8:12]))
+	count := int(binary.BigEndian.Uint32(data[8:12]))
 	off := 12
 	var prev []byte
-	for i := uint64(0); i < count; i++ {
+	for i := 0; i < count; i++ {
 		var mode uint32
 		var err error
 		mode, prev, off, err = indexEntry(body, off, version, i == 0, prev)
@@ -137,11 +137,11 @@ func parseIndex(data []byte) (indexInfo, error) {
 			return info, indexProblem("it ends inside an extension header")
 		}
 		sig := body[off : off+4]
-		size := uint64(binary.BigEndian.Uint32(body[off+4 : off+8]))
-		if size > uint64(len(body)-off-8) {
+		size := int(binary.BigEndian.Uint32(body[off+4 : off+8]))
+		if size < 0 || size > len(body)-off-8 { // negative only where int has 32 bits
 			return info, indexProblem("an extension runs past the end of the file")
 		}
-		ext := body[off+8 : off+8+int(size)]
+		ext := body[off+8 : off+8+size]
 		switch string(sig) {
 		case "sdir":
 			info.sparse = true
@@ -160,7 +160,7 @@ func parseIndex(data []byte) (indexInfo, error) {
 				return info, indexProblem("it has a required extension Specmetry does not know")
 			}
 		}
-		off += 8 + int(size)
+		off += 8 + size
 	}
 	return info, nil
 }
@@ -196,10 +196,10 @@ func indexEntry(body []byte, off int, version uint32, first bool, prev []byte) (
 		p += n
 		kept := 0
 		if !first {
-			if strip > uint64(len(prev)) {
+			if strip > len(prev) {
 				return 0, nil, 0, indexProblem("an entry strips more of the previous path than it has")
 			}
-			kept = len(prev) - int(strip)
+			kept = len(prev) - strip
 		}
 		suffix, end, err := indexName(body, p, nameLen, kept)
 		if err != nil {
@@ -247,27 +247,28 @@ func indexName(body []byte, p, nameLen, kept int) ([]byte, int, error) {
 	return body[p : p+n], p + n, nil
 }
 
+// varintMax bounds a decoded prefix length: far above any path, and far
+// below an overflow.
+const varintMax = 1 << 30
+
 // indexVarint decodes git's offset encoding (the one OFS_DELTA uses):
-// returns the value and the bytes it took, or false on overflow or at the
-// end of the data.
-func indexVarint(b []byte) (uint64, int, bool) {
+// returns the value and the bytes it took, or false when it grows past
+// varintMax or runs past the end of the data.
+func indexVarint(b []byte) (int, int, bool) {
 	if len(b) == 0 {
 		return 0, 0, false
 	}
 	c := b[0]
-	v := uint64(c & 0x7F)
+	v := int(c & 0x7F)
 	n := 1
 	for c&0x80 != 0 {
 		v++
-		if v == 0 || v>>57 != 0 {
-			return 0, 0, false
-		}
-		if n >= len(b) {
+		if v > varintMax>>7 || n >= len(b) {
 			return 0, 0, false
 		}
 		c = b[n]
 		n++
-		v = v<<7 | uint64(c&0x7F)
+		v = v<<7 | int(c&0x7F)
 	}
 	return v, n, true
 }
@@ -308,14 +309,14 @@ func ewahSize(b []byte) (int, bool) {
 	if len(b) < 8 {
 		return 0, false
 	}
-	words := uint64(binary.BigEndian.Uint32(b[4:8]))
-	size := 8 + 8*words + 4
-	if size > uint64(len(b)) {
+	words := int(binary.BigEndian.Uint32(b[4:8]))
+	if words < 0 || words > (len(b)-12)/8 {
 		return 0, false
 	}
-	rlw := uint64(binary.BigEndian.Uint32(b[size-4 : size]))
+	size := 8 + 8*words + 4
+	rlw := int(binary.BigEndian.Uint32(b[size-4 : size]))
 	if words == 0 && rlw != 0 || words > 0 && rlw >= words {
 		return 0, false
 	}
-	return int(size), true
+	return size, true
 }

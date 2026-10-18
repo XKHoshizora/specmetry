@@ -312,7 +312,7 @@ func TestClassifyChecksTheStorage(t *testing.T) {
 		absent    bool
 	}{
 		{name: "K1 a reclaimed tip", reclaimed: true, absent: true,
-			setup: func(t *testing.T, repo *testutil.GitRepo, pack string) string { return repo.Dir }},
+			setup: func(_ *testing.T, repo *testutil.GitRepo, _ string) string { return repo.Dir }},
 		{name: "K18 a .pack that lost its .idx", setup: moveIdx},
 		{name: "K6 an .idx that lost its .pack", setup: func(t *testing.T, repo *testutil.GitRepo, pack string) string {
 			writable(t, pack+".pack")
@@ -385,7 +385,7 @@ func TestClassifyChecksTheStorage(t *testing.T) {
 				return repo.Dir
 			}},
 		{name: "a multi-pack-index beside the packs", reclaimed: true, absent: true,
-			setup: func(t *testing.T, repo *testutil.GitRepo, pack string) string {
+			setup: func(_ *testing.T, repo *testutil.GitRepo, _ string) string {
 				repo.Git("multi-pack-index", "write")
 				return repo.Dir
 			}},
@@ -398,7 +398,7 @@ func TestClassifyChecksTheStorage(t *testing.T) {
 			moveIdx(t, repo, pack)
 			return other.Dir
 		}},
-		{name: "K17 an alternate that does not exist", reclaimed: true, setup: func(t *testing.T, repo *testutil.GitRepo, pack string) string {
+		{name: "K17 an alternate that does not exist", reclaimed: true, setup: func(t *testing.T, repo *testutil.GitRepo, _ string) string {
 			alt := filepath.Join(objectsDir(repo), "info", "alternates")
 			if err := os.WriteFile(alt, []byte(filepath.ToSlash(filepath.Join(t.TempDir(), "none"))+"\n"), 0o644); err != nil {
 				t.Fatal(err)
