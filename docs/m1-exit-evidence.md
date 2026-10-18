@@ -381,6 +381,7 @@ WP1.8 新增的命令也会解析 ref（`target show`、`scope show`、`target s
 | ~~M-11~~ | ~~文档同步~~ **已关闭**，逐项核对：① SRC-07 的里程碑标注已改为"M1 / M2"（PR #16）；② implementation-plan"输出契约的语义约束"中的已知缺口已在本版标为已补齐；③ acceptance-criteria 的 CH-02 一行原称 `source ack` 已在 WP1.4 验证 stdout 重定向，已在本版改为如实的来源（该项证据来自 PR #16）。CH-01 一行同样补注了 PR #16 | 第 1 版核对 | 文档 | — |
 | ~~M-12~~ | ~~项目名称允许代码围栏~~ **已修复**：PR #17（合并提交 `5aad555`），codex-review-037 GO。新登记的名称禁止代码围栏，`init.v1` 同步。**已批准的兼容性限制**（方案 1）见第 11 节 | 第 1 版核对 | 隐私规则 | — |
 | M-13 | 旧项目测试（`TestInitWithARegisteredNameThatHoldsACodeFence`）的无写入摘要，只比较名称、阶段、worktree 数量、`seq` 与 marker，没有直接覆盖完整的 settings、worktree 明细与 exclude。生产检查顺序正确，审查方已另行独立验证 | codex-review-037 N2 | 测试强度（NON-BLOCKER） | 低：本轮不改测试 |
+| M-14 | macOS 上多个进程打开同一个数据库时，读取数据库版本偶发 `SQLITE_READONLY_RECOVERY`（264）。`internal/store/sqlite` 的 `TestSeqIsUniqueAcrossProcesses` 中，一个辅助进程报告 `cannot read the database version: cannot read the database: attempt to write a readonly database (264)`。**根因待调查**："另一个进程正在做 WAL 恢复，造成瞬时竞争"只是假设，没有证实。与 M-1 分开登记，没有证据表明二者同根因。相同的代码此前在 macOS 上通过（run 39108257137、39109376799、39109898115），这次重跑也通过；这不能说明它只是 CI 环境的问题或已经无害，也不关闭本事项 | PR #23 [run 39110669282](https://github.com/XKHoshizora/specmetry/actions/runs/39110669282)：<br>• attempt 1：只有 Go tests (macos-latest) 失败，其余 7 个作业成功；<br>• attempt 2 由"重跑失败的作业"触发：API 列出 8 个作业，作业 ID 都是新的，但实际重新执行的只有 Go tests (macos-latest)（08:27:53 ~ 08:29:37，该测试通过）；其余 7 个作业的日志与起止时间都与 attempt 1 相同，沿用的是 attempt 1 的结果 | 可靠性：跨进程打开数据库；未解决，不是接受的风险 | 高（建议）：M3 之前，与 M-1 相同。Hook 与采集会让并发进程成为常态 |
 
 ## 10. 结论
 

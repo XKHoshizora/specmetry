@@ -3205,3 +3205,78 @@ PR #19（M2 开工准备报告）已合并：合并提交 `258fc50`，父提交�
 - M1 的验收结论（`7e77fd6`）、审查 038、039、043 ~ 047 的结论不变。
 - 所有未关闭的维护事项（M-1、M-2、M-4 ~ M-10、M-13 与 M0 N1）保持未关闭。
 - 没有获批的草案保持原状态；M2 只授权了 WP2.1、WP2.2。
+
+## 61. 最后一处残余的定向复审（codex-review-049）、首批合并与 WP2.1／WP2.2 的验收
+
+**审查结论**：PR #21（WP2.1）**GO**，PR #22（WP2.2）**GO**。
+
+- Review 048 剩下的 B1-R2 残余已关闭。连同已关闭的 B1-R1、B1-R3，**审查 046 的 B1 整体关闭**。
+- 没有 BLOCKER，没有新增的 NON-BLOCKER、产品决定或接受的风险。
+- 没有发现直接回归或确定的算法反例。
+
+审查原文按收到的原样入库（[docs/reviews/codex-review-049.md](reviews/codex-review-049.md)）。按负责人的安排，为保持受审 SHA 不变，原文在两个实现 PR 合并之后，才随本节的文档收尾 PR 入库。
+
+- **审查对象**：
+  - PR #21：HEAD `6178f9d`，base `666efe2`；
+  - PR #22：HEAD `d0b3c01`，base `6178f9d`（叠加在 PR #21 之上）。
+- **CI**（审查 049 核对）：
+  - PR #21：[run 39104694681](https://github.com/XKHoshizora/specmetry/actions/runs/39104694681)，attempt 1，8/8 成功；合并快照 `e0fd1b0`，树 `ea13608`。
+  - PR #22：[run 39104720866](https://github.com/XKHoshizora/specmetry/actions/runs/39104720866)，attempt 1，8/8 成功；合并快照 `77d6b14`，树 `d799ff2`。
+- **审查方的验证边界**：
+  - 在 Windows 本机离线运行；独立复验了 `03b599f`（失败）与 `bb762be`（通过）、最终包测试、11 个场景的两门禁矩阵，以及决策表样例的合法补全。
+  - 跨平台与 Race Detector 的结论来自核对过身份与日志的 GitHub CI；本机没有运行 Linux Race Detector，也没有复验 macOS。
+  - 原始桩阶段，以及真实的 Git、SQLite、CLI，不在本轮范围。
+
+**负责人授权**（2026-10-18）：
+
+- 按顺序以 merge commit 合并 #21、#22。
+- 两个合并结果与受审内容一致、各自的 master CI 通过后，正式验收 WP2.1、WP2.2 的纯函数层交付。
+- 建立本纯文档收尾 PR；限定内容核对正确、CI 通过后合并并核验。
+- 不授权 WP2.3 或其他工作包的业务实现，不宣布 M2 整体验收。
+
+**合并与核验**：
+
+| 步骤 | 结果 |
+|---|---|
+| 合并 PR #21 | merge commit `1364af1`，父提交 `666efe2`、`6178f9d`。<br>树 `ea13608` 与受审 HEAD `6178f9d` 相同，`git diff` 无差异。<br>master CI：[run 39108257137](https://github.com/XKHoshizora/specmetry/actions/runs/39108257137)（push），attempt 1，8/8 成功 |
+| #22 改 base | base 从 `feat/m2-derive` 改为 master（`1364af1`），HEAD 保持 `d0b3c01`，没有改写提交历史。<br>相对新 master 的差异：仍只有受审的 WP2.2 增量（7 个文件），与 `6178f9d..d0b3c01` 的 diff 逐字节相同；共享的 derive、factgen 源码没有差异。<br>预期合并树 `d799ff2`，与受审 HEAD 的树相同 |
+| #22 新 base 的 PR CI | 改 base 不触发 `pull_request`，所以两次关闭并重新打开 PR，以 `reopened` 事件触发，没有修改代码，也没有空提交：<br>• [run 39108890146](https://github.com/XKHoshizora/specmetry/actions/runs/39108890146)：8/8 成功，但 8 个作业检出的都是旧 base 的合并快照 `77d6b14`（父提交 `6178f9d`、`d0b3c01`）。GitHub 当时尚未重算合并引用，所以**这次运行不计为新 base 的 CI**。<br>• [run 39109376799](https://github.com/XKHoshizora/specmetry/actions/runs/39109376799)：8 个作业都检出新快照 `5570bfd`（父提交 `1364af1`、`d0b3c01`，树 `d799ff2`），attempt 1，8/8 成功；Ubuntu 作业带 `-race` |
+| 合并 PR #22 | merge commit `8cf54e0`，父提交 `1364af1`、`d0b3c01`。<br>树 `d799ff2` 与受审 HEAD `d0b3c01` 相同，`git diff` 无差异；master 同时包含 `6178f9d` 与 `d0b3c01`。<br>master CI：[run 39109898115](https://github.com/XKHoshizora/specmetry/actions/runs/39109898115)（push），attempt 1，8/8 成功 |
+
+**正式验收**（产品负责人，2026-10-18，按上述授权）：**WP2.1、WP2.2 的纯函数层交付已验收**。
+
+- 范围：
+  - WP2.1：推导引擎（`internal/domain/derive`）；
+  - WP2.2：独立的 `ready` 复核器（`internal/testutil/readycheck`）；
+  - 已审查的纯函数、合法域测试（`factgen`、`factgen/legality`、`factgen/toderive`、`readycheck/fromdump`）及相关证据（§58 ~ §60 与本节）。
+- 受审 HEAD：PR #21 `6178f9d`，PR #22 `d0b3c01`。
+- 合并：`1364af1`、`8cf54e0`；master CI 为 run 39108257137、run 39109898115，均为 8/8。
+- 最终的合法域分布（与 §59、§60 相同）：
+  - WP2.1：MVP 266 个，非 ready 198、ready 68（observed 61、none 7）；通用 134 个，非 ready 87、ready 47（snapshot_isolated 29、observed 14、none 4）。
+  - WP2.2：MVP 300 个，非 ready 209、ready 91（observed 79、none 12）；通用 300 个，非 ready 194、ready 106（snapshot_isolated 65、observed 29、none 12）。
+  - 两个域都覆盖了 R1 ~ R9 每一条的失败。
+- **不在这次验收之内**，由对应的工作包验证：CLI、真实数据库的读快照与高水位、Git 与磁盘读取、生产写入的前置条件与并发、输出 Schema、SQLite 复核器前端、WP2.9 的 E2E。
+- **M2 尚未整体验收**；WP2.3 与其余 M2 工作包尚未授权。
+
+**文档收尾 PR #23 的 CI 与新的维护事项 M-14**：
+
+- [run 39110669282](https://github.com/XKHoshizora/specmetry/actions/runs/39110669282) attempt 1：Go tests (macos-latest) 失败，其余 7 个作业成功。
+  - 失败测试：`internal/store/sqlite` 的 `TestSeqIsUniqueAcrossProcesses`。
+  - 日志：`cannot read the database version: cannot read the database: attempt to write a readonly database (264)`。
+- attempt 2 由"重跑失败的作业"触发。API 列出 8 个作业，作业 ID 都是新的，但实际重新执行的只有 Go tests (macos-latest)：08:27:53 ~ 08:29:37，检出 `4f2393d`，该测试通过。其余 7 个作业的日志与起止时间都与 attempt 1 相同，沿用的是 attempt 1 的结果。
+- 这个 PR 只改文档，没有修改运行代码，所以不能把这次失败归因于本 PR 的实现改动。
+- 相同代码此前通过、这次重跑也通过，都不能说明它只是 CI 环境的问题或已经无害。"另一个进程正在做 WAL 恢复，造成瞬时竞争"只是假设，不是已确认的根因。
+- 登记为维护事项 **M-14**（[m1-exit-evidence.md §9](m1-exit-evidence.md)）：未解决，根因待调查，与 M-1 分开登记，不归为接受的风险；重跑通过不关闭它。
+- 这次 WP2.1、WP2.2 纯函数层的验收，不表示存储层的这一问题已经解决。
+
+**保留的记录与事项**：
+
+- 失败、取消与不计入的运行都保留：
+  - §58 的 run 39066356194（Go lint 失败，Windows 取消）；
+  - §59 的 run 39071770560、39071848979（Go lint 的 unparam 失败）；
+  - 本节的 run 39108890146（检出旧快照）。
+- 审查 044 ~ 048 的审查对象与结论保持原样。
+- M1 的验收结论（`7e77fd6`）、审查 038、039、043 ~ 048 的结论不变。
+- 所有未关闭的维护事项（M-1、M-2、M-4 ~ M-10、M-13、M-14 与 M0 N1）保持未关闭。
+- 没有获批的草案、风险边界保持原状。
+- 审查 044 的 N1（提交关联的生命周期）仍在 WP2.3 开工前与 M2-Q7 一起冻结。
