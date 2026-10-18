@@ -84,6 +84,10 @@ const (
 	// error (exit 129) without running git, as a git older than the option
 	// does.
 	PassWithoutLsFilesSparse = "without-ls-files-sparse"
+	// PassWithoutWorktreeListZ refuses worktree list -z with a usage
+	// error (exit 129), as a git older than 2.36 does, and runs every
+	// other command.
+	PassWithoutWorktreeListZ = "without-worktree-list-z"
 	// PassHang answers git --version and, run in any other way, waits a
 	// minute and fails, without running git.
 	PassHang = "hang"
@@ -264,6 +268,10 @@ func passthrough(real, mode string) int {
 	}
 	if mode == PassWithoutLsFilesSparse && slices.Contains(args, "ls-files") && slices.Contains(args, "--sparse") {
 		fmt.Fprintln(os.Stderr, "error: unknown option `sparse'")
+		return 129
+	}
+	if mode == PassWithoutWorktreeListZ && slices.Contains(args, "worktree") && slices.Contains(args, "list") && slices.Contains(args, "-z") {
+		fmt.Fprintln(os.Stderr, "error: unknown switch `z'")
 		return 129
 	}
 	hide := map[string]string{PassWithoutNoLazyFetch: "GIT_NO_LAZY_FETCH", PassWithoutTrace: "GIT_TRACE2_EVENT"}[mode]
