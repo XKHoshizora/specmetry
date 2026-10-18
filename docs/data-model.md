@@ -13,7 +13,7 @@
 | 时间 | INTEGER，UTC Unix 毫秒，仅用于展示 |
 | actor | `agent:<agent>`（如 `agent:claude_code`）、`human:<显示名>`、`system` |
 | channel | `agent_cli`、`human_cli`、`dashboard`、`hook`、`system` |
-| 代码上下文 | 由三项组成：`worktree_id`、`head`（40 位提交 SHA；未知时为 NULL）、`tree_state`（`clean` / `dirty` / `unknown`）。`clean` 指 `git status --porcelain --untracked-files=all --ignore-submodules=none -- . ':(exclude).specmetry'` 输出为空（`--ignore-submodules=none`：产品负责人 2026-10-18 决定 D1）：被 git 忽略的文件不计入；未跟踪文件计入；子模块的变化始终计入，仓库配置（如 `diff.ignoreSubmodules`）不能隐藏；**Specmetry 自己的 `.specmetry/` 始终排除**，不管有没有写入 `.git/info/exclude`。项目级安装只写入已被 git 忽略的 `.claude/settings.local.json`（[architecture.md §10.6](architecture.md#106-对仓库的写入)），所以它也不会让工作区变脏。这条命令在 Specmetry 的受控环境中定义语义（只有仓库自己的配置，architecture §6.1.2），并且只定义语义：Specmetry 不在用户的仓库上直接运行它，读取方式不执行仓库配置的任何程序（过滤器等），也不改变仓库中任何文件的内容或修改时间，见 [WP2.3 规范 §4.3](wp2.3-git-reader.md)（待复审）。不执行程序就无法与定义一致地判断的情形（受本地过滤器驱动影响、需要比较内容的文件；带稀疏目录条目的索引），结果为"不可判定"，记为 **`unknown`，绝不报告为 `clean`**（产品负责人 2026-10-19 决定 P1）。带稀疏目录条目的索引一律不可判定，并且在任何可能展开索引的命令运行之前就判定，不扩大到所有稀疏检出（P2）。这些是范围的限制，不是允许误报 `clean` 或修改原对象的豁免。此前"差异只会把 `clean` 变成 `dirty`"的说法不成立，已撤回（审查 052 B3-R1）。 |
+| 代码上下文 | 由三项组成：`worktree_id`、`head`（40 位提交 SHA；未知时为 NULL）、`tree_state`（`clean` / `dirty` / `unknown`）。`clean` 指 `git status --porcelain --untracked-files=all --ignore-submodules=none -- . ':(exclude).specmetry'` 输出为空（`--ignore-submodules=none`：产品负责人 2026-10-18 决定 D1）：被 git 忽略的文件不计入；未跟踪文件计入；子模块的变化始终计入，仓库配置（如 `diff.ignoreSubmodules`）不能隐藏；**Specmetry 自己的 `.specmetry/` 始终排除**，不管有没有写入 `.git/info/exclude`。项目级安装只写入已被 git 忽略的 `.claude/settings.local.json`（[architecture.md §10.6](architecture.md#106-对仓库的写入)），所以它也不会让工作区变脏。这条命令在 Specmetry 的受控环境中定义语义（只有仓库自己的配置，architecture §6.1.2），并且只定义语义：Specmetry 不在用户的仓库上直接运行它，读取方式不执行仓库配置的任何程序（过滤器等），也不改变仓库中任何文件的内容或修改时间，见 [WP2.3 规范 §4.3](wp2.3-git-reader.md)（已冻结）。不执行程序就无法与定义一致地判断的情形（受本地过滤器驱动影响、需要比较内容的文件；带稀疏目录条目的索引），结果为"不可判定"，记为 **`unknown`，绝不报告为 `clean`**（产品负责人 2026-10-19 决定 P1）。带稀疏目录条目的索引一律不可判定，并且在任何可能展开索引的命令运行之前就判定，不扩大到所有稀疏检出（P2）。这些是范围的限制，不是允许误报 `clean` 或修改原对象的豁免。此前"差异只会把 `clean` 变成 `dirty`"的说法不成立，已撤回（审查 052 B3-R1）。 |
 | project_id | 每张保存项目数据的表都有，用于按项目删除和未来的同步（`projects` 以 `id` 作为项目 ID；`meta`、`maintenance` 是全库表）。见 §1.1 |
 | JSON 列 | 应用层按 schema 校验 |
 | 自由文本 | 写入前做密钥扫描，命中则**拒绝写入**（不做替换），见 [architecture.md §10](architecture.md#10-隐私与数据保留契约) |
@@ -409,7 +409,7 @@ Question 在提案提交时立即创建（编号按 TD-14 分配），只能由�
 
 #### 4.11.2 检查输入的身份（`inputs_json`）
 
-产品负责人于 2026-10-18 批准（M2-Q2，TD-23 的比较语义与错误边界）。读取所用的 git 命令与调用方式（TD-23 的 Git 读取机制）写在 [WP2.3 规范 §4](wp2.3-git-reader.md)（2026-10-18，待独立审查后冻结），不改变本节的语义。
+产品负责人于 2026-10-18 批准（M2-Q2，TD-23 的比较语义与错误边界）。读取所用的 git 命令与调用方式（TD-23 的 Git 读取机制）写在 [WP2.3 规范 §4](wp2.3-git-reader.md)（已冻结，2026-10-19），不改变本节的语义。
 
 **记录**：
 
@@ -471,7 +471,7 @@ Question 在提案提交时立即创建（编号按 TD-14 分配），只能由�
   - 缺少 `worktree list -z` 能力的 git 上，扫描返回环境错误（退出码 6），不增加按行解析的回退（产品负责人 2026-10-19 决定）。
   - 分离 HEAD 的游标以规范化的 worktree 路径为身份，所有 worktree 都包括在内，不限于已登记的（产品负责人 2026-10-18 决定 D2）。
   - 要写进游标的 ref 名称或路径命中密钥规则时，拒绝整次扫描（`invalid_input`，退出码 2），不写提交、关联、`seq` 或游标，不回显（产品负责人 2026-10-18 决定 D7）。
-  - 列的设计、读取步骤、路径移动与重用等细节，见 [WP2.3 规范 §5.1、§5.2、§7](wp2.3-git-reader.md)（待复审）。
+  - 列的设计、读取步骤、路径移动与重用等细节，见 [WP2.3 规范 §5.1、§5.2、§7](wp2.3-git-reader.md)（已冻结）。
 
 **`seq` 与记录身份**（F4，§6.13）：
 
