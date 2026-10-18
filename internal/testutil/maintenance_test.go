@@ -12,11 +12,13 @@ import (
 
 // CI run 39121984050 (Ubuntu, git 2.55.0): right after a fixture commit,
 // SettledSnapshot listed .git/objects/maintenance.lock and the file was
-// gone when it read it. A commit can start `git maintenance run --auto`,
-// which takes that lock; on Linux and macOS it detaches and outlives the
-// commit. GitRepo's isolated configuration turns automatic maintenance and
-// gc off. These tests show that a fixture commit starts neither, with a
-// trace2 control showing that the check would see one.
+// gone when it read it. That is consistent with a race against git's
+// automatic maintenance: a commit can start `git maintenance run --auto`,
+// which takes that lock, and gits with maintenance.autoDetach may let it
+// outlive the commit. Whether it did then was not observed, and the race
+// was not reproduced. GitRepo's isolated configuration turns automatic
+// maintenance and gc off. These tests show that a fixture commit starts
+// neither, with a trace2 control showing that the check would see one.
 
 // childProcesses runs git in r with a trace2 event target and returns the
 // argv of every child process that git, or a child of it, started.

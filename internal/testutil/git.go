@@ -56,9 +56,12 @@ func newGitRepo(t testing.TB, format string) *GitRepo {
 		t.Fatal(err)
 	}
 	// No automatic maintenance or gc: after a commit, git may start
-	// `git maintenance run --auto`, detached on Linux and macOS, which takes
-	// and removes objects/maintenance.lock after the commit has returned.
-	// A snapshot of the repository then races with it (CI run 39121984050).
+	// `git maintenance run --auto`, which takes and removes
+	// objects/maintenance.lock. Gits with maintenance.autoDetach detach it by
+	// default where the platform allows, so it may outlive the commit. The
+	// failure of CI run 39121984050 is consistent with a snapshot racing that
+	// lock; that race itself was not reproduced. This removes the automatic
+	// start that was shown to happen.
 	globalConfig := filepath.Join(gitHome, "gitconfig")
 	if err := os.WriteFile(globalConfig, []byte(fixtureGitConfig), 0o600); err != nil {
 		t.Fatal(err)
