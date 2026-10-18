@@ -13,7 +13,7 @@
 | 时间 | INTEGER，UTC Unix 毫秒，仅用于展示 |
 | actor | `agent:<agent>`（如 `agent:claude_code`）、`human:<显示名>`、`system` |
 | channel | `agent_cli`、`human_cli`、`dashboard`、`hook`、`system` |
-| 代码上下文 | 由三项组成：`worktree_id`、`head`（40 位提交 SHA；未知时为 NULL）、`tree_state`（`clean` / `dirty` / `unknown`）。`clean` 指 `git status --porcelain --untracked-files=all --ignore-submodules=none -- . ':(exclude).specmetry'` 输出为空（`--ignore-submodules=none`：产品负责人 2026-10-18 决定 D1）：被 git 忽略的文件不计入；未跟踪文件计入；子模块的变化始终计入，仓库配置（如 `diff.ignoreSubmodules`）不能隐藏；**Specmetry 自己的 `.specmetry/` 始终排除**，不管有没有写入 `.git/info/exclude`。项目级安装只写入已被 git 忽略的 `.claude/settings.local.json`（[architecture.md §10.6](architecture.md#106-对仓库的写入)），所以它也不会让工作区变脏。这条命令在 Specmetry 的受控环境中定义语义（只有仓库自己的配置，architecture §6.1.2），并且只定义语义：Specmetry 不在用户的仓库上直接运行它，读取方式不执行仓库配置的任何程序（过滤器等），也不改变仓库中任何文件的内容或修改时间，见 [WP2.3 规范 §4.3](wp2.3-git-reader.md)（待复审）。不执行程序就无法与定义一致地判断的情形（受本地过滤器驱动影响、需要比较内容的文件；带稀疏目录条目的索引），结果为"不可判定"，**绝不报告为 `clean`**；它记为什么、范围是否调整，待产品负责人决定（WP2.3 规范 §8 的 P1、P2）。此前"差异只会把 `clean` 变成 `dirty`"的说法不成立，已撤回（审查 052 B3-R1）。 |
+| 代码上下文 | 由三项组成：`worktree_id`、`head`（40 位提交 SHA；未知时为 NULL）、`tree_state`（`clean` / `dirty` / `unknown`）。`clean` 指 `git status --porcelain --untracked-files=all --ignore-submodules=none -- . ':(exclude).specmetry'` 输出为空（`--ignore-submodules=none`：产品负责人 2026-10-18 决定 D1）：被 git 忽略的文件不计入；未跟踪文件计入；子模块的变化始终计入，仓库配置（如 `diff.ignoreSubmodules`）不能隐藏；**Specmetry 自己的 `.specmetry/` 始终排除**，不管有没有写入 `.git/info/exclude`。项目级安装只写入已被 git 忽略的 `.claude/settings.local.json`（[architecture.md §10.6](architecture.md#106-对仓库的写入)），所以它也不会让工作区变脏。这条命令在 Specmetry 的受控环境中定义语义（只有仓库自己的配置，architecture §6.1.2），并且只定义语义：Specmetry 不在用户的仓库上直接运行它，读取方式不执行仓库配置的任何程序（过滤器等），也不改变仓库中任何文件的内容或修改时间，见 [WP2.3 规范 §4.3](wp2.3-git-reader.md)（待复审）。不执行程序就无法与定义一致地判断的情形（受本地过滤器驱动影响、需要比较内容的文件；带稀疏目录条目的索引），结果为"不可判定"，记为 **`unknown`，绝不报告为 `clean`**（产品负责人 2026-10-19 决定 P1）。带稀疏目录条目的索引一律不可判定，并且在任何可能展开索引的命令运行之前就判定，不扩大到所有稀疏检出（P2）。这些是范围的限制，不是允许误报 `clean` 或修改原对象的豁免。此前"差异只会把 `clean` 变成 `dirty`"的说法不成立，已撤回（审查 052 B3-R1）。 |
 | project_id | 每张保存项目数据的表都有，用于按项目删除和未来的同步（`projects` 以 `id` 作为项目 ID；`meta`、`maintenance` 是全库表）。见 §1.1 |
 | JSON 列 | 应用层按 schema 校验 |
 | 自由文本 | 写入前做密钥扫描，命中则**拒绝写入**（不做替换），见 [architecture.md §10](architecture.md#10-隐私与数据保留契约) |
@@ -465,8 +465,10 @@ Question 在提案提交时立即创建（编号按 TD-14 分配），只能由�
 - `git_scan_cursors`（受控可变）：
   - 字段：`project_id`、`ref`（每个本地分支，加上各 worktree 的分离 HEAD）、`last_tip`、`scanned_seq`。
   - 每次扫描只读取每个 ref 从 `last_tip` 到当前 tip 的增量。
-  - 如果历史被改写（旧 tip 不再是新 tip 的祖先），就重新扫描该 ref，靠 SHA 去重。旧 tip 可靠地不存在（例如被回收）时同样按改写处理；旧 tip 存在但不可读、或无法确认时，本次扫描失败（退出码 6），不写入。"可靠地不存在"要求 git 的协议输出与退出码一致、没有任何 stderr 输出，并通过对包索引、包文件与对象目录的存储检查；包索引损坏、对象库不可读等都属于无法确认（审查 052 B2-R）。
-  - 读取是严格的：必需读取的 tip 或对象读取失败时，整次扫描失败，游标不前进；不因命令返回成功或输出为空就推进游标。遍历不借 commit-graph、grafts 或 multi-pack-index 绕过对象的读取；读取中途失败时，已读到的部分结果一律丢弃（审查 052 B1-R）。浅克隆的处理待产品负责人决定（WP2.3 规范 §8 的 P3）。
+  - 如果历史被改写（旧 tip 不再是新 tip 的祖先），就重新扫描该 ref，靠 SHA 去重。旧 tip 可靠地不存在（例如被回收）时同样按改写处理；旧 tip 存在但不可读、或无法确认时，本次扫描失败（退出码 6），不写入。"可靠地不存在"要求 git 的协议输出与退出码一致、没有任何 stderr 输出，并通过对包索引、包文件与对象目录的存储检查；包索引损坏、对象库不可读等都属于无法确认（审查 052 B2-R）。存储检查要求包与索引双向配对：一个 `.pack` 失去了 `.idx`，或者有不可识别的文件，都是存储不完整，不是正常回收（审查 055 B2-R2）。检查不写入任何文件，不重建索引或修复包。
+  - 读取是严格的：必需读取的 tip 或对象读取失败时，整次扫描失败，游标不前进；不因命令返回成功或输出为空就推进游标。遍历不借 commit-graph、grafts 或 multi-pack-index 绕过对象的读取；读取中途失败时，已读到的部分结果一律丢弃（审查 052 B1-R）。
+  - **浅克隆**（产品负责人 2026-10-19 决定 P3）：MVP 暂不支持浅克隆的提交扫描。扫描之前只读地检测；是浅克隆，或检测无法确认，都返回环境错误（退出码 6），不写提交、关联、`seq` 或游标，不伪装成成功的空扫描，不自动拉取或修改浅边界。浅克隆期间不建立、不推进游标；恢复为完整仓库之后按既有规则扫描。将来支持时另行设计 deepen / unshallow 与游标的生命周期。
+  - 缺少 `worktree list -z` 能力的 git 上，扫描返回环境错误（退出码 6），不增加按行解析的回退（产品负责人 2026-10-19 决定）。
   - 分离 HEAD 的游标以规范化的 worktree 路径为身份，所有 worktree 都包括在内，不限于已登记的（产品负责人 2026-10-18 决定 D2）。
   - 要写进游标的 ref 名称或路径命中密钥规则时，拒绝整次扫描（`invalid_input`，退出码 2），不写提交、关联、`seq` 或游标，不回显（产品负责人 2026-10-18 决定 D7）。
   - 列的设计、读取步骤、路径移动与重用等细节，见 [WP2.3 规范 §5.1、§5.2、§7](wp2.3-git-reader.md)（待复审）。

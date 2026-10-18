@@ -1,6 +1,6 @@
 # WP2.3 Git Reader 规范
 
-> 状态：**规范草案，按审查 050、审查 052（都为 NO-GO）修订，待复审**（2026-10-18）。负责人已决定 D1、D2、D7（§2、§8）；审查 052 引出的取舍 P1 ~ P3 待负责人决定（§8）；其余没有获批的草案保持原状。本文写出 WP2.3 的读取机制（TD-23）、提交关联规则（M2-Q7 / TD-17）、关联的生命周期（审查 044 N1）、`internal/gitx` 的新接口、扫描层的职责、迁移设计、正反例、验收映射与测试计划。
+> 状态：**规范草案，按审查 050、052、055（都为 NO-GO）修订，待复审**（2026-10-19）。负责人已决定 D1、D2、D7（2026-10-18），以及 P1、P2、P3 与 `worktree list -z` 的能力要求（2026-10-19；§2、§8）；其余没有获批的草案保持原状。本文写出 WP2.3 的读取机制（TD-23）、提交关联规则（M2-Q7 / TD-17）、关联的生命周期（审查 044 N1）、`internal/gitx` 的新接口、扫描层的职责、迁移设计、正反例、验收映射与测试计划。
 >
 > 本文不是实现：本 PR 不提交生产代码、迁移 SQL 或实现测试。WP2.3 的实现尚未授权。
 >
@@ -62,6 +62,19 @@
 6. **D7**：不静默跳过敏感的 ref 或路径。命中密钥规则时拒绝本次扫描，不写提交、关联、`seq` 或游标，不回显敏感值。错误分类遵守既有契约，不新增隐私豁免（§5.1）。
 
 其余没有获批的草案保持原状。
+
+**第三轮决定**（2026-10-19，审查 055 之后；记录见 [review-resolution.md §66](review-resolution.md)）：
+
+7. **P1**：不可判定使用 `unknown`，不能当作 `clean`（§4.3）。
+8. **P2**：含稀疏目录条目的索引一律不可判定，安全门禁放在任何可能展开索引的命令之前；不扩大到所有稀疏检出（§4.3 第 2 步）。
+9. **P3**：MVP 暂不支持浅克隆的提交扫描（§5.2"浅克隆"）：
+   - 需要扫描时，以只读方式明确检测；是浅克隆，或检测无法确认，都返回环境错误（退出码 6），不写提交、关联、`seq` 或游标，不伪装成成功的空扫描；
+   - 不自动拉取，也不修改浅边界；
+   - 触发扫描的命令应明确呈现这一限制（WP2.7）；
+   - 将来支持浅克隆时，另行设计 deepen / unshallow 与游标的生命周期。
+10. **`worktree list -z` 的能力**：缺少这一能力时，MVP 的扫描返回环境错误（退出码 6），不增加按行解析的回退；这是扫描的能力要求，其他命令的支持范围不变（§5.1、§13）。
+
+这些是范围的限制，不是允许误报 `clean`、修改原对象或放行损坏存储的风险豁免。
 
 ## 3. 已冻结、本文据以细化的规则
 
@@ -193,11 +206,11 @@ git status --porcelain --untracked-files=all --ignore-submodules=none -- . ':(ex
 - 带 `--ignore-submodules=none` 时，它还会在每个子模块中启动一个 `git status`，同样会执行子模块配置的过滤器（实验 C9）。
 - 受控环境、关闭 FSMonitor 与对象读取门禁，都不能阻止这些程序执行。
 
-**读取步骤**：
+**读取步骤**（审查 055 B3-R2 之后的顺序：门禁在任何可能展开索引的命令之前）：
 
 1. **私有的 git 目录**：Specmetry 在自己的私有临时目录中建立一个 git 目录，内容如下：
    - `HEAD`：worktree 当前的 HEAD（完整 SHA）。分支还没有提交时，写成指向该分支的符号引用 `ref: refs/heads/<分支>`（unborn），`status` 照常运行；不能省略 `HEAD`，否则 `status` 返回 128（审查 052 N1；实验 N1-u）。
-   - `objects/info/alternates`：指向仓库的对象目录。**它不是只读保护**：私有目录中的 git 一旦需要写对象，会更新原仓库中同一对象文件的修改时间（审查 052 B3-R2）。所以下面第 4 步只允许已验证不写对象的命令与布局。
+   - `objects/info/alternates`：指向仓库的对象目录。**它不是只读保护**：私有目录中的 git 一旦需要写对象，会更新原仓库中同一对象文件的修改时间（审查 052 B3-R2）。所以只允许已验证不写对象的命令与布局，并由第 2 步的门禁先排除稀疏索引。
    - `index`：worktree 索引文件的副本；拆分索引时，同时复制 `sharedindex.*`。
    - `info/exclude`、`info/attributes`、`info/sparse-checkout`：公共目录中这些文件的副本。
    - `config`：只有白名单中的键。
@@ -209,33 +222,35 @@ git status --porcelain --untracked-files=all --ignore-submodules=none -- . ':(ex
      - 另外固定写入 `core.repositoryformatversion = 0`、`core.bare = false`、`core.untrackedCache = false`。
      - 值取自 `git config --list --local --includes -z`；仓库启用了 `extensions.worktreeConfig` 时，再读 `--worktree` 的值，按同一份白名单过滤，worktree 的值优先。读取配置的命令同样在受控环境中运行；这些路径值与原配置都不写入日志或错误。
      - 没有任何 `filter.*`、`core.fsmonitor`、`core.hooksPath`、`include*`、`extensions.partialClone` 或远端配置。
-2. **超级项目的读取**：在私有目录上运行，都经过对象读取门禁（PD-26）：
+   - 建立私有目录只运行不读取索引的 git 命令（`rev-parse` 取路径、`config` 读配置）。
+2. **稀疏门禁**（审查 055 B3-R2；负责人决定 P2）：在任何 git 命令读取这个索引副本**之前**，Specmetry 自己解析它，不运行 git：
+   - 解析索引文件的格式（版本 2、3、4 的条目与扩展；末尾的 SHA-1 校验和，全零表示 git 省略了它）。有 `link` 扩展（拆分索引）时，同样解析它引用的 `sharedindex.<哈希>`。
+   - 有 mode 为 `040000` 的条目（稀疏目录条目），或者有 `sdir` 扩展：这是稀疏索引，结果为 `unknown`（P1、P2）。这个仓库，以及它的子模块，都不再运行任何 git 命令。
+   - 不能完整解析（不是索引文件、未知的版本、截断、校验和错误、扩展越界）：环境错误（退出码 6），同样不再运行任何命令。
+   - 不用 git 做这个门禁的原因：git 读取稀疏索引时，只要工作区中有与稀疏目录同名的目录，就会展开索引并更新原对象的修改时间，连 `ls-files --sparse --stage` 也是这样（实验 X2 ~ X4）；只有另外设置 `sparse.expectFilesOutsideOfPatterns=true` 时它才不展开（实验 X8）。那样的门禁依赖多项配置与 git 的版本，直接解析文件没有这种依赖。
+   - 没有稀疏目录条目的稀疏检出（只有 skip-worktree 标记）不受这一条限制，照常读取（实验 S11）。P2 不扩大到所有稀疏检出。
+3. **超级项目的读取**：在私有目录上运行，都经过对象读取门禁（PD-26）：
    - `git --git-dir=<私有目录> --work-tree=<worktree> status --porcelain -z --untracked-files=all --ignore-submodules=all -- . ':(exclude).specmetry'`。`--ignore-submodules=all` 使 git 不进入子模块，也不启动子进程（实验 C9：子进程数为 0）。
-   - 需要列出索引时只用 `ls-files -z --sparse`（带 `--sparse`，见第 4 步）。
-3. **子模块**：
+   - 需要列出索引时只用 `ls-files -z --sparse`。
+   - 第 5 步的 `diff-files` 必须带 `--ignore-submodules=all`：不带时，它会读取子模块的索引；子模块是稀疏索引时，这会更新子模块原对象的修改时间（实验 X6）。
+4. **子模块**：
    - 对私有索引中每个 `160000` 条目，如果 worktree 中这个路径有 `.git`（已初始化）：
      - 先用受控的 git 元数据解析出它实际的 git 目录（`git -C <子模块路径> rev-parse --absolute-git-dir`）。`.git` 常常是指向 `.git/modules/<名称>` 的 gitfile，不能当作目录直接使用：审查 052 在它的环境中直接传 gitfile 得到 128，本文的环境中得到 0（实验 N1-g），行为不可依赖。
      - 用 `git --git-dir=<解析出的 git 目录> rev-parse --verify HEAD` 取得子模块的 HEAD，与 gitlink 不同即为 `dirty`。
-     - 再对子模块递归执行第 1 ~ 4 步，它的配置与驱动按它自己的 local 配置判断。
+     - 再对子模块按第 1 ~ 6 步读取：先建立它的私有目录，**先过它自己的稀疏门禁**，再运行它的 `status` 等命令；它的配置与驱动按它自己的 local 配置判断。
    - 没有初始化的子模块不读取，与 `status` 相同。
    - 每一次 git 调用都经过对象读取门禁与受控环境；私有目录不是跳过门禁的理由。
-4. **不可判定的情形**（审查 052 B3-R）：以下情形中，不执行程序、又不写原仓库的读取，**无法得出与定义一致的结果**，结果为"不可判定"：
-   - **过滤器**（B3-R1）：
-     - 驱动集合 D：仓库 local（及 worktree）配置中定义了 `filter.<名称>.clean`、`filter.<名称>.process`，或 `filter.<名称>.required = true` 的名称。D 为空时跳过本条。
-     - 受过滤的路径 F：私有目录中 `ls-files -z --sparse` 的路径，经 `check-attr -z --stdin filter`，属性值属于 D 的那些。
-     - 需要比较内容的路径：F 中满足以下任一条件的路径：
-       - 在私有目录的 `diff-files --name-only -z` 中列出（stat 与索引不同，或是 racy 并且原样内容不同）；
-       - racy：工作区文件的修改时间不早于原索引文件的修改时间。`diff-files` 对 racy 条目只做原样比较，可能不列出（实验 F7），所以这一条单独判断。
-     - 存在需要比较内容的受过滤路径时，结果为不可判定。否则，F 中的路径 stat 与索引一致、也不 racy，定义中的 `status` 也不会比较它们的内容，私有目录的结果与定义一致（实验 F3、F5、F6）。
-   - **稀疏索引**（B3-R2）：索引中有稀疏目录条目（`ls-files --sparse --stage` 中 mode 为 `040000` 的条目）时，私有目录中的 `status` 可能展开索引、重建 cache tree，从而借 alternates 更新原对象的修改时间：
-     - 工作区中存在与某个稀疏目录同名的目录时（其中有未跟踪文件，或者只是空目录），即使复制了 `sparse-checkout`，也会发生（实验 S8、S8e）；
-     - 没有这样的目录时，本文实验中没有发生（S3、S5 ~ S7、S9），但没有证明其他触发条件都不存在。
-     - 所以带稀疏目录条目的索引，结果为不可判定。没有稀疏索引的稀疏检出（只有 skip-worktree 标记）照常读取（实验 S11）。
-   - **"不可判定"对应的结果值，以及是否扩大或缩小上述范围，待负责人决定**（§8 的 P1、P2）。D1 只批准了子模块参数，不包括这些退化；本文不把它们写成已授权的实施细节。
-5. **结果**：
-   - 不可判定：按负责人的决定（§8 P1）。
+5. **过滤器下不可判定的情形**（审查 052 B3-R1）：不执行程序就无法得出与定义一致的结果时，结果为 `unknown`（P1）：
+   - 驱动集合 D：仓库 local（及 worktree）配置中定义了 `filter.<名称>.clean`、`filter.<名称>.process`，或 `filter.<名称>.required = true` 的名称。D 为空时跳过本条。
+   - 受过滤的路径 F：私有目录中 `ls-files -z --sparse` 的路径，经 `check-attr -z --stdin filter`，属性值属于 D 的那些。
+   - 需要比较内容的路径：F 中满足以下任一条件的路径：
+     - 在私有目录的 `diff-files --name-only -z --ignore-submodules=all` 中列出（stat 与索引不同，或是 racy 并且原样内容不同）；
+     - racy：工作区文件的修改时间不早于原索引文件的修改时间。`diff-files` 对 racy 条目只做原样比较，可能不列出（实验 F7），所以这一条单独判断。
+   - 存在需要比较内容的受过滤路径时，结果为 `unknown`。否则，F 中的路径 stat 与索引一致、也不 racy，定义中的 `status` 也不会比较它们的内容，私有目录的结果与定义一致（实验 F3、F5、F6）。
+6. **结果**：
+   - 第 2 步或第 5 步判定的不可判定：`unknown`（负责人决定 P1，2026-10-19）。它不是 `clean`，执行因此不合格。
    - 否则：超级项目与所有已初始化子模块都没有变化为 `clean`，有任何变化为 `dirty`。
-   - 任何一步失败（复制失败、git 非 0 退出、输出不合格）时，不报告 `clean`：返回环境错误（退出码 6），或者由调用方按其契约记为 `unknown`（检查执行在 WP2.5 中决定）。
+   - 任何一步失败（复制失败、索引不能解析、git 非 0 退出、输出不合格）时，不报告 `clean`：返回环境错误（退出码 6），或者由调用方按其契约记为 `unknown`（检查执行在 WP2.5 中决定）。
 
 **这种读取方式的保证与边界**：
 
@@ -245,11 +260,11 @@ git status --porcelain --untracked-files=all --ignore-submodules=none -- . ':(ex
   - 实验 C1 ~ C11、F1 ~ F7 中，私有目录的读取都没有执行过滤器。
 - **不报告错误的 `clean`**：
   - 审查 052 指出，"差异只会把 `clean` 变成 `dirty`"不成立：取消过滤器后，原样内容相同不等于过滤后相同（实验 F1、F7 是反方向，定义下为 `dirty`、旧方案为 `clean`）。**本文撤回这一保证。**
-  - 第 4 步的规则下，F1、F7 都判为不可判定，不报告 `clean`；F2、F4 定义下为 `clean`，也判为不可判定（保守）。
+  - 第 5 步的规则下，F1、F7 都判为不可判定，不报告 `clean`；F2、F4 定义下为 `clean`，也判为不可判定（保守）。
   - 这只覆盖实验中的情形与本文列出的判断依据，不是对所有过滤器配置的证明。
 - **不修改用户的仓库**：
   - 索引与配置都是副本；`GIT_OPTIONAL_LOCKS=0` 另外保证不写这些副本的锁。
-  - 原仓库对象文件的**内容与修改时间**：在普通索引、拆分索引、untracked cache、没有稀疏索引的稀疏检出中，本文整套命令（`status`、`ls-files`、`check-attr`、`diff-files`）执行前后都没有变化（实验 S12 ~ S14、S11）。稀疏索引见第 4 步。
+  - 原仓库对象文件的**内容与修改时间**：在普通索引、拆分索引、untracked cache、没有稀疏索引的稀疏检出中，本文整套命令（`status`、`ls-files`、`check-attr`、`diff-files`）执行前后都没有变化（实验 S12 ~ S14、S11、S19）。稀疏索引由第 2 步的门禁在这些命令之前排除（实验 S16 ~ S18b）。
   - 这依据的是这些布局下的实验，不是操作系统层面的只读保证。新的布局或命令须先做同样的实验。
 - **临时目录的生命周期**（审查 052 N2）：
   - 私有目录建在 Specmetry 专用的临时位置，只对当前用户可读写，名称带固定前缀，便于识别崩溃后遗留的目录。具体位置在实现时与数据目录的规则一起确定。
@@ -275,7 +290,7 @@ git status --porcelain --untracked-files=all --ignore-submodules=none -- . ':(ex
 
 审查 052 之后的实验。参考结果是定义中的 `status`（受控环境，过滤器为合成的 `sed s/raw/canonical/g`，只在参考命令中运行）：
 
-| # | 情形 | 参考 `status` | 私有目录的 `status` | 第 4 步的判定 |
+| # | 情形 | 参考 `status` | 私有目录的 `status` | 第 5 步的判定 |
 |---|---|---|---|---|
 | F1 | 审查 052 的第一行：提交时没有驱动（索引为 raw），之后才配置驱动；stat 改变 | ` M f`（`dirty`） | 空（**错误的 `clean`**） | 不可判定 |
 | F2 | 审查 052 的第二行：先配置驱动（索引为 canonical），工作区为 raw；stat 改变 | 空（`clean`） | ` M f` | 不可判定（保守） |
@@ -307,6 +322,28 @@ git status --porcelain --untracked-files=all --ignore-submodules=none -- . ':(ex
 - 私有目录自己的对象目录在所有情形中都没有新写入。
 - S8 的几种变体（S8b ~ S8d，Windows）：以 `-c` 设置 `index.sparse=false`、`core.sparseCheckout=false`，或改用 `--untracked-files=no`，都仍然改变 4 个对象的修改时间。
 
+审查 055 之后的门禁实验（Windows 2.56 与 Linux 2.43 结果相同；X8 只在 Windows 上）：
+
+| # | 情形 | 原 `.git` 的变化 |
+|---|---|---|
+| S15 | 审查 055 的反例：稀疏索引，`out/` 中有未跟踪文件，私有目录复制了模式文件；先运行私有 `status`（审查 052 版的顺序） | **4 个对象文件的修改时间改变**，内容不变 |
+| S16 | 同一布局；先过第 2 步的门禁（解析索引副本：版本 3，1 个稀疏目录条目，`sdir`），判为 `unknown`，不再运行任何命令 | 无 |
+| S17 | 门禁先行，工作区中没有 `out/` | 无（同样判为 `unknown`） |
+| S18a | 普通的超级项目，子模块是稀疏索引并且有 `out/`；按审查 052 版的顺序在子模块中先运行 `status` | 子模块：**4 个** |
+| S18b | 同一布局；超级项目门禁通过（不是稀疏索引）、运行整套命令（`diff-files` 带 `--ignore-submodules=all`），子模块门禁判为 `unknown`、不再运行命令 | 子模块：无 |
+| S19 | 正对照：普通索引；门禁通过，再运行整套命令 | 无；输出 ` M d/x`、`?? d/u` |
+| S20 | 失败路径：私有的索引副本被截断；门禁不能解析 | 无；环境错误（退出码 6），没有运行任何 git 命令 |
+| S22 | 门禁对其他格式与损坏的索引：版本 2、版本 4、带 skip-worktree 的版本 3、拆分索引（`link`）、untracked cache（`UNTR`）；校验和错误；截断；版本 4 的稀疏索引 | 前五种判为不是稀疏索引；校验和错误与截断为环境错误；版本 4 的稀疏索引判为 `unknown` |
+| X2 ~ X4 | 稀疏索引，`out/` 中有未跟踪文件：在原仓库或私有目录中运行 `ls-files --sparse --stage -z` | **4 个**；输出中稀疏目录条目为 0（已被展开） |
+| X5 | 同上，原索引文件本身 | 没有被改写 |
+| X6 | 超级项目的私有目录中，子模块是稀疏索引：`status --ignore-submodules=all`、`ls-files --sparse`、`check-attr` 与带 `--ignore-submodules=all` 的 `diff-files` | 子模块：都无 |
+| X6' | 同上，`diff-files` **不带** `--ignore-submodules` | 子模块：**4 个** |
+| X7 | `ls-files --sparse` 读取被截断的索引副本 | 无；退出 128 |
+| X8 | `ls-files --sparse --stage` 的变体：关闭 commit-graph、关闭 multi-pack-index、关闭提示 | 都是 **4 个** |
+| X8' | 另加 `-c sparse.expectFilesOutsideOfPatterns=true` | 无；报告 1 个稀疏目录条目 |
+
+- 一次较早的运行（exp055 的 S16 第一版，用 `ls-files --sparse` 作门禁）没有发生展开，原因没有查明；对照实验 X2 ~ X4、X8 都发生了展开，所以本文不依赖那一次的结果，门禁改为直接解析索引文件。
+
 子模块与 unborn：
 
 | # | 情形 | 结果 |
@@ -331,7 +368,7 @@ git status --porcelain --untracked-files=all --ignore-submodules=none -- . ':(ex
   - 只取 `objecttype = commit` 的 ref；指向其他对象的分支跳过，不建立游标。
   - 还没有提交的分支不会列出。
 - **分离 HEAD**（负责人决定 D2：保留所有 worktree，不缩小到已登记的）：
-  - 命令：`git worktree list --porcelain -z`。不认识 `-z` 的 git（usage 错误，退出 129）上，本次扫描返回退出码 6。不改按行解析：没有 `-z` 时，路径中的换行无法可靠切分（审查 050 N1，§13）。
+  - 命令：`git worktree list --porcelain -z`。不认识 `-z` 的 git（usage 错误，退出 129）上，本次扫描返回退出码 6。不改按行解析：没有 `-z` 时，路径中的换行无法可靠切分（审查 050 N1，§13）。负责人 2026-10-19 决定：这是 MVP 扫描的能力要求，不增加回退；其他命令的支持范围不变。
   - 取每个非 bare、标为 `detached` 的 worktree 的 `HEAD <sha>`，包括标为 `prunable` 的。
   - 每个分离 HEAD 都是必需读取的正向 tip（§5.2）。
 - **分离 HEAD 的游标身份**（D2）：
@@ -377,7 +414,7 @@ git status --porcelain --untracked-files=all --ignore-submodules=none -- . ':(ex
   | 替换引用 | 用另一个对象代替 | 既有的全局参数 `--no-replace-objects`（§6.1.2） | — |
   | grafts（`info/grafts`） | 改写父提交，缺失的父提交不再被访问 | 环境变量 `GIT_GRAFT_FILE` 指向一个不存在的路径 | G5 |
   | multi-pack-index | 对象查找经过它；它损坏时 git 回退并报告错误 | 分类与读取都固定 `-c core.multiPackIndex=false`，只用各个包自己的索引 | K7 |
-  | 浅克隆（`shallow` 文件） | git 声明的边界之外的父提交不访问 | **待负责人决定**（§8 的 P3） | G6 |
+  | 浅克隆（`shallow` 文件） | git 声明的边界之外的父提交不访问 | MVP 不扫描浅克隆（P3）：扫描之前直接检测，是浅克隆或无法确认就返回退出码 6；读取另设 `GIT_SHALLOW_FILE` 指向一个不存在的路径，使检测之后才出现的浅边界也不能截断读取（见下文"浅克隆"） | G6、H1 ~ H7 |
 
 - 关闭这些途径之后，git 访问到的每一个提交都要读取并解析它的对象；读取失败就是非 0 退出。
 - 没有被访问到的提交，不影响"T 可达、且不被排除项可达"的集合，所以不需要读取（实验 G4：排除项之后的祖先缺失，不影响结果）。
@@ -405,11 +442,13 @@ git status --porcelain --untracked-files=all --ignore-submodules=none -- . ':(ex
   | `<sha> missing` | 1 | 有 stderr 输出，或存储检查不通过 | **无法确认**，退出码 6 |
   | 其他类型、其他输出、任一命令的其他退出码 | — | — | **无法确认**，退出码 6 |
 
-- **存储检查**：只在出现"`missing` 且 1"时进行，由 Specmetry 直接读取 git 目录中的文件，不运行 git，不读取源码或对象内容：
+- **存储检查**：只在出现"`missing` 且 1"时进行，由 Specmetry 直接读取 git 目录中的文件，不运行 git，不读取源码或对象内容，也不写入任何文件（不重建索引、不修复包）：
   1. `objects/` 与其下所有目录（包括 `objects/pack`）都能列出；
-  2. `objects/pack` 中每一个 `.idx` 都能读取，长度不小于最小值，末尾 20 字节等于它前面全部内容的 SHA-1；
-  3. 每一个 `.idx` 都有对应的 `.pack`，能读取，并且 `.pack` 的末尾 20 字节等于 `.idx` 中记录的包校验和；
-  4. 有 `objects/info/alternates` 时，它能读取，其中列出的每个对象目录都存在，并对它们递归执行 1 ~ 4（层数上限与 git 相同）。
+  2. **包与索引双向配对**（审查 055 B2-R2）：`objects/pack` 中每一个 `pack-<哈希>.pack` 都有同名的 `.idx`，每一个 `.idx` 都有同名的 `.pack`。只检查"每个 `.idx` 都有 `.pack`"，在一个 `.pack` 失去了 `.idx` 时会在空集合上成立（实验 K18）；
+  3. 每一个 `.idx` 都能读取，长度不小于最小值，末尾 20 字节等于它前面全部内容的 SHA-1；它对应的 `.pack` 能读取，末尾 20 字节等于 `.idx` 中记录的包校验和；
+  4. `objects/pack` 中只有可识别的文件：成对的 `.pack` 与 `.idx`；与某个现存的 `.pack` 同名的 `.keep`、`.promisor`、`.bitmap`、`.rev`、`.mtimes`；multi-pack-index 的文件（读取时已关闭它）。其他任何文件（例如 `tmp_pack_*`、`tmp_idx_*`，或没有 `.pack` 的 `.rev`）说明存储不完整或正在写入（实验 K20、K22）；
+  5. 有 `objects/info/alternates` 时，它能读取，其中列出的每个对象目录都存在，并对它们递归执行 1 ~ 5（层数上限与 git 相同；实验 K19）。
+  - 任何一条不成立：**无法确认**，退出码 6，不发布扫描结果、不推进游标。这区分了"对象被正常回收"（检查通过，实验 K1、K21）与"存储不完整"（检查不通过）。
   - 它读取全部 `.idx` 文件，耗时与对象数成正比；但只在出现缺失的旧 tip 时才进行，通常是历史改写并回收之后。
 - **stderr 只看有没有**：不看、不比较、不保存、不回显其中的文字，这与按本地化错误文字匹配不同。
 - 这一分类保留了历史改写后重扫的要求：真正被回收的旧 tip（实验 K1）分类为可靠地不存在，按改写处理。
@@ -419,6 +458,7 @@ git status --porcelain --untracked-files=all --ignore-submodules=none -- . ':(ex
 - 审查 052 的反例（K2，`.idx` 被截断）：`missing`、`cat-file -e` 为 1，**有** stderr；存储检查也不通过。
 - 但 stderr 不够：`.idx` 的 SHA 表被静默改坏（K3）、`.pack` 被删除（K6）、`.pack` 或 `.idx` 不可读（K12、K13）、包目录可列出但不可进入（K15）时，都是 `missing`、1、**没有** stderr。这些只有存储检查能发现。
 - 存储检查也不够：松散对象所在的目录不可读（K10）时，`cat-file -e` 为 1、没有 stderr，但 `--batch-check` 有 stderr；存储检查同样能发现。两者合用。
+- 审查 055 的反例（K18，`.pack` 失去 `.idx`）：`missing`、1、**没有** stderr；审查 052 版的存储检查**通过**（漏检），本版的双向配对不通过。恢复同一个 `.idx` 之后，对象又能读出，说明它不是被回收的对象。
 
 **仍然不能证明的**：
 
@@ -513,11 +553,41 @@ git status --porcelain --untracked-files=all --ignore-submodules=none -- . ':(ex
 | K14、K15 | 包目录不可读；可列出但不可进入 | `missing`；1；前者有 stderr，后者**没有** | 存储检查不通过；**无法确认** |
 | K16 | `objects/info/alternates` 不可读（对象在备用对象库中） | `missing`；1；有 stderr | 存储检查：alternates 不可读；**无法确认** |
 | K17 | 备用对象目录不存在 | `missing`；1；有 stderr | 存储检查：备用目录缺失；**无法确认** |
+| K18 | 审查 055 的反例：已打包的旧提交，`.idx` 移开，`.pack` 保留 | `missing`；1；**没有** stderr；审查 052 版的检查**通过** | 双向配对：`.pack` 没有 `.idx`；**无法确认**。恢复 `.idx` 后为 `commit` |
+| K19 | 同上，发生在备用对象目录中 | `missing`；1；没有 stderr；审查 052 版的检查通过 | 递归检查备用目录：**无法确认** |
+| K20 | 真正被回收的旧 tip，但 `objects/pack` 中残留 `tmp_pack_*` | `missing`；1；没有 stderr | 不可识别的文件：**无法确认**（保守） |
+| K21 | 正对照：真正被回收的旧 tip；包旁有 `.bitmap`、`.rev`、`.keep` | `missing`；1；没有 stderr | 检查通过：**可靠地不存在** |
+| K22 | 一个没有 `.pack` 的 `.rev` | `missing`；1；没有 stderr | **无法确认** |
 
 **结论**：
 
 - commit-graph 的绕过与版本有关：2.56 会，2.43 不会。关闭它之后，两个版本都严格。
-- `--batch-check` 的 `missing` 加裸 ID 的 `cat-file -e` 为 1，不足以证明不存在；加上"没有 stderr"也不够（K3、K6、K12、K13、K15）。三者再加上存储检查，本文的 17 种情形中，只有真正被回收的旧 tip 被判为可靠地不存在。
+- `--batch-check` 的 `missing` 加裸 ID 的 `cat-file -e` 为 1，不足以证明不存在；加上"没有 stderr"也不够（K3、K6、K12、K13、K15、K18、K19）。三者再加上双向配对的存储检查，本文的 22 种情形中，只有真正被回收的旧 tip（K1、K21）被判为可靠地不存在。
+- K18 ~ K22 在 Windows 2.56 与 Linux 2.43 上结果相同。
+
+**浅克隆**（负责人决定 P3，2026-10-19）：
+
+- **检测**：扫描之前，Specmetry 直接检查公共 git 目录中的 `shallow` 项（路径由 `rev-parse --git-common-dir` 给出；这个命令不读取对象，也不读取 `shallow` 文件的内容）：
+  - 不存在（lstat 报告"不存在"）：不是浅克隆，照常扫描；
+  - 存在（不论是普通文件、目录或其他）：浅克隆，返回环境错误（退出码 6）；
+  - 其他任何错误：无法确认，同样返回退出码 6。
+  - 不用 `git rev-parse --is-shallow-repository`：`shallow` 文件不可读或是一个目录时，它报告 `false`、退出 0，`log` 也照常把仓库当作完整的仓库读取（实验 H6、H7）。
+- **退出码 6 时**：不写提交、关联、`seq` 或游标，不伪装成成功的空扫描；不自动拉取，不修改浅边界。触发扫描的命令应明确呈现这一限制（WP2.7）。
+- **读取中的防护**：扫描的读取另设 `GIT_SHALLOW_FILE` 指向一个不存在的路径。检测之后才出现的浅边界因此不会截断读取；父提交真的缺失时，严格读取失败（实验 H5）。
+- **生命周期**：
+  - 浅克隆期间不建立、也不推进任何游标（审查 055 的加深场景因此不会出现：不存在在浅边界上建立的游标）。
+  - 恢复为完整仓库之后，按既有的规则扫描：从未扫描过的仓库是第一次扫描，读取全部历史（实验 H3）；在变为浅克隆之前已有游标的，按 §5.2 的增量或重扫（实验 H4：变为浅克隆之前已扫描 A、B、C，恢复之后只需读取新提交 D）。
+  - 将来支持浅克隆时，另行设计 deepen / unshallow 与游标的生命周期，不在本文之内。
+
+| # | 情形 | 结果 |
+|---|---|---|
+| H1 | 完整仓库 | 检测为不是浅克隆；原 `.git` 没有变化 |
+| H2 | 有 `.git/shallow` | 浅克隆：退出码 6；原 `.git` 没有变化 |
+| H3 | 浅克隆期间拒绝扫描（没有游标），之后恢复为完整仓库 | 第一次扫描读取 3 个提交（A、B、C） |
+| H4 | 完整仓库已扫描（游标在 C），变为浅克隆时拒绝、游标不变，恢复后新增 D | 增量 `C..D` 读取 1 个提交，没有遗漏 |
+| H5 | 检测之后才出现 `shallow` 文件 | 默认的 `log` 截断为 3 个提交；设置 `GIT_SHALLOW_FILE` 后读取 4 个；父提交缺失时 128 |
+| H6 | `shallow` 文件不可读（Linux，非 root） | `--is-shallow-repository` 为 `false`、退出 0，`log` 退出 0；本文的检测：无法确认，退出码 6 |
+| H7 | `shallow` 是一个目录 | `--is-shallow-repository` 为 `false`；本文的检测：退出码 6 |
 
 **未验证**：
 
@@ -612,6 +682,8 @@ git status --porcelain --untracked-files=all --ignore-submodules=none -- . ':(ex
   - 不合格的输出；
   - 旧 tip 或正向 tip 的分类为"存在但不可读"或"无法确认"（§5.2），包括分类命令写出了 stderr、存储检查不通过；
   - 读取中途失败：已经读到的部分结果一律丢弃（§5.2 第四步）；
+  - 存储检查不通过：包与索引不配对、不可识别的文件、不可读的目录或 alternates（§5.2）；
+  - 浅克隆，或浅克隆的检测无法确认（§5.2，P3）；
   - git 不支持需要的选项（§13）；
   - 被取消。
 - 错误只说明是哪个 git 子命令、退出状态是多少（§6.1.2），不依赖、也不回显 git 的错误文字。错误中的子命令名称是固定的标签（例如 `status`、`log`），不从参数中取：参数中可能有 `--git-dir=<路径>` 之类的全局选项（审查 052 N2）。
@@ -643,8 +715,8 @@ const (
 	StateClean State = iota
 	StateDirty
 	// StateUndecidable: telling clean from dirty would need a program the
-	// repository configures, or a layout not shown to leave the repository
-	// untouched (§4.3 step 4). What it becomes is the owner's decision P1.
+	// repository configures (§4.3 step 5), or the index is a sparse index
+	// (step 2). It is recorded as unknown, never as clean (decision P1).
 	StateUndecidable
 )
 
@@ -653,6 +725,19 @@ const (
 // submodule, so that no program the repository configures runs and the
 // repository's files are left as they were (§4.3).
 func Clean(ctx context.Context, worktree string) (State, error)
+
+// IndexIsSparse parses an index file without running git (versions 2 to
+// 4, and the shared index that a split index links to) and reports whether
+// it has sparse directory entries or the "sdir" extension; anything it
+// cannot parse completely is an error (§4.3 step 2). Clean calls it on the
+// private copy before any git command reads that copy.
+func IndexIsSparse(path string) (bool, error)
+
+// CheckShallow returns an environment error for a shallow repository, or
+// one whose "shallow" entry in the common git directory cannot be shown
+// absent; it reads that entry itself, since git reports false when the file
+// is unreadable (§5.2, decision P3).
+func CheckShallow(ctx context.Context, worktree string) error
 
 // Tip is a scanned ref: a local branch, or the detached HEAD of a worktree.
 type Tip struct {
@@ -703,7 +788,7 @@ func Log(ctx context.Context, worktree, tip string, exclude []string, fn func(Co
 ```
 
 - 除 `worktree list` 之外，这些操作都经过 `runObjects`。`worktree list` 只读取 git 目录的布局。
-- 扫描的读取（`Classify`、`IsAncestor`、`Log`）固定 `-c core.commitGraph=false -c core.multiPackIndex=false`，并设置 `GIT_GRAFT_FILE`（§5.2）。浅克隆的处理待 P3。
+- 扫描的读取（`Classify`、`IsAncestor`、`Log`）固定 `-c core.commitGraph=false -c core.multiPackIndex=false`，并设置 `GIT_GRAFT_FILE` 与 `GIT_SHALLOW_FILE`（§5.2）。扫描开始之前先运行 `CheckShallow`。
 - `Clean` 的私有 git 目录由 `gitx` 创建并删除（§4.3 的生命周期）；在实验覆盖的布局中，它不写用户的仓库。
 - 错误都是 `apperr.Environment`（退出码 6），不带 git 的输出。
 - `gitx` 不知道编号、项目或数据库。
@@ -714,7 +799,7 @@ func Log(ctx context.Context, worktree, tip string, exclude []string, fn func(Co
 |---|---|
 | `Mentions(trailers, message string) []Mention` | 纯函数：§5.3 的切词与 trailer 优先，结果为编号与来源 |
 | 计划 | 读游标，确认是否已有编号（D5） |
-| 读取 | 调用 `gitx`：tip、密钥扫描（D7）、分类、范围、严格日志；得到候选提交 |
+| 读取 | 调用 `gitx`：浅克隆的检测（P3）、tip、密钥扫描（D7）、分类与存储检查、范围、严格日志；得到候选提交 |
 | 写入 | §5.5 的写事务：比较游标、去重、解析编号、分配 `seq`、写入 |
 | `Scan(ctx, store, project, worktree) (Result, error)` | 编排以上步骤。`Result` 只含计数：读取的提交数、新入库数、是否并发跳过 |
 
@@ -824,25 +909,34 @@ func Log(ctx context.Context, worktree, tip string, exclude []string, fn func(Co
 
 | # | 问题 | 修订 | 状态 |
 |---|---|---|---|
-| B1-R | commit-graph 使已经消失的排除对象仍被严格 log 接受 | 扫描的读取固定 `core.commitGraph=false`、`core.multiPackIndex=false`，并让 grafts 失效；部分结果丢弃（§5.2；实验 G1 ~ G7） | 修订，待复审；浅克隆待 P3 |
-| B2-R | 损坏的包索引被判为可靠地不存在 | "可靠地不存在"另需没有 stderr 与存储检查；其他一律无法确认（§5.2；实验 K1 ~ K17） | 修订，待复审；判据的适用条件见 §5.2"仍然不能证明的" |
-| B3-R1 | 取消过滤器可能把 `dirty` 判为 `clean` | 撤回"只会 clean → dirty"；需要比较受过滤文件的内容时为不可判定（§4.3 第 4 步；实验 F1 ~ F7） | 修订，待复审；取值待 P1 |
-| B3-R2 | 稀疏索引的展开借 alternates 改变原对象的修改时间 | 复制 `sparse-checkout`、只用带 `--sparse` 的列举；带稀疏目录条目的索引为不可判定（§4.3；实验 S1 ~ S14） | 修订，待复审；范围待 P2 |
+| B1-R | commit-graph 使已经消失的排除对象仍被严格 log 接受 | 扫描的读取固定 `core.commitGraph=false`、`core.multiPackIndex=false`，并让 grafts 失效；部分结果丢弃（§5.2；实验 G1 ~ G7） | 修订，待复审（审查 055 认为原反例已修正）；浅克隆由 P3 决定 |
+| B2-R | 损坏的包索引被判为可靠地不存在 | "可靠地不存在"另需没有 stderr 与存储检查；其他一律无法确认（§5.2；实验 K1 ~ K17） | 修订；审查 055 发现 B2-R2，再次修订，待复审 |
+| B3-R1 | 取消过滤器可能把 `dirty` 判为 `clean` | 撤回"只会 clean → dirty"；需要比较受过滤文件的内容时为不可判定（§4.3 第 5 步；实验 F1 ~ F7） | 修订，待复审（审查 055 认为判据方向成立）；取值由 P1 决定为 `unknown` |
+| B3-R2 | 稀疏索引的展开借 alternates 改变原对象的修改时间 | 复制 `sparse-checkout`、只用带 `--sparse` 的列举；带稀疏目录条目的索引为不可判定（§4.3；实验 S1 ~ S14） | 审查 055 发现判断晚于 `status`（B3-R2），门禁已前置，待复审；范围由 P2 决定 |
 
-**审查 052 引出、待负责人决定的取舍**（D1 不包括这些；本文不把它们写成已授权的实施细节）：
+**审查 052 引出的取舍**（负责人 2026-10-19 决定；D1 不包括这些）：
 
-| # | 内容 | 影响 | 选项 | 推荐 |
-|---|---|---|---|---|
-| **P1** | §4.3 的"不可判定"记为什么 | 仓库 local 配置定义了过滤器驱动、并且受过滤的文件需要比较内容时；以及 P2 的稀疏索引。这类工作区上的执行不再合格 | (a) `unknown`（`tree_state` 已有的值）；(b) `dirty`；(c) 环境错误，退出码 6；(d) 不支持定义了本地过滤器驱动的仓库 | (a)：如实表达"无法确认"，与"有变化"区分；对合格性的效果与 (b) 相同 |
-| **P2** | 稀疏索引的范围 | 使用 sparse index 的仓库：工作区中出现与稀疏目录同名的目录时，私有读取会改变原对象的修改时间（实验 S8） | (a) 带稀疏目录条目的索引一律不可判定；(b) 预先检查工作区中没有任何稀疏目录时照常读取，否则不可判定（实验 S3 支持，但没有证明其他触发条件不存在）；(c) 不支持 sparse index 的仓库（环境错误） | (a)：在有更多证据之前，不依赖未证明的条件 |
-| **P3** | 浅克隆 | git 声明的浅边界之外的父提交不读取，缺失也不报错（实验 G6） | (a) 按 git 的声明在边界处停止，并写明扫描只覆盖本地存在的历史；(b) 用 `GIT_SHALLOW_FILE` 使浅边界失效，浅克隆的扫描一律失败（退出码 6）；(c) 浅克隆不扫描提交，记为"没有扫描" | (a)：边界是 git 对"父提交不在本地"的明确声明，不是无法确认的存储状态；但它改变"所有本地分支的历史"的含义，所以需要决定 |
+| # | 内容 | 决定 |
+|---|---|---|
+| **P1** | §4.3 的"不可判定"记为什么 | **`unknown`**，不能当作 `clean`；执行因此不合格 |
+| **P2** | 稀疏索引的范围 | **含稀疏目录条目的索引一律不可判定**，安全门禁放在任何可能展开索引的命令之前（§4.3 第 2 步）；不扩大到所有稀疏检出 |
+| **P3** | 浅克隆 | **MVP 暂不支持浅克隆的提交扫描**：只读地明确检测，浅克隆或无法确认都返回退出码 6，不写入、不伪装成空扫描、不自动拉取或改变浅边界；命令应呈现这一限制；将来支持时另行设计 deepen / unshallow 与游标的生命周期（§5.2） |
+| **`-z`** | 不支持 `worktree list -z` 的 git | MVP 的扫描返回退出码 6，不增加按行解析的回退；这是扫描的能力要求，其他命令的支持范围不变（§5.1、§13） |
+
+**审查 055 的阻塞项**（详见 [review-resolution.md §66](review-resolution.md)）：
+
+| # | 问题 | 修订 | 状态 |
+|---|---|---|---|
+| B2-R2 | 存储检查只查 idx → pack，`.pack` 失去 `.idx` 时被当作可靠缺失 | 包与索引双向配对；不可识别的文件为存储不完整；alternates 递归同样检查（§5.2；实验 K18 ~ K22） | 修订，待复审 |
+| B3-R2 | 稀疏索引的判断晚于 `status`，返回不可判定不能撤销已发生的修改 | 门禁移到第 2 步：Specmetry 解析索引副本，不运行 git，在任何可能展开索引的命令之前；子模块同样先过门禁；超级项目的 `diff-files` 带 `--ignore-submodules=all`（§4.3；实验 S15 ~ S22、X1 ~ X8） | 修订，待复审 |
+| 浅克隆的加深 | P3 的静态描述不足以决定加深后的扫描 | 负责人选择不支持浅克隆的扫描；浅克隆期间不建立游标，恢复为完整仓库之后按既有规则（§5.2"浅克隆"；实验 H1 ~ H7） | 修订，待复审 |
 
 **其他待决或需要说明的事项**：
 
 - 跨项目的同名编号无法区分（§5.3），这是现有格式的限制，不在 MVP 中扩展。
 - 第一次扫描大型仓库的耗时、`Clean` 复制索引的耗时，以及 §5.2 的存储检查在大型仓库中的耗时，都没有基准。实现时测量，必要时另立事项。
 - 维护事项 M-14、M-15 未解决，都与扫描所在命令打开或写入数据库有关，各自单独处理（§5.6）。
-- **低于 2.36 的 git 上的分离 HEAD**（§13）：推荐保持 fail-closed（退出码 6）。按行解析无法可靠切分含换行的路径；若负责人以后要求兼容这些版本，须另行设计能证明安全的读取方式，并经审查。审查 052 认为 fail-closed 是合理的安全行为，但"对这些构建长期不提供扫描"这一兼容性取舍**没有获批**，待负责人决定，不由 WP2.7 的错误展示代替。
+- **低于 2.36 的 git 上的分离 HEAD**（§13）：负责人 2026-10-19 决定，MVP 的扫描以 `worktree list -z` 为能力要求，缺少时返回退出码 6，不增加按行解析的回退。
 
 ## 9. 正反例
 
@@ -887,9 +981,11 @@ func Log(ctx context.Context, worktree, tip string, exclude []string, fn func(Co
 | L19 | 正常扫描：分支有新提交 | `log` 退出 0；新入库与游标在一个事务中写出 |
 | L20 | 移动一个分离 HEAD 的 worktree；在原路径上新建 worktree | 前者成为新游标、按新 ref 读取；后者沿用原游标，按 §5.2 判断：旧 tip 不是祖先或可靠地不存在时重扫，仍是祖先时增量（D2；审查 052 N3） |
 | L21 | 已经读到一部分提交之后 `log` 失败（实验 G3） | 退出码 6；部分结果丢弃；所有提交、关联、`seq` 与游标都不变 |
-| L22 | 旧 tip 所在包的 `.idx` 被截断（审查 052 的反例），或 SHA 表被静默改坏、`.pack` 缺失或不可读 | 无法确认：退出码 6，不写入，不当作改写重扫（审查 052 B2-R；实验 K2、K3、K6、K12 ~ K15） |
+| L22 | 旧 tip 所在包的 `.idx` 被截断（审查 052 的反例）、SHA 表被静默改坏、`.pack` 缺失或不可读，或者 `.pack` 失去了 `.idx`（审查 055 的反例），包括发生在备用对象目录中 | 无法确认：退出码 6，不写入，不当作改写重扫（审查 052 B2-R、审查 055 B2-R2；实验 K2、K3、K6、K12 ~ K15、K18、K19） |
 | L23 | `info/grafts` 让缺失的父提交不再被访问 | grafts 失效，严格读取遇到缺失：退出码 6（实验 G5） |
-| L24 | 浅克隆 | 按 P3 的决定 |
+| L24 | 浅克隆 | 退出码 6；不写提交、关联、`seq` 或游标；不显示为成功的空扫描；不自动拉取（P3；实验 H2） |
+| L25 | `shallow` 项存在但不可读，或是一个目录 | 无法确认：退出码 6（实验 H6、H7） |
+| L26 | 浅克隆期间被拒绝，之后恢复为完整仓库 | 没有游标时为第一次扫描，读取全部历史；已有游标的按增量或重扫，没有遗漏（实验 H3、H4） |
 
 **输入路径与工作区状态**：
 
@@ -907,10 +1003,10 @@ func Log(ctx context.Context, worktree, tip string, exclude []string, fn func(Co
 | MVP-EV-07 | 只追加表的触发器 | `commits`、`commit_links` 的迁移测试（§7） | — |
 | MVP-EV-14 | 编号匹配的规则 | `Mentions` 的单元测试（M1 ~ M11）与集成测试 | — |
 | MVP-EV-15 | 关联的生命周期 | 集成测试（L1 ~ L3，前提见 §9） | — |
-| MVP-EV-16 | 扫描的写入、严格读取与失败 | 集成测试（L4、L9、L10、L14 ~ L19、L21 ~ L23；G1 ~ G7、K1 ~ K17） | — |
+| MVP-EV-16 | 扫描的写入、严格读取与失败 | 集成测试（L4、L9、L10、L14 ~ L19、L21 ~ L23；G1 ~ G7、K1 ~ K22） | — |
 | MVP-EV-17 | 输入路径的读取机制（TD-23） | `gitx` 的集成测试 | 在执行中的退出码与不写记录：WP2.5 |
-| **MVP-EV-18**（新增） | 工作区状态的读取不执行仓库配置的程序；子模块变化；不报告错误的 `clean`；原仓库文件的内容与修改时间不变 | `gitx.Clean` 的集成测试（C1 ~ C11、F1 ~ F7、S1 ~ S14、N1） | "不可判定"的取值：P1、P2 |
-| MVP-WT-06 | 扫描的范围：分离 HEAD 与其身份（D2）、新 ref、密钥命中的拒绝（D7）、没有编号时不扫描（D5）、浅克隆（P3） | 集成测试（L6、L8、L11、L12、L20、L24） | 命令如何呈现扫描被拒绝：WP2.7 |
+| **MVP-EV-18**（新增） | 工作区状态的读取不执行仓库配置的程序；子模块变化；不报告错误的 `clean`；稀疏门禁前置；原仓库文件的内容与修改时间不变 | `gitx.Clean` 的集成测试（C1 ~ C11、F1 ~ F7、S1 ~ S22、X1 ~ X8、N1）；`IndexIsSparse` 的单元测试 | — |
+| MVP-WT-06 | 扫描的范围：分离 HEAD 与其身份（D2）、新 ref、密钥命中的拒绝（D7）、没有编号时不扫描（D5）、浅克隆（P3） | 集成测试（L6、L8、L11、L12、L20、L24 ~ L26） | 命令如何呈现扫描被拒绝与浅克隆的限制：WP2.7 |
 | §6.5 进度中的关联提交 | — | — | 已由 WP2.1 覆盖 |
 | CX | 没有直接针对提交关联的反例项 | — | E2E-2 的"追加带 trailer 的提交"属于 WP2.9 |
 
@@ -928,6 +1024,10 @@ func Log(ctx context.Context, worktree, tip string, exclude []string, fn func(Co
   - **对象读取不被绕过**：写出 commit-graph 之后删除排除对象；`info/grafts`；损坏的 multi-pack-index。断言扫描失败、不写入。
   - **原仓库不变**：每个 `Clean` 测试前后，比较原 `.git` 下所有文件的内容哈希**与修改时间**（之前先设为旧的修改时间），不只比较索引与配置。
   - **临时目录**：成功、失败、取消之后都没有遗留；删除失败时返回环境错误；遗留目录在下一次读取时被清理。
+  - **门禁的执行顺序**（审查 055 B3-R2）：稀疏索引的布局（超级项目与子模块，有无稀疏目录同名的目录）中，断言门禁之后**没有运行任何 git 命令**（例如用记录调用的替身 git），并且原 `.git` 下所有文件的内容与修改时间都不变；只断言最终的 `unknown` 不够。正对照：普通布局照常运行整套命令。
+  - **存储检查**：K18 ~ K22（`.pack` 失去 `.idx`、备用目录中同样的情形、残留的临时文件、伴随文件、孤立的 `.rev`），断言存储检查不写入任何文件。
+  - **浅克隆**：H1 ~ H7；检测与拒绝都不写入。
+- **`IndexIsSparse` 的单元测试**：版本 2、3、4；扩展标志；拆分索引与它的共享索引；untracked cache；稀疏目录条目与 `sdir`；校验和错误、截断、未知版本、扩展越界都为错误。
   - **过滤器不执行**：
     - clean、process 过滤器与子模块中的过滤器，都配置成运行时写标记的夹具程序。
     - 断言 `Clean` 运行之后没有标记，结果符合 §4.3。
@@ -976,7 +1076,8 @@ func Log(ctx context.Context, worktree, tip string, exclude []string, fn func(Co
 | `status --porcelain -z --ignore-submodules=all`，`config --list --local --includes -z`，`--git-dir`、`--work-tree` | `Clean` | 未逐一核对 | Linux 上运行（F、S、N1） | 支持（C1 ~ C11、F、S、N1） | 实现时核对 |
 | `ls-files --sparse`、`check-attr -z --stdin`、`diff-files --name-only -z`、`rev-parse --absolute-git-dir` | `Clean` 的第 3、4 步 | 未核对（`--sparse` 的引入版本未核实） | Linux 上运行（S、F、N1） | 支持 | 不支持时退出码 6 |
 | `-c core.commitGraph=false`、`-c core.multiPackIndex=false`、`GIT_GRAFT_FILE` | 严格读取（§5.2） | 未运行 | Linux 上运行（G、K） | 支持（G、K） | 实现时在 CI 的三个平台上验证 |
-| `GIT_SHALLOW_FILE` | 浅克隆（P3 的选项 b） | 未运行 | 未运行 | 支持（G6） | 待 P3 |
+| `GIT_SHALLOW_FILE` | 读取中的浅克隆防护（P3） | 未运行 | Linux 上运行（H5） | 支持（G6、H5） | 实现时在 CI 的三个平台上验证 |
+| 浅克隆的检测、稀疏门禁 | §5.2、§4.3 第 2 步 | 不运行 git | 不运行 git | 不运行 git | Specmetry 直接检查 `shallow` 项、直接解析索引文件，与 git 的版本无关 |
 
 - 2.56 是 Windows 上实际运行的结果；2.43 一列中标为"Linux 上运行"的，是审查 052 之后在 WSL Ubuntu 的 git 2.43.0 上实际运行的结果，其余仍来自审查 050 的静态核查；2.32 一列都是静态核查。
 - **后果**：一个低于 2.36、却通过了 PD-26 探测的 git（例如回移了 `GIT_NO_LAZY_FETCH` 的发行版构建，是否存在未核实），每次提交扫描都会因 `worktree list -z` 返回退出码 6。
