@@ -51,7 +51,18 @@ func TestCriterionDecisionTable(t *testing.T) {
 			f.h.Run(f.ac, factgen.RunSpec{Head: commitA, Result: "error", FailureKind: "timeout"})
 		}, derive.CriterionFailing, "check_failed"},
 		{"4: input_missing counts as a failure", func(f *fixture) {
-			f.h.Run(f.ac, factgen.RunSpec{Head: commitA, Result: "error", FailureKind: "input_missing"})
+			// A person's edit makes the check declare an input commit A's
+			// tree lacks: a material update, revision 2. The run binds that
+			// revision and configuration and, the input missing at its HEAD
+			// (data-model §7.4 step 2), records no input; no record shows
+			// the input at A (review 048).
+			f.h.Apply(func(r *factgen.Review) {
+				r.Update(f.ac, true, func(x *factgen.Fields) { x.Check = check("go test ./orders", "testdata/orders.golden") })
+			})
+			run := f.h.RunRow(f.h.Run(f.ac, factgen.RunSpec{Head: commitA, Result: "error", FailureKind: "input_missing"}))
+			if run.CriterionRevision != 2 || run.CheckConfigHash != f.h.ConfigHash(f.ac) || run.InputsJSON != nil {
+				f.t.Fatalf("the run binds revision %d, configuration %s, record %v", run.CriterionRevision, run.CheckConfigHash, run.InputsJSON)
+			}
 		}, derive.CriterionFailing, "check_failed"},
 		{"4 before 5: rejected, then a failure", func(f *fixture) {
 			f.h.Decide(f.ac, factgen.DecisionSpec{Decision: "rejected", Snapshot: commitA})

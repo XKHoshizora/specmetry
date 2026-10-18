@@ -29,7 +29,8 @@
 //     preconditions (§7.1, §7.3, §7.4, V-C03), with one immutable tree
 //     per commit: a normalized path at a head_start has one input entry,
 //     and an input_missing run there needs a declared path no record shows
-//     at that commit (§4.11.2, §7.4 step 2).
+//     at that commit, so a check that declares no input never gives one
+//     (§4.11.2, §7.4 step 2).
 //
 // Not checked, because the dump does not carry them: a scope's
 // acknowledged waivers and seen_scope_confirmation_id, a decision's
@@ -860,6 +861,14 @@ func (c *checker) checkRuns() {
 		}
 		declared := slices.Clone(st.Values.Check.Inputs)
 		slices.Sort(declared)
+		// §7.4 step 2 tells three cases apart. A check that declares no
+		// input reads none: it is never input_missing, and records nothing.
+		// A declared input missing at head_start makes the run
+		// input_missing, without a record. Otherwise the run records every
+		// declared input.
+		if kind == "input_missing" && len(declared) == 0 {
+			c.fail(r.Seq, "input_missing", "input_missing of a check that declares no input")
+		}
 		if kind == "input_missing" && r.HeadStart != nil && len(declared) > 0 && !slices.ContainsFunc(declared, func(p string) bool {
 			_, ok := recorded[treeKey{*r.HeadStart, lookupPath(p)}]
 			return !ok
@@ -991,11 +1000,21 @@ func Report(problems []Problem, trace []string) string {
 }
 
 // CheckTrees checks the input records of a dump against the trees of its
-// commits, a generator's witness (factgen.Case.Trees): every entry is the
-// one of its lookup path in the tree of the run's head_start, and an
-// input_missing run declares a path that tree does not have. It shows the
-// records are explained by one tree per commit as the generator declares
-// them; it says nothing of how a Git reader computes an entry.
+// commits, a generator's witness (factgen.Case.Trees), without relying on
+// Check having run. It tells apart the three cases of §7.4 step 2:
+//
+//   - a check that declares no input reads none, so its run is never
+//     input_missing, whatever the tree;
+//   - a run is input_missing when the tree of its head_start lacks a
+//     declared input (every one when head_start is NULL);
+//   - otherwise the run records every declared input, each entry the one
+//     of its lookup path in that tree.
+//
+// It takes each run's declared inputs from the configuration the rows
+// give it; a run whose configuration no change wrote is Check's to refuse.
+// It shows the records are explained by one tree per commit as the
+// generator declares them; it says nothing of how a Git reader computes an
+// entry.
 func CheckTrees(d factgen.Dump, trees factgen.Trees) []Problem {
 	c := &checker{d: d}
 	declared := map[string][]string{} // criterion/config hash -> inputs
@@ -1006,8 +1025,17 @@ func CheckTrees(d factgen.Dump, trees factgen.Trees) []Problem {
 		}
 	}
 	for _, r := range d.CheckRuns {
-		inputs := declared[r.CriterionID+"/"+r.CheckConfigHash]
-		if r.HeadStart == nil || len(inputs) == 0 {
+		inputs, known := declared[r.CriterionID+"/"+r.CheckConfigHash]
+		missing := orEmpty(r.FailureKind) == "input_missing"
+		switch {
+		case !known:
+			continue
+		case len(inputs) == 0:
+			if missing {
+				c.fail(r.Seq, "input_missing", "input_missing of a check that declares no input")
+			}
+			continue
+		case r.HeadStart == nil:
 			continue
 		}
 		tree, ok := trees[*r.HeadStart]
@@ -1017,11 +1045,18 @@ func CheckTrees(d factgen.Dump, trees factgen.Trees) []Problem {
 		}
 		has := func(p string) bool { _, ok := tree[lookupPath(p)]; return ok }
 		switch {
-		case orEmpty(r.FailureKind) == "input_missing":
+		case missing:
 			if !slices.ContainsFunc(inputs, func(p string) bool { return !has(p) }) {
 				c.fail(r.Seq, "commit tree", "input_missing at %s, whose tree has every declared input %v", short(*r.HeadStart), inputs)
 			}
-		case r.InputsJSON != nil:
+		case r.InputsJSON == nil:
+			c.fail(r.Seq, "§4.11.2", "a run of declared inputs %v without their input record", inputs)
+		default:
+			for _, p := range inputs {
+				if !has(p) {
+					c.fail(r.Seq, "commit tree", "a run that records its inputs, though the tree of %s lacks %s", short(*r.HeadStart), p)
+				}
+			}
 			var entries []factgen.InputEntry
 			_ = json.Unmarshal([]byte(*r.InputsJSON), &entries)
 			for _, e := range entries {
