@@ -33,6 +33,8 @@ func TestMain(m *testing.M) {
 		"upgrader":    upgraderHelper,
 		"lockholder":  lockHolderHelper,
 		"plainclose":  plainCloseHelper,
+		"m14open":     m14OpenHelper,
+		"m14probe":    m14ProbeHelper,
 	})
 	os.Exit(m.Run())
 }

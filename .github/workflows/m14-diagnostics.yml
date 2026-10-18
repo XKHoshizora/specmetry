@@ -1,0 +1,57 @@
+name: M-14 diagnostics
+
+# The off-by-default diagnostics of maintenance item M-14
+# (docs/m14-diagnostics.md), on macOS and, as the control, Windows. Not part
+# of CI: it runs on pushes to the diagnostics branch and by hand; ci.yml
+# runs the same tests only as skipped ones.
+on:
+  push:
+    branches: [test/m14-diagnostics]
+    # Only a change of the diagnosed code or of this workflow runs it again;
+    # a change of the documents does not.
+    paths:
+      - internal/store/sqlite/**
+      - internal/datadir/**
+      - go.mod
+      - go.sum
+      - .github/workflows/m14-diagnostics.yml
+  workflow_dispatch:
+    inputs:
+      seconds:
+        description: Seconds of each read-only probe variant (at most 300)
+        default: "60"
+      rounds:
+        description: Rounds of the Open path (at most 1000)
+        default: "200"
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    name: M-14 (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-go@v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Diagnose
+        shell: bash
+        env:
+          SPECMETRY_M14: "1"
+          M14_SHA: ${{ github.sha }}
+          M14_SECONDS: ${{ inputs.seconds || '60' }}
+          M14_ROUNDS: ${{ inputs.rounds || '200' }}
+        run: |
+          go version
+          go test -tags nowebui -count=1 -v -timeout 25m -run '^TestM14' ./internal/store/sqlite | tee m14.log
+      - name: Results
+        if: always()
+        shell: bash
+        run: grep 'M14-RESULT' m14.log || echo "no result line"
