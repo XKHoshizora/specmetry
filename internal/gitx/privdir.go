@@ -22,7 +22,7 @@ import (
 // project fact; they never reach a log, an error or a backup.
 
 const (
-	privatePrefix = "specmetry-git-"
+	privatePrefix = "specmetry-private-"
 	privateLock   = "lock"
 	// staleUnlocked is how old a directory without a lock file must be to
 	// be taken for one whose process stopped before it locked it.
