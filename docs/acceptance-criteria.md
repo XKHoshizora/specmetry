@@ -139,6 +139,7 @@
 | MVP-WT-03 | 每条 Claim 批次、检查执行、会话和事件都有 `worktree_id` 和完整的代码上下文 | 集成 | FR-WT-02 | M2 / M3 |
 | MVP-WT-04 | 在 `feature/x` 上提交带 trailer 的提交 → 被发现，且只发现一次；在 `feature/x` 上执行 `reset` 并提交新提交 → 该 ref 被重新扫描，不产生重复 | 集成 | FR-WT-04 | M2 |
 | MVP-WT-05 | 在 feature worktree 中执行 `status --json` → `workspace.is_target_snapshot = false`；`delivery` 部分与在主 worktree 中执行时完全相同 | 集成 | FR-WT-05 | M2 |
+| MVP-WT-06 | **扫描的范围**（WP2.3 规范 §5.1、§5.2，待审查）：分离 HEAD 上的提交提到已有编号 → 入库；从已扫描的 `main` 新建分支并提交一个新提交 → 只读取新提交；分支名命中密钥规则 → 该 ref 跳过、不建立游标、不回显；项目还没有需求或 AC → 不扫描、不建立游标 | 集成 | FR-WT-04 | M2 |
 
 ### 2.6 现状盘点（INV）
 
@@ -178,6 +179,10 @@
 | MVP-EV-11 | 提交的标题中有 canary 字符串 → 提交关联正常，数据库中只有 SHA 和时间 | 集成 | FR-EV-06 | M2 |
 | MVP-EV-12 | **`--json` 的输出流**：检查同时向 stdout 和 stderr 打印 canary → `check run --json` 的 stdout 恰好是一份能通过 `check-run.v1` 校验的 JSON，其中没有 canary；两个 canary 都出现在 stderr；数据目录中找不到 canary | 集成 | FR-EV-01 | M2 |
 | MVP-EV-13 | **证据等级**：MVP 中每条执行的 `evidence_grade` 都是 `observed`；`check run --isolation required` → 不执行检查，`check_runs` 不增加任何行，退出码 6，`error.details` 中有 `isolation_unavailable` | 集成 | FR-EV-08 | M2 |
+| MVP-EV-14 | **提交关联的匹配**（TD-17，data-model §4.12；WP2.3 规范 §5.3）：`Specmetry-Ref` trailer 的键不区分大小写，哪些行是 trailer 由 git 判定；编号按 TD-14 的格式整词匹配，小写、位数不足、`GOAL-n` 都不关联；本项目没有的编号忽略，已退役的照常关联；同一提交对同一实体只有一条关联，在 trailer 中出现时为 `trailer`，否则为 `message`；没有任何关联的提交不入库（WP2.3 规范 §9 的 M1 ~ M11） | 单元、集成 | FR-EV-06 | M2 |
+| MVP-EV-15 | **关联的生命周期**（审查 044 N1，data-model §4.12）：扫描时编号还不存在的提交不入库，之后的常规增量扫描不再读取它；已入库提交的关联不重算，后来新增的编号不补写；历史改写后的重扫中首次满足条件的提交，以这次扫描的 `seq` 入库 | 集成 | FR-EV-06、FR-WT-04 | M2 |
+| MVP-EV-16 | **扫描的写入**（data-model §4.12；WP2.3 规范 §5.5、§5.6）：有新入库的提交时，这些提交共用一个 `seq`，关联与游标在同一事务中写入；没有时不分配 `seq`（`seq` 计数器不变），游标照常更新，`scanned_seq` 不变；写入时游标已被另一个进程改变 → 什么都不写；扫描中任何 git 命令失败 → 退出码 6，什么都不写 | 集成 | FR-WT-04、FR-EV-06 | M2 |
+| MVP-EV-17 | **输入路径的读取机制**（TD-23，WP2.3 规范 §4，待审查）：在夹具仓库中逐项复现规范中 T1 ~ T23 的结果：普通文件、可执行文件、目录、仓库根、符号链接、gitlink、空格与特殊字符、通配字符的字面匹配、大小写、未规范化的路径；路径不存在 → 没有记录；读取路径所需的树对象缺失 → 退出码 6；叶对象缺失 → 照常记录 | 集成 | FR-EV-01 | M2 |
 
 ### 2.9 验收（ACC）
 
@@ -452,10 +457,10 @@
 | FR-SRC | SRC-01 ~ 08、CX-17 |
 | FR-BL | BL-01 ~ 28、CX-07、CX-14 |
 | FR-TGT | TGT-01 ~ 11、CX-05、CX-06、CX-18（FR-TGT-05）、CX-22（FR-TGT-03）、INIT-09（FR-TGT-03） |
-| FR-WT | WT-01 ~ 05、COL-10、CX-03、CX-04 |
+| FR-WT | WT-01 ~ 06、EV-15、EV-16、COL-10、CX-03、CX-04 |
 | FR-INV | INV-01 ~ 06、CX-10 |
 | FR-CLM | CLM-01 ~ 05、CX-12、CX-13 |
-| FR-EV | EV-01 ~ 13、CX-02、CX-15、CX-16、CX-26 ~ 28 |
+| FR-EV | EV-01 ~ 17、CX-02、CX-15、CX-16、CX-26 ~ 28 |
 | FR-ACC | ACC-01 ~ 11、CX-01、CX-08、CX-19 ~ 21、CX-25 ~ 27 |
 | FR-ST | ST-01 ~ 15、CLM-01（FR-ST-07）、CX-09、CX-12（FR-ST-07）、CX-22 |
 | FR-COL | COL-01 ~ 15 |
