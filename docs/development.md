@@ -34,7 +34,7 @@ export SPECMETRY_HOME="$(mktemp -d)/specmetry-home"
 | `internal/baseline/` | 读取已确认的基准（当前版本、按编号查找条目），按 TD-14 分配编号（`GOAL-n`、`REQ-nnn`、`AC-<需求号>-n`、`Q-nnn`，永不复用） |
 | `internal/proposal/` | 提案（architecture §6.1.4）：静态规则、来源解析、流式片段校验（不保存原文）、代码引用检查、在一个写事务中保存提案、条目、问题与问题的来源引用 |
 | `internal/gitx/` | 调用 git CLI（只读）：定位仓库与 worktree、分支与提交、文件列表；不传递 `GIT_DIR` 等定位变量 |
-| `internal/domain/derive/` | 推导规则（纯函数，data-model §6）；目前只有初始化进度（§6.12） |
+| `internal/domain/derive/` | 推导引擎（纯函数，data-model §6、§6.13、§6.13.1）：`Derive` 是截止 `as_of_seq` 的完整推导，`ChangesSince` 是 `--diff-since` 的 AC 投影。全部输入显式给出，只导入不做 I/O 的标准库包（由测试检查），不读取数据库、git、文件、网络、环境变量或时钟；缺少输入时返回 `*InputError`，不用缺省值或当前值补齐 |
 | `internal/ulid/` | ULID 生成（只用于标识，不用于排序） |
 | `internal/contract/` | 用内嵌的 `schemas/` 做 JSON Schema 2020-12 校验；错误只给出字段指针和约束，不回显提交的值或意外的键（architecture §10.8） |
 | `internal/testutil/` | 测试基座（见 §6） |
@@ -111,7 +111,7 @@ go build -o dist/ ./cmd/specmetry
 
 ## 6. 测试
 
-- 推导引擎（M2 起）测试先行，表驱动，每条规则对应 CX 反例；`ready` 复核器在测试中独立实现。
+- 推导引擎（M2 起）测试先行，表驱动，每条规则对应 CX 反例；`ready` 复核器在测试中独立实现。性质测试使用固定的随机种子，每个种子是一个子测试，失败时可以单独重跑，例如 `go test ./internal/domain/derive -run 'TestGapsAndDelivery/seed=17'`。
 - 验收项编号写在测试函数的注释中（例如 `// MVP-STO-01`），便于追溯。
 - 测试基座 `internal/testutil`：
   - `TempHome`：为测试设置独立且尚未创建的 `SPECMETRY_HOME`。
@@ -123,6 +123,12 @@ go build -o dist/ ./cmd/specmetry
   - `DispatchHelper` / `HelperCommand`：在 `TestMain` 中注册辅助子进程，用于多进程并发测试。
   - `LoosenPermissions`：放宽文件或目录的权限，用于检查拒绝写入和 `doctor` 的报告。
   - `SnapshotTree` / `AssertTreeUnchanged`：记录目录下每个条目的类型、权限、大小、修改时间和内容哈希，用于断言"拒绝时没有任何改动""只读检查前后完全一致"。`SettledSnapshot` 先等两次快照一致：Windows 的 NTFS 可能稍后才公布另一进程较早写入的修改时间。
+  - `factgen`：推导测试的事实前端（WP2.1、WP2.2）。
+    - `History` 按生产写入的方式逐次写入事实（同一次逻辑写入共用一个 `seq`），产出与数据库行对应的转储：JSON 列为文本，NULL 为 nil，并带当前投影列，用来检查实现不拿当前投影冒充历史。
+    - 审核与人工编辑（`Review` / `Apply`）先计划、再按 `baseline.Apply` 的方式应用：显式变更都来自提案条目，同一提案的 target 至多一次（V-P03），按 data-model §5.5 的阶段与 `item_index` 应用，级联紧跟其原因，后续处理（`FollowUp`）在最后。每条变更在本次写入前面各条留下的状态上应用，所以 Goal 的级联之后，条目还可以更新或退役同一需求；被级联退役的实体不能再改。关于提案条目的问题只回填到需求或 AC 的新增。违反规则的构造会 panic。`Trace` 记录每次写入，用于定位生成历史中的问题。
+    - `Random` 用固定种子生成合法事实历史与当前值输入。每个生成的提交有一棵固定的树（`Case.Trees`），执行只在 HEAD 的树缺少声明的输入时为 `input_missing`。
+    - `factgen/legality` 只读转储行，按冻结的写入规则独立检查历史是否合法，不使用 `History`、推导器或复核器；`CheckTrees` 用生成器的提交树核对输入记录。性质测试与双向对照只使用经它们确认的历史。
+    - `factgen/toderive` 把转储映射为推导引擎的输入，只做映射，不选择、不过滤、不计算。
   - `testdir.New`：放数据目录的测试目录。Windows 上位于 `%LOCALAPPDATA%\specmetry-test`：`%TEMP%` 可能授予其他账户修改权限（例如编码代理的沙箱账户），按路径规则会被拒绝。
 - 存储包的测试用辅助子进程模拟崩溃（写入后不关闭数据库直接退出）、进行中的未提交事务、并发升级和持锁进程。
 - 跨用户测试（`crossuser_linux_test.go`）需要以 root 运行，以便启动两个不同用户的进程；普通用户运行时跳过。CI 在 Linux 上单独用 `sudo` 运行它们；本地可在 WSL 中用 `wsl -u root` 运行交叉编译的测试二进制。
