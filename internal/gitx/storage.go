@@ -157,7 +157,7 @@ const idxMinSize = 256*4 + 2*indexHashSize
 // checkPack checks one pack's .idx and .pack (base is the path without the
 // extension).
 func checkPack(base string) error {
-	f, err := os.Open(base + ".idx")
+	f, err := os.Open(base + ".idx") //nolint:gosec // a pack index git reads; only read
 	if err != nil {
 		return errStorage
 	}
@@ -181,7 +181,7 @@ func checkPack(base string) error {
 	if _, err := f.ReadAt(sums, size-2*indexHashSize); err != nil || !bytes.Equal(h.Sum(nil), sums[indexHashSize:]) {
 		return errStorage
 	}
-	p, err := os.Open(base + ".pack")
+	p, err := os.Open(base + ".pack") //nolint:gosec // its pack; only its trailer is read
 	if err != nil {
 		return errStorage
 	}
