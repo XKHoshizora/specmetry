@@ -28,12 +28,13 @@ export SPECMETRY_HOME="$(mktemp -d)/specmetry-home"
 | `internal/config/` | `config.toml` 读取（未知键视为错误；错误只给出行列位置，不回显文件内容）；`[secrets]` 追加规则 |
 | `internal/channel/` | CLI 通道识别（architecture §5.1）：`Detect`（stdin、stdout 是否为终端或 Windows 控制台，已核实的 Agent 环境变量只看是否存在且非空，值只用于这次判断，从不保存、记录或输出）、`Guard`（人类专属操作的拦截与交互式确认，没有跳过参数）。防止误操作，不是身份认证 |
 | `internal/secrets/` | 密钥识别（architecture §10.8）：14 条内置规则、追加规则校验、按字段扫描（JSON Pointer）、不回显命中文本的拒绝错误。只能降低泄露风险，不能保证检测出所有秘密 |
-| `internal/store/sqlite/` | SQLite 存储基础：打开顺序、迁移框架、备份、墓碑、`seq`、只追加触发器、只读检查；迁移 v2 起是业务表（`projects`、`worktrees`、`delivery_targets`） |
+| `internal/store/sqlite/` | SQLite 存储基础：打开顺序、迁移框架、备份、墓碑、`seq`、只追加触发器、只读检查；迁移 v2 起是业务表（`projects`、`worktrees`、`delivery_targets`）；v7 是提交扫描的 `commits`、`commit_links`、`git_scan_cursors`（WP2.3） |
 | `internal/project/` | 项目登记与 `init`（architecture §6.1.1、§6.1.2）：阶段识别与候选来源（只看路径和大小，不读内容）、marker、exclude 条目、项目与 worktree 的登记、默认交付目标 |
 | `internal/source/` | 来源（architecture §6.1.3）：路径解析（`in_repo` / `external`）、分块计算 sha256（可取消，不保存内容）、磁盘观测、来源集合哈希、登记、确认与移除、引用列表 |
 | `internal/baseline/` | 读取已确认的基准（当前版本、按编号查找条目），按 TD-14 分配编号（`GOAL-n`、`REQ-nnn`、`AC-<需求号>-n`、`Q-nnn`，永不复用） |
 | `internal/proposal/` | 提案（architecture §6.1.4）：静态规则、来源解析、流式片段校验（不保存原文）、代码引用检查、在一个写事务中保存提案、条目、问题与问题的来源引用 |
-| `internal/gitx/` | 调用 git CLI（只读）：定位仓库与 worktree、分支与提交、文件列表；不传递 `GIT_DIR` 等定位变量 |
+| `internal/gitx/` | 调用 git CLI（只读）：定位仓库与 worktree、分支与提交、文件列表；不传递 `GIT_DIR` 等定位变量。WP2.3（[规范](wp2.3-git-reader.md)）：输入路径的树条目（`TreeEntry`）；工作区状态（`Clean`：私有 git 目录、白名单配置、直接解析索引的稀疏门禁 `IndexIsSparse`，不执行仓库配置的程序）；提交扫描的严格读取（`CheckShallow`、`Tips`、`Classify` 与存储检查、`IsAncestor`、`Log`：关闭 commit-graph、multi-pack-index、grafts 与 shallow 文件）。私有目录建在系统临时目录中，名称前缀 `specmetry-private-`，使用期间加锁 |
+| `internal/gitscan/` | 提交扫描（WP2.3）：编号匹配（`Mentions`）、各 ref 的读取范围、计划之后的一个写事务（并发跳过、只入库至少关联一个本项目编号的新提交、共享一个 `seq`、写游标）。不输出、不节流，由调用的命令决定何时扫描（WP2.7） |
 | `internal/domain/derive/` | 推导引擎（纯函数，data-model §6、§6.13、§6.13.1）：`Derive` 是截止 `as_of_seq` 的完整推导，`ChangesSince` 是 `--diff-since` 的 AC 投影。全部输入显式给出，只导入不做 I/O 的标准库包（由测试检查），不读取数据库、git、文件、网络、环境变量或时钟；缺少输入时返回 `*InputError`，不用缺省值或当前值补齐 |
 | `internal/ulid/` | ULID 生成（只用于标识，不用于排序） |
 | `internal/contract/` | 用内嵌的 `schemas/` 做 JSON Schema 2020-12 校验；错误只给出字段指针和约束，不回显提交的值或意外的键（architecture §10.8） |
@@ -121,6 +122,7 @@ go build -o dist/ ./cmd/specmetry
   - `RunInPTY` / `RunInPTYSession`：在伪终端中运行命令（Windows 使用 ConPTY），后者还能在提示出现后输入回答，用于通道识别和交互式确认测试。ConPTY 渲染时会去掉行尾空格，所以等待的提示文字不要以空格结尾。
   - `NewCanary` / `FindInTree`：隐私测试中的 canary 搜索。
   - `DispatchHelper` / `HelperCommand`：在 `TestMain` 中注册辅助子进程，用于多进程并发测试。
+  - `FakeGit` / `PassthroughGit` / `FakeRemoteHelper`：替身 git（记录调用；`PassthroughGit` 按模式改变真实 git 的行为，例如隐藏 `GIT_NO_LAZY_FETCH`、拒绝 `ls-files --sparse` 或 `worktree list -z`）与运行即写标记的替身程序（也用作过滤器或 `gpg.program`，证明它没有运行）。
   - `LoosenPermissions`：放宽文件或目录的权限，用于检查拒绝写入和 `doctor` 的报告。
   - `SnapshotTree` / `AssertTreeUnchanged`：记录目录下每个条目的类型、权限、大小、修改时间和内容哈希，用于断言"拒绝时没有任何改动""只读检查前后完全一致"。`SettledSnapshot` 先等两次快照一致：Windows 的 NTFS 可能稍后才公布另一进程较早写入的修改时间。
   - `factgen`：推导测试的事实前端（WP2.1、WP2.2）。
