@@ -558,10 +558,18 @@ func execTo(ctx context.Context, git, dir string, stdout io.Writer, args ...stri
 // command runs git once in dir with env. Its output goes to stdout, or
 // nowhere when stdout is nil; its messages go nowhere.
 func command(ctx context.Context, git, dir string, env []string, stdout io.Writer, args ...string) (int, error) {
+	return commandIO(ctx, git, dir, env, nil, stdout, nil, args...)
+}
+
+// commandIO is command with stdin as git's input, and git's messages
+// written to stderr, or nowhere when it is nil.
+func commandIO(ctx context.Context, git, dir string, env []string, stdin io.Reader, stdout, stderr io.Writer, args ...string) (int, error) {
 	cmd := exec.CommandContext(ctx, git, args...)
 	cmd.Dir = dir
 	cmd.Env = env
+	cmd.Stdin = stdin
 	cmd.Stdout = stdout
+	cmd.Stderr = stderr
 	err := cmd.Run()
 	var exit *exec.ExitError
 	switch {
