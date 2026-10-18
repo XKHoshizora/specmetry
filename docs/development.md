@@ -129,6 +129,7 @@ go build -o dist/ ./cmd/specmetry
     - `Random` 用固定种子生成合法事实历史与当前值输入。每个生成的提交有一棵固定的树（`Case.Trees`），执行只在 HEAD 的树缺少声明的输入时为 `input_missing`。
     - `factgen/legality` 只读转储行，按冻结的写入规则独立检查历史是否合法，不使用 `History`、推导器或复核器；`CheckTrees` 用生成器的提交树核对输入记录。性质测试与双向对照只使用经它们确认的历史。
     - `factgen/toderive` 把转储映射为推导引擎的输入，只做映射，不选择、不过滤、不计算。
+  - `readycheck`：独立的 `ready` 复核器（WP2.2，acceptance-criteria §3.1）。按谓词 R1 ~ R10 自行从事实判断交付是否 `ready`，只导入标准库，不导入推导引擎或任何生产包；`readycheck/fromdump` 是它自己的转换器，与 `factgen/toderive` 分别实现。两个方向的导入关系都由测试检查。
   - `testdir.New`：放数据目录的测试目录。Windows 上位于 `%LOCALAPPDATA%\specmetry-test`：`%TEMP%` 可能授予其他账户修改权限（例如编码代理的沙箱账户），按路径规则会被拒绝。
 - 存储包的测试用辅助子进程模拟崩溃（写入后不关闭数据库直接退出）、进行中的未提交事务、并发升级和持锁进程。
 - 跨用户测试（`crossuser_linux_test.go`）需要以 root 运行，以便启动两个不同用户的进程；普通用户运行时跳过。CI 在 Linux 上单独用 `sudo` 运行它们；本地可在 WSL 中用 `wsl -u root` 运行交叉编译的测试二进制。
