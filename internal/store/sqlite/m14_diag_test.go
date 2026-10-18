@@ -69,10 +69,10 @@ func m14Enabled(t *testing.T) {
 	}
 }
 
-// m14Int reads a bound from the environment, def when unset. A value
-// outside [low, limit] stops the run before any work: a run never does
-// less, or other, work than it reports.
-func m14Int(t *testing.T, name string, def, low, limit int) int {
+// m14Int reads a bound from the environment, def when unset. Every bound
+// is at least 1: a value outside [1, limit] stops the run before any work,
+// so a run never does less, or other, work than it reports.
+func m14Int(t *testing.T, name string, def, limit int) int {
 	t.Helper()
 	v := def
 	if s := os.Getenv(name); s != "" {
@@ -82,8 +82,8 @@ func m14Int(t *testing.T, name string, def, low, limit int) int {
 		}
 		v = n
 	}
-	if v < low || v > limit {
-		t.Fatalf("%s=%d is outside [%d, %d]", name, v, low, limit)
+	if v < 1 || v > limit {
+		t.Fatalf("%s=%d is outside [1, %d]", name, v, limit)
 	}
 	return v
 }
@@ -584,9 +584,9 @@ func m14Invalid(t *testing.T, invalid []string) map[string]any {
 // Open does.
 func TestM14ReadOnlyProbe(t *testing.T) {
 	m14Enabled(t)
-	seconds := m14Int(t, "M14_SECONDS", 20, 1, 300)
-	writers := m14Int(t, "M14_WRITERS", 3, 1, 16)
-	probers := m14Int(t, "M14_PROBERS", 3, 1, 16)
+	seconds := m14Int(t, "M14_SECONDS", 20, 300)
+	writers := m14Int(t, "M14_WRITERS", 3, 16)
+	probers := m14Int(t, "M14_PROBERS", 3, 16)
 	for _, variant := range []struct {
 		name    string
 		writers int
@@ -688,10 +688,10 @@ func TestM14ReadOnlyProbe(t *testing.T) {
 // M14_ROUND_TIMEOUT seconds.
 func TestM14OpenPath(t *testing.T) {
 	m14Enabled(t)
-	rounds := m14Int(t, "M14_ROUNDS", 30, 1, 1000)
-	procs := m14Int(t, "M14_PROCS", 3, 1, 16)
-	facts := m14Int(t, "M14_FACTS", 100, 1, 1000)
-	roundTimeout := m14Int(t, "M14_ROUND_TIMEOUT", 120, 1, 600)
+	rounds := m14Int(t, "M14_ROUNDS", 30, 1000)
+	procs := m14Int(t, "M14_PROCS", 3, 16)
+	facts := m14Int(t, "M14_FACTS", 100, 1000)
+	roundTimeout := m14Int(t, "M14_ROUND_TIMEOUT", 120, 600)
 	base := testdir.New(t)
 	var platform m14Platform
 	failures := map[string]int{}
