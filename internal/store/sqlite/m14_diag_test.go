@@ -9,15 +9,27 @@ package sqlite
 //
 // They are off by default: each one skips unless SPECMETRY_M14=1, so the
 // normal test run and CI never run them. Every run is bounded (seconds or
-// rounds, each with a hard cap) and prints one line per variant,
+// rounds, each between a lower bound and a hard cap, and every helper
+// process has a deadline after which it is killed and waited for) and
+// prints one line per variant,
 //
 //	M14-RESULT {...}
 //
 // with the platform, the Go, SQLite and driver versions, the commit under
-// test (M14_SHA), the bounds, and every outcome counted, zero failures
-// included.
+// test (M14_SHA), the bounds, the work actually done, and every outcome
+// counted, zero failures included.
+//
+// A run is valid only if the experiment really took place (codex-review-051
+// B1). A helper that did not start, crashed, printed a corrupt result or
+// none, failed in its own setup or reached its deadline is a broken
+// experiment: the test fails and records why. So does a run without the
+// work it claims: no probe, or, during commits, no commit or no probe while
+// a writer was committing. An error that a diagnosed call (Open, the probe,
+// a write) returns is an observation: it is counted and does not fail the
+// test. m14_validity_test.go checks both, in the normal test run.
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -27,6 +39,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"runtime/debug"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -42,7 +55,12 @@ import (
 	"github.com/XKHoshizora/specmetry/internal/testutil/testdir"
 )
 
-const m14Project = "01J9Z3K5Q8R2T4V6W8X0Y2Z4A6"
+const (
+	m14Project = "01J9Z3K5Q8R2T4V6W8X0Y2Z4A6"
+	// m14KillGrace is how long a helper may outlive its deadline before it
+	// is killed; Wait gets as long again for its output.
+	m14KillGrace = 3 * time.Second
+)
 
 func m14Enabled(t *testing.T) {
 	t.Helper()
@@ -51,19 +69,23 @@ func m14Enabled(t *testing.T) {
 	}
 }
 
-// m14Int reads a bound from the environment: def when unset, never above
-// limit (a run is always bounded).
-func m14Int(t *testing.T, name string, def, limit int) int {
+// m14Int reads a bound from the environment, def when unset. A value
+// outside [low, limit] stops the run before any work: a run never does
+// less, or other, work than it reports.
+func m14Int(t *testing.T, name string, def, low, limit int) int {
 	t.Helper()
 	v := def
 	if s := os.Getenv(name); s != "" {
 		n, err := strconv.Atoi(s)
-		if err != nil || n < 0 {
-			t.Fatalf("%s=%q is not a non-negative integer", name, s)
+		if err != nil {
+			t.Fatalf("%s=%q is not an integer", name, s)
 		}
 		v = n
 	}
-	return min(v, limit)
+	if v < low || v > limit {
+		t.Fatalf("%s=%d is outside [%d, %d]", name, v, low, limit)
+	}
+	return v
 }
 
 // m14Platform is what a result line records about the run.
@@ -91,8 +113,16 @@ func m14PlatformOf(t *testing.T, db *DB) m14Platform {
 	return p
 }
 
+// m14Report prints a result line. Faults or injections that the validity
+// regressions set are recorded in it, so such a run is never mistaken for
+// a diagnosis.
 func m14Report(t *testing.T, result map[string]any) {
 	t.Helper()
+	for _, name := range []string{"M14_FAULT", "M14_INJECT"} {
+		if v := os.Getenv(name); v != "" {
+			result[strings.ToLower(name)] = v
+		}
+	}
 	b, err := json.Marshal(result)
 	if err != nil {
 		t.Fatal(err)
@@ -110,7 +140,9 @@ func m14Code(err error) int {
 }
 
 // m14OpenStage names the step of Open that err comes from, by the messages
-// Open gives each step (store.go).
+// Open gives each step (store.go), and only as far as they tell: "cannot
+// read the database version" alone may come from the read-only probe's file
+// checks or from the read-write connection (codex-review-051 N3).
 func m14OpenStage(err error) string {
 	msg := err.Error()
 	switch {
@@ -119,24 +151,30 @@ func m14OpenStage(err error) string {
 	case strings.Contains(msg, "cannot confirm that this specmetry binary may open the database"):
 		return "open: read-only probe, uninspectable"
 	case strings.Contains(msg, "cannot read the database version"):
-		return "open: read-write version read"
+		return "open: version read, step unknown"
 	default:
 		return "open: other"
 	}
 }
 
 // m14Outcome is what a helper process reports, as one JSON line on stdout.
+// Times are Unix milliseconds of the machine's clock, which all the
+// processes share.
 type m14Outcome struct {
-	Stage     string         `json:"stage"`
-	Code      int            `json:"code,omitempty"`
-	ErrorCode string         `json:"error_code,omitempty"`
-	Error     string         `json:"error,omitempty"`
-	Committed int            `json:"committed"`
-	Probes    int            `json:"probes,omitempty"`
-	Outcomes  map[string]int `json:"outcomes,omitempty"`
-	RetryOK   int            `json:"retry_ok,omitempty"`
-	RetryFail int            `json:"retry_failed,omitempty"`
-	AtMillis  []int64        `json:"at_ms,omitempty"`
+	Helper     string         `json:"helper"`
+	Stage      string         `json:"stage"`
+	OpenCalled bool           `json:"open_called"`
+	Code       int            `json:"code,omitempty"`
+	ErrorCode  string         `json:"error_code,omitempty"`
+	Error      string         `json:"error,omitempty"`
+	Committed  int            `json:"committed"`
+	Probes     int            `json:"probes"` // first attempts; the retries are counted apart
+	Outcomes   map[string]int `json:"outcomes,omitempty"`
+	RetryOK    int            `json:"retry_ok,omitempty"`
+	RetryFail  int            `json:"retry_failed,omitempty"`
+	AtMillis   []int64        `json:"at_ms,omitempty"`
+	StartMs    int64          `json:"start_ms,omitempty"` // before the first write or probe
+	EndMs      int64          `json:"end_ms,omitempty"`   // after the last commit or probe
 }
 
 // m14Print writes a helper's outcome; the helper exits 0 whatever it found,
@@ -146,17 +184,32 @@ func m14Print(o m14Outcome) {
 	fmt.Println(string(b))
 }
 
-func m14Until() time.Time {
-	ms, _ := strconv.ParseInt(os.Getenv("M14_UNTIL"), 10, 64)
-	return time.UnixMilli(ms)
+func m14UnixMilli(name string) (time.Time, error) {
+	ms, err := strconv.ParseInt(os.Getenv(name), 10, 64)
+	if err != nil || ms <= 0 {
+		return time.Time{}, fmt.Errorf("%s is not set to a time", name)
+	}
+	return time.UnixMilli(ms), nil
+}
+
+// m14HelperContext ends at the helper's deadline, M14_DEADLINE, which the
+// test also enforces by killing the helper.
+func m14HelperContext() (context.Context, context.CancelFunc, error) {
+	deadline, err := m14UnixMilli("M14_DEADLINE")
+	if err != nil {
+		return nil, nil, err
+	}
+	c, cancel := context.WithDeadline(context.Background(), deadline)
+	return c, cancel, nil
 }
 
 // m14OpenHelper runs Open as every specmetry process does (the data
 // directory check, the open lock, the read-only version probe, the
-// read-write connection), then writes M14_FACTS facts, or facts until
-// M14_UNTIL. It reports the step that failed, with its codes.
+// read-write connection), then writes M14_FACTS facts, or, when it is 0,
+// facts until M14_UNTIL (at least one attempt). It reports the step that
+// failed, with its codes.
 func m14OpenHelper() int {
-	var o m14Outcome
+	o := m14Outcome{Helper: "m14open"}
 	// Faults for the validity regressions (m14_validity_test.go): a helper
 	// that crashes, prints a corrupt result or none, fails in its own setup,
 	// or hangs. The diagnostics workflow never sets M14_FAULT.
@@ -176,6 +229,13 @@ func m14OpenHelper() int {
 		time.Sleep(20 * time.Second)
 		return 0
 	}
+	hctx, cancel, err := m14HelperContext()
+	if err != nil {
+		o.Stage, o.Error = "setup", err.Error()
+		m14Print(o)
+		return 0
+	}
+	defer cancel()
 	dir, err := datadir.Resolve()
 	if err != nil {
 		o.Stage, o.Error = "resolve", err.Error()
@@ -188,22 +248,41 @@ func m14OpenHelper() int {
 		m14Print(o)
 		return 0
 	}
-	db, _, err := Open(context.Background(), dir, Options{Migrations: migs})
+	facts, err := strconv.Atoi(os.Getenv("M14_FACTS"))
+	var until time.Time
+	if err == nil && facts == 0 {
+		until, err = m14UnixMilli("M14_UNTIL")
+	}
+	if err != nil || facts < 0 {
+		o.Stage, o.Error = "setup", "M14_FACTS or M14_UNTIL is not usable"
+		m14Print(o)
+		return 0
+	}
+	o.OpenCalled = true
+	db, _, err := Open(hctx, dir, Options{Migrations: migs})
 	if err != nil {
-		o.Stage, o.Code, o.ErrorCode, o.Error = m14OpenStage(err), m14Code(err), string(apperr.From(err).Code), err.Error()
+		if hctx.Err() != nil {
+			o.Stage, o.Error = "deadline", "in Open: "+err.Error()
+		} else {
+			o.Stage, o.Code, o.ErrorCode, o.Error = m14OpenStage(err), m14Code(err), string(apperr.From(err).Code), err.Error()
+		}
 		m14Print(o)
 		return 0
 	}
 	defer func() { _ = db.Close() }()
-	facts, _ := strconv.Atoi(os.Getenv("M14_FACTS"))
-	until := m14Until()
-	for i := 0; facts > 0 && i < facts || facts == 0 && time.Now().Before(until); i++ {
-		if _, err := writeFact(context.Background(), db, m14Project, "m14"); err != nil {
-			o.Stage, o.Code, o.ErrorCode, o.Error = "write", m14Code(err), string(apperr.From(err).Code), err.Error()
+	o.StartMs = time.Now().UnixMilli()
+	for i := 0; facts > 0 && i < facts || facts == 0 && (i == 0 || time.Now().Before(until)); i++ {
+		if _, err := writeFact(hctx, db, m14Project, "m14"); err != nil {
+			if hctx.Err() != nil {
+				o.Stage, o.Error = "deadline", "in a write: "+err.Error()
+			} else {
+				o.Stage, o.Code, o.ErrorCode, o.Error = "write", m14Code(err), string(apperr.From(err).Code), err.Error()
+			}
 			m14Print(o)
 			return 0
 		}
 		o.Committed++
+		o.EndMs = time.Now().UnixMilli()
 	}
 	o.Stage = "done"
 	m14Print(o)
@@ -211,11 +290,24 @@ func m14OpenHelper() int {
 }
 
 // m14ProbeHelper runs Open's read-only version probe (readMetaReadOnly, as
-// Open calls it) in a loop until M14_UNTIL, outside Open: without the data
-// directory check and without the open lock. After a SQLite error it
-// probes once more at once.
+// Open calls it) in a loop until M14_UNTIL (at least once), outside Open:
+// without the data directory check and without the open lock. After a
+// SQLite error it probes once more at once.
 func m14ProbeHelper() int {
-	o := m14Outcome{Stage: "probe", Outcomes: map[string]int{}}
+	o := m14Outcome{Helper: "m14probe", Stage: "probe", Outcomes: map[string]int{}}
+	hctx, cancel, err := m14HelperContext()
+	if err != nil {
+		o.Stage, o.Error = "setup", err.Error()
+		m14Print(o)
+		return 0
+	}
+	defer cancel()
+	until, err := m14UnixMilli("M14_UNTIL")
+	if err != nil {
+		o.Stage, o.Error = "setup", err.Error()
+		m14Print(o)
+		return 0
+	}
 	dir, err := datadir.Resolve()
 	if err != nil {
 		o.Stage, o.Error = "resolve", err.Error()
@@ -223,9 +315,13 @@ func m14ProbeHelper() int {
 		return 0
 	}
 	dbPath := dir.Join(datadir.DatabaseFile)
-	start, until := time.Now(), m14Until()
-	for time.Now().Before(until) {
-		_, err := readMetaReadOnly(context.Background(), dbPath, false)
+	o.StartMs = time.Now().UnixMilli()
+	for first := true; first || time.Now().Before(until); first = false {
+		_, err := readMetaReadOnly(hctx, dbPath, false)
+		if err != nil && hctx.Err() != nil {
+			o.Stage, o.Error = "deadline", "in a probe: "+err.Error()
+			break
+		}
 		o.Probes++
 		var u *uninspectableError
 		switch {
@@ -236,35 +332,65 @@ func m14ProbeHelper() int {
 		case m14Code(err) != 0:
 			o.Outcomes[fmt.Sprintf("sqlite %d", m14Code(err))]++
 			if len(o.AtMillis) < 50 {
-				o.AtMillis = append(o.AtMillis, time.Since(start).Milliseconds())
+				o.AtMillis = append(o.AtMillis, time.Now().UnixMilli())
 			}
-			if _, again := readMetaReadOnly(context.Background(), dbPath, false); again == nil {
+			if _, again := readMetaReadOnly(hctx, dbPath, false); again == nil {
 				o.RetryOK++
 			} else {
 				o.RetryFail++
 			}
 		default:
+			// An error of the probe that is not SQLite's: an observation too.
 			o.Outcomes["other"]++
 			o.Error = err.Error()
 		}
+		o.EndMs = time.Now().UnixMilli()
 	}
 	m14Print(o)
 	return 0
 }
 
-// m14Spawn starts helper processes at once and returns their outcomes.
-func m14Spawn(t *testing.T, cmds []*exec.Cmd) []m14Outcome {
+// m14Run is a helper process as the test saw it. Invalid says why its
+// result cannot be used ("" when it can); then Outcome means nothing.
+type m14Run struct {
+	Started bool
+	Outcome m14Outcome
+	Invalid string
+}
+
+// m14Spawn starts the helper commands at once, each with deadline: a helper
+// stops by itself at its deadline, and one still running m14KillGrace later
+// is killed. Every process is waited for before m14Spawn returns.
+func m14Spawn(t *testing.T, cmds []*exec.Cmd, deadline time.Time) []m14Run {
 	t.Helper()
-	out := make([]m14Outcome, len(cmds))
+	out := make([]m14Run, len(cmds))
 	var wg sync.WaitGroup
-	for i, cmd := range cmds {
+	for i, h := range cmds {
+		hctx, cancel := context.WithDeadline(context.Background(), deadline.Add(m14KillGrace))
+		cmd := exec.CommandContext(hctx, h.Path, h.Args[1:]...)
+		env := slices.Clone(h.Env)
+		env = append(env, "M14_DEADLINE="+strconv.FormatInt(deadline.UnixMilli(), 10))
+		cmd.Env = env
+		cmd.WaitDelay = m14KillGrace
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout, cmd.Stderr = &stdout, &stderr
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			b, err := cmd.Output()
-			line := strings.TrimSpace(string(b))
-			if err != nil || json.Unmarshal([]byte(line), &out[i]) != nil {
-				out[i] = m14Outcome{Stage: "helper crashed", Error: fmt.Sprintf("%v: %s", err, line)}
+			defer cancel()
+			if err := cmd.Start(); err != nil {
+				out[i].Invalid = "did not start: " + err.Error()
+				return
+			}
+			out[i].Started = true
+			err := cmd.Wait()
+			switch {
+			case hctx.Err() != nil:
+				out[i].Invalid = fmt.Sprintf("killed: still running %v after its deadline", m14KillGrace)
+			case err != nil:
+				out[i].Invalid = fmt.Sprintf("exited abnormally (%v)%s", err, m14Tail(stderr.String()))
+			default:
+				out[i].Outcome, out[i].Invalid = m14Parse(stdout.Bytes())
 			}
 		}()
 	}
@@ -272,10 +398,142 @@ func m14Spawn(t *testing.T, cmds []*exec.Cmd) []m14Outcome {
 	return out
 }
 
+func m14Tail(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	if len(s) > 300 {
+		s = "..." + s[len(s)-300:]
+	}
+	return ": " + s
+}
+
+// m14Parse reads a helper's stdout: exactly one JSON outcome, with no field
+// it does not know.
+func m14Parse(stdout []byte) (m14Outcome, string) {
+	var o m14Outcome
+	line := bytes.TrimSpace(stdout)
+	if len(line) == 0 {
+		return o, "printed no result"
+	}
+	dec := json.NewDecoder(bytes.NewReader(line))
+	dec.DisallowUnknownFields()
+	if bytes.ContainsRune(line, '\n') || dec.Decode(&o) != nil || dec.More() {
+		if len(line) > 80 {
+			line = line[:80]
+		}
+		return m14Outcome{}, fmt.Sprintf("printed a malformed result %q", line)
+	}
+	return o, ""
+}
+
+// m14CheckOpen decides whether an m14open helper's result is an observation
+// of Open: facts is what it was to write, 0 for writes until a time. A
+// setup failure, a deadline, or a report that does not add up is not.
+func m14CheckOpen(r *m14Run, facts int) {
+	if r.Invalid != "" {
+		return
+	}
+	o := r.Outcome
+	switch {
+	case o.Helper != "m14open":
+		r.Invalid = fmt.Sprintf("reported as helper %q", o.Helper)
+	case o.Stage == "setup" || o.Stage == "resolve" || o.Stage == "migrations":
+		r.Invalid = fmt.Sprintf("failed in its setup, before Open (%s): %s", o.Stage, o.Error)
+	case o.Stage == "deadline":
+		r.Invalid = "reached its deadline " + o.Error
+	case !o.OpenCalled:
+		r.Invalid = "reported stage " + o.Stage + " without calling Open"
+	case strings.HasPrefix(o.Stage, "open: "):
+		if o.Committed != 0 {
+			r.Invalid = "reported commits after a failed Open"
+		}
+	case o.Stage == "write":
+		if facts > 0 && o.Committed >= facts {
+			r.Invalid = "reported a failed write after all its facts"
+		}
+	case o.Stage == "done":
+		if facts > 0 && o.Committed != facts || facts == 0 && o.Committed == 0 {
+			r.Invalid = fmt.Sprintf("reported done after %d commits", o.Committed)
+		}
+	default:
+		r.Invalid = "reported an unknown stage " + o.Stage
+	}
+}
+
+// m14CheckProbe decides whether an m14probe helper's result is usable: it
+// probed at least once and its counts add up.
+func m14CheckProbe(r *m14Run) {
+	if r.Invalid != "" {
+		return
+	}
+	o := r.Outcome
+	sum := 0
+	for _, v := range o.Outcomes {
+		sum += v
+	}
+	switch {
+	case o.Helper != "m14probe":
+		r.Invalid = fmt.Sprintf("reported as helper %q", o.Helper)
+	case o.Stage == "setup" || o.Stage == "resolve":
+		r.Invalid = fmt.Sprintf("failed in its setup (%s): %s", o.Stage, o.Error)
+	case o.Stage == "deadline":
+		r.Invalid = "reached its deadline " + o.Error
+	case o.Stage != "probe":
+		r.Invalid = "reported an unknown stage " + o.Stage
+	case o.Probes < 1:
+		r.Invalid = "made no probe"
+	case sum != o.Probes || o.StartMs == 0 || o.EndMs < o.StartMs:
+		r.Invalid = "reported counts or times that do not add up"
+	}
+}
+
+// m14Union merges time spans [start, end] into disjoint ones.
+func m14Union(spans [][2]int64) [][2]int64 {
+	s := slices.Clone(spans)
+	sort.Slice(s, func(i, j int) bool { return s[i][0] < s[j][0] })
+	var out [][2]int64
+	for _, x := range s {
+		if n := len(out); n > 0 && x[0] <= out[n-1][1] {
+			out[n-1][1] = max(out[n-1][1], x[1])
+			continue
+		}
+		out = append(out, x)
+	}
+	return out
+}
+
+// m14Overlap is how many milliseconds at least one writer was between its
+// first and its last commit while at least one prober was between its first
+// and its last probe. It is evidence that probes and commits overlapped,
+// not that every writer committed throughout.
+func m14Overlap(writers, probers [][2]int64) int64 {
+	var total int64
+	for _, w := range m14Union(writers) {
+		for _, p := range m14Union(probers) {
+			if lo, hi := max(w[0], p[0]), min(w[1], p[1]); hi > lo {
+				total += hi - lo
+			}
+		}
+	}
+	return total
+}
+
+// m14Relative gives spans in milliseconds since start.
+func m14Relative(spans [][2]int64, start time.Time) [][2]int64 {
+	out := make([][2]int64, len(spans))
+	for i, s := range spans {
+		out[i] = [2]int64{s[0] - start.UnixMilli(), s[1] - start.UnixMilli()}
+	}
+	return out
+}
+
 // m14Check checks the database after a round: SQLite's integrity check,
-// the committed facts all there, their seqs unique and contiguous from 1,
-// and the seq counter at the last one. A failed helper must have left
-// nothing more than the facts it reported committed.
+// the committed facts all there, their seqs unique and exactly 1 to n
+// (codex-review-051 N1), and the seq counter at the last one. A failed
+// helper must have left nothing more than the facts it reported committed.
+// It checks the database, not whether the experiment was valid.
 func m14Check(t *testing.T, db *DB, committed int) []string {
 	t.Helper()
 	var problems []string
@@ -283,15 +541,15 @@ func m14Check(t *testing.T, db *DB, committed int) []string {
 	if err := db.sql.QueryRowContext(ctx, `PRAGMA integrity_check`).Scan(&integrity); err != nil || integrity != "ok" {
 		problems = append(problems, fmt.Sprintf("integrity_check: %q %v", integrity, err))
 	}
-	var n, distinct, maxSeq, counter int
-	if err := db.sql.QueryRowContext(ctx, `SELECT count(*), count(DISTINCT seq), coalesce(max(seq), 0) FROM facts`).Scan(&n, &distinct, &maxSeq); err != nil {
+	var n, distinct, minSeq, maxSeq, counter int
+	if err := db.sql.QueryRowContext(ctx, `SELECT count(*), count(DISTINCT seq), coalesce(min(seq), 0), coalesce(max(seq), 0) FROM facts`).Scan(&n, &distinct, &minSeq, &maxSeq); err != nil {
 		return append(problems, err.Error())
 	}
 	if err := db.sql.QueryRowContext(ctx, `SELECT seq_counter FROM meta`).Scan(&counter); err != nil {
 		return append(problems, err.Error())
 	}
-	if n != committed || distinct != n || maxSeq != n || counter != n {
-		problems = append(problems, fmt.Sprintf("rows=%d distinct=%d max=%d counter=%d, committed=%d", n, distinct, maxSeq, counter, committed))
+	if n != committed || distinct != n || counter != n || n > 0 && (minSeq != 1 || maxSeq != n) {
+		problems = append(problems, fmt.Sprintf("rows=%d distinct=%d min=%d max=%d counter=%d, committed=%d", n, distinct, minSeq, maxSeq, counter, committed))
 	}
 	return problems
 }
@@ -305,6 +563,20 @@ func m14Sorted(m map[string]int) []string {
 	return keys
 }
 
+// m14Invalid fails the test for each reason the experiment is not valid,
+// and returns the reasons for the result line (at most 20, with the count).
+func m14Invalid(t *testing.T, invalid []string) map[string]any {
+	t.Helper()
+	for i, s := range invalid {
+		if i == 20 {
+			t.Errorf("invalid experiment: %d more", len(invalid)-20)
+			break
+		}
+		t.Errorf("invalid experiment: %s", s)
+	}
+	return map[string]any{"valid": len(invalid) == 0, "invalid": invalid[:min(len(invalid), 20)], "invalid_count": len(invalid)}
+}
+
 // The read-only version probe, outside Open: probers run it in a loop while
 // writers commit, and the test process keeps the database open, as in
 // TestSeqIsUniqueAcrossProcesses. The control has no writers. This is an
@@ -312,9 +584,9 @@ func m14Sorted(m map[string]int) []string {
 // Open does.
 func TestM14ReadOnlyProbe(t *testing.T) {
 	m14Enabled(t)
-	seconds := m14Int(t, "M14_SECONDS", 20, 300)
-	writers := m14Int(t, "M14_WRITERS", 3, 16)
-	probers := m14Int(t, "M14_PROBERS", 3, 16)
+	seconds := m14Int(t, "M14_SECONDS", 20, 1, 300)
+	writers := m14Int(t, "M14_WRITERS", 3, 1, 16)
+	probers := m14Int(t, "M14_PROBERS", 3, 1, 16)
 	for _, variant := range []struct {
 		name    string
 		writers int
@@ -323,45 +595,87 @@ func TestM14ReadOnlyProbe(t *testing.T) {
 			dir := testutil.TempHome(t)
 			db, _ := open(t, dir, Options{Migrations: append(foundation(t), factsMigration(t))})
 			platform := m14PlatformOf(t, db)
-			until := strconv.FormatInt(time.Now().Add(time.Duration(seconds)*time.Second).UnixMilli(), 10)
+			start := time.Now()
+			until := start.Add(time.Duration(seconds) * time.Second)
+			// A writer's Open may wait up to 30 s for the open lock.
+			deadline := until.Add(60 * time.Second)
+			untilEnv := "M14_UNTIL=" + strconv.FormatInt(until.UnixMilli(), 10)
 			var cmds []*exec.Cmd
 			for range variant.writers {
-				cmds = append(cmds, testutil.HelperCommand(t, "m14open", "M14_UNTIL="+until, "M14_FACTS=0"))
+				cmds = append(cmds, testutil.HelperCommand(t, "m14open", untilEnv, "M14_FACTS=0"))
 			}
 			for range probers {
-				cmds = append(cmds, testutil.HelperCommand(t, "m14probe", "M14_UNTIL="+until))
+				cmds = append(cmds, testutil.HelperCommand(t, "m14probe", untilEnv))
 			}
-			outcomes := m14Spawn(t, cmds)
-			probes, retryOK, retryFail, committed := 0, 0, 0, 0
+			runs := m14Spawn(t, cmds, deadline)
+			var invalid []string
+			started, probes, retryOK, retryFail, committed := 0, 0, 0, 0, 0
 			counts, writerFailures := map[string]int{}, map[string]int{}
 			var at []int64
-			for i, o := range outcomes {
+			var writerSpans, proberSpans [][2]int64
+			for i, r := range runs {
+				if r.Started {
+					started++
+				}
 				if i < variant.writers {
+					m14CheckOpen(&r, 0)
+					if r.Invalid != "" {
+						invalid = append(invalid, fmt.Sprintf("writer %d: %s", i, r.Invalid))
+						continue
+					}
+					o := r.Outcome
 					committed += o.Committed
+					if o.Committed > 0 {
+						writerSpans = append(writerSpans, [2]int64{o.StartMs, o.EndMs})
+					}
 					if o.Stage != "done" {
 						writerFailures[fmt.Sprintf("%s (code %d): %s", o.Stage, o.Code, o.Error)]++
 					}
 					continue
 				}
-				if o.Stage != "probe" {
-					t.Errorf("prober %d: %s: %s", i, o.Stage, o.Error)
+				m14CheckProbe(&r)
+				if r.Invalid != "" {
+					invalid = append(invalid, fmt.Sprintf("prober %d: %s", i-variant.writers, r.Invalid))
+					continue
 				}
+				o := r.Outcome
 				probes, retryOK, retryFail = probes+o.Probes, retryOK+o.RetryOK, retryFail+o.RetryFail
 				for k, v := range o.Outcomes {
 					counts[k] += v
 				}
-				at = append(at, o.AtMillis...)
+				for _, ms := range o.AtMillis {
+					at = append(at, ms-start.UnixMilli())
+				}
+				proberSpans = append(proberSpans, [2]int64{o.StartMs, o.EndMs})
+			}
+			overlap := m14Overlap(writerSpans, proberSpans)
+			if variant.writers > 0 {
+				switch {
+				case committed == 0:
+					invalid = append(invalid, "no writer committed: there were no commits to probe during")
+				case overlap == 0:
+					invalid = append(invalid, "no probe ran while a writer was committing")
+				}
 			}
 			problems := m14Check(t, db, committed)
 			for _, p := range problems {
 				t.Errorf("database after the run: %s", p)
 			}
-			m14Report(t, map[string]any{
+			result := m14Invalid(t, invalid)
+			for k, v := range map[string]any{
 				"test": "read-only probe", "variant": variant.name, "platform": platform,
-				"seconds": seconds, "writers": variant.writers, "probers": probers,
-				"probes": probes, "outcomes": counts, "retry_ok": retryOK, "retry_failed": retryFail, "at_ms": at,
-				"writer_commits": committed, "writer_failures": m14Sorted(writerFailures), "database_problems": problems,
-			})
+				"loop_seconds": seconds, "deadline_seconds": int(deadline.Sub(start).Seconds()),
+				"writers": variant.writers, "probers": probers,
+				"planned_helpers": len(cmds), "started_helpers": started,
+				"probes": probes, "retries": retryOK + retryFail, "probe_calls": probes + retryOK + retryFail,
+				"outcomes": counts, "retry_ok": retryOK, "retry_failed": retryFail, "at_ms": at,
+				"writer_commits": committed, "writer_failures": m14Sorted(writerFailures),
+				"writer_spans_ms": m14Relative(writerSpans, start), "prober_spans_ms": m14Relative(proberSpans, start),
+				"overlap_ms": overlap, "database_problems": problems,
+			} {
+				result[k] = v
+			}
+			m14Report(t, result)
 		})
 	}
 }
@@ -370,17 +684,19 @@ func TestM14ReadOnlyProbe(t *testing.T) {
 // database that the test process opens and keeps open, and M14_PROCS helper
 // processes that each Open it and write M14_FACTS facts, all started at
 // once: TestSeqIsUniqueAcrossProcesses (3 helpers, 100 facts each) by
-// default, repeated M14_ROUNDS times.
+// default, repeated M14_ROUNDS times. Each round's helpers have
+// M14_ROUND_TIMEOUT seconds.
 func TestM14OpenPath(t *testing.T) {
 	m14Enabled(t)
-	rounds := m14Int(t, "M14_ROUNDS", 30, 1000)
-	procs := m14Int(t, "M14_PROCS", 3, 16)
-	facts := max(1, m14Int(t, "M14_FACTS", 100, 1000))
+	rounds := m14Int(t, "M14_ROUNDS", 30, 1, 1000)
+	procs := m14Int(t, "M14_PROCS", 3, 1, 16)
+	facts := m14Int(t, "M14_FACTS", 100, 1, 1000)
+	roundTimeout := m14Int(t, "M14_ROUND_TIMEOUT", 120, 1, 600)
 	base := testdir.New(t)
 	var platform m14Platform
 	failures := map[string]int{}
-	failedRounds, failedHelpers := 0, 0
-	var problems []string
+	var invalid, problems []string
+	planned, started, openCalls, opened, committed, failedRounds, failedHelpers := 0, 0, 0, 0, 0, 0, 0
 	for r := range rounds {
 		home := filepath.Join(base, fmt.Sprintf("r%04d", r))
 		db, _, err := Open(ctx, datadir.Dir{Path: home, FromEnv: true}, Options{Migrations: append(foundation(t), factsMigration(t))})
@@ -401,29 +717,54 @@ func TestM14OpenPath(t *testing.T) {
 		for range procs {
 			cmds = append(cmds, testutil.HelperCommand(t, "m14open", datadir.EnvHome+"="+home, "M14_FACTS="+strconv.Itoa(facts)))
 		}
-		committed, failed := 0, false
-		for _, o := range m14Spawn(t, cmds) {
-			committed += o.Committed
+		roundCommitted, roundFailed, roundValid := 0, false, true
+		for i, run := range m14Spawn(t, cmds, time.Now().Add(time.Duration(roundTimeout)*time.Second)) {
+			planned++
+			if run.Started {
+				started++
+			}
+			m14CheckOpen(&run, facts)
+			if run.Invalid != "" {
+				roundValid = false
+				invalid = append(invalid, fmt.Sprintf("round %d, helper %d: %s", r, i, run.Invalid))
+				continue
+			}
+			o := run.Outcome
+			openCalls++
+			roundCommitted += o.Committed
+			if o.Stage == "done" || o.Stage == "write" {
+				opened++
+			}
 			if o.Stage != "done" {
-				failed = true
+				roundFailed = true
 				failedHelpers++
 				failures[fmt.Sprintf("%s, code %d, %s: %s", o.Stage, o.Code, o.ErrorCode, o.Error)]++
 			}
 		}
-		if failed {
+		committed += roundCommitted
+		if roundFailed {
 			failedRounds++
 		}
-		for _, p := range m14Check(t, db, committed) {
-			problems = append(problems, fmt.Sprintf("round %d: %s", r, p))
-			t.Errorf("round %d, database after the round: %s", r, p)
+		// What a helper with an unusable result committed is unknown, so its
+		// round's database cannot be checked against the reports.
+		if roundValid {
+			for _, p := range m14Check(t, db, roundCommitted) {
+				problems = append(problems, fmt.Sprintf("round %d: %s", r, p))
+				t.Errorf("round %d, database after the round: %s", r, p)
+			}
 		}
 		if err := db.Close(); err != nil {
 			t.Fatal(err)
 		}
 	}
-	m14Report(t, map[string]any{
-		"test": "open path", "platform": platform, "rounds": rounds, "procs": procs, "facts": facts,
-		"helper_opens": rounds * procs, "failed_helpers": failedHelpers, "failed_rounds": failedRounds,
+	result := m14Invalid(t, invalid)
+	for k, v := range map[string]any{
+		"test": "open path", "platform": platform, "rounds": rounds, "procs": procs, "facts": facts, "round_timeout_seconds": roundTimeout,
+		"planned_helpers": planned, "started_helpers": started, "open_calls": openCalls, "opens_succeeded": opened,
+		"facts_committed": committed, "failed_helpers": failedHelpers, "failed_rounds": failedRounds,
 		"failures": m14Sorted(failures), "database_problems": problems,
-	})
+	} {
+		result[k] = v
+	}
+	m14Report(t, result)
 }

@@ -269,3 +269,24 @@ func TestValidityOfM14OpenStage(t *testing.T) {
 		}
 	}
 }
+
+// The overlap that "during commits" needs as its evidence: the time at
+// least one writer and at least one prober were both between their first
+// and their last call.
+func TestValidityOfM14Overlap(t *testing.T) {
+	for _, c := range []struct {
+		name             string
+		writers, probers [][2]int64
+		want             int64
+	}{
+		{"none", nil, [][2]int64{{0, 10}}, 0},
+		{"disjoint", [][2]int64{{0, 10}}, [][2]int64{{10, 20}}, 0},
+		{"inside", [][2]int64{{0, 100}}, [][2]int64{{10, 20}}, 10},
+		{"writers merged, probers merged", [][2]int64{{0, 50}, {40, 100}}, [][2]int64{{30, 60}, {50, 120}}, 70},
+		{"a gap between writers", [][2]int64{{0, 10}, {90, 100}}, [][2]int64{{0, 100}}, 20},
+	} {
+		if got := m14Overlap(c.writers, c.probers); got != c.want {
+			t.Errorf("%s: overlap %d, want %d", c.name, got, c.want)
+		}
+	}
+}
