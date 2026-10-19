@@ -229,12 +229,31 @@ Windows 原子 FILE_CREATE、创建原身份、保护句柄及核对原身份的
 |---|---|
 | Windows 本机 | Go 1.27.1、Git 2.56.0.windows.2、NTFS；七个新增故障／重试用例及上述直接回归实际运行。非双账户，不外推其他文件系统 |
 | WSL Linux 本机 | 普通 UID 1000、Git 2.43.0；Windows Go 交叉编译后在 Linux 实际运行，非 Linux 原生构建；新用例及上述直接回归实际 PASS。本机没有 -race 或本轮 root 跨账户结果 |
-| macOS | 本机没有运行；新用例及直接回归的实际运行、跳过以新 CI 日志单列，不以交叉编译或旧 CI 代替 |
-| 静态检查 | 固定 golangci-lint v2.14.0 对相关生产／测试包检查；完整仓库检查以新 CI 为准 |
+| macOS | 本机没有运行；新代码 CI 的 Go 1.27.2 darwin/arm64、Git 2.56.0 实际运行新七项、owner/FIFO、真实生存期六项及正常回收／重试；不以交叉编译或旧 CI 代替 |
+| 静态检查 | 固定 golangci-lint v2.14.0 对相关生产／测试包检查 0 issues；新代码 CI 全仓 tidy、vet、格式、lint 和 Markdown 链接检查通过 |
 
 ### 9.4 新 CI 与文件范围
 
-新代码 CI 和后续证据文档 HEAD CI 按各自完整 SHA 单独登记，核对 attempt、8 个 job、实际 checkout、merge 父提交及内容树；不以原 CI 8/8 或代码 CI 代替最终文档 HEAD CI。实际三平台新回归、Ubuntu 普通 -race 与单独 root 无 -race 步骤、按设计跳过项在日志核验后接续。
+归档提交为 `ac8f54c31df2ec5e6c877d5fa63e78648b0a308f`；代码、回归及规范同步提交为 `a2f7bd643fefa39155b883951a786f6cf63353e5`。新代码 CI [39276404802](https://github.com/XKHoshizora/specmetry/actions/runs/39276404802)，attempt **1**、**8/8 success**，HEAD 正是该完整代码 SHA。没有失败重跑或 CI 自动修复。
+
+全部 8 个 job 的 checkout 日志实际为 `08a59cc50d584f3589956b3a9cf2d3742e7b0f5e`；Git Data 合并对象的父提交依次为 base `e0a21b46b5ad7e05146f254aa7523d6054ce2e76`、代码 HEAD `a2f7bd643fefa39155b883951a786f6cf63353e5`，树为 `8a1d4d964378e7130a59d4ac73265ab653040f71`，与本地代码 HEAD 树相同。没有仅用 Actions head_sha 代替 checkout／内容核对。
+
+| job（均 success） | ID | 核对到的运行 |
+|---|---|---|
+| Go tests Ubuntu | `118141716289` | Go 1.27.2 linux/amd64、Git 2.55.0；普通 Test 带 -race，新七项与直接回归实际 PASS；随后单独 root 跨账户 8 项 PASS，编译／运行没有 -race |
+| Go tests macOS | `118141716102` | Go 1.27.2 darwin/arm64、Git 2.56.0；新增完成 Sync／写入故障、后续独立进程处理、owner/FIFO、六项真实 Git、取消／回收／ownerGone 重试实际 PASS |
+| Go tests Windows | `118141716562` | Go 1.27.2 windows/amd64、Git 2.56.0.windows.2；同一新增七项、owner 八组合、六项真实 Git及 Windows 原子机制实际 PASS；OS 阻止的移动仍按日志单列 |
+| Go lint | `118141716222` | tidy、vet、仓库相对链接、格式与全仓 lint PASS |
+| Web | `118141716054` | 格式、lint、类型、测试与构建 PASS |
+| Build with dashboard Ubuntu | `118141961548` | 构建、嵌入 dashboard 测试及 smoke PASS |
+| Build with dashboard macOS | `118141962022` | 同上 |
+| Build with dashboard Windows | `118141961520` | 同上 |
+
+三平台日志均明确记录完成故障 starts=1／waits=1／pending=false；启动前对照 starts=0／waits=0／pending=true。测试还比较完整树、释放资源、禁止本次记录重试，并分别验证后续 true／不完整记录拒绝和完整 false 可信回收。gitscan 的失败丢弃／事实不变与 N1 直接组也通过；本机 Windows 三个扫描直接组 `gitscan-windows.log` 43.951s PASS。不将整仓 CI 当作旧模块重新验收。
+
+按设计跳过项均不计为通过：三平台未配置真实 unsafe Git 的 `TestInitRefusesRealOldGit`、`TestARealGitThatFetches`、`TestWP23ReadsWithAGitThatFetches`；未启用的 M-14 两项诊断。Windows 两个 POSIX 不可读权限测试 SKIP，Unix FIFO 不编译；macOS／Windows 的 Linux root 步骤 skipped，不计双账户运行。Ubuntu 普通步骤的 8 项 CrossUser 因非 root SKIP，随后单独 root 步骤才实际 PASS。记录型代理不冒充真实旧 Git；Ubuntu race 与 root 无 race 的证据分开。
+
+代码 CI 原始八份日志和 `code-ci-receipt.json` 保留于 §9.3 隔离目录。此处 CI 证据接续为后续**纯文档提交**，生产代码仍为 `a2f7bd6`。最终文档 HEAD CI 按其完整 SHA 另核验；完整 HEAD、run／attempt／8 job、checkout、父提交与树的回执写入 PR 当前描述和交付回执，不把本节代码 CI 或原 CI 当作最终文档 HEAD CI。
 
 相对固定起点仅七个文件：`docs/reviews/codex-review-062.md` 原样归档；`internal/gitx/privdir.go` 最小状态修复与 I/O 故障钩子；`internal/gitx/review062_test.go` 精确回归；`docs/review-resolution.md` §73；`docs/wp2.3-git-reader.md` §14.3；`docs/acceptance-criteria.md` 直接验收分支；本交付记录。生产改动仅 privdir.go，不修改生产 SQLite 重试／错误映射、迁移、推导、CLI、Schema 或 CI 配置。
 
