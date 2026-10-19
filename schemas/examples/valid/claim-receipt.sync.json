@@ -1,0 +1,70 @@
+{
+  "schema": "specmetry.claim-receipt/v1",
+  "batch_id": "01JA0K7Q8R2T4V6W8X0Y2Z4B6C",
+  "seq": 57,
+  "kind": "sync",
+  "base_version": 4,
+  "context": {
+    "worktree_id": "01J9Z3K5Q8R2T4V6W8X0Y2Z4B6",
+    "head": "3f2a9c1b7d0e4a5f6c8b9d0e1f2a3b4c5d6e7f80",
+    "tree_state": "dirty"
+  },
+  "compare_from": {
+    "commit": "9e8d7c6b5a4f3e2d1c0b9a8f7e6d5c4b3a291807",
+    "source": "previous_batch"
+  },
+  "claims": [
+    {
+      "index": 0,
+      "claim_id": "01JA0K7Q8R2T4V6W8X0Y2Z4B6D",
+      "target": "AC-002-2",
+      "target_revision": 1,
+      "assertion": "done",
+      "refs": {
+        "files": [
+          {
+            "path": "internal/orders/query.go",
+            "lines": "40-62",
+            "exists": true
+          }
+        ],
+        "commits": [
+          {
+            "commit": "3f2a9c1",
+            "resolved": true
+          }
+        ],
+        "tests": 1
+      }
+    },
+    {
+      "index": 1,
+      "claim_id": "01JA0K7Q8R2T4V6W8X0Y2Z4B6E",
+      "target": "AC-001-2",
+      "target_revision": 2,
+      "assertion": "blocked",
+      "refs": {
+        "files": [],
+        "commits": [],
+        "tests": 0
+      }
+    }
+  ],
+  "unmapped_work": [
+    {
+      "index": 0,
+      "claim_id": "01JA0K7Q8R2T4V6W8X0Y2Z4B6F",
+      "refs": {
+        "files": [
+          {
+            "path": "internal/log/log.go",
+            "lines": null,
+            "exists": false
+          }
+        ],
+        "commits": [],
+        "tests": 0
+      }
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "schema": "specmetry.claim-receipt/v1",
+  "batch_id": "01JA0K7Q8R2T4V6W8X0Y2Z4B6M",
+  "seq": 3,
+  "kind": "sync",
+  "base_version": 1,
+  "context": {
+    "worktree_id": "01J9Z3K5Q8R2T4V6W8X0Y2Z4B6",
+    "head": null,
+    "tree_state": "unknown"
+  },
+  "compare_from": {
+    "commit": null,
+    "source": "none"
+  },
+  "claims": [],
+  "unmapped_work": []
+}
