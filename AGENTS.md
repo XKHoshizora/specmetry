@@ -12,6 +12,8 @@
 
 除非用户明确要求开始某个里程碑，否则不要开始后续里程碑。开工条件见 `docs/implementation-plan.md §2`；开发环境与工程约定见 `docs/development.md`。
 
+**PR #27 B1 实施授权补充**：负责人已明确批准方案 B 的 B1-D1～D4（`docs/review-resolution.md §71`）：本轮由 Codex 实施、测试、提交并推送现有 PR，不合并、不宣布 GO／B1 关闭／WP2.3 验收；其他 M2 工作包仍未授权。局部保证调整仅按 §71 适用。
+
 ## 文档地图
 
 | 文档 | 内容 |

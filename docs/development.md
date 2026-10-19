@@ -159,3 +159,5 @@ go build -o dist/ ./cmd/specmetry
 | Go lint | `go mod tidy -diff`、`go vet`、golangci-lint |
 | Web | `npm ci`、`npm run check`，上传 `web/dist` |
 | Build | 三平台下载 `web/dist`，构建完整二进制，运行内嵌测试和冒烟测试（`version`、`doctor`） |
+
+Git Reader B1 新协议见 WP2.3 §14.3／review-resolution §71：`tmp/git-reader-v2/` 与旧顶层 `read-*` 隔离；私有目录建立至清理持合作锁，按创建清单删除。扫描使用经实际 Git 文件身份行为探测的显式空 `GIT_GRAFT_FILE=`／`GIT_SHALLOW_FILE=`。不支持或观察到异常时 exit 6，无 missing 路径回退；局部同用户排除边界只按负责人的批准适用，不改变其他权限和隐私保证。
