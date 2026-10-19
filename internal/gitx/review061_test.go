@@ -22,7 +22,7 @@ import (
 // Review 061 B1-R1: an open owner handle does not prove that its name exists.
 func TestOwnerRequiredBeforeCleanup(t *testing.T) {
 	for _, content := range []bool{false, true} {
-		for _, damage := range []string{"missing", "record"} {
+		for _, damage := range []string{"missing", "record", "directory", "replacement"} {
 			t.Run(fmt.Sprintf("content=%v/%s", content, damage), func(t *testing.T) {
 				s, home := scratchIn(t)
 				d, err := newPrivateDir(s)
@@ -35,12 +35,20 @@ func TestOwnerRequiredBeforeCleanup(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
-				if damage == "missing" {
+				if damage != "record" {
 					if err := os.Rename(d.join(ownerName), home.Join("saved-owner")); err != nil {
 						if runtime.GOOS == "windows" {
 							t.Skipf("OS blocked owner rename; missing-name schedule did not occur: %v", err)
 						}
 						t.Fatal(err)
+					}
+					if damage == "directory" {
+						if err := os.Mkdir(d.join(ownerName), 0o700); err != nil {
+							t.Fatal(err)
+						}
+					}
+					if damage == "replacement" {
+						write(t, d.join(ownerName), d.record())
 					}
 				} else {
 					write(t, d.join(ownerName), "invalid owner record")

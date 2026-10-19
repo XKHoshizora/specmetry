@@ -322,6 +322,10 @@ func (s *Scratch) adopt(name string) *privateDir {
 		d.close()
 		return nil
 	}
+	if info, err := d.root.Lstat(ownerName); err != nil || !info.Mode().IsRegular() {
+		d.close()
+		return nil
+	}
 	f, err := d.root.OpenFile(ownerName, os.O_RDWR, 0)
 	if err != nil {
 		d.close()
@@ -583,6 +587,10 @@ func (d *privateDir) checkOwner() error {
 	}
 	if err := d.verify(); err != nil {
 		return err
+	}
+	info, err := d.root.Lstat(ownerName)
+	if err != nil || !info.Mode().IsRegular() {
+		return errReplaced
 	}
 	f, err := d.root.Open(ownerName)
 	if err != nil {
