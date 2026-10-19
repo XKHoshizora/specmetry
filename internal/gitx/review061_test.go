@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -204,11 +205,49 @@ func helperReview61Consumer() int {
 	defer cancel()
 	mode := config.Kind
 	end := ""
+	// Hold a real Git on stdin until its stop is acknowledged. A tiny status
+	// can finish before SIGSTOP/NtSuspendProcess, so Clean uses its check-attr
+	// consumer; the probe's real log accepts --stdin with no additional refs.
+	// Both run the original input once EOF is released. These pipes carry no lease.
+	var gateRead, gateWrite *os.File
+	defer func() {
+		if gateRead != nil {
+			_ = gateRead.Close()
+			_ = gateWrite.Close()
+		}
+	}()
+	testHookCommandSetup = func(cmd *exec.Cmd) {
+		if (mode == "clean" && !slices.Contains(cmd.Args, "check-attr")) || (mode == "probe" && !slices.Contains(cmd.Args, "--format=%H")) {
+			return
+		}
+		testHookCommandSetup = nil
+		var data []byte
+		var err error
+		if cmd.Stdin != nil {
+			data, err = io.ReadAll(cmd.Stdin)
+		}
+		if err == nil {
+			gateRead, gateWrite, err = os.Pipe()
+		}
+		// This fixture has only a handful of path names, below PIPE_BUF.
+		if err == nil && len(data) < 512 {
+			_, err = gateWrite.Write(data)
+		} else if err == nil {
+			err = errors.New("oversized fixture gate input")
+		}
+		if err != nil {
+			os.Exit(92)
+		}
+		cmd.Stdin = gateRead
+		if mode == "probe" {
+			cmd.Args = append(cmd.Args, "--stdin")
+		}
+	}
 	testHookCommand = func(stage string, pid int, args []string) {
 		if stage != "started" {
 			return
 		}
-		if mode == "clean" && !slices.Contains(args, "status") {
+		if mode == "clean" && !slices.Contains(args, "check-attr") {
 			return
 		}
 		if mode == "probe" && !slices.Contains(args, "--format=%H") {
@@ -224,23 +263,33 @@ func helperReview61Consumer() int {
 			return
 		}
 		testHookCommand = nil
+		fail := func(code int) {
+			if child, err := os.FindProcess(pid); err == nil {
+				_ = child.Kill()
+				_ = child.Release()
+			}
+			os.Exit(code)
+		}
 		if err := pauseConsumer(pid); err != nil {
 			fmt.Fprintln(os.Stderr, err)
-			os.Exit(94)
+			fail(94)
 		}
 		if err := json.NewEncoder(os.Stdout).Encode(consumerReady{path, pid}); err != nil {
-			os.Exit(95)
+			fail(95)
 		}
 		if err := input.Decode(&end); err != nil {
-			os.Exit(93)
+			fail(93)
 		}
 		if end == "crash" {
 			os.Exit(99)
 		}
 		if end == "cancel" {
 			cancel()
-		} else if err := resumeConsumer(pid); err != nil {
-			os.Exit(96)
+		} else {
+			_ = gateWrite.Close()
+			if err := resumeConsumer(pid); err != nil {
+				fail(96)
+			}
 		}
 	}
 	if mode == "clean" {
@@ -270,6 +319,13 @@ func TestGitConsumerLifetimeProcesses(t *testing.T) {
 		for _, end := range []string{"release", "cancel", "crash"} {
 			t.Run(kind+"/"+end, func(t *testing.T) {
 				repo, ids := chain(t, 2)
+				if kind == "clean" {
+					// Configure only after the fixture's commits: normal Clean must
+					// strip this driver, and still ask check-attr which paths use it.
+					repo.WriteFile(".gitattributes", "* filter=r61\n")
+					repo.Git("config", "filter.r61.clean", "r61-must-never-run")
+					repo.Git("config", "filter.r61.required", "true")
+				}
 				s, home := scratchIn(t)
 				cmd := testutil.HelperCommand(t, "review61-consumer")
 				input, err := cmd.StdinPipe()
