@@ -4015,3 +4015,48 @@ owner 预检、原消费者崩溃反例、空覆盖及 Windows 子机制按报�
 - 本节不预写这些结果；实际证据写入 PR 描述与交付回执，不为写回结果追加提交。
 
 **状态**：技术复审通过，等待合并核验。WP2.3 与 M2 都没有宣布验收。M-14、M-15 未解决，M-9 与其他维护事项照旧；Auto-fix / Auto-merge 保持关闭。
+
+## 75．Review 064、#27 的合并后核验与 WP2.3 库层的验收
+
+**PR #27 的合并后核验**（§74 的待完成项）：
+
+- **合并**：
+  - merge commit `5985b319ac4cdb23a8f9cbc9b40653c154257fec`，以 `--match-head-commit a41c991e5210a080c73b5a9c16cb3dd787bb212a` 锁定；
+  - 父提交为 `e0a21b46b5ad7e05146f254aa7523d6054ce2e76` 与 `a41c991`；
+  - master 包含 `a41c991`；树 `7283db1` 与最终 HEAD 相同，diff 为空。
+- **最终 HEAD 的 CI**：run 39282753234，attempt 1，completed/success，8/8。检出合并快照 `ed717e1`，父提交为 `e0a21b4` 与 `a41c991`，树 `7283db1`。
+- **master push CI**：run 39287153098：
+  - **attempt 1**：completed/failure。8 个作业都检出 `5985b31`，其中 7 个成功。失败的是 Go tests (windows-latest)（118177199541）：`internal/store/sqlite` 的 `TestSeqIsUniqueAcrossProcesses` 中，一个 `seqwriter` 辅助进程 `exit status 1: database is locked (5) (SQLITE_BUSY)`。
+  - **attempt 2**：按负责人的一次授权执行 `gh run rerun 39287153098 --failed`，结果 completed/success。只有 Go tests (windows-latest)（118203422167）实际重新执行，检出 `5985b31`，该测试通过；其余 7 个作业沿用 attempt 1 的结果。它不是首轮 8/8，也不是三个平台都重新运行。
+  - **首轮失败保留**，作为 M-15 的一次新观测：根因未验证，未解决，不是已接受的风险。失败发生在 `Open` 还是写入阶段、与以往观测是否同一根因，都没有确认；attempt 2 成功不关闭 M-15。维护记录在 WP2.4 规范 PR 中补充。
+
+**WP2.3 库层的正式验收**（产品负责人决定，2026-10-20）：
+
+- **验收对象**：`5985b319ac4cdb23a8f9cbc9b40653c154257fec`。
+- **范围**：Git Reader（`internal/gitx`）、`internal/gitscan`、迁移 0007，以及已审查的库层验证。
+- **依据**：审查 063 技术 GO；合并内容与最终 HEAD 一致；master CI 39287153098 attempt 2 正式成功。
+- **保留**：首轮失败的记录；M-15 未解决，不是已接受的风险；方案 B 的边界（§71）不变。
+- **不在本次验收之内**：CLI 接入、输出集成与后续 E2E，由对应工作包完成。**M2 未整体验收。**
+
+**审查 064**：
+
+- **归档**：原样归档为 `85d909d293a03be0a1d3bc9eab46b4c96e1c24fd`。源文件、暂存与该提交 blob 的 SHA-256 均为 `504d009e9e3967e6f5c42401e59b023f151504ee1151ad95379389124ef2beac`。
+- **审查对象**：PR #28，HEAD `a482dacb1bd61cd3b583cffcc519b1d205e18dc1`，base `5985b319ac4cdb23a8f9cbc9b40653c154257fec`。之后的收尾提交不改变审查对象。
+- **结论：技术 GO，BLOCKER 0**；M-7 的修复要求已满足。
+  - 指定的 CI 39299026564 attempt 1 正式 completed/success，8/8。
+  - 实际检出 `d454091`，父提交为 base 与 HEAD，树与 HEAD 相同。
+- **NON-BLOCKER N1**：
+  - `questionsProject` 夹具只有 open 的问题，所以不能区分默认列表与 `--all`。这限制该夹具对过滤语义与错误配对的检出力，不影响 M-7 的保证（两份完整输出都符合 `question-list.v1`）。
+  - 过滤语义由既有的 `TestQuestionAnswerAndDismiss` 覆盖（审查方只静态核对）。
+  - 不要求本 PR 扩展业务测试。
+- **审查方的验证边界**：只在 Windows 隔离副本上运行了两项定向测试与三项变异；三个平台的结果来自 CI；没有在本机重跑整个 CLI 包或 TTY/E2E。
+- 没有新的产品待决事项，也没有新的风险接受。
+
+**M-7**：审查通过，**等待合并后核验**。合并内容与 master push CI 都核验通过后，按负责人的决定登记关闭；实际依据在 WP2.4 规范 PR 中登记。
+
+**状态**：
+
+- PR #28 技术审查通过，等待合并核验。
+- WP2.3 库层已验收（对象 `5985b31`）；M2 未整体验收。
+- WP2.4 及其余 M2 工作包尚未授权实现。
+- M-14、M-15、M-9、M-10 及其他维护事项保持原状；Auto-fix / Auto-merge 保持关闭。

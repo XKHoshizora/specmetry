@@ -374,7 +374,7 @@ WP1.8 新增的命令也会解析 ref（`target show`、`scope show`、`target s
 | M-4 | 跨项目需求外键的测试可能由另一条外键先拒绝 | codex-review-034 N1 / 035 N1 | 测试覆盖的准确性；实际约束正确 | 低 |
 | M-5 | 自定义 Writer 与进程 stderr 的终端可见性可能不一致 | codex-review-033 N1 | 使用约束；正式二进制不受影响 | 低：将来支持嵌入或包装输出时 |
 | M-6 | 首次登记特殊路径的非文档来源时，确认可能无法输入 | codex-review-031 N1 | 可用性；没有错误放行 | 低 |
-| M-7 | 部分成功 JSON 输出的测试只检查以 `{` 开头 | codex-review-029 N1 | 测试强度 | 中：M2 新增输出接口之前统一改为按 schema 校验。**已修复，待独立审查**（分支 `test/m7-json-schema`）：`TestCommandLineStillWorks` 的五种 `--json` 写法按 `source-list.v1`、`proposal-list.v1`、`question-list.v1` 校验完整文档，`--json` 在前时与在后的输出相同；`TestValidateJSONTakesOneWholeDocument` 证明校验拒绝文档前后的非空内容。合并前不关闭 |
+| M-7 | 部分成功 JSON 输出的测试只检查以 `{` 开头 | codex-review-029 N1 | 测试强度 | 中：M2 新增输出接口之前统一改为按 schema 校验。**已修复；审查 064 技术 GO、无 BLOCKER，等待合并后核验**（PR #28，审查对象 `a482dac`）：`TestCommandLineStillWorks` 的五种 `--json` 写法按 `source-list.v1`、`proposal-list.v1`、`question-list.v1` 校验完整文档，`--json` 在前时与在后的输出相同；`TestValidateJSONTakesOneWholeDocument` 证明校验拒绝文档前后的非空内容。合并后核验通过之前不关闭 |
 | M-8 | WP1.6 N1：确认预览显示审核者选择的 `editorial`，而强制字段会把它升级为 `material`；N2：`baseline history` 没有输出后续处理的理由 | codex-review-025 | 显示与读取模型；持久化正确 | 中：M5 Dashboard 的审核界面之前 |
 | M-9 | 在 `SPECMETRY_TEST_GIT_OBJECTS=unsafe` 下，`gitx` 的 3 个正向测试不跳过（第 7 节） | 本次核对 | 测试脚手架 | 低 |
 | M-10 | 本地 Windows 上 `internal/cli` 的测试超过 Go 默认的 10 分钟超时，所以本地 `scripts/check.sh` 不能完整通过 | 历次本地运行 | 开发体验；CI 不受影响 | 低 |
