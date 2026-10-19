@@ -74,7 +74,7 @@ func TestCleanLeavesOutSpecmetry(t *testing.T) {
 			}
 			touch(t, filepath.Join(r.Dir, ".specmetry", "probe.txt"), idx.ModTime())
 		}, true, StateClean},
-		{"a tracked file in .specmetry/ modified and staged", func(t *testing.T, r *testutil.GitRepo) {
+		{"a tracked file in .specmetry/ modified and staged", func(_ *testing.T, r *testutil.GitRepo) {
 			r.WriteFile(".specmetry/plain.txt", "staged\n")
 			r.Git("add", ".specmetry/plain.txt")
 		}, true, StateClean},
@@ -90,7 +90,7 @@ func TestCleanLeavesOutSpecmetry(t *testing.T) {
 		{"only the modification time in .specmetry-not/", func(t *testing.T, r *testutil.GitRepo) {
 			touch(t, filepath.Join(r.Dir, ".specmetry-not", "probe.txt"), future)
 		}, true, StateUndecidable},
-		{"an untracked file in .specmetry-not/", func(t *testing.T, r *testutil.GitRepo) {
+		{"an untracked file in .specmetry-not/", func(_ *testing.T, r *testutil.GitRepo) {
 			r.WriteFile(".specmetry-not/new.txt", "n\n")
 		}, false, StateDirty},
 	} {
@@ -137,7 +137,7 @@ func TestCleanLeavesOutSpecmetryGitlinks(t *testing.T) {
 				t.Fatal(err)
 			}
 		}, true, StateClean},
-		{"a submodule in .specmetry/, its gitlink staged", ".specmetry/sub", func(t *testing.T, r *testutil.GitRepo, path string) {
+		{"a submodule in .specmetry/, its gitlink staged", ".specmetry/sub", func(_ *testing.T, r *testutil.GitRepo, path string) {
 			r.GitIn(filepath.Join(r.Dir, filepath.FromSlash(path)), "commit", "-q", "--allow-empty", "-m", "more")
 			r.Git("add", path)
 		}, true, StateClean},
@@ -146,7 +146,7 @@ func TestCleanLeavesOutSpecmetryGitlinks(t *testing.T) {
 				t.Fatal(err)
 			}
 		}, false, StateDirty},
-		{"a .specmetry/ inside a submodule", "sub", func(t *testing.T, r *testutil.GitRepo, path string) {
+		{"a .specmetry/ inside a submodule", "sub", func(_ *testing.T, r *testutil.GitRepo, path string) {
 			r.WriteFile(path+"/.specmetry/marker.json", "{}\n")
 		}, false, StateDirty},
 	} {
