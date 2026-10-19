@@ -123,19 +123,64 @@ Windows 原子 FILE_CREATE、创建原身份、保护句柄及核对原身份的
 
 原始失败日志 `before-windows.log`、`before-linux.log`，第一轮绿色日志 `after-windows.log`、`after-linux.log`；最终定向结果另存 `windows-final-regressions.log`，Linux 最终结果另列。Windows 的 owner 移动调度实际执行成功，没有把“OS 阻止”算作该用例通过。生命周期测试用独立调用方进程、真实 Git、原生暂停确认与退出通知同步，不依赖睡眠；超时仅表示失败。测试结束受控终止／释放自己建立的进程及夹具。
 
+最后补齐 owner 在**打开之前**的普通文件检查，覆盖检查与遗留认领两处，避免 FIFO 类型使预检阻塞。目录型 owner、复制完整记录但身份不同的替代 owner 在空／非空清单上均保留报错（Windows、Linux 实跑）；Unix 新增 `TestOwnerFIFORejectedBeforeOpen`（Linux 实跑，macOS 以 CI 为准）。此补充不改变 Unix 未观测名称替换的获批边界。
+
+三平台故障夹具进一步使用明确输入闸门：真实 Clean 的 check-attr 消费原有路径输入后等待 EOF；真实探测 log 仅在测试调度中加 `--stdin` 并等待空输入 EOF。先确认原生暂停，再让调用方 exit 99；OS 关闭调用方管道不解除 Git 的暂停，下一 Scratch 的保留检查发生于恢复之前。正常释放原输入 EOF，取消则等待 Git 被终止。该管道不承载保护租约，不是生产 fd／handle 继承方案，也不改生产 Git 参数；测试用的过滤器程序名不能由 Clean 执行，正常对照会检出执行错误。`windows-gated-lifetime.log` 六项 PASS，`linux-gated-lifetime.log` 六项及 FIFO PASS。Darwin 停止回复按原生 [wait.h](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/sys/wait.h) 的状态与 SIGSTOP 确认，不能把共享 BSD helper 的判读当作动态成功。
+
+**最终夹具的检出力**：仓库外导出 `f935fb9`，只将 call 的 beginConsumer／finishConsumer 调用退回 checkContents，保持最终输入闸门、真实 Git、清单和平台保护。Linux 实际运行两个崩溃用例均 FAIL：调用方 exit 99、Git 暂停未恢复时，NewScratch 返回 nil、原目录 ENOENT（`gated-mutant-linux.log`）。不是编译失败，也没有把该变异用于生产仓库。
+
 | 平台／证据层 | 实际执行与限制 |
 |---|---|
 | Windows 本机 | Go 1.27.1、Git 2.56.0.windows.2、NTFS；NtSuspendProcess 成功确认测试 Git 暂停，进程 handle 等待实际退出。修复前失败与修复后 owner／崩溃／正常／取消对照均已运行；不是双账户或所有 Windows 文件系统验证 |
 | WSL Linux 本机 | UID 1000、Git 2.43.0；交叉编译的 Linux 测试二进制，非 Linux 原生工具链。SIGSTOP + WUNTRACED 确认暂停；pidfd 的 POLLIN 确认退出。gitx 整包、修正预期后的 gitscan 整包 PASS；root 仅用于启动两个普通账户的 8 项跨用户测试，全部 PASS。没有本机 -race 结果 |
-| macOS | 本机仅交叉编译通过，不算运行；实际运行与跳过必须以本轮 CI 日志为准，尚不预先宣称通过。原生退出观察使用预先注册的 kqueue NOTE_EXIT |
+| macOS | 本机仅交叉编译，不算运行；最终代码 CI 的 darwin/arm64、Git 2.56.0 实际通过 owner 八组合、FIFO、公开 Clean 检查、完成回收及六项真实 Git 对照。原生退出观察使用预先注册的 kqueue NOTE_EXIT；不是以本机交叉编译补充运行证据 |
 | 静态检查 | golangci-lint v2.14.0，包含测试的相关包检查 0 issues；最终 CI 另做全仓 tidy、vet、格式及 lint |
 
 保留开发失败记录：新增 v2 隔离夹具最初漏建父目录，首轮 Windows 整包 gitx 543.062s 仅该项失败，其余通过；首轮 gitscan 118.739s／Linux gitscan 因旧的“移除额外文件即可恢复”预期失败，改为持久屏障继续拒绝，并检查剩余内容和业务事实不变后通过。sqlite 本机整包 36.044s 通过，没有修改生产 SQLite。初期测试辅助进程直接从环境传路径导致三条 G703 告警，定位到测试入口后改为自己的结构化管道协议；最终没有关闭规则或修改生产 Clean 路径。已有临时 linter 被外部清理后在本隔离目录重建固定版本，未改全局配置。
 
 ### 8.4 本轮 CI、文件与剩余边界
 
-本节修复提交及对应 CI 将在推送完成后补录完整身份；代码 CI 和随后纯文档 HEAD CI 分别记录，不能以旧 CI 或交叉编译代替新 HEAD 的三平台运行。等待 CI 时不预先写为通过。
+本轮提交按顺序为：
 
-新增／修改范围：本报告、review-resolution §72、WP2.3 §14.3、architecture 的 tmp 条目、验收直接回归、开发指南与实施计划的活动状态；`internal/gitx/{privdir,call,gitx,scan_probe}.go`、TestMain、`review061_test.go`、四个平台同步辅助测试、既有 schemeb／scratch 测试；gitscan 的 Scratch 注释及异常探测回归；sqlite 跨用户测试仅更新命名空间路径断言。没有修改迁移、推导、CLI、Schema 或生产 SQLite 重试／错误映射。
+| 提交 | 内容 |
+|---|---|
+| `d4a42e614568a0a608d7efd55d7cd5655ea4a5b0` | 原样归档 Review 061 |
+| `941d4e227f5e83d0aaa5f417cd088319ea21d3dd` | 两项生产机制、先失败回归、§72 及规范同步 |
+| `c05cb4e67af523068d99647b339f672a3408c8a1` | owner 打开前类型拒绝与目录／替代／FIFO 对照 |
+| `f935fb9300373ba44790737055d365866a3221a4` | 三平台明确输入闸门、Darwin 原生暂停判读与故障夹具收尾；本轮最终代码对象 |
+
+首轮修复 CI [39264392152](https://github.com/XKHoshizora/specmetry/actions/runs/39264392152)，attempt 1，目标 `941d4e2`，**7/8**：仅 macOS Go tests 失败，不能记为三平台通过。实际 checkout `7836e040a407f46eff4e858521caadbf584c5cff`，父提交为 base／`941d4e2`，树 `fbcd7b11a3d1c805c49c0ffce3aed01a313e5dad` 与该代码对象相同。macOS 六个生存期子测试均未完成有效调度：5 次收到原生 SIGSTOP 回复，但 x/sys v0.49.0 共享 BSD Stopped 排除了 SIGSTOP；另 1 次 Git 在信号之前已经退出。修正为原生状态确认和上述明确输入等待，不重跑旧 CI 来覆盖失败，也不跳过 macOS。
+
+最终代码 CI [39266213035](https://github.com/XKHoshizora/specmetry/actions/runs/39266213035)，attempt 1，目标 `f935fb9300373ba44790737055d365866a3221a4`，**8/8 成功**。8 个 job 的实际 checkout 均核对为 `50f832302443fcbfb45d38c2a2fb0905a0d07f12`，父提交依次为 `e0a21b46b5ad7e05146f254aa7523d6054ce2e76`、`f935fb9300373ba44790737055d365866a3221a4`；合并快照树 `ea7732a39bc12bb23155572ea5ea915a343b0f6e` 与代码对象相同。未重跑任何 attempt，没有把首轮失败覆盖成通过。
+
+| job | ID | 实际日志核对 |
+|---|---|---|
+| Go tests (ubuntu-latest) | `118106341354` | Go 1.27.2 linux/amd64，Git 2.55.0；普通 Test 带 `-race`，修复／直接回归 PASS；随后单独 root 跨账户步骤无 `-race`，8 项 CrossUser PASS |
+| Go tests (macos-latest) | `118106341345` | Go 1.27.2 darwin/arm64，Git 2.56.0；owner／FIFO、六项真实 Git 生存期、正常回收及获批 Unix 窗口实际 PASS |
+| Go tests (windows-latest) | `118106341388` | Go 1.27.2 windows/amd64，Git 2.56.0.windows.2；owner 八组合实际执行，无 rename skip；六项真实 Git 对照、Windows 原子创建／同句柄删除 PASS |
+| Go lint | `118106340871` | tidy、vet、仓库相对 Markdown 链接、全仓格式与 lint PASS |
+| Web | `118106341391` | 格式、lint、类型、测试与构建 PASS |
+| Build with dashboard (ubuntu-latest) | `118106564945` | 构建、嵌入 dashboard 测试、smoke PASS |
+| Build with dashboard (macos-latest) | `118106564836` | 构建、嵌入 dashboard 测试、smoke PASS |
+| Build with dashboard (windows-latest) | `118106564752` | 构建、嵌入 dashboard 测试、smoke PASS |
+
+三平台日志均确认 owner 缺失／损坏／目录型／替代身份、读取前后及清理预检、正常完成／取消／启动失败、真实调用方 exit 99 后 Git 暂停、下一 Scratch 的完整保留和退出后仍拒绝猜测回收；没有把存在性与错误码单独当作内容保留证据。已核对原 manifest、重试及方案 B 扫描正反对照（空覆盖、实际二进制变化、不支持与取消、多父图、增量、缺失／损坏），并沿用 B2 bitmap、B3 排除目录与 N1 并发跳过的直接回归。生产 SQLite 或其他模块不因整仓测试通过而重新验收。
+
+**按设计跳过／不适用**（全部不计为运行通过）：
+
+- 三平台：`TestInitRefusesRealOldGit`、`TestARealGitThatFetches`、`TestWP23ReadsWithAGitThatFetches` 未配置真实 unsafe Git；记录型代理只验证相应分支，不能替代旧 Git 实跑。
+- 三平台：M-14 诊断 `TestM14ReadOnlyProbe`、`TestM14OpenPath` 未开启；不是 M-14／M-15 已解决。
+- Windows：`TestSourceListUnreadableSource`、`TestClassifyWithUnreadableStorage` 的 POSIX 权限调度跳过；Unix FIFO 文件不参与 Windows 构建，不算 Windows 阻止了 FIFO。Windows 双账户与其他文件系统没有动态证据。
+- Ubuntu 普通非 root 步骤：8 项 CrossUser 跳过，随后 root 步骤实际运行并 PASS。Windows／macOS 不编译 Linux 双账户基座；不能把它们计为跨用户动态通过。
+
+本文件的证据收尾是后续纯文档提交，代码仍为上述对象。**最终文档 HEAD CI 单独按该提交 SHA 核验，其完整 HEAD、run／attempt／8 job 与 checkout 回执写在 PR 当前描述及本轮交付回执**；不把本节的代码 CI 8/8 当作最终文档 HEAD CI，也不以旧 CI、变异检验或交叉编译代替它。
+
+完整文件清单（相对固定起点）：
+
+- 文档：`docs/reviews/codex-review-061.md`、`docs/review-resolution.md`、`docs/wp2.3-b1-implementation.md`、`docs/wp2.3-git-reader.md`、`docs/architecture.md`、`docs/acceptance-criteria.md`、`docs/development.md`、`docs/implementation-plan.md`。
+- gitx：`internal/gitx/call.go`、`gitx.go`、`gitx_test.go`、`privdir.go`、`scan_probe.go`、`review061_test.go`、`owner_unix_test.go`、`consumer_unix_test.go`、`consumer_linux_test.go`、`consumer_darwin_test.go`、`consumer_windows_test.go`、`schemeb_test.go`、`scratch_test.go`。
+- 直接接点：`internal/gitscan/scan.go`（仅 Scratch 注释）、`internal/gitscan/scan_test.go`（异常探测／未确认消费者的事实不变）、`internal/store/sqlite/crossuser_linux_test.go`（仅命名空间路径断言）。
+
+共 24 个文件。没有修改迁移、推导、CLI、Schema、生产 SQLite 重试／错误映射或 CI 配置。后续证据收尾只追加／接续本报告，不改变代码对象。
 
 获批的 Unix mkdir/open、最终 unlink/rmdir 窗口原始测试继续保留，不能写为新代码阻止；Clean 不能排除 false-clean，Log 完整性没有豁免。记录型 Git 代理仍不代表真实旧版 Git。unsafe Git、Windows 双账户／其他文件系统、压力与长时间故障运行等未验证边界分列，不扩大为安全结论。B2、B3、已关闭 N1 保持关闭；M-14／M-15 等遗留不变。Auto-fix／Auto-merge 保持关闭，PR 不合并，不启动后续工作包，不生成下一轮复审提示词。
