@@ -847,3 +847,9 @@ func TestPrivateDirectoriesArePrivate(t *testing.T) {
 		t.Fatalf("the private directory holds %d entries: %v", len(entries), err)
 	}
 }
+
+// cleanForTest runs Clean as a command would.
+func cleanForTest(t *testing.T, worktree string) (State, error) {
+	t.Helper()
+	return Clean(ctx, worktree)
+}

@@ -291,7 +291,7 @@ func readLink(ext []byte, info *indexInfo) error {
 	}
 	for range 2 {
 		n, ok := ewahSize(rest)
-		if !ok {
+		if !ok || n > len(rest) {
 			return indexProblem("a bitmap of its link extension is malformed")
 		}
 		rest = rest[n:]
@@ -302,18 +302,26 @@ func readLink(ext []byte, info *indexInfo) error {
 	return nil
 }
 
-// ewahSize returns the size of the EWAH bitmap at the start of b: its bit
-// count, its count of 64-bit words, the words and the position of its
-// running-length word, which must be one of the words.
+// EWAH bitmaps: a 32-bit bit count and word count, the 64-bit words, and
+// the 32-bit position of the running-length word.
+const (
+	ewahHeader = 8
+	ewahFooter = 4
+)
+
+// ewahSize returns the size of the EWAH bitmap at the start of b, which
+// must hold all of it: header, words and footer (a bitmap of no word is
+// 12 bytes; review 058 B2: 8 to 11 bytes were taken for one). The
+// running-length word must be one of the words.
 func ewahSize(b []byte) (int, bool) {
-	if len(b) < 8 {
+	if len(b) < ewahHeader+ewahFooter {
 		return 0, false
 	}
 	words := int(binary.BigEndian.Uint32(b[4:8]))
-	if words < 0 || words > (len(b)-12)/8 {
+	if words < 0 || words > (len(b)-ewahHeader-ewahFooter)/8 {
 		return 0, false
 	}
-	size := 8 + 8*words + 4
+	size := ewahHeader + 8*words + ewahFooter
 	rlw := int(binary.BigEndian.Uint32(b[size-4 : size]))
 	if words == 0 && rlw != 0 || words > 0 && rlw >= words {
 		return 0, false
