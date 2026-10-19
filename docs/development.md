@@ -33,7 +33,7 @@ export SPECMETRY_HOME="$(mktemp -d)/specmetry-home"
 | `internal/source/` | 来源（architecture §6.1.3）：路径解析（`in_repo` / `external`）、分块计算 sha256（可取消，不保存内容）、磁盘观测、来源集合哈希、登记、确认与移除、引用列表 |
 | `internal/baseline/` | 读取已确认的基准（当前版本、按编号查找条目），按 TD-14 分配编号（`GOAL-n`、`REQ-nnn`、`AC-<需求号>-n`、`Q-nnn`，永不复用） |
 | `internal/proposal/` | 提案（architecture §6.1.4）：静态规则、来源解析、流式片段校验（不保存原文）、代码引用检查、在一个写事务中保存提案、条目、问题与问题的来源引用 |
-| `internal/gitx/` | 调用 git CLI（只读）：定位仓库与 worktree、分支与提交、文件列表；不传递 `GIT_DIR` 等定位变量。WP2.3（[规范](wp2.3-git-reader.md)）：输入路径的树条目（`TreeEntry`）；工作区状态（`Clean`：私有 git 目录、白名单配置、直接解析索引的稀疏门禁 `IndexIsSparse`，不执行仓库配置的程序）；提交扫描的严格读取（`CheckShallow`、`Tips`、`Classify` 与存储检查、`IsAncestor`、`Log`：关闭 commit-graph、multi-pack-index、grafts 与 shallow 文件）。私有目录建在数据目录的 `tmp/` 中（`NewScratch` 先做数据目录的写入前验证），使用期间加锁，身份在写入、git 使用与删除前复核（规范 §14.3） |
+| `internal/gitx/` | 调用 git CLI（只读）：定位仓库与 worktree、分支与提交、文件列表；不传递 `GIT_DIR` 等定位变量。WP2.3（[规范](wp2.3-git-reader.md)）：输入路径的树条目（`TreeEntry`）；工作区状态（`Clean`：私有 git 目录、白名单配置、直接解析索引的稀疏门禁 `IndexIsSparse`，不执行仓库配置的程序）；提交扫描的严格读取（`CheckShallow`、`Tips`、`Classify` 与存储检查、`IsAncestor`、`Log`：关闭 commit-graph、multi-pack-index、grafts 与 shallow 文件）。私有目录建在数据目录的 `tmp/` 中（`NewScratch` 先做数据目录的写入前验证，持有 `tmp/` 的句柄，用完 `Close`）；写入与删除经目录句柄，所有者文件在使用期间加锁并记录身份，路径上每一级目录的身份在写入、git 使用与每次删除尝试前复核（规范 §14.3） |
 | `internal/gitscan/` | 提交扫描（WP2.3）：编号匹配（`Mentions`）、各 ref 的读取范围、计划之后的一个写事务（并发跳过、只入库至少关联一个本项目编号的新提交、共享一个 `seq`、写游标）。不输出、不节流，由调用的命令决定何时扫描（WP2.7） |
 | `internal/domain/derive/` | 推导引擎（纯函数，data-model §6、§6.13、§6.13.1）：`Derive` 是截止 `as_of_seq` 的完整推导，`ChangesSince` 是 `--diff-since` 的 AC 投影。全部输入显式给出，只导入不做 I/O 的标准库包（由测试检查），不读取数据库、git、文件、网络、环境变量或时钟；缺少输入时返回 `*InputError`，不用缺省值或当前值补齐 |
 | `internal/ulid/` | ULID 生成（只用于标识，不用于排序） |
