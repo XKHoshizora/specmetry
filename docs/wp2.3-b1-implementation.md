@@ -184,3 +184,58 @@ Windows 原子 FILE_CREATE、创建原身份、保护句柄及核对原身份的
 共 24 个文件。没有修改迁移、推导、CLI、Schema、生产 SQLite 重试／错误映射或 CI 配置。后续证据收尾只追加／接续本报告，不改变代码对象。
 
 获批的 Unix mkdir/open、最终 unlink/rmdir 窗口原始测试继续保留，不能写为新代码阻止；Clean 不能排除 false-clean，Log 完整性没有豁免。记录型 Git 代理仍不代表真实旧版 Git。unsafe Git、Windows 双账户／其他文件系统、压力与长时间故障运行等未验证边界分列，不扩大为安全结论。B2、B3、已关闭 N1 保持关闭；M-14／M-15 等遗留不变。Auto-fix／Auto-merge 保持关闭，PR 不合并，不启动后续工作包，不生成下一轮复审提示词。
+
+## 9．Review 062 后续：完成记录 Sync 失败的定向修复
+
+2026-10-20，按 [决定 §73](review-resolution.md#73review-062-与完成记录-sync-失败定向修复) 接续唯一 B1-R2-S。Review 062 的 NO-GO、owner 预检 B1-R1 可关闭、原消费者崩溃反例已修复等裁定以完整原文为准；本节记录实施证据，不宣布 GO、B1 关闭或 WP2.3 验收。
+
+### 9.1 身份、归档及原证据
+
+- 固定起点 `d121bfb42fdbdb922fc136265a3792a86875709b`，base `e0a21b46b5ad7e05146f254aa7523d6054ce2e76`；开始及代码提交前远程仍为 `XKHoshizora/specmetry` / `feat/m2-wp23-git-reader` / PR #27，Open、未合并、auto_merge=null。工作区开始仅有未跟踪 Review 062，全部保留，没有 reset、覆盖、清理或改基。
+- 原样归档提交 `ac8f54c31df2ec5e6c877d5fa63e78648b0a308f`。源文件、仓库归档、暂存 blob 和提交 blob SHA-256 均为 `bba92f73c87cb96596e4cd75c910af1e4be00d74f9f313f1b5995d7a105d1fbf`，逐字节一致；受审对象仍为 `d121bfb`，不修改 Review 060～062 原文。
+- 原代码 CI [39266213035](https://github.com/XKHoshizora/specmetry/actions/runs/39266213035) 对象为 `f935fb9`；原最终文档 CI [39267810108](https://github.com/XKHoshizora/specmetry/actions/runs/39267810108) 对象为 `d121bfb`。各 attempt 1、8/8，不含完成 Sync 故障注入，不能反驳完整 Review 062 §二的独立反例；原失败历史也不覆盖为通过。
+
+### 9.2 两个状态与最小修复
+
+根因为 consumerPending 同时承担序列化记录值和本次清理资格；写完整 false 后 Sync 错误，旧 remove 只检查 pending，因而仍删除所有内容。真实 Git 已结束、错误已返回都不能代替完成记录的成功 Sync。
+
+增加仅属于当前 privateDir 的 `completionUnconfirmed`：完成输入预检通过后，先设为未确认，再生成 false 记录；只有 Truncate、完整 WriteAt 和 Sync 都成功才清除此状态。写入或同步失败时保留，begin／finish 拒绝覆盖，remove 在任何删除前拒绝、仅 close 自身句柄和租约、返回环境错误。失败后没有自动重写、Sync 重试或回滚记录。Clean 和空覆盖探测均经 call.private 共用路径，不改错误映射或发布路径。
+
+该内存状态明确只约束本次调用；v3 字节格式、namespace.lock 和后续认领规则不变。后续 Scratch 在另一个进程中只观察实际记录及归属：完整规范 false、原身份及完整清单一致、锁可取得时仍可信回收，因为 false 仅在实际 Git 结束并输入检查通过后生成；true、截断／无效记录、缺失或不明归属均保留并 exit 6。一次 Sync 失败后当前可读完整 false 可在后续回收，不证明旧 Sync 成功，也不是跨进程永久失败标记。电源故障后恢复为何种记录以实际可验证字节为准，不能验证则保留。当前保留与后续回收分别测试，不以恢复一个内存标志声称所有持久状态已解决。
+
+不升级协议，无新增锁、服务、恢复命令或外部配置程序。公开接口与资源数量不变，v1／v2 不认领；取消／Start 失败的既有完成顺序不变。
+
+### 9.3 准确的失败回归及对照
+
+仓库外证据目录：`C:\Users\hoshi\.codex\visualizations\2026\10\19\01a153a5-24ad-7d82-b219-2787d737ce0a\fix062-1792422143091`。全部使用测试新建仓库与数据目录，不操作真实项目数据。先对起点实现仅加记录 I/O 边界注入钩子及测试，再编译、实际运行 Windows／Linux 失败回归；故障前保留真实 Truncate、WriteAt、合法完整清单及 Git Start／Wait，不修改清理算法。
+
+故障在 owner 完整 false 字节写入、真实 Git ProcessState 确认为成功退出、checkContents 通过之后，指定一次完成 Sync 模拟返回 I/O 错误。它是精确边界注入，不是物理磁盘故障。启动前 Sync 对照明确真实 Git 启动数为零，不能冒充该完成分支。完成分支均断言实际 Git starts=1、waits=1、Sync 位置命中一次。
+
+| 用例 | 起点实现实际结果（Windows、Linux） | 修复后实际结果（两平台） |
+|---|---|---|
+| `TestConsumerRecordFailureRetainsInputs/finish-sync` | FAIL：读取返回环境错误，close 返回 nil、整个临时树被删除 | 环境错误；目录、owner、所有现存清单内容的快照完全不变；自身资源关闭、租约释放 |
+| `TestPublicCompletionSyncFailure/clean` | FAIL：公开 Clean 返回 exit 6，但目录消失 | 公开 Clean exit 6，全部内容保留 |
+| 同测试 `/probe` | FAIL：公开 Log 触发的真实行为探测失败，目录消失 | 全部内容保留、无回调发布、失败不缓存 |
+| `TestCompletionSyncFailureCannotRetry` | FAIL：再次 finish 成功，覆盖刚收到的失败 | 再次 finish／begin 均环境错误，无记录写入或 Sync 重试，随后 close 仍保留 |
+| `/begin-sync` | PASS：零真实 Git 启动，内容保留 | 保持；独立后续进程拒绝 pending=true 并保留 |
+| `/finish-write`、`/finish-truncate` | PASS：直接关联的写入失败分支保留 | 保持；前者留下不完整记录，后者留下 true，独立后续进程均拒绝并保留 |
+| 后续进程完整 false 对照 | 不把旧实现已删除的树算作有效回收 | 先确认本次完整保留及资源释放，再由真实独立进程完整预检并回收；未把回收写成旧 Sync 成功 |
+
+修复前日志 `before-windows.log`、`before-linux.log` 及未修复源码／Linux 二进制保留在隔离目录。修复后 `after-windows.log`、`after-linux.log`；最终补齐“错误收尾无记录 I/O 重试”断言后的 `windows-final-sync.log`、`linux-final-sync.log` 均 PASS。原预检在故障前通过，未用额外文件等前置异常遮蔽路径。
+
+直接回归：Windows `windows-regressions.log`、Linux `after-linux.log` 实际 PASS owner 完整预检、公开 Clean 三阶段、正常／取消／Start 失败后可信回收、真实 Git 生存期六项、清单异常、协议隔离、合作多进程、清理及 ownerGone 重试、空覆盖及身份重探测／取消／多父图／缺失损坏、B2 bitmap 与 B3 排除。Windows 原子创建／同句柄删除实际 PASS；部分目录移动调度被 Windows OS 拒绝，日志单列该事实，不当作替换后拒绝证据。Linux 获批最终 unlink/rmdir 窗口仍实际成立，不声称新代码已阻止。扫描失败丢弃与 N1 仅运行直接回归，不重新验收旧模块。
+
+| 平台／证据层 | 本轮实际范围 |
+|---|---|
+| Windows 本机 | Go 1.27.1、Git 2.56.0.windows.2、NTFS；七个新增故障／重试用例及上述直接回归实际运行。非双账户，不外推其他文件系统 |
+| WSL Linux 本机 | 普通 UID 1000、Git 2.43.0；Windows Go 交叉编译后在 Linux 实际运行，非 Linux 原生构建；新用例及上述直接回归实际 PASS。本机没有 -race 或本轮 root 跨账户结果 |
+| macOS | 本机没有运行；新用例及直接回归的实际运行、跳过以新 CI 日志单列，不以交叉编译或旧 CI 代替 |
+| 静态检查 | 固定 golangci-lint v2.14.0 对相关生产／测试包检查；完整仓库检查以新 CI 为准 |
+
+### 9.4 新 CI 与文件范围
+
+新代码 CI 和后续证据文档 HEAD CI 按各自完整 SHA 单独登记，核对 attempt、8 个 job、实际 checkout、merge 父提交及内容树；不以原 CI 8/8 或代码 CI 代替最终文档 HEAD CI。实际三平台新回归、Ubuntu 普通 -race 与单独 root 无 -race 步骤、按设计跳过项在日志核验后接续。
+
+相对固定起点仅七个文件：`docs/reviews/codex-review-062.md` 原样归档；`internal/gitx/privdir.go` 最小状态修复与 I/O 故障钩子；`internal/gitx/review062_test.go` 精确回归；`docs/review-resolution.md` §73；`docs/wp2.3-git-reader.md` §14.3；`docs/acceptance-criteria.md` 直接验收分支；本交付记录。生产改动仅 privdir.go，不修改生产 SQLite 重试／错误映射、迁移、推导、CLI、Schema 或 CI 配置。
+
+方案 B 的域外 Unix 窗口和 Clean false-clean 边界不变，Log 完整性不豁免；owner 预检、原消费者崩溃反例、空覆盖和 Windows 子机制保留既有裁定。B2、B3、已关闭 N1 不重开；M-14／M-15 等未解决。没有验证物理磁盘／断电故障、真实 unsafe 旧 Git、Windows 双账户及其他文件系统或穷尽压力。Auto-fix／Auto-merge 保持关闭，PR 不合并，实施方不作关闭或验收结论。

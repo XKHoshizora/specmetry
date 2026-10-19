@@ -362,9 +362,14 @@ type privateDir struct {
 	// a failed Start) and complete input verification. Caller death leaves a
 	// barrier: unlocked does not mean that every Git consumer has exited.
 	consumerPending bool
-	lease           *os.File
-	entries         map[string]ownedEntry
-	createHandle    *os.File
+	// completionUnconfirmed blocks this call's cleanup/reuse until the complete
+	// false record has been written AND synced. A readable false record alone
+	// cannot override a persistence error this caller has observed. This local
+	// state is not a new on-disk protocol or a later adopter's Sync receipt.
+	completionUnconfirmed bool
+	lease                 *os.File
+	entries               map[string]ownedEntry
+	createHandle          *os.File
 }
 
 // open opens the entry name of tmp as a directory, its identity read from
@@ -477,7 +482,13 @@ func (d *privateDir) record() string {
 }
 func (d *privateDir) saveRecord() error {
 	b := []byte(d.record())
+	if err := d.recordIO("truncate"); err != nil {
+		return err
+	}
 	if err := d.lock.Truncate(0); err != nil {
+		return err
+	}
+	if err := d.recordIO("write"); err != nil {
 		return err
 	}
 	n, err := d.lock.WriteAt(b, 0)
@@ -487,7 +498,19 @@ func (d *privateDir) saveRecord() error {
 	if err != nil {
 		return err
 	}
+	if err := d.recordIO("sync"); err != nil {
+		return err
+	}
 	return d.lock.Sync()
+}
+
+var testHookRecordIO func(stage string, d *privateDir) error
+
+func (d *privateDir) recordIO(stage string) error {
+	if testHookRecordIO != nil {
+		return testHookRecordIO(stage, d)
+	}
+	return nil
 }
 func (d *privateDir) loadRecord() bool {
 	const limit = 1 << 20
@@ -662,7 +685,7 @@ func (d *privateDir) checkContents() error {
 // beginConsumer establishes the conservative crash barrier before any child can
 // consume this directory. A torn/failed write is also unadoptable; no child starts.
 func (d *privateDir) beginConsumer() error {
-	if d.consumerPending {
+	if d.consumerPending || d.completionUnconfirmed {
 		return scratchProblem("a private Git consumer has no confirmed completion; its directory was retained")
 	}
 	if err := d.checkContents(); err != nil {
@@ -678,13 +701,18 @@ func (d *privateDir) beginConsumer() error {
 // finishConsumer is called only after commandIO has returned from Start failure
 // or Wait. Failed verification leaves the barrier in place, never a false proof.
 func (d *privateDir) finishConsumer() error {
+	if d.completionUnconfirmed {
+		return scratchProblem("cannot persist the private Git consumer completion; its directory was retained")
+	}
 	if err := d.checkContents(); err != nil {
 		return scratchProblem("private inputs changed; the directory was retained")
 	}
+	d.completionUnconfirmed = true
 	d.consumerPending = false
 	if err := d.saveRecord(); err != nil {
 		return scratchProblem("cannot persist the private Git consumer completion; its directory was retained")
 	}
+	d.completionUnconfirmed = false
 	return nil
 }
 
@@ -715,7 +743,7 @@ func (d *privateDir) verify() error {
 // is not reported clean), and a directory that still has its owner file
 // is left for a later Scratch to remove.
 func (d *privateDir) remove() error {
-	if d.consumerPending {
+	if d.consumerPending || d.completionUnconfirmed {
 		d.close()
 		return scratchProblem("a private Git consumer has no confirmed completion; its directory was retained")
 	}
