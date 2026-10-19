@@ -73,6 +73,11 @@ func FakeTraceGit(t testing.TB, control, test string, code int) (dir string, env
 const (
 	// PassAsIs runs the real git as it was run.
 	PassAsIs = "as-is"
+	// PassIgnoringEmptyHistory simulates a Git that ignores the two explicit
+	// empty history overrides; all commands otherwise run the real Git.
+	PassIgnoringEmptyHistory = "ignoring-empty-history"
+	// PassProbeExtraFile injects an unmanifested probe entry: cleanup MUST fail.
+	PassProbeExtraFile = "probe-extra-file"
 	// PassWithoutNoLazyFetch hides GIT_NO_LAZY_FETCH from the real git,
 	// which then fetches a missing object as a git that does not honour
 	// the variable (git 2.32) does.
@@ -277,8 +282,21 @@ func passthrough(real, mode string) int {
 	hide := map[string]string{PassWithoutNoLazyFetch: "GIT_NO_LAZY_FETCH", PassWithoutTrace: "GIT_TRACE2_EVENT"}[mode]
 	var env []string
 	for _, kv := range os.Environ() {
-		if name, _, _ := strings.Cut(kv, "="); hide == "" || !strings.EqualFold(name, hide) {
+		name, value, _ := strings.Cut(kv, "=")
+		if mode == PassIgnoringEmptyHistory && value == "" && (strings.EqualFold(name, "GIT_GRAFT_FILE") || strings.EqualFold(name, "GIT_SHALLOW_FILE")) {
+			continue
+		}
+		if hide == "" || !strings.EqualFold(name, hide) {
 			env = append(env, kv)
+		}
+	}
+	if mode == PassProbeExtraFile && slices.Contains(args, "--format=%H") {
+		for _, arg := range args {
+			if path, ok := strings.CutPrefix(arg, "--git-dir="); ok {
+				if err := os.WriteFile(filepath.Join(path, "unexpected"), []byte("synthetic-extra"), 0o600); err != nil {
+					return 127
+				}
+			}
 		}
 	}
 	cmd := exec.Command(real, args...)

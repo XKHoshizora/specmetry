@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"slices"
 	"strings"
 	"testing"
 
@@ -41,13 +40,18 @@ func newScratch(t *testing.T, d datadir.Dir) (*Scratch, error) {
 // entries lists the names in the data directory's tmp directory.
 func entries(t *testing.T, d datadir.Dir) []string {
 	t.Helper()
-	es, err := os.ReadDir(d.Join(datadir.TmpDir))
+	es, err := os.ReadDir(d.Join(filepath.Join(datadir.TmpDir, scratchNamespace)))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
 	var out []string
 	for _, e := range es {
-		out = append(out, e.Name())
+		if e.Name() != leaseName {
+			out = append(out, e.Name())
+		}
 	}
 	return out
 }
@@ -88,7 +92,7 @@ func wantFiles(t *testing.T, files map[string]string) {
 // or replaced.
 func wantReplaced(t *testing.T, err error) {
 	t.Helper()
-	if apperr.ExitCode(err) != apperr.ExitEnvironment || !strings.Contains(err.Error(), "moved or replaced") {
+	if apperr.ExitCode(err) != apperr.ExitEnvironment || !strings.Contains(err.Error(), "replac") {
 		t.Fatalf("the read = %v; want it to fail on the change", err)
 	}
 }
@@ -99,10 +103,10 @@ func wantReplaced(t *testing.T, err error) {
 // file, held from its making until its removal), nor tmp while the
 // Scratch's handle on it is. That refusal is what the schedule meets on
 // Windows.
-func moveAway(t *testing.T, from, to string, held bool) bool {
+func moveAway(t *testing.T, from, to string) bool {
 	t.Helper()
 	err := os.Rename(from, to)
-	if held && runtime.GOOS == "windows" {
+	if runtime.GOOS == "windows" {
 		if err == nil {
 			t.Fatalf("Windows renamed %s while it was held open", from)
 		}
@@ -119,17 +123,12 @@ func moveAway(t *testing.T, from, to string, held bool) bool {
 var reads = []struct {
 	name string
 	read func(t *testing.T, s *Scratch) error
-}{{"Clean", readClean}, {"Log", readLog}}
+}{{"Clean", readClean}} // Log no longer uses a private directory; see TestScanEmptyOverrides.
 
 func readClean(t *testing.T, s *Scratch) error {
 	repo := baseRepo(t)
 	_, err := Clean(ctx, s, repo.Dir)
 	return err
-}
-
-func readLog(t *testing.T, s *Scratch) error {
-	repo, shas := chain(t, 2)
-	return Log(ctx, s, repo.Dir, shas[1], nil, func(Commit) error { return nil })
 }
 
 // Review 058 B1, the first counterexample: the private directories live
@@ -204,7 +203,7 @@ func TestPrivateDirectoryReplaced(t *testing.T) {
 				testHookPrivateDir = func(path string) {
 					testHookPrivateDir = nil
 					at = path
-					if moved = moveAway(t, path, path+".moved", true); !moved {
+					if moved = moveAway(t, path, path+".moved"); !moved {
 						return
 					}
 					if c.link {
@@ -234,8 +233,8 @@ func TestPrivateDirectoryReplaced(t *testing.T) {
 					t.Errorf("an owner file is in the replacement: %v", err)
 				}
 				if !c.link { // with a link in tmp, the data directory is refused
-					if _, err := newScratch(t, d); err != nil {
-						t.Fatal(err)
+					if _, err := newScratch(t, d); apperr.ExitCode(err) != apperr.ExitEnvironment {
+						t.Fatalf("unknown replacement: %v", err)
 					}
 					wantFiles(t, map[string]string{witness: "keep"})
 				}
@@ -272,7 +271,7 @@ func TestRemovalAttemptsCheckTheDirectory(t *testing.T) {
 						return nil
 					}
 					at = path
-					if moved = moveAway(t, path, path+".moved", step == "contents"); moved {
+					if moved = moveAway(t, path, path+".moved"); moved {
 						mkPrivate(t, path)
 						witness = filepath.Join(path, "replacement-content")
 						write(t, witness, "keep")
@@ -297,8 +296,8 @@ func TestRemovalAttemptsCheckTheDirectory(t *testing.T) {
 				if _, err := os.Stat(at + ".moved"); err != nil {
 					t.Errorf("the read's own directory, moved away, was removed: %v", err)
 				}
-				if _, err := newScratch(t, d); err != nil {
-					t.Fatal(err)
+				if _, err := newScratch(t, d); apperr.ExitCode(err) != apperr.ExitEnvironment {
+					t.Fatalf("unknown replacement: %v", err)
 				}
 				wantFiles(t, map[string]string{witness: "keep"})
 			})
@@ -328,7 +327,7 @@ func TestRemovalChecksWhatItRemoves(t *testing.T) {
 				testHookRemove = func(st, path string) error {
 					if st == step && at == "" {
 						at = path
-						if moved = moveAway(t, path, path+".moved", step == "contents"); moved {
+						if moved = moveAway(t, path, path+".moved"); moved {
 							mkPrivate(t, path)
 							if step == "contents" {
 								kept[filepath.Join(path, "config")] = "keep"
@@ -410,15 +409,16 @@ func TestScratchRootReplacedWhileInUse(t *testing.T) {
 			moved := false
 			testHookPrivateDir = func(path string) {
 				testHookPrivateDir = nil
-				if moved = moveAway(t, tmp, tmp+".moved", true); !moved {
+				if moved = moveAway(t, tmp, tmp+".moved"); !moved {
 					return
 				}
-				own = filepath.Join(tmp+".moved", filepath.Base(path))
+				own = filepath.Join(tmp+".moved", scratchNamespace, filepath.Base(path))
 				record, err := os.ReadFile(filepath.Join(own, ownerName))
 				if err != nil {
 					t.Fatal(err)
 				}
 				mkPrivate(t, tmp)
+				mkPrivate(t, filepath.Join(tmp, scratchNamespace))
 				mkPrivate(t, path)
 				kept[filepath.Join(path, ownerName)] = string(record)
 				kept[filepath.Join(path, "witness")] = "keep"
@@ -441,8 +441,8 @@ func TestScratchRootReplacedWhileInUse(t *testing.T) {
 			if _, err := os.Stat(filepath.Join(own, ownerName)); err != nil {
 				t.Errorf("the read's own directory lost its owner file: %v", err)
 			}
-			if _, err := newScratch(t, d); err != nil {
-				t.Fatal(err)
+			if _, err := newScratch(t, d); apperr.ExitCode(err) != apperr.ExitEnvironment {
+				t.Fatalf("unknown replacement: %v", err)
 			}
 			wantFiles(t, kept)
 		})
@@ -478,12 +478,12 @@ func TestScratchRootRedirected(t *testing.T) {
 				moved := false
 				testHookPrivateDir = func(path string) {
 					testHookPrivateDir = nil
-					if moved = moveAway(t, dir, dir+".moved", true); !moved {
+					if moved = moveAway(t, dir, dir+".moved"); !moved {
 						return
 					}
-					own = filepath.Join(dir+".moved", filepath.Base(path))
+					own = filepath.Join(dir+".moved", scratchNamespace, filepath.Base(path))
 					if c.data {
-						own = filepath.Join(dir+".moved", datadir.TmpDir, filepath.Base(path))
+						own = filepath.Join(dir+".moved", datadir.TmpDir, scratchNamespace, filepath.Base(path))
 					}
 					if c.elsewhere {
 						target = filepath.Join(d.Path, "elsewhere")
@@ -538,8 +538,8 @@ func TestPrivateDirectoryReplacedAsItIsMade(t *testing.T) {
 				testHookMkdir = func(path string) {
 					testHookMkdir = nil
 					at = path
-					if err := os.Rename(path, path+".moved"); err != nil {
-						t.Fatal(err)
+					if !moveAway(t, path, path+".moved") {
+						return
 					}
 					if c.link {
 						target := filepath.Join(d.Path, "elsewhere")
@@ -553,7 +553,15 @@ func TestPrivateDirectoryReplacedAsItIsMade(t *testing.T) {
 					write(t, witness, "keep")
 				}
 				t.Cleanup(func() { testHookMkdir = nil })
-				wantReplaced(t, r.read(t, s))
+				err := r.read(t, s)
+				if witness == "" && runtime.GOOS == "windows" {
+					if err != nil {
+						t.Fatal(err)
+					}
+					wantEmpty(t, d)
+					return
+				}
+				wantReplaced(t, err)
 				wantFiles(t, map[string]string{witness: "keep"})
 				if _, err := os.Lstat(at); err != nil {
 					t.Errorf("what replaced the private directory was removed: %v", err)
@@ -575,7 +583,7 @@ func TestPrivateDirectoryReplacedAsItIsMade(t *testing.T) {
 func TestScratchRootReplaced(t *testing.T) {
 	s, d := scratchIn(t)
 	root := d.Join(datadir.TmpDir)
-	if !moveAway(t, root, root+".moved", true) {
+	if !moveAway(t, root, root+".moved") {
 		p, err := newPrivateDir(s)
 		if err != nil {
 			t.Fatal(err)
@@ -586,102 +594,71 @@ func TestScratchRootReplaced(t *testing.T) {
 		return
 	}
 	mkPrivate(t, root)
-	if _, err := newPrivateDir(s); apperr.ExitCode(err) != apperr.ExitEnvironment || !strings.Contains(err.Error(), "moved or replaced") {
+	if _, err := newPrivateDir(s); apperr.ExitCode(err) != apperr.ExitEnvironment || !strings.Contains(err.Error(), "replac") {
 		t.Errorf("newPrivateDir = %v; want a refusal", err)
 	}
 	wantEmpty(t, d)
 }
 
-// Review 058 B1, the third counterexample, and review 059 B1-R: a new
-// Scratch removes only what it can show is a crashed read's: a directory
-// of a name Specmetry makes, whose owner file's lock no process holds, and
-// whose owner file's record names that directory and that file. A private
-// directory in use (its lock held), a copy of a crashed read's directory
-// (its record copied too), a directory without an owner file, with one
-// that is a directory or does not hold the record, a link to a crashed
-// read's directory, names Specmetry does not make, the lock files of the
-// earlier layout, and anything in the system's temporary directory stay.
+// v2 retains unknown, copied, unmanifested and active content. Unlike the
+// former cleanup, detecting an unknown object is an environment error.
 func TestScratchRemovesOnlyItsOwnLeftovers(t *testing.T) {
-	s, d := scratchIn(t)
-	root := d.Join(datadir.TmpDir)
-	// crashed makes a private directory, writes a file in it, and lets go
-	// of it as a read that stopped would.
-	crashed := func() string {
-		p, err := newPrivateDir(s)
-		if err != nil {
-			t.Fatal(err)
-		}
-		write(t, filepath.Join(p.path, "index"), "x")
-		p.close()
-		return p.path
-	}
-	one, two := crashed(), crashed()
-	copied := filepath.Join(root, "read-"+strings.Repeat("1", privateNameLen))
-	mkPrivate(t, copied)
-	record, err := os.ReadFile(filepath.Join(one, ownerName))
-	if err != nil {
-		t.Fatal(err)
-	}
-	write(t, filepath.Join(copied, ownerName), string(record))
-	write(t, filepath.Join(copied, "index"), "x")
-	noOwner := filepath.Join(root, "read-"+strings.Repeat("2", privateNameLen))
-	mkPrivate(t, noOwner)
-	ownerDir := filepath.Join(root, "read-"+strings.Repeat("3", privateNameLen))
-	mkPrivate(t, ownerDir)
-	mkPrivate(t, filepath.Join(ownerDir, ownerName))
-	noRecord := filepath.Join(root, "read-"+strings.Repeat("4", privateNameLen))
-	mkPrivate(t, noRecord)
-	write(t, filepath.Join(noRecord, ownerName), "")
-	linked := filepath.Join(root, "read-"+strings.Repeat("5", privateNameLen))
-	link(t, two, linked)
-	for _, name := range []string{"read-" + strings.Repeat("6", privateNameLen) + ".lock", "read-not-hex.lock", "notes.txt"} {
-		write(t, filepath.Join(root, name), "")
-	}
-	for _, name := range []string{"read-not-hex", "specmetry-private-old"} {
-		mkPrivate(t, filepath.Join(root, name))
-	}
-	active, err := newPrivateDir(s)
-	if err != nil {
-		t.Fatal(err)
-	}
-	inUse := filepath.Join(active.path, "in-use")
-	write(t, inUse, "")
-	system := filepath.Join(os.TempDir(), "read-"+strings.Repeat("ab", privateNameLen/2))
-	if err := os.Mkdir(system, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(system) })
-
-	// The link in tmp is not something the data directory's check allows,
-	// so the next Scratch is opened past NewScratch's Ensure.
-	next, err := openScratch(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = next.Close() })
-	next.removeLeftovers()
-	left := entries(t, d)
-	for _, gone := range []string{one, two} {
-		if slices.Contains(left, filepath.Base(gone)) {
-			t.Errorf("a crashed read's directory was not removed: %s", filepath.Base(gone))
-		}
-	}
-	for _, kept := range []string{copied, noOwner, ownerDir, noRecord, linked, active.path} {
-		if !slices.Contains(left, filepath.Base(kept)) {
-			t.Errorf("removed: %s", filepath.Base(kept))
-		}
-	}
-	for _, name := range []string{"read-" + strings.Repeat("6", privateNameLen) + ".lock", "read-not-hex.lock", "notes.txt", "read-not-hex", "specmetry-private-old"} {
-		if !slices.Contains(left, name) {
-			t.Errorf("removed: %s", name)
-		}
-	}
-	wantFiles(t, map[string]string{filepath.Join(copied, "index"): "x", filepath.Join(copied, ownerName): string(record), inUse: ""})
-	if _, err := os.Stat(system); err != nil {
-		t.Errorf("the system's temporary directory was cleaned: %v", err)
-	}
-	if err := active.remove(); err != nil {
-		t.Fatal(err)
+	for _, kind := range []string{"crashed", "unknown-file", "copied-owner", "extra-content", "active"} {
+		t.Run(kind, func(t *testing.T) {
+			s, d := scratchIn(t)
+			p, err := newPrivateDir(s)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := p.write("index", []byte("private")); err != nil {
+				t.Fatal(err)
+			}
+			path := p.path
+			switch kind {
+			case "unknown-file":
+				p.close()
+				write(t, filepath.Join(s.path, "unknown"), "keep")
+			case "copied-owner":
+				p.close()
+				record, err := os.ReadFile(filepath.Join(path, ownerName))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Rename(filepath.Join(path, ownerName), d.Join("original-owner")); err != nil {
+					t.Fatal(err)
+				}
+				write(t, filepath.Join(path, ownerName), string(record)) // new owner identity
+			case "extra-content":
+				p.close()
+				write(t, filepath.Join(path, "unknown"), "keep")
+			case "crashed":
+				p.close()
+			}
+			next, err := newScratch(t, d)
+			if kind == "crashed" {
+				if err != nil {
+					t.Fatal(err)
+				}
+				wantEmpty(t, d)
+				return
+			}
+			if kind == "active" {
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := newPrivateDir(next); apperr.ExitCode(err) != apperr.ExitEnvironment {
+					t.Fatalf("contention: %v", err)
+				}
+				if err := p.remove(); err != nil {
+					t.Fatal(err)
+				}
+				return
+			}
+			if apperr.ExitCode(err) != apperr.ExitEnvironment {
+				t.Fatalf("unknown content: %v", err)
+			}
+			wantFiles(t, map[string]string{filepath.Join(path, "index"): "private"})
+		})
 	}
 }
 
@@ -739,7 +716,7 @@ func TestPrivateDirectoryLifecycle(t *testing.T) {
 	if len(left) != 1 {
 		t.Fatalf("after a failed removal: %v; want the directory", left)
 	}
-	if _, err := os.Stat(filepath.Join(d.Join(datadir.TmpDir), left[0], ownerName)); err != nil {
+	if _, err := os.Stat(filepath.Join(d.Join(filepath.Join(datadir.TmpDir, scratchNamespace)), left[0], ownerName)); err != nil {
 		t.Errorf("its owner file: %v", err)
 	}
 	if _, err := newScratch(t, d); err != nil {
@@ -758,14 +735,14 @@ func TestPrivateDirectoryLifecycle(t *testing.T) {
 	if apperr.ExitCode(err) != apperr.ExitEnvironment {
 		t.Errorf("a directory whose own entry cannot be removed: Clean = %v; want an environment error", err)
 	}
-	if _, err := newScratch(t, d); err != nil {
-		t.Fatal(err)
+	if _, err := newScratch(t, d); apperr.ExitCode(err) != apperr.ExitEnvironment {
+		t.Fatalf("ownerless leftover: %v", err)
 	}
 	left = entries(t, d)
 	if len(left) != 1 {
 		t.Fatalf("after a failed removal of the entry: %v; want the empty directory, kept", left)
 	}
-	if es, err := os.ReadDir(filepath.Join(d.Join(datadir.TmpDir), left[0])); err != nil || len(es) != 0 {
+	if es, err := os.ReadDir(filepath.Join(d.Join(filepath.Join(datadir.TmpDir, scratchNamespace)), left[0])); err != nil || len(es) != 0 {
 		t.Errorf("the directory kept: %v, %v; want it empty", es, err)
 	}
 

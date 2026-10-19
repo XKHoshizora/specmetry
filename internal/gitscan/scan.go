@@ -19,8 +19,9 @@ import (
 type Options struct {
 	// Secrets scans the names the scan would store in its cursors (D7).
 	Secrets *secrets.Scanner
-	// Scratch holds the private directories of the scan's git reads
-	// (gitx.NewScratch on the data directory).
+	// Scratch supplies the protected v2 lease for the scan capability probe
+	// (gitx.NewScratch on the data directory). Real scan reads use empty
+	// history overrides, with no private missing pathname.
 	Scratch *gitx.Scratch
 	// Now is the clock of scanned_at; nil means time.Now.
 	Now func() time.Time

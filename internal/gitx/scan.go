@@ -19,37 +19,32 @@ import (
 // history without reading the commit objects, so that a missing or damaged
 // object goes unnoticed (review 052 B1-R); every read here closes those
 // ways: the commit-graph and the multi-pack-index are out of use, replace
-// objects already are (globalArgs), and grafts and the shallow file point
-// to a path that does not exist, so that neither a grafts file nor a
+// objects already are (globalArgs), and explicit empty grafts and shallow overrides are behavior-probed
+// per executable identity, so that neither a grafts file nor a
 // shallow file that appears after CheckShallow cuts a walk short. Whatever
 // git visits, it reads and parses. The scan starts with CheckShallow.
 
 // scanArgs come first in every scan read.
 var scanArgs = []string{"-c", "core.commitGraph=false", "-c", "core.multiPackIndex=false"}
 
-// scanCall runs c as a scan read: an object read with scanArgs, and
-// GIT_GRAFT_FILE and GIT_SHALLOW_FILE naming a file that does not exist,
-// in a private directory of its own made for the call in s (only the
-// current user can make anything there; its path is checked to lead to
-// the directory made before git runs, and again as it is removed).
+// scanCall pins a verified executable and uses explicit EMPTY values. No
+// private pathname participates in a real scan read (B1-D1, approval §71).
 func scanCall(ctx context.Context, s *Scratch, c call) (result, error) {
-	d, err := newPrivateDir(s)
+	if err := s.verify(); err != nil {
+		return result{}, err
+	}
+	git, err := scanGit(ctx, s)
 	if err != nil {
 		return result{}, err
 	}
-	if err := d.verify(); err != nil {
-		_ = d.remove()
-		return result{}, err
-	}
-	missing := d.join("none")
-	c.objects = true
 	c.args = append(slices.Clone(scanArgs), c.args...)
-	c.env = append(c.env, "GIT_GRAFT_FILE="+missing, "GIT_SHALLOW_FILE="+missing)
-	r, err := c.run(ctx)
-	if rerr := d.remove(); err == nil {
-		err = rerr
+	c.env = append(c.env, "GIT_GRAFT_FILE=", "GIT_SHALLOW_FILE=")
+	if testHookScanCall != nil {
+		if after := testHookScanCall(c); after != nil {
+			defer after()
+		}
 	}
-	return r, err
+	return c.runWithGit(ctx, git)
 }
 
 // CheckShallow returns an environment error for a shallow repository, or
@@ -426,3 +421,6 @@ func (r *logReader) close() error {
 	}
 	return nil
 }
+
+// Exact before-Git/after-Git roundtrip schedule, used only by regression tests.
+var testHookScanCall func(call) func()

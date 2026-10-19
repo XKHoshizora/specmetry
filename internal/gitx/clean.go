@@ -328,7 +328,7 @@ func (p *privateRepo) fill(paths repoPaths, head headState, config []byte) error
 	}
 	root := p.dir.root
 	for _, d := range []string{"refs/heads", "refs/tags", "objects/info", "objects/pack", "info"} {
-		if err := root.MkdirAll(filepath.FromSlash(d), 0o700); err != nil {
+		if err := p.dir.mkdirAll(d); err != nil {
 			return privateProblem(err)
 		}
 	}
@@ -345,16 +345,16 @@ func (p *privateRepo) fill(paths repoPaths, head headState, config []byte) error
 		"config":                  config,
 		"objects/info/alternates": []byte(objects + "\n"),
 	} {
-		if err := writeNew(root, filepath.FromSlash(name), data); err != nil {
+		if err := p.dir.write(name, data); err != nil {
 			return privateProblem(err)
 		}
 	}
 	for name, from := range paths.info {
-		if _, err := copyIfExists(from, root, filepath.FromSlash(name)); err != nil {
+		if _, err := copyIfExists(from, p.dir, filepath.FromSlash(name)); err != nil {
 			return err
 		}
 	}
-	found, err := copyIfExists(paths.index, root, "index")
+	found, err := copyIfExists(paths.index, p.dir, "index")
 	if err != nil || !found.exists {
 		return err // no index: an empty one (review 057 N1)
 	}
@@ -368,7 +368,7 @@ func (p *privateRepo) fill(paths repoPaths, head headState, config []byte) error
 		return err
 	}
 	name := sharedIndexName(*info.shared)
-	shared, err := copyIfExists(filepath.Join(filepath.Dir(paths.index), name), root, name)
+	shared, err := copyIfExists(filepath.Join(filepath.Dir(paths.index), name), p.dir, name)
 	if err != nil {
 		return err
 	}
@@ -376,20 +376,6 @@ func (p *privateRepo) fill(paths repoPaths, head headState, config []byte) error
 		return indexProblem("the shared index of a split index is missing")
 	}
 	return nil
-}
-
-// writeNew writes the file name in root, which must not exist yet,
-// owner-only.
-func writeNew(root *os.Root, name string, data []byte) error {
-	f, err := root.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if err != nil {
-		return err
-	}
-	if _, err := f.Write(data); err != nil {
-		_ = f.Close()
-		return err
-	}
-	return f.Close()
 }
 
 // copied is what copyIfExists found.
@@ -401,7 +387,7 @@ type copied struct {
 // copyIfExists copies the regular file from to the new file name in root,
 // as it was when opened (its modification time from the same handle). A
 // file that does not exist is not copied; any other failure is an error.
-func copyIfExists(from string, root *os.Root, name string) (copied, error) {
+func copyIfExists(from string, d *privateDir, name string) (copied, error) {
 	src, err := os.Open(from)
 	if errors.Is(err, fs.ErrNotExist) {
 		return copied{}, nil
@@ -414,7 +400,7 @@ func copyIfExists(from string, root *os.Root, name string) (copied, error) {
 	if err != nil || !fi.Mode().IsRegular() {
 		return copied{}, apperr.New(apperr.Environment, "a file of the repository's git directory that Specmetry copies is not a regular file")
 	}
-	dst, err := root.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	dst, err := d.create(name)
 	if err != nil {
 		return copied{}, privateProblem(err)
 	}
@@ -463,7 +449,7 @@ func (p *privateRepo) read(ctx context.Context, top bool) (State, []gitlink, err
 	}
 	state := StateClean
 	out, err := call{label: "status", dir: p.worktree, objects: true,
-		args: p.args(append([]string{"status", "--porcelain", "-z", "--untracked-files=all", "--ignore-submodules=all"}, pathspec...)...)}.must(ctx)
+		private: p.dir, args: p.args(append([]string{"status", "--porcelain", "-z", "--untracked-files=all", "--ignore-submodules=all"}, pathspec...)...)}.must(ctx)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -474,7 +460,7 @@ func (p *privateRepo) read(ctx context.Context, top bool) (State, []gitlink, err
 	// candidates, take the definition's pathspec too (review 058 B3): what
 	// it leaves out cannot change the state through them either.
 	out, err = call{label: "ls-files", dir: p.worktree, list: true,
-		args: p.args(append([]string{"ls-files", "-z", "--sparse", "--stage"}, pathspec...)...)}.must(ctx)
+		private: p.dir, args: p.args(append([]string{"ls-files", "-z", "--sparse", "--stage"}, pathspec...)...)}.must(ctx)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -501,7 +487,7 @@ func (p *privateRepo) read(ctx context.Context, top bool) (State, []gitlink, err
 		state = StateDirty
 	case p.head != "":
 		out, err = call{label: "diff-index", dir: p.worktree, objects: true,
-			args: p.args(append([]string{"diff-index", "--cached", "--raw", "-z", "--ignore-submodules=none", p.head}, pathspec...)...)}.must(ctx)
+			private: p.dir, args: p.args(append([]string{"diff-index", "--cached", "--raw", "-z", "--ignore-submodules=none", p.head}, pathspec...)...)}.must(ctx)
 		if err != nil {
 			return 0, nil, err
 		}
@@ -548,7 +534,7 @@ func (p *privateRepo) filtered(ctx context.Context, paths, pathspec []string) (b
 		return false, nil
 	}
 	out, err := call{label: "check-attr", dir: p.worktree, objects: true,
-		args: p.args("check-attr", "-z", "--stdin", "filter"), stdin: []byte(strings.Join(paths, "\x00") + "\x00")}.must(ctx)
+		private: p.dir, args: p.args("check-attr", "-z", "--stdin", "filter"), stdin: []byte(strings.Join(paths, "\x00") + "\x00")}.must(ctx)
 	if err != nil {
 		return false, err
 	}
@@ -569,7 +555,7 @@ func (p *privateRepo) filtered(ctx context.Context, paths, pathspec []string) (b
 		return false, nil
 	}
 	out, err = call{label: "diff-files", dir: p.worktree, objects: true,
-		args: p.args(append([]string{"diff-files", "--name-only", "-z", "--ignore-submodules=all"}, pathspec...)...)}.must(ctx)
+		private: p.dir, args: p.args(append([]string{"diff-files", "--name-only", "-z", "--ignore-submodules=all"}, pathspec...)...)}.must(ctx)
 	if err != nil {
 		return false, err
 	}

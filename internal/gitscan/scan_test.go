@@ -542,6 +542,40 @@ func TestScanFailuresWriteNothing(t *testing.T) {
 		// (REQ-001, the cursor's tip), with C (REQ-001) committed on top.
 		damage func(t *testing.T, e *env, a, b, cc string) (undo func())
 	}{
+		{"B1 empty-override probe unsupported", func(t *testing.T, _ *env, _, _, _ string) func() {
+			dir, env, _ := testutil.PassthroughGit(t, testutil.PassIgnoringEmptyHistory)
+			for _, kv := range env {
+				k, v, _ := strings.Cut(kv, "=")
+				t.Setenv(k, v)
+			}
+			old := os.Getenv("PATH")
+			t.Setenv("PATH", dir+string(os.PathListSeparator)+old)
+			return func() { t.Setenv("PATH", old) }
+		}},
+		{"B1 probe cleanup observes unknown content", func(t *testing.T, e *env, _, _, _ string) func() {
+			dir, env, _ := testutil.PassthroughGit(t, testutil.PassProbeExtraFile)
+			for _, kv := range env {
+				k, v, _ := strings.Cut(kv, "=")
+				t.Setenv(k, v)
+			}
+			old := os.Getenv("PATH")
+			t.Setenv("PATH", dir+string(os.PathListSeparator)+old)
+			return func() {
+				t.Setenv("PATH", old)
+				// Explicit test-fixture repair, never production cleanup of unknowns.
+				paths, err := filepath.Glob(e.home.Join("tmp/git-reader-v2/read-*/unexpected"))
+				if err != nil || len(paths) != 1 {
+					t.Fatalf("fault witness: %v %v", paths, err)
+				}
+				data, err := os.ReadFile(paths[0])
+				if err != nil || string(data) != "synthetic-extra" {
+					t.Fatalf("fault witness changed: %v", err)
+				}
+				if err := os.Remove(paths[0]); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}},
 		{"L10 a git without worktree list -z", func(t *testing.T, _ *env, _, _, _ string) func() {
 			dir, env, _ := testutil.PassthroughGit(t, testutil.PassWithoutWorktreeListZ)
 			for _, kv := range env {

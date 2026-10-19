@@ -26,6 +26,7 @@ type call struct {
 	// git shown never to fetch one (PD-26). list: it lists an index, so
 	// that git must also know ls-files --sparse.
 	objects, list bool
+	private       *privateDir
 }
 
 // result is what a call showed: its output (unless it went to stdout), its
@@ -51,6 +52,16 @@ func (c call) run(ctx context.Context) (result, error) {
 	if err != nil {
 		return result{}, err
 	}
+	return c.runWithGit(ctx, git)
+}
+
+// runWithGit pins a probed executable for this call; it never rediscovers PATH.
+func (c call) runWithGit(ctx context.Context, git string) (result, error) {
+	if c.private != nil {
+		if err := c.private.checkContents(); err != nil {
+			return result{}, scratchProblem("private inputs changed; the directory was retained")
+		}
+	}
 	var out bytes.Buffer
 	stdout := c.stdout
 	if stdout == nil {
@@ -65,6 +76,11 @@ func (c call) run(ctx context.Context) (result, error) {
 	code, err := commandIO(ctx, git, c.dir, env, stdin, stdout, &stderr, append(slices.Clone(globalArgs), c.args...)...)
 	if err != nil {
 		return result{}, err
+	}
+	if c.private != nil {
+		if err := c.private.checkContents(); err != nil {
+			return result{}, scratchProblem("private inputs changed; the directory was retained")
+		}
 	}
 	return result{out: out.Bytes(), code: code, stderr: stderr.seen}, nil
 }

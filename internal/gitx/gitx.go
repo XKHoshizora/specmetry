@@ -444,9 +444,10 @@ func supportedVersion(out string) bool {
 // PATH finds the same file, unchanged; any other git is checked anew. The
 // file found is the one run.
 type gitBinary struct {
-	path    string
-	size    int64
-	modTime int64
+	path     string
+	size     int64
+	modTime  int64
+	identity fileKey
 }
 
 var (
@@ -459,6 +460,7 @@ var (
 		versionOK bool
 		objects   objectSafety
 		sparse    sparseListing
+		scanEmpty bool
 	}
 )
 
@@ -468,11 +470,20 @@ func findGit() (gitBinary, error) {
 	if err != nil {
 		return gitBinary{}, apperr.New(apperr.Environment, "git is required but was not found on PATH")
 	}
-	fi, err := os.Stat(p)
+	f, err := os.Open(p)
+	if err != nil {
+		return gitBinary{}, apperr.New(apperr.Environment, "cannot identify git")
+	}
+	defer func() { _ = f.Close() }()
+	identity, _, err := keyOf(f)
+	if err != nil {
+		return gitBinary{}, apperr.New(apperr.Environment, "cannot identify git")
+	}
+	fi, err := f.Stat()
 	if err != nil {
 		return gitBinary{}, apperr.New(apperr.Environment, "cannot run git ("+osProblem(err)+")")
 	}
-	return gitBinary{path: p, size: fi.Size(), modTime: fi.ModTime().UnixNano()}, nil
+	return gitBinary{path: p, size: fi.Size(), modTime: fi.ModTime().UnixNano(), identity: identity}, nil
 }
 
 // gitToRun returns the git to run after refusing one too old to be
@@ -490,7 +501,7 @@ func gitToRunLocked(ctx context.Context) (string, error) {
 		return "", err
 	}
 	if bin != state.bin {
-		state.bin, state.versionOK, state.objects, state.sparse = bin, false, unprobed, sparseUnprobed
+		state.bin, state.versionOK, state.objects, state.sparse, state.scanEmpty = bin, false, unprobed, sparseUnprobed, false
 	}
 	if !state.versionOK {
 		out, code, err := exec1(ctx, bin.path, "", "--version")

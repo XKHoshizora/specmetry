@@ -308,8 +308,15 @@ func TestCrossUserScratchUnderASafeParent(t *testing.T) {
 		t.Fatalf("the victim's read: exit %d, %q: %s", code, out, stderr)
 	}
 	tmp := filepath.Join(home, datadir.TmpDir)
-	if entries, err := os.ReadDir(tmp); err != nil || len(entries) != 0 {
+	if entries, err := os.ReadDir(tmp); err != nil || len(entries) != 1 || entries[0].Name() != "git-reader-v2" {
 		t.Fatalf("tmp after the read: %v, %v", entries, err)
+	}
+	namespace := filepath.Join(tmp, "git-reader-v2")
+	if entries, err := os.ReadDir(namespace); err != nil || len(entries) != 1 || entries[0].Name() != "namespace.lock" {
+		t.Fatalf("namespace after read: %v %v", entries, err)
+	}
+	if b, err := os.ReadFile(filepath.Join(namespace, "namespace.lock")); err != nil || len(b) != 0 {
+		t.Fatalf("persistent protocol lock contains content: %v", err)
 	}
 	for _, a := range [][2]string{{tmp, filepath.Join(home, "stolen")}, {home, filepath.Join(safe, "stolen")}} {
 		if out := c.attack("rename", a[0], a[1]); !strings.Contains(out, "permission denied") {
