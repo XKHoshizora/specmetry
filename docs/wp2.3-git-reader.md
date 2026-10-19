@@ -1,6 +1,6 @@
 # WP2.3 Git Reader 规范
 
-> 状态：**已冻结**（2026-10-19，产品负责人批准；审查 057 技术 GO，见 [review-resolution.md §67](review-resolution.md)）。实现中的细化写在 §14（审查 058 之后，经审查 059 复审；其中 §14.3 已按负责人 B1-D1～D4 的批准调整（审查 060 之后，§71），实现结果待独立复核；不是审查 057 的审查对象，不改变冻结的语义）。此前按审查 050、052、055（都为 NO-GO）修订。负责人已决定 D1、D2、D7（2026-10-18），以及 P1、P2、P3 与 `worktree list -z` 的能力要求（2026-10-19；§2、§8）；其余没有获批的草案保持原状。本文写出 WP2.3 的读取机制（TD-23）、提交关联规则（M2-Q7 / TD-17）、关联的生命周期（审查 044 N1）、`internal/gitx` 的新接口、扫描层的职责、迁移设计、正反例、验收映射与测试计划。
+> 状态：**已冻结**（2026-10-19，产品负责人批准；审查 057 技术 GO，见 [review-resolution.md §67](review-resolution.md)）。实现中的细化写在 §14（审查 058 之后，经审查 059 复审；其中 §14.3 已按负责人 B1-D1～D4 的批准调整（审查 060 之后，§71），实现结果待独立复核；不是审查 057 的审查对象；业务定义不变，§14.3 的局部安全保证按 §71 明确调整）。此前按审查 050、052、055（都为 NO-GO）修订。负责人已决定 D1、D2、D7（2026-10-18），以及 P1、P2、P3 与 `worktree list -z` 的能力要求（2026-10-19；§2、§8）；其余没有获批的草案保持原状。本文写出 WP2.3 的读取机制（TD-23）、提交关联规则（M2-Q7 / TD-17）、关联的生命周期（审查 044 N1）、`internal/gitx` 的新接口、扫描层的职责、迁移设计、正反例、验收映射与测试计划。
 >
 > 本文不是实现。WP2.3 的实现获得条件授权（2026-10-19）：本规范的 PR 合并、合并核验与对应的 master push CI 全部通过之后开工，实现以冻结的本文为依据，另开 PR。
 >
@@ -269,10 +269,10 @@ git status --porcelain --untracked-files=all --ignore-submodules=none -- . ':(ex
   - 原仓库对象文件的**内容与修改时间**：在普通索引、拆分索引、untracked cache、没有稀疏索引的稀疏检出中，本文整套命令（`status`、`ls-files`、`check-attr`、`diff-files`）执行前后都没有变化（实验 S12 ~ S14、S11、S19）。稀疏索引由第 2 步的门禁在这些命令之前排除（实验 S16 ~ S18b）。
   - 这依据的是这些布局下的实验，不是操作系统层面的只读保证。新的布局或命令须先做同样的实验。
 - **临时目录的生命周期**（审查 052 N2）：
-  - 私有目录建在 Specmetry 专用的临时位置，只对当前用户可读写，名称带固定前缀，便于识别崩溃后遗留的目录。具体位置在实现时与数据目录的规则一起确定。（实现细化：位置为数据目录下的 `tmp/`，身份复核与遗留清理的规则见 §14.3，待复审。）
-  - 成功、失败与取消都删除它；删除失败时返回环境错误（退出码 6），不报告 `clean`。
-  - 下一次读取开始时，清理同一前缀下的遗留目录。
-  - 它不属于项目事实，不进入日志、错误输出或备份。索引副本与配置值只在读取期间存在，不是保存源码或完整配置的许可（architecture §10）。
+  - 私有目录建在受数据目录保护的 `tmp/git-reader-v2/`，按 §14.3／决定 §71 的合作协议使用。名字只用于识别候选，不能据前缀、年龄或 PID 接管遗留。
+  - 正常结束删除自身临时内容；失败／取消也尝试按清单清理。发现未知、额外或身份不符时保留对象并返回环境错误（退出码 6），清理失败同样不能报告 `clean`。
+  - 下一次租约只清理有效 v2 owner 及完整创建清单能证明归属的非活跃遗留；未知对象保留并失败。v1 顶层目录不接管。
+  - 它不属于项目事实，不进入日志、错误输出或备份。成功返回后只可保留无项目内容的最小协议锁／标识；异常遗留按 D3 保留并报错，不是保存源码或完整配置的许可（architecture §10、决定 §71）。
 - **没有关闭的边界**：
   - `assume-unchanged`、`skip-worktree` 是用户在索引上的标记，`status` 的参数无法覆盖，这里也不处理。
   - `core.autocrlf` 等内置转换的结果与定义相同（同一份白名单配置）。
@@ -414,9 +414,9 @@ git status --porcelain --untracked-files=all --ignore-submodules=none -- . ':(ex
   |---|---|---|---|
   | commit-graph | 从图文件取父提交与时间，不读取提交对象 | 每次调用固定 `-c core.commitGraph=false`，不依赖用户配置 | G1、G2 |
   | 替换引用 | 用另一个对象代替 | 既有的全局参数 `--no-replace-objects`（§6.1.2） | — |
-  | grafts（`info/grafts`） | 改写父提交，缺失的父提交不再被访问 | 环境变量 `GIT_GRAFT_FILE` 指向一个不存在的路径 | G5 |
+  | grafts（`info/grafts`） | 改写父提交，缺失的父提交不再被访问 | 显式 `GIT_GRAFT_FILE=`，按实际 Git 身份行为探测；不回退 missing 路径（§14.3、§71） | G5 |
   | multi-pack-index | 对象查找经过它；它损坏时 git 回退并报告错误 | 分类与读取都固定 `-c core.multiPackIndex=false`，只用各个包自己的索引 | K7 |
-  | 浅克隆（`shallow` 文件） | git 声明的边界之外的父提交不访问 | MVP 不扫描浅克隆（P3）：扫描之前直接检测，是浅克隆或无法确认就返回退出码 6；读取另设 `GIT_SHALLOW_FILE` 指向一个不存在的路径，使检测之后才出现的浅边界也不能截断读取（见下文"浅克隆"） | G6、H1 ~ H7 |
+  | 浅克隆（`shallow` 文件） | git 声明的边界之外的父提交不访问 | MVP 不扫描浅克隆（P3）：扫描之前直接检测，是浅克隆或无法确认就返回退出码 6；读取另设经行为探测的显式 `GIT_SHALLOW_FILE=`，使检测之后才出现的浅边界也不能截断读取（见下文"浅克隆"） | G6、H1 ~ H7 |
 
 - 关闭这些途径之后，git 访问到的每一个提交都要读取并解析它的对象；读取失败就是非 0 退出。
 - 没有被访问到的提交，不影响"T 可达、且不被排除项可达"的集合，所以不需要读取（实验 G4：排除项之后的祖先缺失，不影响结果）。
@@ -1181,3 +1181,9 @@ Windows 原子 FILE_CREATE 返回目录句柄，已有名字拒绝，不使用 O
 | 14.4 | `TestIsAncestor`、`TestScanFailuresWriteNothing`、`TestScanDropsAPartialRead` |
 | 14.6 | `TestCleanLeavesOutSpecmetry`、`TestCleanLeavesOutSpecmetryGitlinks`（都以真实运行的定义命令为对照）、`TestCleanSparseGateIgnoresTheExclusion` |
 | 14.7 | `TestIndexIsSparseShortBitmapHeader`、`TestCleanWithAShortBitmapHeader`、`TestIndexIsSparseCutBitmaps`、`TestIndexIsSparseBadBitmapCounts`、`TestIndexIsSparseRandomDamage`、`FuzzIndexIsSparse` |
+
+### 14.9 B1 方案 B 的实现证据（本轮实施，不是独立审查）
+
+批准范围、代码／规范身份、平台与失败历史见 [实施交付记录](wp2.3-b1-implementation.md)。新测试包括 `TestScanEmptyOverrides`、`TestScanRefusesUnsupportedEmptyOverrides`、`TestScanCapabilityFollowsExecutableIdentity`、`TestScanProbeCancellationReleasesLease`、`TestScanEmptyMultiParentAndFailures`、`TestScanScratchContract`、`TestScratchManifestAnomalyIsRetained`、`TestScratchVersionNamespacesDoNotMix`、`TestScratchProtocolProcesses`、Windows 的 `TestWindowsAtomicPrivateDirectory`。原私有目录替换调度现在针对 Clean；Log 不再使用私有防护路径，以公开 Log 的真实往返回归覆盖。
+
+`TestCreationWindowWithApprovedBoundary` 与 Unix 的 `TestApprovedUnixFinalWindow` 明确记录获批的残余窗口，其通过表示边界如实保留，不表示域外干预已被阻止。早期 hook、最后身份核对／unlink 与实际 Git 消费是不同层次；不改写 Review 060 原文。B2、B3、N1 保持关闭，B1 结果交独立会话复核。

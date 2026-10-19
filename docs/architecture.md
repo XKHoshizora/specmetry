@@ -762,8 +762,8 @@ M1 的实现（独立确认，以及附带在审核中的确认）见 §6.1.7。
   - 扫描开始时一次取得所有 tip 的 SHA，之后只按这些 SHA 读取。
   - 命令为 `git log -z --stdin --format=%H%x00%ct%x00%(trailers:key=Specmetry-Ref,valueonly,separator=%x2C)%x00%B`，经过 `internal/gitx` 的对象读取门禁（§6.1.2）；另加 `--no-show-signature`，使仓库配置的 `log.showSignature` 不能运行 `gpg.program`（实现细化，WP2.3 规范 §14.2，待复审）。
   - stdin 中是正向 tip 与 `^<sha>` 形式的排除项。读取是严格的：不使用 `--ignore-missing`；排除项只用已确认存在的旧 tip；任何非 0 退出都使整次扫描失败（退出码 6），游标不前进，已读到的部分结果丢弃（审查 050 B1、B2）。
-  - 遍历必须读取对象：扫描的读取固定 `-c core.commitGraph=false -c core.multiPackIndex=false`，并让 grafts 失效（`GIT_GRAFT_FILE`），不让 commit-graph 等掩盖缺失的对象（审查 052 B1-R）。
-  - 浅克隆（产品负责人 2026-10-19 决定 P3）：扫描之前由 Specmetry 直接检查公共 git 目录中的 `shallow` 项；是浅克隆或无法确认都返回退出码 6，不写入，不伪装成空扫描，不自动拉取或修改浅边界。读取另设 `GIT_SHALLOW_FILE` 指向一个不存在的路径。
+  - 遍历必须读取对象：扫描的读取固定 `-c core.commitGraph=false -c core.multiPackIndex=false`，并让 grafts 失效（经行为探测的显式 `GIT_GRAFT_FILE=`，§71），不让 commit-graph 等掩盖缺失的对象（审查 052 B1-R）。
+  - 浅克隆（产品负责人 2026-10-19 决定 P3）：扫描之前由 Specmetry 直接检查公共 git 目录中的 `shallow` 项；是浅克隆或无法确认都返回退出码 6，不写入，不伪装成空扫描，不自动拉取或修改浅边界。读取另设经实际 Git 身份行为探测的显式 `GIT_SHALLOW_FILE=`（§71），不回退 missing 路径。
   - 需要的选项在某个 git 上不支持时（例如低于 2.36 的 `worktree list -z`），同样返回退出码 6；这不提高最低版本（WP2.3 规范 §13）。产品负责人 2026-10-19 决定：`worktree list -z` 是 MVP 扫描的能力要求，不增加按行解析的回退，其他命令的支持范围不变。
 - **匹配**：只匹配编号（data-model §4.12 的关联规则）；只保存 SHA、时间和关联关系。
 - **正文**：标题、正文与 trailer 的值在内存中处理，不保存、不记入日志、不出现在错误中。
