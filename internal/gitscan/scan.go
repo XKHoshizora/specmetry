@@ -19,7 +19,7 @@ import (
 type Options struct {
 	// Secrets scans the names the scan would store in its cursors (D7).
 	Secrets *secrets.Scanner
-	// Scratch supplies the protected v2 lease for the scan capability probe
+	// Scratch supplies the protected v3 lease for the scan capability probe
 	// (gitx.NewScratch on the data directory). Real scan reads use empty
 	// history overrides, with no private missing pathname.
 	Scratch *gitx.Scratch

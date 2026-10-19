@@ -33,7 +33,7 @@ export SPECMETRY_HOME="$(mktemp -d)/specmetry-home"
 | `internal/source/` | 来源（architecture §6.1.3）：路径解析（`in_repo` / `external`）、分块计算 sha256（可取消，不保存内容）、磁盘观测、来源集合哈希、登记、确认与移除、引用列表 |
 | `internal/baseline/` | 读取已确认的基准（当前版本、按编号查找条目），按 TD-14 分配编号（`GOAL-n`、`REQ-nnn`、`AC-<需求号>-n`、`Q-nnn`，永不复用） |
 | `internal/proposal/` | 提案（architecture §6.1.4）：静态规则、来源解析、流式片段校验（不保存原文）、代码引用检查、在一个写事务中保存提案、条目、问题与问题的来源引用 |
-| `internal/gitx/` | 调用 git CLI（只读）：定位仓库与 worktree、分支与提交、文件列表；不传递 `GIT_DIR` 等定位变量。WP2.3（[规范](wp2.3-git-reader.md)）：输入路径的树条目（`TreeEntry`）；工作区状态（`Clean`：私有 git 目录、白名单配置、直接解析索引的稀疏门禁 `IndexIsSparse`，不执行仓库配置的程序）；提交扫描的严格读取（`CheckShallow`、`Tips`、`Classify` 与存储检查、`IsAncestor`、`Log`：关闭 commit-graph、multi-pack-index、grafts 与 shallow 文件）。私有目录建在数据目录的 `tmp/` 中（`NewScratch` 先做数据目录的写入前验证，持有 `tmp/` 的句柄，用完 `Close`）；写入与删除经目录句柄，所有者文件在使用期间加锁并记录身份，路径上每一级目录的身份在写入、git 使用与每次删除尝试前复核（规范 §14.3） |
+| `internal/gitx/` | 调用 git CLI（只读）：定位仓库与 worktree、分支与提交、文件列表；不传递 `GIT_DIR` 等定位变量。WP2.3（[规范](wp2.3-git-reader.md)）：输入路径的树条目（`TreeEntry`）；工作区状态（`Clean`：私有 git 目录、白名单配置、直接解析索引的稀疏门禁 `IndexIsSparse`，不执行仓库配置的程序）；提交扫描的严格读取（`CheckShallow`、`Tips`、`Classify` 与存储检查、`IsAncestor`、`Log`：关闭 commit-graph、multi-pack-index，经行为探测传显式空 graft/shallow 覆盖）。Clean 与探测使用 `tmp/git-reader-v3/` 的合作租约、创建清单、路径 owner 校验和持久消费者屏障；无法确认归属或消费者结束时保留并 exit 6，Windows 用原子创建和同句柄删除。Unix 创建／最终删除及 Clean false-clean 的局部排除仅按获批方案 B 适用，不声称句柄与前后检查消除所有往返替换（规范 §14.3、review-resolution §71～72） |
 | `internal/gitscan/` | 提交扫描（WP2.3）：编号匹配（`Mentions`）、各 ref 的读取范围、计划之后的一个写事务（并发跳过、只入库至少关联一个本项目编号的新提交、共享一个 `seq`、写游标）。不输出、不节流，由调用的命令决定何时扫描（WP2.7） |
 | `internal/domain/derive/` | 推导引擎（纯函数，data-model §6、§6.13、§6.13.1）：`Derive` 是截止 `as_of_seq` 的完整推导，`ChangesSince` 是 `--diff-since` 的 AC 投影。全部输入显式给出，只导入不做 I/O 的标准库包（由测试检查），不读取数据库、git、文件、网络、环境变量或时钟；缺少输入时返回 `*InputError`，不用缺省值或当前值补齐 |
 | `internal/ulid/` | ULID 生成（只用于标识，不用于排序） |
@@ -160,4 +160,4 @@ go build -o dist/ ./cmd/specmetry
 | Web | `npm ci`、`npm run check`，上传 `web/dist` |
 | Build | 三平台下载 `web/dist`，构建完整二进制，运行内嵌测试和冒烟测试（`version`、`doctor`） |
 
-Git Reader B1 新协议见 WP2.3 §14.3／review-resolution §71：`tmp/git-reader-v2/` 与旧顶层 `read-*` 隔离；私有目录建立至清理持合作锁，按创建清单删除。扫描使用经实际 Git 文件身份行为探测的显式空 `GIT_GRAFT_FILE=`／`GIT_SHALLOW_FILE=`。不支持或观察到异常时 exit 6，无 missing 路径回退；局部同用户排除边界只按负责人的批准适用，不改变其他权限和隐私保证。
+Git Reader B1 当前协议见 WP2.3 §14.3／review-resolution §71、§72：`tmp/git-reader-v3/` 与旧顶层 `read-*`、v2 子树隔离；私有目录建立至清理持合作锁，按创建清单删除。Git 启动前同步消费者未完成标记，实际 Wait／启动失败后才清除；崩溃未确认的目录保留并 exit 6，不自动猜测回收。任何删除前必须验证路径上的 owner，只有本次可信移除 owner 后的目录重试例外。扫描使用经实际 Git 文件身份行为探测的显式空 `GIT_GRAFT_FILE=`／`GIT_SHALLOW_FILE=`。不支持或观察到异常时 exit 6，无 missing 路径回退；局部同用户排除边界只按负责人的批准适用，不改变其他权限和隐私保证。

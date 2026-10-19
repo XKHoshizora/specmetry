@@ -38,7 +38,7 @@ func scanGit(ctx context.Context, s *Scratch) (string, error) {
 	return git, nil
 }
 
-// probeScanEmpty creates only synthetic Git objects in a manifested v2 lease.
+// probeScanEmpty creates only synthetic Git objects in a manifested v3 lease.
 // It invokes no writer Git commands, has no remotes/alternates/filters, and all
 // subprocesses inherit the controlled deny-all transport environment. A real
 // root+child+merge graph must be cut by the positive control and fully read by
@@ -118,7 +118,7 @@ func probeScanEmpty(ctx context.Context, s *Scratch, git string) (err error) {
 		}
 		args := append(slices.Clone(scanArgs), "--git-dir="+d.path, "log", "--no-show-signature", "--no-decorate", "--format=%H", tip)
 		args = append(args, excludes...)
-		c := call{label: "log", dir: d.path, args: args}
+		c := call{label: "log", dir: d.path, args: args, private: d}
 		if empty {
 			c.env = []string{"GIT_GRAFT_FILE=", "GIT_SHALLOW_FILE="}
 		}

@@ -20,7 +20,7 @@ import (
 
 // Scheme B (owner approval in review-resolution §71): cooperating processes
 // serialize a private directory's entire lifetime with a persistent namespace
-// lock. v2 lives below tmp/git-reader-v2; v1's top-level read-* is never adopted.
+// lock. v3 lives below tmp/git-reader-v3; v1/v2 content is never adopted.
 // Other-user protection still comes from datadir. Uncooperative same-user
 // namespace changes (including mistakes) are excluded, not prevented by these
 // checks: Unix mkdir/open and final unlink windows remain, and Clean can consume
@@ -32,8 +32,8 @@ const (
 	// ownerName is the owner file in each private directory; git never
 	// makes a file of that name.
 	ownerName        = "specmetry-owner"
-	recordHeader     = "specmetry private directory 2"
-	scratchNamespace = "git-reader-v2"
+	recordHeader     = "specmetry private directory 3"
+	scratchNamespace = "git-reader-v3"
 	leaseName        = "namespace.lock"
 	removeAttempts   = 20
 )
@@ -60,10 +60,10 @@ var (
 )
 
 // Scratch is where a command's reads make their private directories: the
-// data directory's v2 namespace, checked when it was made, and held open
+// data directory's v3 namespace, checked when it was made, and held open
 // until Close.
 type Scratch struct {
-	path     string   // tmp/git-reader-v2, resolved
+	path     string   // tmp/git-reader-v3, resolved
 	chain    []dirKey // every directory from the volume root through the namespace
 	root     *os.Root // namespace; nil once closed
 	dir      *os.File // namespace itself, open
@@ -212,19 +212,19 @@ func (s *Scratch) initProtocol() error {
 		f, err = s.root.OpenFile(leaseName, os.O_RDWR, 0)
 	}
 	if err != nil {
-		return scratchProblem("cannot open the v2 protocol lock")
+		return scratchProblem("cannot open the v3 protocol lock")
 	}
 	s.witness = f
 	k, dir, err := keyOf(f)
 	if err != nil || dir {
-		return scratchProblem("cannot identify the v2 protocol lock")
+		return scratchProblem("cannot identify the v3 protocol lock")
 	}
 	s.leaseKey = k
 	// The empty file itself is the protocol identifier: no initialization write
 	// can race a second cooperating process after exclusive creation.
 	fi, err := f.Stat()
 	if err != nil || fi.Size() != 0 {
-		return scratchProblem("the v2 protocol lock has unknown content")
+		return scratchProblem("the v3 protocol lock has unknown content")
 	}
 	return s.verify()
 }
@@ -269,7 +269,7 @@ func releaseLease(f *os.File) {
 	}
 }
 
-// removeLeftovers only adopts a complete v2 creation manifest, under the
+// removeLeftovers only adopts a complete v3 creation manifest, under the
 // same lease as creators. A busy lease belongs to an active cooperating read.
 func (s *Scratch) removeLeftovers() error {
 	lease, err := s.acquire()
@@ -353,10 +353,14 @@ type privateDir struct {
 	lock    *os.File // its owner file, locked; nil once closed
 	lockKey fileKey
 	// ownerGone is set once the owner file is removed.
-	ownerGone    bool
-	lease        *os.File
-	entries      map[string]ownedEntry
-	createHandle *os.File
+	ownerGone bool
+	// consumerPending is durable before Start and cleared only after Wait (or
+	// a failed Start) and complete input verification. Caller death leaves a
+	// barrier: unlocked does not mean that every Git consumer has exited.
+	consumerPending bool
+	lease           *os.File
+	entries         map[string]ownedEntry
+	createHandle    *os.File
 }
 
 // open opens the entry name of tmp as a directory, its identity read from
@@ -383,10 +387,11 @@ type ownedEntry struct {
 	Dir bool    `json:"dir"`
 }
 type ownerRecord struct {
-	Protocol  string                `json:"protocol"`
-	Directory fileKey               `json:"directory"`
-	Owner     fileKey               `json:"owner"`
-	Entries   map[string]ownedEntry `json:"entries"`
+	Protocol        string                `json:"protocol"`
+	Directory       fileKey               `json:"directory"`
+	Owner           fileKey               `json:"owner"`
+	Entries         map[string]ownedEntry `json:"entries"`
+	ConsumerPending bool                  `json:"consumer_pending"`
 }
 
 func newPrivateDir(s *Scratch) (*privateDir, error) {
@@ -463,7 +468,7 @@ func newPrivateDir(s *Scratch) (*privateDir, error) {
 	return d, nil
 }
 func (d *privateDir) record() string {
-	b, _ := json.Marshal(ownerRecord{recordHeader, d.key, d.lockKey, d.entries})
+	b, _ := json.Marshal(ownerRecord{Protocol: recordHeader, Directory: d.key, Owner: d.lockKey, Entries: d.entries, ConsumerPending: d.consumerPending})
 	return string(b) + "\n"
 }
 func (d *privateDir) saveRecord() error {
@@ -493,7 +498,7 @@ func (d *privateDir) loadRecord() bool {
 	var r ownerRecord
 	dec := json.NewDecoder(strings.NewReader(string(b)))
 	dec.DisallowUnknownFields()
-	if dec.Decode(&r) != nil || dec.Decode(new(any)) != io.EOF || r.Protocol != recordHeader || r.Directory != d.key || r.Owner != d.lockKey || r.Entries == nil {
+	if dec.Decode(&r) != nil || dec.Decode(new(any)) != io.EOF || r.Protocol != recordHeader || r.Directory != d.key || r.Owner != d.lockKey || r.Entries == nil || r.ConsumerPending {
 		return false
 	}
 	for name, e := range r.Entries {
@@ -526,7 +531,7 @@ func (d *privateDir) mkdirAll(name string) error {
 		if _, ok := d.entries[current]; ok {
 			continue
 		}
-		if err := d.verify(); err != nil {
+		if err := d.checkOwner(); err != nil {
 			return err
 		}
 		if err := d.root.Mkdir(filepath.FromSlash(current), 0o700); err != nil {
@@ -545,7 +550,7 @@ func (d *privateDir) mkdirAll(name string) error {
 	return nil
 }
 func (d *privateDir) create(name string) (*os.File, error) {
-	if err := d.verify(); err != nil {
+	if err := d.checkOwner(); err != nil {
 		return nil, err
 	}
 	f, err := d.root.OpenFile(name, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
@@ -570,13 +575,45 @@ func (d *privateDir) write(name string, data []byte) error {
 	return errors.Join(err, f.Close())
 }
 
-// checkContents validates the WHOLE tree before deletion. No guessed recursive
-// removal: extra files, links, identity changes and missing entries are errors.
-func (d *privateDir) checkContents() error {
+// checkOwner verifies the NAME before using the still-open owner handle. A
+// missing name, another object, or a record that no longer matches is not owned.
+func (d *privateDir) checkOwner() error {
+	if d.ownerGone || d.lock == nil || d.root == nil {
+		return errReplaced
+	}
 	if err := d.verify(); err != nil {
 		return err
 	}
+	f, err := d.root.Open(ownerName)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = f.Close() }()
+	k, dir, err := keyOf(f)
+	if err != nil || dir || k != d.lockKey {
+		return errReplaced
+	}
+	pathKey, pathDir, err := lstatKey(d.join(ownerName))
+	if err != nil || pathDir || pathKey != k {
+		return errReplaced
+	}
+	want := d.record()
+	b := make([]byte, len(want)+1)
+	n, err := f.ReadAt(b, 0)
+	if (err != nil && !errors.Is(err, io.EOF)) || string(b[:n]) != want {
+		return errReplaced
+	}
+	return nil
+}
+
+// checkContents validates the WHOLE tree before deletion. No guessed recursive
+// removal: extra files, links, identity changes and missing entries are errors.
+func (d *privateDir) checkContents() error {
+	if err := d.checkOwner(); err != nil {
+		return err
+	}
 	seen := make(map[string]bool)
+	ownerSeen := false
 	err := fs.WalkDir(d.root.FS(), ".", func(name string, e fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -595,6 +632,7 @@ func (d *privateDir) checkContents() error {
 			if key != d.lockKey || dir {
 				return errReplaced
 			}
+			ownerSeen = true
 			return nil
 		}
 		want, ok := d.entries[name]
@@ -607,8 +645,37 @@ func (d *privateDir) checkContents() error {
 	if err != nil {
 		return err
 	}
-	if len(seen) != len(d.entries) {
+	if !ownerSeen || len(seen) != len(d.entries) {
 		return errReplaced
+	}
+	return nil
+}
+
+// beginConsumer establishes the conservative crash barrier before any child can
+// consume this directory. A torn/failed write is also unadoptable; no child starts.
+func (d *privateDir) beginConsumer() error {
+	if d.consumerPending {
+		return scratchProblem("a private Git consumer has no confirmed completion; its directory was retained")
+	}
+	if err := d.checkContents(); err != nil {
+		return scratchProblem("private inputs changed; the directory was retained")
+	}
+	d.consumerPending = true
+	if err := d.saveRecord(); err != nil {
+		return scratchProblem("cannot persist the private Git consumer barrier; its directory was retained")
+	}
+	return nil
+}
+
+// finishConsumer is called only after commandIO has returned from Start failure
+// or Wait. Failed verification leaves the barrier in place, never a false proof.
+func (d *privateDir) finishConsumer() error {
+	if err := d.checkContents(); err != nil {
+		return scratchProblem("private inputs changed; the directory was retained")
+	}
+	d.consumerPending = false
+	if err := d.saveRecord(); err != nil {
+		return scratchProblem("cannot persist the private Git consumer completion; its directory was retained")
 	}
 	return nil
 }
@@ -640,6 +707,10 @@ func (d *privateDir) verify() error {
 // is not reported clean), and a directory that still has its owner file
 // is left for a later Scratch to remove.
 func (d *privateDir) remove() error {
+	if d.consumerPending {
+		d.close()
+		return scratchProblem("a private Git consumer has no confirmed completion; its directory was retained")
+	}
 	var err error
 	for attempt := range removeAttempts {
 		if attempt > 0 {

@@ -600,7 +600,7 @@ func TestScratchRootReplaced(t *testing.T) {
 	wantEmpty(t, d)
 }
 
-// v2 retains unknown, copied, unmanifested and active content. Unlike the
+// v3 retains unknown, copied, unmanifested and active content. Unlike the
 // former cleanup, detecting an unknown object is an environment error.
 func TestScratchRemovesOnlyItsOwnLeftovers(t *testing.T) {
 	for _, kind := range []string{"crashed", "unknown-file", "copied-owner", "extra-content", "active"} {

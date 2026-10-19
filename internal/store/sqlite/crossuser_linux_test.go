@@ -308,10 +308,10 @@ func TestCrossUserScratchUnderASafeParent(t *testing.T) {
 		t.Fatalf("the victim's read: exit %d, %q: %s", code, out, stderr)
 	}
 	tmp := filepath.Join(home, datadir.TmpDir)
-	if entries, err := os.ReadDir(tmp); err != nil || len(entries) != 1 || entries[0].Name() != "git-reader-v2" {
+	if entries, err := os.ReadDir(tmp); err != nil || len(entries) != 1 || entries[0].Name() != "git-reader-v3" {
 		t.Fatalf("tmp after the read: %v, %v", entries, err)
 	}
-	namespace := filepath.Join(tmp, "git-reader-v2")
+	namespace := filepath.Join(tmp, "git-reader-v3")
 	if entries, err := os.ReadDir(namespace); err != nil || len(entries) != 1 || entries[0].Name() != "namespace.lock" {
 		t.Fatalf("namespace after read: %v %v", entries, err)
 	}

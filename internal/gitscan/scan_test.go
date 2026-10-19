@@ -563,7 +563,7 @@ func TestScanFailuresWriteNothing(t *testing.T) {
 			return func() {
 				t.Setenv("PATH", old)
 				// Explicit test-fixture repair, never production cleanup of unknowns.
-				paths, err := filepath.Glob(e.home.Join("tmp/git-reader-v2/read-*/unexpected"))
+				paths, err := filepath.Glob(e.home.Join("tmp/git-reader-v3/read-*/unexpected"))
 				if err != nil || len(paths) != 1 {
 					t.Fatalf("fault witness: %v %v", paths, err)
 				}
@@ -687,6 +687,20 @@ func TestScanFailuresWriteNothing(t *testing.T) {
 				return
 			}
 			undo()
+			if c.name == "B1 probe cleanup observes unknown content" {
+				// Removing the injected extra file does not erase the persistent
+				// consumer barrier. Verification failed after Wait, so no complete
+				// completion record was published; production must still retain it.
+				private := e.home.Join("tmp/git-reader-v3")
+				kept := testutil.SettledSnapshot(t, private)
+				r, err := e.scan()
+				if apperr.ExitCode(err) != apperr.ExitEnvironment || r != (Result{}) {
+					t.Fatalf("unconfirmed probe: %+v %v", r, err)
+				}
+				requireUnchanged(t, "unconfirmed probe", before, e.state())
+				testutil.AssertTreeUnchanged(t, private, kept)
+				return
+			}
 			if r := e.mustScan(); r.Stored != 1 {
 				t.Errorf("the next scan, once git can read again: %+v; want C stored", r)
 			}

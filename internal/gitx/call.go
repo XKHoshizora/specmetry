@@ -58,8 +58,8 @@ func (c call) run(ctx context.Context) (result, error) {
 // runWithGit pins a probed executable for this call; it never rediscovers PATH.
 func (c call) runWithGit(ctx context.Context, git string) (result, error) {
 	if c.private != nil {
-		if err := c.private.checkContents(); err != nil {
-			return result{}, scratchProblem("private inputs changed; the directory was retained")
+		if err := c.private.beginConsumer(); err != nil {
+			return result{}, err
 		}
 	}
 	var out bytes.Buffer
@@ -74,13 +74,16 @@ func (c call) runWithGit(ctx context.Context, git string) (result, error) {
 	var stderr presence
 	env := append(filterEnv(os.Environ()), c.env...)
 	code, err := commandIO(ctx, git, c.dir, env, stdin, stdout, &stderr, append(slices.Clone(globalArgs), c.args...)...)
+	// commandIO waits for the actual Git process even on cancellation; a failed
+	// Start has no consumer. Only this live caller can persist that completion.
+	if c.private != nil {
+		completionErr := c.private.finishConsumer()
+		if err == nil {
+			err = completionErr
+		}
+	}
 	if err != nil {
 		return result{}, err
-	}
-	if c.private != nil {
-		if err := c.private.checkContents(); err != nil {
-			return result{}, scratchProblem("private inputs changed; the directory was retained")
-		}
 	}
 	return result{out: out.Bytes(), code: code, stderr: stderr.seen}, nil
 }

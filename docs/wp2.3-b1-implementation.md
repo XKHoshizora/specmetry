@@ -87,3 +87,55 @@
 Windows 证据限本机 NTFS 与 CI 实际平台，没有双账户动态运行，也不外推到所有文件系统。真实旧版 unsafe Git、本机 macOS 未新运行；CI 的 unsafe Git 用例按设计跳过。本机没有 Race Detector 结果，Ubuntu CI 的普通 -race 与 root 无 -race 步骤分开。没有做穷尽压力或完整 CLI 本地重跑，不改变 M-14／M-15、M-9 等遗留状态。
 
 PR #27 保持未合并，未启用 Auto-fix／Auto-merge。独立会话继续定向复核；合并与验收仍由负责人决定。本实施会话不宣布 B1 关闭，不启动后续工作包。
+
+## 8．Review 061 后续：两项阻塞的定向修复
+
+本节接续上文历史交付，不把原 CI 通过改写成反例已被覆盖。负责人明确授权实施方修改、测试、提交并推送现有 PR #27（[决定 §72](review-resolution.md#72review-061-与两项定向修复授权)）；方案 B 批准范围不变。本节不是审查结论，不宣布 GO、B1 关闭或 WP2.3 验收。
+
+### 8.1 固定起点与原样归档
+
+- 起点 `8e089ab7ed5a12f250c30723d9fc1d1df75af6ea`，base `e0a21b46b5ad7e05146f254aa7523d6054ce2e76`；本地与远程均为 `XKHoshizora/specmetry` 的 `feat/m2-wp23-git-reader` / PR #27。开始时仅有未跟踪 Review 061；既有提交、文件及报告全部保留，没有 reset、清理、覆盖或改基。
+- 原样归档提交 `d4a42e614568a0a608d7efd55d7cd5655ea4a5b0`；源文件、仓库归档、暂存 blob 和提交 blob 逐字节一致，SHA-256 均为 `622940c44df6a80f6918676d5e6254c342dcb60e4291e1b2238186bb60d0388c`。Review 061 审查对象仍为 `8e089ab`，完整原文不改写。
+- 原最终文档 HEAD CI [39253367700](https://github.com/XKHoshizora/specmetry/actions/runs/39253367700)，attempt 1，目标 `8e089ab`，8/8 成功；实际 merge checkout `a7f15f34488f8448d94b0389380367b4e140a2e7`，树 `99eb880dd3e38b8a04e549d0847072501b2b1202`。它与上文代码提交 `979f705` 的 CI 39251919896 分开，均不能证明 Review 061 的两个新调度安全。原审查的独立反例和本轮修复前失败分别保留。
+
+### 8.2 根因、机制与代价
+
+**B1-R1**：旧 checkContents 仅校验遍历到的 owner，没有要求它存在；最终 owner 删除之前，其他清单内容已经删掉。现在 checkOwner 先验证根链，重新打开路径上的 owner，检查普通文件、原身份、无链接身份和完整规范记录；完整遍历还必须实际看到 owner。创建填充、公开读取前后、清理预检及遗留认领共用校验。异常预检返回环境错误，现存目录、内容、替代物保留。只有本次可信删除成功后才设置 ownerGone，允许随后目录删除重试；不能把旧句柄有效或无 owner 遗留当作可信阶段。
+
+**B1-R2**：旧租约只由调用方持有；其崩溃释放锁不代表真实 Git 结束。现在所有消费私有目录的 call 在 Start 前同步写入 `consumer_pending=true`；实际 Run/Wait 返回（或 Start 失败）、完整输入验证通过后才同步清除。它覆盖 Clean 的 status、ls-files、diff-index、check-attr、diff-files，以及空覆盖探测的全部正反对照。取消也先等待实际 Git。同步写入失败不启动／不发布结果；无效记录与未清除屏障禁止认领，锁释放不构成结束证明。没有生产 fd／handle 继承、进程监控／终止服务或仓库配置程序，也不以 PID、目录年龄或固定等待猜测结束。
+
+协议升级为独立 `tmp/git-reader-v3/`；旧 v2 无消费者完成证明，不能在原子树中升级认领，v1／v2 遗留不接管。正常完成、取消及无消费者的完整可信遗留仍能回收。调用方在屏障期间死亡时，即使 Git 后来退出，也因没有持久完成记录而继续保留并 exit 6；同一 v3 命名空间后续私有读取会被阻塞，需另行确认安全后人工处理。本轮不新增自动恢复命令。这是明确的安全失败分支，不把两项阻塞排除为不合作同用户行为。
+
+Windows 原子 FILE_CREATE、创建原身份、保护句柄及核对原身份的同句柄删除代码未变。扫描实际读取仍用两个显式空值，不依赖临时 missing 路径；PD-26、P3、禁 replace／commit-graph／MIDX、no-show-signature、严格失败与部分结果丢弃均保持。
+
+### 8.3 先失败、后修复的本机证据
+
+仓库外证据目录：`C:\Users\hoshi\.codex\visualizations\2026\10\19\01a153a5-24ad-7d82-b219-2787d737ce0a\fix061-1792416345689`。只运行新建临时仓库／home；不作用于真实项目数据。旧实现仅增加等价 Start/Wait 测试同步点和回归夹具，先编译并运行，再修改生产机制。后续收窄同步接口及改用结构化管道传参，不改变旧失败调度的含义。
+
+| 证据 | 旧机制实际结果 | 新机制／对照断言 |
+|---|---|---|
+| `TestOwnerRequiredBeforeCleanup`，空／非空清单 × 缺失／损坏 owner | Windows、Linux 均 FAIL：预检通过；非空清单内容被删除，损坏记录也被接纳 | 环境错误，删除前完整快照不变；下一 Scratch 仍拒绝并保留 |
+| `TestCleanMissingOwnerPreservesInputs`，读取前／读取后／清理预检 | 两平台均 FAIL；读取前缺失仍运行 Git，随后内容改变／删除 | 公开 Clean exit 6；读取前缺失不运行 status；现存内容完整保留 |
+| `TestGitConsumerLifetimeProcesses`，Clean／真实空覆盖探测 × 调用方崩溃 | 两平台均 FAIL：调用方 exit 99、真实 Git 已确认暂停且未恢复时，NewScratch 成功并删除目录 | 同时检查错误和目录内容快照；Git 存活时不回收；恢复并原生确认 Git 退出后，未持久确认的屏障仍保留报错 |
+| 同一多进程测试的 release／cancel | 旧机制四个正常对照 PASS | 新机制正常等待／取消等待结束，内容清空、租约可重用 |
+| `TestConfirmedConsumerCompletionAllowsReaping` | 修复后新增正对照，不冒称旧实现执行了新字段断言 | 正常 Wait／取消前未启动／Start 失败均记录完成；故意只关句柄留下目录，下一 Scratch 安全回收 |
+| 原重试、异常清单、v1／v2 隔离、扫描事实原子性 | 保留旧测试，不重新展开 B2／B3／N1 | owner 正常存在可清理；本次已删除 owner 后重试正常；额外／缺失／替代条目保留；扫描失败时提交、关联、seq、游标和既有字段不变 |
+
+原始失败日志 `before-windows.log`、`before-linux.log`，第一轮绿色日志 `after-windows.log`、`after-linux.log`；最终定向结果另存 `windows-final-regressions.log`，Linux 最终结果另列。Windows 的 owner 移动调度实际执行成功，没有把“OS 阻止”算作该用例通过。生命周期测试用独立调用方进程、真实 Git、原生暂停确认与退出通知同步，不依赖睡眠；超时仅表示失败。测试结束受控终止／释放自己建立的进程及夹具。
+
+| 平台／证据层 | 实际执行与限制 |
+|---|---|
+| Windows 本机 | Go 1.27.1、Git 2.56.0.windows.2、NTFS；NtSuspendProcess 成功确认测试 Git 暂停，进程 handle 等待实际退出。修复前失败与修复后 owner／崩溃／正常／取消对照均已运行；不是双账户或所有 Windows 文件系统验证 |
+| WSL Linux 本机 | UID 1000、Git 2.43.0；交叉编译的 Linux 测试二进制，非 Linux 原生工具链。SIGSTOP + WUNTRACED 确认暂停；pidfd 的 POLLIN 确认退出。gitx 整包、修正预期后的 gitscan 整包 PASS；root 仅用于启动两个普通账户的 8 项跨用户测试，全部 PASS。没有本机 -race 结果 |
+| macOS | 本机仅交叉编译通过，不算运行；实际运行与跳过必须以本轮 CI 日志为准，尚不预先宣称通过。原生退出观察使用预先注册的 kqueue NOTE_EXIT |
+| 静态检查 | golangci-lint v2.14.0，包含测试的相关包检查 0 issues；最终 CI 另做全仓 tidy、vet、格式及 lint |
+
+保留开发失败记录：新增 v2 隔离夹具最初漏建父目录，首轮 Windows 整包 gitx 543.062s 仅该项失败，其余通过；首轮 gitscan 118.739s／Linux gitscan 因旧的“移除额外文件即可恢复”预期失败，改为持久屏障继续拒绝，并检查剩余内容和业务事实不变后通过。sqlite 本机整包 36.044s 通过，没有修改生产 SQLite。初期测试辅助进程直接从环境传路径导致三条 G703 告警，定位到测试入口后改为自己的结构化管道协议；最终没有关闭规则或修改生产 Clean 路径。已有临时 linter 被外部清理后在本隔离目录重建固定版本，未改全局配置。
+
+### 8.4 本轮 CI、文件与剩余边界
+
+本节修复提交及对应 CI 将在推送完成后补录完整身份；代码 CI 和随后纯文档 HEAD CI 分别记录，不能以旧 CI 或交叉编译代替新 HEAD 的三平台运行。等待 CI 时不预先写为通过。
+
+新增／修改范围：本报告、review-resolution §72、WP2.3 §14.3、architecture 的 tmp 条目、验收直接回归、开发指南与实施计划的活动状态；`internal/gitx/{privdir,call,gitx,scan_probe}.go`、TestMain、`review061_test.go`、四个平台同步辅助测试、既有 schemeb／scratch 测试；gitscan 的 Scratch 注释及异常探测回归；sqlite 跨用户测试仅更新命名空间路径断言。没有修改迁移、推导、CLI、Schema 或生产 SQLite 重试／错误映射。
+
+获批的 Unix mkdir/open、最终 unlink/rmdir 窗口原始测试继续保留，不能写为新代码阻止；Clean 不能排除 false-clean，Log 完整性没有豁免。记录型 Git 代理仍不代表真实旧版 Git。unsafe Git、Windows 双账户／其他文件系统、压力与长时间故障运行等未验证边界分列，不扩大为安全结论。B2、B3、已关闭 N1 保持关闭；M-14／M-15 等遗留不变。Auto-fix／Auto-merge 保持关闭，PR 不合并，不启动后续工作包，不生成下一轮复审提示词。

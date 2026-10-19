@@ -170,6 +170,11 @@ func TestScratchVersionNamespacesDoNotMix(t *testing.T) {
 	old := d.Join(filepath.Join(datadir.TmpDir, "read-"+strings.Repeat("f", 32)))
 	mkPrivate(t, old)
 	write(t, filepath.Join(old, ownerName), "specmetry private directory 1\n")
+	oldV2 := d.Join(filepath.Join(datadir.TmpDir, "git-reader-v2", "read-"+strings.Repeat("e", 32)))
+	mkPrivate(t, filepath.Dir(oldV2))
+	mkPrivate(t, oldV2)
+	write(t, filepath.Join(oldV2, ownerName), "specmetry private directory 2\n")
+	write(t, filepath.Join(oldV2, "index"), "possibly consumed by an older Git")
 	p, err := newPrivateDir(s)
 	if err != nil {
 		t.Fatal(err)
@@ -184,8 +189,12 @@ func TestScratchVersionNamespacesDoNotMix(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantFiles(t, map[string]string{filepath.Join(old, ownerName): "specmetry private directory 1\n"})
-	// A v1 owner INSIDE v2 cannot be adopted, even if its basename looks ours.
+	wantFiles(t, map[string]string{
+		filepath.Join(old, ownerName):   "specmetry private directory 1\n",
+		filepath.Join(oldV2, ownerName): "specmetry private directory 2\n",
+		filepath.Join(oldV2, "index"):   "possibly consumed by an older Git",
+	})
+	// An older owner INSIDE v3 cannot be adopted, even if its basename looks ours.
 	bad := filepath.Join(s.path, filepath.Base(old))
 	mkPrivate(t, bad)
 	write(t, filepath.Join(bad, ownerName), "specmetry private directory 1\n")

@@ -572,6 +572,9 @@ func command(ctx context.Context, git, dir string, env []string, stdout io.Write
 	return commandIO(ctx, git, dir, env, nil, stdout, nil, args...)
 }
 
+// testHookCommand brackets the actual Git process for deterministic lifecycle tests.
+var testHookCommand func(stage string, pid int, args []string)
+
 // commandIO is command with stdin as git's input, and git's messages
 // written to stderr, or nowhere when it is nil.
 func commandIO(ctx context.Context, git, dir string, env []string, stdin io.Reader, stdout, stderr io.Writer, args ...string) (int, error) {
@@ -581,7 +584,19 @@ func commandIO(ctx context.Context, git, dir string, env []string, stdin io.Read
 	cmd.Stdin = stdin
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
-	err := cmd.Run()
+	var err error
+	if testHookCommand == nil {
+		err = cmd.Run()
+	} else {
+		err = cmd.Start()
+		if err == nil {
+			testHookCommand("started", cmd.Process.Pid, slices.Clone(cmd.Args))
+			err = cmd.Wait()
+			if testHookCommand != nil {
+				testHookCommand("waited", cmd.Process.Pid, slices.Clone(cmd.Args))
+			}
+		}
+	}
 	var exit *exec.ExitError
 	switch {
 	case ctx.Err() != nil:
