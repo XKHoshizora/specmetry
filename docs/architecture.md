@@ -760,7 +760,7 @@ M1 的实现（独立确认，以及附带在审核中的确认）见 §6.1.7。
   - 新 ref 的范围见 WP2.3 规范 §5.2。
 - **读取**：
   - 扫描开始时一次取得所有 tip 的 SHA，之后只按这些 SHA 读取。
-  - 命令为 `git log -z --stdin --format=%H%x00%ct%x00%(trailers:key=Specmetry-Ref,valueonly,separator=%x2C)%x00%B`，经过 `internal/gitx` 的对象读取门禁（§6.1.2）。
+  - 命令为 `git log -z --stdin --format=%H%x00%ct%x00%(trailers:key=Specmetry-Ref,valueonly,separator=%x2C)%x00%B`，经过 `internal/gitx` 的对象读取门禁（§6.1.2）；另加 `--no-show-signature`，使仓库配置的 `log.showSignature` 不能运行 `gpg.program`（实现细化，WP2.3 规范 §14.2，待复审）。
   - stdin 中是正向 tip 与 `^<sha>` 形式的排除项。读取是严格的：不使用 `--ignore-missing`；排除项只用已确认存在的旧 tip；任何非 0 退出都使整次扫描失败（退出码 6），游标不前进，已读到的部分结果丢弃（审查 050 B1、B2）。
   - 遍历必须读取对象：扫描的读取固定 `-c core.commitGraph=false -c core.multiPackIndex=false`，并让 grafts 失效（`GIT_GRAFT_FILE`），不让 commit-graph 等掩盖缺失的对象（审查 052 B1-R）。
   - 浅克隆（产品负责人 2026-10-19 决定 P3）：扫描之前由 Specmetry 直接检查公共 git 目录中的 `shallow` 项；是浅克隆或无法确认都返回退出码 6，不写入，不伪装成空扫描，不自动拉取或修改浅边界。读取另设 `GIT_SHALLOW_FILE` 指向一个不存在的路径。
@@ -791,7 +791,8 @@ $SPECMETRY_HOME/                  默认 ~/.specmetry（TD-02）；权限见 §1
 ├── spool/drops/                  丢弃计数标记（空文件，文件名中带原因）
 ├── spool/dead/                   无法解析的记录（7 天）
 ├── logs/specmetry.log            程序日志（不包含 C0 / C1 内容）
-└── backups/                      一致性备份（§11.3）
+├── backups/                      一致性备份（§11.3）
+└── tmp/                          git 读取的私有目录与其锁（读取结束即删除；WP2.3 规范 §14.3，待复审）
 
 <主 worktree>/.specmetry/project.json   {"schema":"specmetry.project/v1","project_id":"…","name":"…"}
 ```
@@ -1077,6 +1078,7 @@ extra_rules = [
 - **Unix**：数据目录权限为 `0700`，文件为 `0600`。
 - **Windows**：对数据目录设置受保护的 DACL（关闭继承），只授予**当前用户 SID 和 SYSTEM** 完全控制权（TD-22，已确认）。SYSTEM 本来就能凭借特权绕过 DACL，加入它不会削弱对其他本地用户的保护，还能让 Defender、备份等系统服务正常工作。新建的文件继承这个 DACL。`doctor` 会检查实际权限，不符合时报告。
 - `run/dashboard.json` 和备份文件的权限与数据目录相同。
+- `tmp/`：git 读取的私有目录（WP2.3 规范 §14.3，实现细化，待复审）。读取 git 的命令先做本节的写入前验证，再在其中建立私有目录，所以它们与数据目录受同样的保护；私有目录的身份在写入、git 使用与删除之前复核，崩溃遗留只按锁确认后清理。它不是事实，不进入备份。
 - **写入前验证**（codex-review-004 B1）：数据目录不存在时按上述权限创建；**已存在时不予信任**，每个写入方在写入任何数据之前检查目录及其中所有条目（包括数据库、WAL、SHM、备份），任何一项不满足就拒绝写入（退出码 6），不自动修正，也不继续。检查内容：
   - Unix：属主是当前用户，没有 group 和 other 权限位。在 Linux 上这已足够：POSIX ACL 只能通过 group 类权限位（mask）授权，mask 为 0 时其他条目都不生效。macOS 的扩展 ACL 先于权限位生效，单独检查；有允许访问的条目即视为不满足。
   - Windows：只有当前用户和 SYSTEM 的允许条目；属主是当前用户、SYSTEM 或 Administrators 组；数据目录本身的 DACL 受保护；每个目录都有可继承给新文件的当前用户条目（否则 SQLite 新建的 WAL、SHM 会得到进程的默认 DACL）。

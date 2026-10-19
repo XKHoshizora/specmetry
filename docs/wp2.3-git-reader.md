@@ -1,6 +1,6 @@
 # WP2.3 Git Reader 规范
 
-> 状态：**已冻结**（2026-10-19，产品负责人批准；审查 057 技术 GO，见 [review-resolution.md §67](review-resolution.md)）。此前按审查 050、052、055（都为 NO-GO）修订。负责人已决定 D1、D2、D7（2026-10-18），以及 P1、P2、P3 与 `worktree list -z` 的能力要求（2026-10-19；§2、§8）；其余没有获批的草案保持原状。本文写出 WP2.3 的读取机制（TD-23）、提交关联规则（M2-Q7 / TD-17）、关联的生命周期（审查 044 N1）、`internal/gitx` 的新接口、扫描层的职责、迁移设计、正反例、验收映射与测试计划。
+> 状态：**已冻结**（2026-10-19，产品负责人批准；审查 057 技术 GO，见 [review-resolution.md §67](review-resolution.md)）。实现中的细化写在 §14（审查 058 之后，**待审查 059 复审**，不是审查 057 的审查对象，不改变冻结的语义）。此前按审查 050、052、055（都为 NO-GO）修订。负责人已决定 D1、D2、D7（2026-10-18），以及 P1、P2、P3 与 `worktree list -z` 的能力要求（2026-10-19；§2、§8）；其余没有获批的草案保持原状。本文写出 WP2.3 的读取机制（TD-23）、提交关联规则（M2-Q7 / TD-17）、关联的生命周期（审查 044 N1）、`internal/gitx` 的新接口、扫描层的职责、迁移设计、正反例、验收映射与测试计划。
 >
 > 本文不是实现。WP2.3 的实现获得条件授权（2026-10-19）：本规范的 PR 合并、合并核验与对应的 master push CI 全部通过之后开工，实现以冻结的本文为依据，另开 PR。
 >
@@ -232,6 +232,7 @@ git status --porcelain --untracked-files=all --ignore-submodules=none -- . ':(ex
 3. **超级项目的读取**：在私有目录上运行，都经过对象读取门禁（PD-26）：
    - `git --git-dir=<私有目录> --work-tree=<worktree> status --porcelain -z --untracked-files=all --ignore-submodules=all -- . ':(exclude).specmetry'`。`--ignore-submodules=all` 使 git 不进入子模块，也不启动子进程（实验 C9：子进程数为 0）。
    - 需要列出索引时只用 `ls-files -z --sparse`。
+   - （实现细化，待复审：`ls-files`、`diff-files` 与 `status` 使用相同的 pathspec，见 §14.6；另以 `diff-index --cached` 比较索引与 HEAD 的 gitlink，见 §14.1。）
    - 第 5 步的 `diff-files` 必须带 `--ignore-submodules=all`：不带时，它会读取子模块的索引；子模块是稀疏索引时，这会更新子模块原对象的修改时间（实验 X6）。
 4. **子模块**：
    - 对私有索引中每个 `160000` 条目，如果 worktree 中这个路径有 `.git`（已初始化）：
@@ -239,6 +240,7 @@ git status --porcelain --untracked-files=all --ignore-submodules=none -- . ':(ex
      - 用 `git --git-dir=<解析出的 git 目录> rev-parse --verify HEAD` 取得子模块的 HEAD，与 gitlink 不同即为 `dirty`。
      - 再对子模块按第 1 ~ 6 步读取：先建立它的私有目录，**先过它自己的稀疏门禁**，再运行它的 `status` 等命令；它的配置与驱动按它自己的 local 配置判断。
    - 没有初始化的子模块不读取，与 `status` 相同。
+   - （实现细化，待复审：gitlink 的路径不存在或不是目录时为 `dirty`，见 §14.1。）
    - 每一次 git 调用都经过对象读取门禁与受控环境；私有目录不是跳过门禁的理由。
 5. **过滤器下不可判定的情形**（审查 052 B3-R1）：不执行程序就无法得出与定义一致的结果时，结果为 `unknown`（P1）：
    - 驱动集合 D：仓库 local（及 worktree）配置中定义了 `filter.<名称>.clean`、`filter.<名称>.process`，或 `filter.<名称>.required = true` 的名称。D 为空时跳过本条。
@@ -267,7 +269,7 @@ git status --porcelain --untracked-files=all --ignore-submodules=none -- . ':(ex
   - 原仓库对象文件的**内容与修改时间**：在普通索引、拆分索引、untracked cache、没有稀疏索引的稀疏检出中，本文整套命令（`status`、`ls-files`、`check-attr`、`diff-files`）执行前后都没有变化（实验 S12 ~ S14、S11、S19）。稀疏索引由第 2 步的门禁在这些命令之前排除（实验 S16 ~ S18b）。
   - 这依据的是这些布局下的实验，不是操作系统层面的只读保证。新的布局或命令须先做同样的实验。
 - **临时目录的生命周期**（审查 052 N2）：
-  - 私有目录建在 Specmetry 专用的临时位置，只对当前用户可读写，名称带固定前缀，便于识别崩溃后遗留的目录。具体位置在实现时与数据目录的规则一起确定。
+  - 私有目录建在 Specmetry 专用的临时位置，只对当前用户可读写，名称带固定前缀，便于识别崩溃后遗留的目录。具体位置在实现时与数据目录的规则一起确定。（实现细化：位置为数据目录下的 `tmp/`，身份复核与遗留清理的规则见 §14.3，待复审。）
   - 成功、失败与取消都删除它；删除失败时返回环境错误（退出码 6），不报告 `clean`。
   - 下一次读取开始时，清理同一前缀下的遗留目录。
   - 它不属于项目事实，不进入日志、错误输出或备份。索引副本与配置值只在读取期间存在，不是保存源码或完整配置的许可（architecture §10）。
@@ -479,11 +481,11 @@ git status --porcelain --untracked-files=all --ignore-submodules=none -- . ':(ex
 | R 没有游标（新的 ref，D4） | — | `<T>`，排除 C 中**存在**的所有 `last_tip`；可靠地不存在的旧 tip 不作排除项（范围变大）；有任何一个旧 tip 存在但不可读或无法确认，本次扫描返回退出码 6 |
 | 项目还没有任何游标（第一次扫描） | — | 每个 ref 的全部历史 |
 
-- 实验 R10 中，打包对象的数据被改写、commit-graph 存在时，`is-ancestor` 返回 0：它用图文件回答，没有读取对象。固定 `core.commitGraph=false` 之后，祖先判断也要读取对象（实验 G2）。
+- 实验 R10 中，打包对象的数据被改写、commit-graph 存在时，`is-ancestor` 返回 0：它用图文件回答，没有读取对象。固定 `core.commitGraph=false` 之后，祖先判断也要读取对象（实验 G2）。（实现细化，待复审：路径中间的提交缺失时，部分版本返回 1 而不是失败，扫描的保证不变，见 §14.4。）
 
 **第四步：严格读取**：
 
-- 每个有工作的 ref 一次 `git log -z --stdin --format=%H%x00%ct%x00%(trailers:key=Specmetry-Ref,valueonly,separator=%x2C)%x00%B`，固定 `-c core.commitGraph=false -c core.multiPackIndex=false`，并设置 `GIT_GRAFT_FILE`（见上）。
+- 每个有工作的 ref 一次 `git log -z --stdin --format=%H%x00%ct%x00%(trailers:key=Specmetry-Ref,valueonly,separator=%x2C)%x00%B`，固定 `-c core.commitGraph=false -c core.multiPackIndex=false`，并设置 `GIT_GRAFT_FILE`（见上）。（实现细化，待复审：另加 `--no-show-signature`，见 §14.2。）
 - stdin 中先写正向 tip T，再为每个排除项写一行 `^<完整 SHA>`。
   - 不写 `--not` 行（git 2.32 的 `--stdin` 不接受选项行，审查 050 N1）；
   - **不使用 `--ignore-missing`**（审查 050 B1；实验 R1）。
@@ -696,7 +698,7 @@ git status --porcelain --untracked-files=all --ignore-submodules=none -- . ':(ex
 
 ## 6. 接口设计
 
-**`internal/gitx` 新增**（名称与签名供审查，实现时可调整；行为以本文为准）：
+**`internal/gitx` 新增**（名称与签名供审查，实现时可调整；行为以本文为准。实现细化，待复审：`Clean`、`Tips`、`Classify`、`IsAncestor`、`Log` 另带私有临时区参数 `*Scratch`，由 `NewScratch` 在数据目录中准备，见 §14.3）：
 
 ```go
 // Entry is a tree entry's metadata (data-model §4.11.2).
@@ -1095,3 +1097,136 @@ func Log(ctx context.Context, worktree, tip string, exclude []string, fn func(Co
   - 调用扫描的命令（`status`、`ingest`、`sync`）如何呈现这个错误，由 WP2.7 确定（§5.1 对 D7 的同一要求）。
   - 是否另外提供不依赖 `-z` 的兼容读取，列为待决事项（§8），本文不自行决定。
 - 实现时在 CI 的三个平台上运行全部用到的命令，并为不支持的选项写出拒绝路径的测试（§11）。
+
+## 14. 实现中的细化（审查 058 之后，待复审）
+
+> 本节写于 2026-10-19，是 WP2.3 实现（PR #27）中发现、并按审查 058（NO-GO）修复后同步的实现细化，**待审查 059 复审**。它们**不是审查 057 审查过的内容**，也不改变已冻结的语义：`clean` 的定义（data-model §1、D1）、P1 / P2 / P3、`worktree list -z` 的能力要求、关联的生命周期、`seq` 与写事务（§5.4、§5.5）都不变。记录见 [review-resolution.md §68](review-resolution.md)。
+
+### 14.1 子模块：被 `--ignore-submodules=all` 隐藏的四种变化（§4.3 第 3、4 步）
+
+- **发现**：超级项目的私有 `status` 固定 `--ignore-submodules=all`，它不只隐藏子模块自身的状态，还隐藏以下四种变化；定义命令（`=none`）都会显示它们（git 2.56 与 WSL 的 2.43 结果相同）：
+  - 已暂存的 gitlink（`M  sub`）；
+  - 从索引中移除的 gitlink（`D  sub`）；
+  - 子模块目录被删除（` D sub`）；
+  - 子模块目录被换成文件（` T sub`）。
+- 只按 §4.3 第 4 步比较子模块的 HEAD 与 gitlink，这四种情形会被报告为 `clean`。
+- **补充的读取**：
+  - 在私有目录上运行 `git diff-index --cached --raw -z --ignore-submodules=none <HEAD> -- <pathspec>`，比较索引与 HEAD 的树。它只比较索引与树，不进入子模块的工作区，trace2 显示没有子进程。有输出即为 `dirty`。分支还没有提交时，索引中有 gitlink 即为 `dirty`。
+  - 对索引中每个 stage 0 的 gitlink，检查它的路径：不存在为 `dirty`（` D`）；不是目录为 `dirty`（` T`）；是目录而没有 `.git` 时为未初始化，与定义相同，不读取；有 `.git` 时按 §4.3 第 4 步读取。
+  - stage 不为 0 的 gitlink（冲突中）为 `dirty`。
+- 这是保持定义所必需的补足，只对这几种情形成立；**不是**"私有读取与定义的差异只会多报 `dirty`"的一般证明。
+
+### 14.2 严格日志不运行签名程序（§5.2 第四步）
+
+- 仓库 local 配置有 `log.showSignature=true` 与 `gpg.program` 时，§5.2 第四步的命令按原文会为带签名的提交运行 `gpg.program`（两个版本都复现）。这违反"不执行仓库配置的程序"（architecture §6.1.2）。
+- `Log` 因此另加 `--no-show-signature`（git 2.10 起支持）。测试先以普通 `git log` 证明夹具确实会运行标记程序，再证明扫描的读取不运行它。
+
+### 14.3 私有临时区：位置、身份与清理（§4.3"临时目录的生命周期"；审查 058 B1）
+
+§4.3 留待实现确定的位置，现在确定为**数据目录下的 `tmp/`**。审查 058 指出，实现最初把私有目录放在系统临时目录下：没有检查那里的路径，其他账户可以在锁住之前把目录移走、放入替代物；子目录的 DACL 不能使替代物的属主变得可信；清理还会删除只是前缀相同、时间较早的无关目录。
+
+**位置与准备**：
+
+- 读取 git 的命令先用 `gitx.NewScratch(数据目录)` 准备私有临时区：
+  1. 先调用数据目录的写入前验证 `datadir.Ensure`（architecture §11.1，原样复用）：路径上的每一级目录都不能被其他用户替换，数据目录及其中所有条目都只对当前用户开放，没有符号链接或联接，属主可信；数据目录不存在时按这些规则创建。
+  2. 然后建立 `tmp/`（继承数据目录的保护），并从打开的句柄记下它的身份。
+  3. 准备过程不打开数据库，不迁移，也不放宽版本或只读保护。
+- 只有通过这些检查的数据目录才会被使用。因此，私有目录所在的整个名字空间只有当前用户（以及 root / 管理员，即已声明的信任边界）能改动。
+- 系统临时目录不再使用，也**不清理**其中旧版本留下的目录（没有经过验证的自动清扫）。
+
+**各机制的作用**（各自只提供以下保证，不能互相替代，也不能替代上述路径与名字空间的保护）：
+
+| 机制 | 提供的保证 |
+|---|---|
+| 随机名称（`read-<32 位十六进制>`） | 区分同一用户的不同读取 |
+| 锁文件 `read-<…>.lock` | 在目录之前以 `O_EXCL` 建立，在目录使用期间一直持有。只用来区分"使用中"与"崩溃遗留" |
+| 目录身份 | 建立后从句柄记录。在写入任何文件之前、git 使用之前、删除之前都要复核：仍是原来的目录，不是链接 |
+| `O_EXCL` | 私有目录中的文件都必须是新建的 |
+
+**复核失败时**：
+
+- 读取失败（退出码 6）。
+- 不删除该路径上现有的任何内容，同时删除它的锁文件，使以后的清理也不会删除它。
+
+**删除**：
+
+- 成功、失败与取消都删除私有目录，然后删除锁。
+- 删除失败时返回环境错误，不报告 `clean`；锁文件保留（已解锁），留给以后的清理。
+
+**遗留清理**：
+
+- 新的 Scratch 只删除能确认属于 Specmetry 且已失活的内容：名称符合 Specmetry 格式、能取得锁的锁文件，以及同名的目录（必须是目录，不是链接）。
+- 以下内容都保留：
+  - 锁被持有的条目（使用中）；
+  - 没有锁文件的目录；
+  - 不是普通文件的"锁"；
+  - 其他名称。
+- 不按前缀或时间删除任何内容。
+
+**覆盖范围**：
+
+- `Clean` 的私有 git 目录，以及扫描读取（`Tips`、`Classify`、`IsAncestor`、`Log`）中 `GIT_GRAFT_FILE` / `GIT_SHALLOW_FILE` 所指的不存在路径。
+- 删除此前"留待 WP2.5 接线时再定"的说法：这是本库自身的安全契约，在 WP2.3 中解决，没有风险豁免。
+
+**接口**（§6 的签名相应调整）：
+
+- 新增 `NewScratch(d datadir.Dir) (*Scratch, error)`。
+- `Clean`、`Tips`、`Classify`、`IsAncestor`、`Log` 都多一个 `*Scratch` 参数，缺少时为内部错误。
+- `gitscan.Options.Scratch` 为必填。
+- 数据目录布局中新增 `tmp/`（architecture §8）。
+
+**验证边界**：
+
+- Linux 的双用户动态测试由既有跨用户基座覆盖（以 root 启动两个普通用户进程）：
+  - 父目录可写时，攻击者持续替换数据目录，每次读取都被拒绝；
+  - 父目录安全时，攻击者既不能重命名 `tmp/`，也不能重命名数据目录；
+  - 祖先目录属于其他用户时拒绝；
+  - sticky 的父目录被接受。
+- Windows 上没有双账户的动态验证，只验证了：
+  - 祖先目录对 Everyone 开放 `FILE_DELETE_CHILD` 时拒绝；
+  - 同一账户把私有目录换成目录或联接时，能够发现，且不删除替代物。
+
+### 14.4 祖先判断：祖先本身缺失与路径中间的提交缺失（§5.2 第三步）
+
+- **祖先本身缺失**（实验 G2）：`merge-base --is-ancestor <A> <C>` 在 git 2.56、2.43、2.32 上都返回 128，与原文一致，扫描失败（退出码 6）。
+- **路径中间的提交缺失**：
+  - 关闭 commit-graph 时，git 2.56 返回 128；git 2.43 与 2.32 返回 **1**（"不是祖先"）。三者都不会返回 0。
+  - 2.43、2.32 的结果是作者在 WSL 中的实验记录；CI 上的 2.55、2.56 在测试中都报错。
+- 原文"关闭 commit-graph 之后，祖先判断也要读取对象（G2）"只对 G2 的情形成立。
+- **扫描的保证不变**：
+  - 返回 1 只会使该 ref 按改写处理，读取整段历史；随后的严格 `log` 在缺失的提交处失败，整次扫描不写提交、关联、`seq` 或游标。
+  - 实验中，路径中间的提交缺失时，三个版本都没有返回 0。即使返回 0，随后的增量读取 `<T> ^<A>` 仍然严格：它访问到的每一个提交都要读取，缺失即失败。
+
+### 14.5 worktree 的元数据文件（§4.3 第 1 步）
+
+- `info/exclude`、`info/attributes`、`info/sparse-checkout` 按 `git rev-parse --git-path` 给出的实际位置复制，这正是 git 自己读取的位置。
+- 主 worktree 的这三个文件都在公共目录中，与原文一致。关联 worktree 的 `info/sparse-checkout` 在它自己的 git 目录中（git 的 per-worktree 规则），不能统一写成公共目录。
+
+### 14.6 `.specmetry/` 的排除在所有读取中一致（审查 058 B3）
+
+- 原实现只有 `status` 与 `diff-index` 带了定义的 pathspec，`ls-files` 列出整个索引。因此由它得到的过滤器候选（`check-attr`、`diff-files`、racy 判断）与 gitlink 检查，仍会受 `.specmetry/` 中内容的影响：那里一个受过滤文件的变化会使结果成为 `unknown`，那里一个子模块目录被删除会使结果成为 `dirty`，而定义命令的输出为空。
+- 现在 `ls-files`、`diff-files` 与 `status`、`diff-index` 使用相同的 git pathspec：超级项目中为 `-- . ':(exclude).specmetry'`，子模块中为 `-- .`。子模块内部不排除：定义命令询问的是子模块自己的 `status`。
+- 由 git 自己匹配 pathspec，不用字符串前缀，因此 `.specmetry-not/` 之类名称相近的路径照常计入。
+- 整个索引的安全门禁不受 pathspec 影响：稀疏目录条目即使是 `.specmetry/`，也仍判为 `unknown`（P2）；损坏的索引仍是环境错误。
+
+### 14.7 `link` 扩展的位图（审查 058 B2，§4.3 第 2 步）
+
+- 一个 EWAH 位图至少有 12 字节：位数、字数与 running-length 位置。原实现只要求 8 字节：剩余 8～11 字节时，读取越过 `link` 的载荷；外层校验和为零（skipHash）时，`IndexIsSparse` 与 `Clean` 会 panic。
+- 现在的要求：
+  - 先要求完整的 12 字节框架；
+  - 字数必须容得下剩余的长度；
+  - running-length 位置必须是某个字；
+  - 两个位图必须正好用完载荷；
+  - 任何切片都不超出当前载荷。
+- 损坏时返回环境错误，不 panic；在任何读取索引的 git 命令之前失败。
+
+### 14.8 对应的测试（补充 §11）
+
+| 项 | 测试 |
+|---|---|
+| 14.1 | `TestCleanSubmodules`、`TestCleanSubmodulesAgreeWithTheDefinition` |
+| 14.2 | `TestLogRunsNoSignatureProgram`（含对照） |
+| 14.3 | `TestScratchNeedsAPrivateDataDirectory`、`TestPrivateDirectoryReplaced`、`TestScratchRootReplaced`、`TestScratchRemovesOnlyItsOwnLeftovers`、`TestPrivateDirectoryLifecycle`、`TestPrivateDirectoriesArePrivate`；跨用户：`TestCrossUserScratch*`（`internal/store/sqlite`，以 root 运行） |
+| 14.4 | `TestIsAncestor`、`TestScanFailuresWriteNothing`、`TestScanDropsAPartialRead` |
+| 14.6 | `TestCleanLeavesOutSpecmetry`、`TestCleanLeavesOutSpecmetryGitlinks`（都以真实运行的定义命令为对照）、`TestCleanSparseGateIgnoresTheExclusion` |
+| 14.7 | `TestIndexIsSparseShortBitmapHeader`、`TestCleanWithAShortBitmapHeader`、`TestIndexIsSparseCutBitmaps`、`TestIndexIsSparseBadBitmapCounts`、`TestIndexIsSparseRandomDamage`、`FuzzIndexIsSparse` |
