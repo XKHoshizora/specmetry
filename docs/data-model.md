@@ -1141,6 +1141,7 @@ stateDiagram-v2
 | `source-list.v1` | `source list --json`：来源、观测哈希、引用与片段保存情况 | CLI → Agent 或人 |
 | `source-add.v1` | `source add --json` 的结果 | CLI → Agent |
 | `proposal-receipt.v1` | `propose --json` 的结果（条目 ID、校验标记；不回显片段） | CLI → Agent 或人 |
+| `claim-receipt.v1` | `claim --json` 的结果（批次身份、`seq`、采集的代码上下文、`sync` 的 `compare_from`、逐项的引用存在性结果；不回显摘要与测试名；M2-Q9，WP2.4 规范，待审查） | CLI → Agent |
 | `proposal-list.v1` | `proposal list --json` | CLI → Agent 或人 |
 | `proposal-show.v1` | `proposal show --json`：条目、审核状态、冲突条目的三方对比（`base` / `current` / `proposed`） | CLI → Agent 或人 |
 | `baseline-show.v1` | `baseline show --json`：已确认的基准（含 revision，供提案携带） | CLI → Agent 或人 |
