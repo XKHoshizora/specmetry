@@ -321,13 +321,14 @@ func quoteConfig(v string) string {
 	return `"` + r.Replace(v) + `"`
 }
 
-// fill writes the private git directory's files.
+// fill writes the private git directory's files, through its handle.
 func (p *privateRepo) fill(paths repoPaths, head headState, config []byte) error {
 	if err := p.dir.verify(); err != nil {
 		return err
 	}
+	root := p.dir.root
 	for _, d := range []string{"refs/heads", "refs/tags", "objects/info", "objects/pack", "info"} {
-		if err := os.MkdirAll(p.dir.join(filepath.FromSlash(d)), 0o700); err != nil {
+		if err := root.MkdirAll(filepath.FromSlash(d), 0o700); err != nil {
 			return privateProblem(err)
 		}
 	}
@@ -344,21 +345,21 @@ func (p *privateRepo) fill(paths repoPaths, head headState, config []byte) error
 		"config":                  config,
 		"objects/info/alternates": []byte(objects + "\n"),
 	} {
-		if err := writeNew(p.dir.join(filepath.FromSlash(name)), data); err != nil {
+		if err := writeNew(root, filepath.FromSlash(name), data); err != nil {
 			return privateProblem(err)
 		}
 	}
 	for name, from := range paths.info {
-		if _, err := copyIfExists(from, p.dir.join(filepath.FromSlash(name))); err != nil {
+		if _, err := copyIfExists(from, root, filepath.FromSlash(name)); err != nil {
 			return err
 		}
 	}
-	found, err := copyIfExists(paths.index, p.dir.join("index"))
+	found, err := copyIfExists(paths.index, root, "index")
 	if err != nil || !found.exists {
 		return err // no index: an empty one (review 057 N1)
 	}
 	p.indexTime = found.modTime
-	data, err := os.ReadFile(p.dir.join("index"))
+	data, err := root.ReadFile("index")
 	if err != nil {
 		return privateProblem(err)
 	}
@@ -367,7 +368,7 @@ func (p *privateRepo) fill(paths repoPaths, head headState, config []byte) error
 		return err
 	}
 	name := sharedIndexName(*info.shared)
-	shared, err := copyIfExists(filepath.Join(filepath.Dir(paths.index), name), p.dir.join(name))
+	shared, err := copyIfExists(filepath.Join(filepath.Dir(paths.index), name), root, name)
 	if err != nil {
 		return err
 	}
@@ -377,9 +378,10 @@ func (p *privateRepo) fill(paths repoPaths, head headState, config []byte) error
 	return nil
 }
 
-// writeNew writes a file that must not exist yet, owner-only.
-func writeNew(path string, data []byte) error {
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+// writeNew writes the file name in root, which must not exist yet,
+// owner-only.
+func writeNew(root *os.Root, name string, data []byte) error {
+	f, err := root.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return err
 	}
@@ -396,10 +398,10 @@ type copied struct {
 	modTime time.Time
 }
 
-// copyIfExists copies the regular file from to to, as it was when opened
-// (its modification time from the same handle). A file that does not exist
-// is not copied; any other failure is an error.
-func copyIfExists(from, to string) (copied, error) {
+// copyIfExists copies the regular file from to the new file name in root,
+// as it was when opened (its modification time from the same handle). A
+// file that does not exist is not copied; any other failure is an error.
+func copyIfExists(from string, root *os.Root, name string) (copied, error) {
 	src, err := os.Open(from)
 	if errors.Is(err, fs.ErrNotExist) {
 		return copied{}, nil
@@ -412,7 +414,7 @@ func copyIfExists(from, to string) (copied, error) {
 	if err != nil || !fi.Mode().IsRegular() {
 		return copied{}, apperr.New(apperr.Environment, "a file of the repository's git directory that Specmetry copies is not a regular file")
 	}
-	dst, err := os.OpenFile(to, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	dst, err := root.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return copied{}, privateProblem(err)
 	}
@@ -443,11 +445,12 @@ type gitlink struct{ path, oid string }
 // read does steps 2, 3 and 5 for the repository, and returns its own state
 // and its gitlinks.
 func (p *privateRepo) read(ctx context.Context, top bool) (State, []gitlink, error) {
-	// The directory git is given must be the one prepare made and filled.
+	// The path git is given must lead to the directory prepare made and
+	// filled; each removal attempt checks it again, after git.
 	if err := p.dir.verify(); err != nil {
 		return 0, nil, err
 	}
-	sparse, err := IndexIsSparse(p.dir.join("index"))
+	sparse, err := indexIsSparse(p.dir.root.ReadFile, "index")
 	if err != nil {
 		return 0, nil, err
 	}

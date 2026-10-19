@@ -296,7 +296,9 @@ func TestCrossUserScratchUnderAWritableParent(t *testing.T) {
 }
 
 // With a parent only root can write to, the victim's read works, and the
-// other user can rename neither the data directory nor its tmp directory.
+// other user can rename neither the data directory nor its tmp directory,
+// nor make anything in tmp: no directory a Scratch could take for a crashed
+// read's, or find at a private directory's name (review 059 B1-R).
 func TestCrossUserScratchUnderASafeParent(t *testing.T) {
 	c := newCrossUser(t)
 	safe := c.mkdir("safe", 0, 0o755)
@@ -313,6 +315,10 @@ func TestCrossUserScratchUnderASafeParent(t *testing.T) {
 		if out := c.attack("rename", a[0], a[1]); !strings.Contains(out, "permission denied") {
 			t.Fatalf("attacker rename of %s: %s", a[0], out)
 		}
+	}
+	planted := filepath.Join(tmp, "read-"+strings.Repeat("0", 32))
+	if out := c.attack("mkdir", planted, ""); !strings.Contains(out, "permission denied") {
+		t.Fatalf("attacker mkdir in tmp: %s", out)
 	}
 }
 

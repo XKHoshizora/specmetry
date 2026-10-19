@@ -65,10 +65,17 @@ func indexProblem(problem string) error {
 // or the sdir extension in either. An index that does not exist is an
 // empty index, as in a new repository (review 057 N1); anything it cannot
 // read or parse completely, a missing shared index included, is an
-// environment error. Clean calls it on its private copy before any git
-// command reads that copy.
+// environment error. Clean reads its private copy the same way, through
+// the private directory's handle, before any git command reads that copy.
 func IndexIsSparse(path string) (bool, error) {
-	data, err := os.ReadFile(path)
+	dir := filepath.Dir(path)
+	return indexIsSparse(func(name string) ([]byte, error) { return os.ReadFile(filepath.Join(dir, name)) }, filepath.Base(path))
+}
+
+// indexIsSparse is IndexIsSparse on the index name and its shared index,
+// both read with readFile.
+func indexIsSparse(readFile func(name string) ([]byte, error), name string) (bool, error) {
+	data, err := readFile(name)
 	if errors.Is(err, fs.ErrNotExist) {
 		return false, nil
 	}
@@ -79,7 +86,7 @@ func IndexIsSparse(path string) (bool, error) {
 	if err != nil || info.shared == nil {
 		return info.sparse, err
 	}
-	shared, err := os.ReadFile(filepath.Join(filepath.Dir(path), sharedIndexName(*info.shared)))
+	shared, err := readFile(sharedIndexName(*info.shared))
 	if err != nil {
 		return false, indexProblem("the shared index of a split index cannot be read: " + osProblem(err))
 	}

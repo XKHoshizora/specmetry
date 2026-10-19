@@ -62,6 +62,7 @@ func newEnv(t *testing.T, keys ...string) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = scratch.Close() })
 	e := &env{t: t, home: home, db: db, repo: repo, scratch: scratch, ids: map[string]string{}, clock: 1_700_000_000_000}
 	common := gitx.Canonical(filepath.Join(repo.Dir, ".git"))
 	e.exec(`INSERT INTO projects (id, name, git_common_dir, main_worktree_id, stage, settings_json, created_at)
@@ -930,6 +931,7 @@ func helperScan() int {
 		fmt.Println(err)
 		return 1
 	}
+	defer func() { _ = scratch.Close() }()
 	r, err := Scan(ctx, db, os.Getenv("SCAN_PROJECT"), os.Getenv("SCAN_WORKTREE"), Options{Secrets: scanner, Scratch: scratch})
 	if err != nil {
 		fmt.Println(err)

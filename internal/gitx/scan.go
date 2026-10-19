@@ -30,8 +30,8 @@ var scanArgs = []string{"-c", "core.commitGraph=false", "-c", "core.multiPackInd
 // scanCall runs c as a scan read: an object read with scanArgs, and
 // GIT_GRAFT_FILE and GIT_SHALLOW_FILE naming a file that does not exist,
 // in a private directory of its own made for the call in s (only the
-// current user can make anything there, and it is checked to be the
-// directory made before git runs).
+// current user can make anything there; its path is checked to lead to
+// the directory made before git runs, and again as it is removed).
 func scanCall(ctx context.Context, s *Scratch, c call) (result, error) {
 	d, err := newPrivateDir(s)
 	if err != nil {

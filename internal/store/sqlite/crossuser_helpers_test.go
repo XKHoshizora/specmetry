@@ -54,6 +54,7 @@ func victimCleanHelper() int {
 		fmt.Fprintln(os.Stderr, err.Error()+" "+strings.Join(detailStrings(err), "; "))
 		return apperr.ExitCode(err)
 	}
+	defer func() { _ = s.Close() }()
 	state, err := gitx.Clean(context.Background(), s, os.Getenv("REPO"))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -73,7 +74,8 @@ func detailStrings(err error) []string {
 
 // attackerHelper performs one file operation as whatever user it runs as and
 // prints "ok" or the error. ATTACK_OP=swap keeps replacing $ATTACK_A with a
-// symbolic link to $ATTACK_B until $ATTACK_STOP exists.
+// symbolic link to $ATTACK_B until $ATTACK_STOP exists; ATTACK_OP=mkdir
+// makes the directory $ATTACK_A.
 func attackerHelper() int {
 	a, b := os.Getenv("ATTACK_A"), os.Getenv("ATTACK_B")
 	var err error
@@ -82,6 +84,8 @@ func attackerHelper() int {
 		err = os.Rename(a, b)
 	case "read":
 		_, err = os.ReadFile(a)
+	case "mkdir":
+		err = os.Mkdir(a, 0o700)
 	case "swap":
 		for {
 			if _, serr := os.Stat(os.Getenv("ATTACK_STOP")); serr == nil {

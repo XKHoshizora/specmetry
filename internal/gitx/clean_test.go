@@ -720,7 +720,7 @@ func cleanForTest(t *testing.T, worktree string) (State, error) {
 // testScratch is a Scratch in a data directory of the test's own.
 func testScratch(t *testing.T) *Scratch {
 	t.Helper()
-	s, err := NewScratch(datadir.Dir{Path: filepath.Join(testdir.New(t), "home")})
+	s, err := newScratch(t, datadir.Dir{Path: filepath.Join(testdir.New(t), "home")})
 	if err != nil {
 		t.Fatalf("NewScratch: %v (%v)", err, apperr.From(err).Details)
 	}
