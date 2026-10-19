@@ -3,6 +3,7 @@ package sqlite
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -214,5 +215,145 @@ func TestCrossUserAncestorOwnedByAnotherUser(t *testing.T) {
 	}
 	if hits := testutil.FindInTree(t, home, canary); len(hits) != 0 {
 		t.Fatalf("data was written: %v", hits)
+	}
+}
+
+// repo makes a git repository with one commit, as root, and gives it to
+// the victim (git reads only repositories their user owns).
+func (c *crossUser) repo() string {
+	c.t.Helper()
+	p := filepath.Join(c.base, "repo")
+	env := append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null",
+		"GIT_AUTHOR_NAME=v", "GIT_AUTHOR_EMAIL=v@v.invalid", "GIT_COMMITTER_NAME=v", "GIT_COMMITTER_EMAIL=v@v.invalid")
+	for _, args := range [][]string{{"init", "-q", "-b", "main", p}, {"-C", p, "commit", "-q", "--allow-empty", "-m", "one"}} {
+		cmd := exec.Command("git", args...)
+		cmd.Env = env
+		if out, err := cmd.CombinedOutput(); err != nil {
+			c.t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	if out, err := exec.Command("chown", "-R", fmt.Sprintf("%d:%d", victimUID, victimUID), p).CombinedOutput(); err != nil {
+		c.t.Fatalf("chown: %v: %s", err, out)
+	}
+	return p
+}
+
+// clean runs the victim's Clean of repo through a Scratch in home and
+// returns the exit code, what it printed and its stderr.
+func (c *crossUser) clean(home, repo string) (int, string, string) {
+	c.t.Helper()
+	victimHome := filepath.Join(c.base, "victim-home")
+	if _, err := os.Stat(victimHome); err != nil {
+		c.mkdir("victim-home", victimUID, 0o700)
+	}
+	cmd := c.command(victimUID, "victimclean", datadir.EnvHome+"="+home, "REPO="+repo, "HOME="+victimHome)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	err := cmd.Run()
+	var ee *exec.ExitError
+	if errors.As(err, &ee) {
+		return ee.ExitCode(), stdout.String(), stderr.String()
+	}
+	if err != nil {
+		c.t.Fatal(err)
+	}
+	return 0, strings.TrimSpace(stdout.String()), stderr.String()
+}
+
+// Review 058 B1 with two users: another user who can rename entries in the
+// data directory's parent keeps swapping the data directory for a link to
+// a directory of theirs while the victim reads git. Every read is refused
+// before a private directory is made, and nothing reaches their directory.
+func TestCrossUserScratchUnderAWritableParent(t *testing.T) {
+	c := newCrossUser(t)
+	shared := c.mkdir("shared", 0, 0o777)
+	trap := c.mkdir("trap", attackerUID, 0o777)
+	repo := c.repo()
+	home := filepath.Join(shared, "home")
+	stop := filepath.Join(c.base, "stop")
+	swapper := c.command(attackerUID, "attacker", "ATTACK_OP=swap", "ATTACK_A="+home, "ATTACK_B="+trap, "ATTACK_STOP="+stop)
+	if err := swapper.Start(); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	reads, refused := 0, 0
+	for time.Now().Before(deadline) {
+		_ = os.RemoveAll(home)
+		code, _, stderr := c.clean(home, repo)
+		reads++
+		if code == apperr.ExitEnvironment && strings.Contains(stderr, "writable by other users") {
+			refused++
+		}
+	}
+	_ = os.WriteFile(stop, nil, 0o600)
+	_ = swapper.Wait()
+	if refused != reads {
+		t.Fatalf("%d of %d reads under an other-writable parent were not refused for that reason", reads-refused, reads)
+	}
+	if entries, _ := os.ReadDir(trap); len(entries) != 0 {
+		t.Fatalf("the victim made something in the attacker's directory: %v", entries)
+	}
+}
+
+// With a parent only root can write to, the victim's read works, and the
+// other user can rename neither the data directory nor its tmp directory,
+// nor make anything in tmp: no directory a Scratch could take for a crashed
+// read's, or find at a private directory's name (review 059 B1-R).
+func TestCrossUserScratchUnderASafeParent(t *testing.T) {
+	c := newCrossUser(t)
+	safe := c.mkdir("safe", 0, 0o755)
+	home := c.mkdir(filepath.Join("safe", "home"), victimUID, 0o700)
+	repo := c.repo()
+	if code, out, stderr := c.clean(home, repo); code != 0 || out != "0" {
+		t.Fatalf("the victim's read: exit %d, %q: %s", code, out, stderr)
+	}
+	tmp := filepath.Join(home, datadir.TmpDir)
+	if entries, err := os.ReadDir(tmp); err != nil || len(entries) != 1 || entries[0].Name() != "git-reader-v3" {
+		t.Fatalf("tmp after the read: %v, %v", entries, err)
+	}
+	namespace := filepath.Join(tmp, "git-reader-v3")
+	if entries, err := os.ReadDir(namespace); err != nil || len(entries) != 1 || entries[0].Name() != "namespace.lock" {
+		t.Fatalf("namespace after read: %v %v", entries, err)
+	}
+	if b, err := os.ReadFile(filepath.Join(namespace, "namespace.lock")); err != nil || len(b) != 0 {
+		t.Fatalf("persistent protocol lock contains content: %v", err)
+	}
+	for _, a := range [][2]string{{tmp, filepath.Join(home, "stolen")}, {home, filepath.Join(safe, "stolen")}} {
+		if out := c.attack("rename", a[0], a[1]); !strings.Contains(out, "permission denied") {
+			t.Fatalf("attacker rename of %s: %s", a[0], out)
+		}
+	}
+	planted := filepath.Join(tmp, "read-"+strings.Repeat("0", 32))
+	if out := c.attack("mkdir", planted, ""); !strings.Contains(out, "permission denied") {
+		t.Fatalf("attacker mkdir in tmp: %s", out)
+	}
+}
+
+// A directory on the path owned by another user is refused before any
+// private directory is made.
+func TestCrossUserScratchAncestorOwnedByAnotherUser(t *testing.T) {
+	c := newCrossUser(t)
+	c.mkdir("theirs", attackerUID, 0o755)
+	home := c.mkdir(filepath.Join("theirs", "home"), victimUID, 0o700)
+	code, _, stderr := c.clean(home, c.repo())
+	if code != apperr.ExitEnvironment || !strings.Contains(stderr, "owned by uid 65534") {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+	if _, err := os.Lstat(filepath.Join(home, datadir.TmpDir)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("tmp was made: %v", err)
+	}
+}
+
+// A sticky, world-writable parent such as /tmp is accepted: only the
+// victim can rename their data directory there.
+func TestCrossUserScratchStickyParent(t *testing.T) {
+	c := newCrossUser(t)
+	tmp := c.mkdir("tmp", 0, os.ModeSticky|0o777)
+	home := filepath.Join(tmp, "home")
+	if code, out, stderr := c.clean(home, c.repo()); code != 0 || out != "0" {
+		t.Fatalf("the victim's read under a sticky parent: exit %d, %q: %s", code, out, stderr)
+	}
+	if out := c.attack("rename", home, filepath.Join(tmp, "stolen")); !strings.Contains(out, "operation not permitted") {
+		t.Fatalf("attacker rename in a sticky directory: %s", out)
 	}
 }

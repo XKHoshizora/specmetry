@@ -73,6 +73,11 @@ func FakeTraceGit(t testing.TB, control, test string, code int) (dir string, env
 const (
 	// PassAsIs runs the real git as it was run.
 	PassAsIs = "as-is"
+	// PassIgnoringEmptyHistory simulates a Git that ignores the two explicit
+	// empty history overrides; all commands otherwise run the real Git.
+	PassIgnoringEmptyHistory = "ignoring-empty-history"
+	// PassProbeExtraFile injects an unmanifested probe entry: cleanup MUST fail.
+	PassProbeExtraFile = "probe-extra-file"
 	// PassWithoutNoLazyFetch hides GIT_NO_LAZY_FETCH from the real git,
 	// which then fetches a missing object as a git that does not honour
 	// the variable (git 2.32) does.
@@ -84,6 +89,10 @@ const (
 	// error (exit 129) without running git, as a git older than the option
 	// does.
 	PassWithoutLsFilesSparse = "without-ls-files-sparse"
+	// PassWithoutWorktreeListZ refuses worktree list -z with a usage
+	// error (exit 129), as a git older than 2.36 does, and runs every
+	// other command.
+	PassWithoutWorktreeListZ = "without-worktree-list-z"
 	// PassHang answers git --version and, run in any other way, waits a
 	// minute and fails, without running git.
 	PassHang = "hang"
@@ -266,11 +275,28 @@ func passthrough(real, mode string) int {
 		fmt.Fprintln(os.Stderr, "error: unknown option `sparse'")
 		return 129
 	}
+	if mode == PassWithoutWorktreeListZ && slices.Contains(args, "worktree") && slices.Contains(args, "list") && slices.Contains(args, "-z") {
+		fmt.Fprintln(os.Stderr, "error: unknown switch `z'")
+		return 129
+	}
 	hide := map[string]string{PassWithoutNoLazyFetch: "GIT_NO_LAZY_FETCH", PassWithoutTrace: "GIT_TRACE2_EVENT"}[mode]
 	var env []string
 	for _, kv := range os.Environ() {
-		if name, _, _ := strings.Cut(kv, "="); hide == "" || !strings.EqualFold(name, hide) {
+		name, value, _ := strings.Cut(kv, "=")
+		if mode == PassIgnoringEmptyHistory && value == "" && (strings.EqualFold(name, "GIT_GRAFT_FILE") || strings.EqualFold(name, "GIT_SHALLOW_FILE")) {
+			continue
+		}
+		if hide == "" || !strings.EqualFold(name, hide) {
 			env = append(env, kv)
+		}
+	}
+	if mode == PassProbeExtraFile && slices.Contains(args, "--format=%H") {
+		for _, arg := range args {
+			if path, ok := strings.CutPrefix(arg, "--git-dir="); ok {
+				if err := os.WriteFile(filepath.Join(path, "unexpected"), []byte("synthetic-extra"), 0o600); err != nil {
+					return 127
+				}
+			}
 		}
 	}
 	cmd := exec.Command(real, args...)

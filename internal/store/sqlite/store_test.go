@@ -28,6 +28,7 @@ func TestMain(m *testing.M) {
 		"crashwriter": crashWriterHelper,
 		"livewriter":  liveWriterHelper,
 		"victimopen":  victimOpenHelper,
+		"victimclean": victimCleanHelper,
 		"attacker":    attackerHelper,
 		"uncommitted": uncommittedWriterHelper,
 		"upgrader":    upgraderHelper,

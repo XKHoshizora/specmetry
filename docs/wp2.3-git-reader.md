@@ -1,6 +1,6 @@
 # WP2.3 Git Reader 规范
 
-> 状态：**已冻结**（2026-10-19，产品负责人批准；审查 057 技术 GO，见 [review-resolution.md §67](review-resolution.md)）。此前按审查 050、052、055（都为 NO-GO）修订。负责人已决定 D1、D2、D7（2026-10-18），以及 P1、P2、P3 与 `worktree list -z` 的能力要求（2026-10-19；§2、§8）；其余没有获批的草案保持原状。本文写出 WP2.3 的读取机制（TD-23）、提交关联规则（M2-Q7 / TD-17）、关联的生命周期（审查 044 N1）、`internal/gitx` 的新接口、扫描层的职责、迁移设计、正反例、验收映射与测试计划。
+> 状态：**已冻结**（2026-10-19，产品负责人批准；审查 057 技术 GO，见 [review-resolution.md §67](review-resolution.md)）。实现中的细化写在 §14（审查 058 之后，经审查 059 复审；其中 §14.3 已按负责人 B1-D1～D4 的批准调整（审查 060 之后，§71），实现经审查 063 技术复审通过（方案 B 下，§74），等待合并核验；不是审查 057 的审查对象；业务定义不变，§14.3 的局部安全保证按 §71 明确调整）。此前按审查 050、052、055（都为 NO-GO）修订。负责人已决定 D1、D2、D7（2026-10-18），以及 P1、P2、P3 与 `worktree list -z` 的能力要求（2026-10-19；§2、§8）；其余没有获批的草案保持原状。本文写出 WP2.3 的读取机制（TD-23）、提交关联规则（M2-Q7 / TD-17）、关联的生命周期（审查 044 N1）、`internal/gitx` 的新接口、扫描层的职责、迁移设计、正反例、验收映射与测试计划。
 >
 > 本文不是实现。WP2.3 的实现获得条件授权（2026-10-19）：本规范的 PR 合并、合并核验与对应的 master push CI 全部通过之后开工，实现以冻结的本文为依据，另开 PR。
 >
@@ -232,6 +232,7 @@ git status --porcelain --untracked-files=all --ignore-submodules=none -- . ':(ex
 3. **超级项目的读取**：在私有目录上运行，都经过对象读取门禁（PD-26）：
    - `git --git-dir=<私有目录> --work-tree=<worktree> status --porcelain -z --untracked-files=all --ignore-submodules=all -- . ':(exclude).specmetry'`。`--ignore-submodules=all` 使 git 不进入子模块，也不启动子进程（实验 C9：子进程数为 0）。
    - 需要列出索引时只用 `ls-files -z --sparse`。
+   - （实现细化，待复审：`ls-files`、`diff-files` 与 `status` 使用相同的 pathspec，见 §14.6；另以 `diff-index --cached` 比较索引与 HEAD 的 gitlink，见 §14.1。）
    - 第 5 步的 `diff-files` 必须带 `--ignore-submodules=all`：不带时，它会读取子模块的索引；子模块是稀疏索引时，这会更新子模块原对象的修改时间（实验 X6）。
 4. **子模块**：
    - 对私有索引中每个 `160000` 条目，如果 worktree 中这个路径有 `.git`（已初始化）：
@@ -239,6 +240,7 @@ git status --porcelain --untracked-files=all --ignore-submodules=none -- . ':(ex
      - 用 `git --git-dir=<解析出的 git 目录> rev-parse --verify HEAD` 取得子模块的 HEAD，与 gitlink 不同即为 `dirty`。
      - 再对子模块按第 1 ~ 6 步读取：先建立它的私有目录，**先过它自己的稀疏门禁**，再运行它的 `status` 等命令；它的配置与驱动按它自己的 local 配置判断。
    - 没有初始化的子模块不读取，与 `status` 相同。
+   - （实现细化，待复审：gitlink 的路径不存在或不是目录时为 `dirty`，见 §14.1。）
    - 每一次 git 调用都经过对象读取门禁与受控环境；私有目录不是跳过门禁的理由。
 5. **过滤器下不可判定的情形**（审查 052 B3-R1）：不执行程序就无法得出与定义一致的结果时，结果为 `unknown`（P1）：
    - 驱动集合 D：仓库 local（及 worktree）配置中定义了 `filter.<名称>.clean`、`filter.<名称>.process`，或 `filter.<名称>.required = true` 的名称。D 为空时跳过本条。
@@ -267,10 +269,10 @@ git status --porcelain --untracked-files=all --ignore-submodules=none -- . ':(ex
   - 原仓库对象文件的**内容与修改时间**：在普通索引、拆分索引、untracked cache、没有稀疏索引的稀疏检出中，本文整套命令（`status`、`ls-files`、`check-attr`、`diff-files`）执行前后都没有变化（实验 S12 ~ S14、S11、S19）。稀疏索引由第 2 步的门禁在这些命令之前排除（实验 S16 ~ S18b）。
   - 这依据的是这些布局下的实验，不是操作系统层面的只读保证。新的布局或命令须先做同样的实验。
 - **临时目录的生命周期**（审查 052 N2）：
-  - 私有目录建在 Specmetry 专用的临时位置，只对当前用户可读写，名称带固定前缀，便于识别崩溃后遗留的目录。具体位置在实现时与数据目录的规则一起确定。
-  - 成功、失败与取消都删除它；删除失败时返回环境错误（退出码 6），不报告 `clean`。
-  - 下一次读取开始时，清理同一前缀下的遗留目录。
-  - 它不属于项目事实，不进入日志、错误输出或备份。索引副本与配置值只在读取期间存在，不是保存源码或完整配置的许可（architecture §10）。
+  - 私有目录建在受数据目录保护的 `tmp/git-reader-v3/`，按 §14.3／决定 §71、§72 的合作协议使用。名字只用于识别候选，不能据前缀、年龄或 PID 接管遗留。
+  - 正常结束删除自身临时内容；失败／取消也尝试按清单清理。发现未知、额外或身份不符时保留对象并返回环境错误（退出码 6），清理失败同样不能报告 `clean`。
+  - 下一次租约只清理有效 v3 owner、完整创建清单和已确认消费者结束记录能证明安全的遗留；未确认结束、缺失 owner 或未知对象保留并失败。v1 顶层及 v2 子树均不接管。
+  - 它不属于项目事实，不进入日志、错误输出或备份。成功返回后只可保留无项目内容的最小协议锁／标识；异常遗留按 D3 保留并报错，不是保存源码或完整配置的许可（architecture §10、决定 §71）。
 - **没有关闭的边界**：
   - `assume-unchanged`、`skip-worktree` 是用户在索引上的标记，`status` 的参数无法覆盖，这里也不处理。
   - `core.autocrlf` 等内置转换的结果与定义相同（同一份白名单配置）。
@@ -412,9 +414,9 @@ git status --porcelain --untracked-files=all --ignore-submodules=none -- . ':(ex
   |---|---|---|---|
   | commit-graph | 从图文件取父提交与时间，不读取提交对象 | 每次调用固定 `-c core.commitGraph=false`，不依赖用户配置 | G1、G2 |
   | 替换引用 | 用另一个对象代替 | 既有的全局参数 `--no-replace-objects`（§6.1.2） | — |
-  | grafts（`info/grafts`） | 改写父提交，缺失的父提交不再被访问 | 环境变量 `GIT_GRAFT_FILE` 指向一个不存在的路径 | G5 |
+  | grafts（`info/grafts`） | 改写父提交，缺失的父提交不再被访问 | 显式 `GIT_GRAFT_FILE=`，按实际 Git 身份行为探测；不回退 missing 路径（§14.3、§71） | G5 |
   | multi-pack-index | 对象查找经过它；它损坏时 git 回退并报告错误 | 分类与读取都固定 `-c core.multiPackIndex=false`，只用各个包自己的索引 | K7 |
-  | 浅克隆（`shallow` 文件） | git 声明的边界之外的父提交不访问 | MVP 不扫描浅克隆（P3）：扫描之前直接检测，是浅克隆或无法确认就返回退出码 6；读取另设 `GIT_SHALLOW_FILE` 指向一个不存在的路径，使检测之后才出现的浅边界也不能截断读取（见下文"浅克隆"） | G6、H1 ~ H7 |
+  | 浅克隆（`shallow` 文件） | git 声明的边界之外的父提交不访问 | MVP 不扫描浅克隆（P3）：扫描之前直接检测，是浅克隆或无法确认就返回退出码 6；读取另设经行为探测的显式 `GIT_SHALLOW_FILE=`，使检测之后才出现的浅边界也不能截断读取（见下文"浅克隆"） | G6、H1 ~ H7 |
 
 - 关闭这些途径之后，git 访问到的每一个提交都要读取并解析它的对象；读取失败就是非 0 退出。
 - 没有被访问到的提交，不影响"T 可达、且不被排除项可达"的集合，所以不需要读取（实验 G4：排除项之后的祖先缺失，不影响结果）。
@@ -479,11 +481,11 @@ git status --porcelain --untracked-files=all --ignore-submodules=none -- . ':(ex
 | R 没有游标（新的 ref，D4） | — | `<T>`，排除 C 中**存在**的所有 `last_tip`；可靠地不存在的旧 tip 不作排除项（范围变大）；有任何一个旧 tip 存在但不可读或无法确认，本次扫描返回退出码 6 |
 | 项目还没有任何游标（第一次扫描） | — | 每个 ref 的全部历史 |
 
-- 实验 R10 中，打包对象的数据被改写、commit-graph 存在时，`is-ancestor` 返回 0：它用图文件回答，没有读取对象。固定 `core.commitGraph=false` 之后，祖先判断也要读取对象（实验 G2）。
+- 实验 R10 中，打包对象的数据被改写、commit-graph 存在时，`is-ancestor` 返回 0：它用图文件回答，没有读取对象。固定 `core.commitGraph=false` 之后，祖先判断也要读取对象（实验 G2）。（实现细化，待复审：路径中间的提交缺失时，部分版本返回 1 而不是失败，扫描的保证不变，见 §14.4。）
 
 **第四步：严格读取**：
 
-- 每个有工作的 ref 一次 `git log -z --stdin --format=%H%x00%ct%x00%(trailers:key=Specmetry-Ref,valueonly,separator=%x2C)%x00%B`，固定 `-c core.commitGraph=false -c core.multiPackIndex=false`，并设置 `GIT_GRAFT_FILE`（见上）。
+- 每个有工作的 ref 一次 `git log -z --stdin --format=%H%x00%ct%x00%(trailers:key=Specmetry-Ref,valueonly,separator=%x2C)%x00%B`，固定 `-c core.commitGraph=false -c core.multiPackIndex=false`，并设置 `GIT_GRAFT_FILE`（见上）。（实现细化，待复审：另加 `--no-show-signature`，见 §14.2。）
 - stdin 中先写正向 tip T，再为每个排除项写一行 `^<完整 SHA>`。
   - 不写 `--not` 行（git 2.32 的 `--stdin` 不接受选项行，审查 050 N1）；
   - **不使用 `--ignore-missing`**（审查 050 B1；实验 R1）。
@@ -696,7 +698,7 @@ git status --porcelain --untracked-files=all --ignore-submodules=none -- . ':(ex
 
 ## 6. 接口设计
 
-**`internal/gitx` 新增**（名称与签名供审查，实现时可调整；行为以本文为准）：
+**`internal/gitx` 新增**（名称与签名供审查，实现时可调整；行为以本文为准。实现细化，待复审：`Clean`、`Tips`、`Classify`、`IsAncestor`、`Log` 另带私有临时区参数 `*Scratch`，由 `NewScratch` 在数据目录中准备，见 §14.3）：
 
 ```go
 // Entry is a tree entry's metadata (data-model §4.11.2).
@@ -1095,3 +1097,103 @@ func Log(ctx context.Context, worktree, tip string, exclude []string, fn func(Co
   - 调用扫描的命令（`status`、`ingest`、`sync`）如何呈现这个错误，由 WP2.7 确定（§5.1 对 D7 的同一要求）。
   - 是否另外提供不依赖 `-z` 的兼容读取，列为待决事项（§8），本文不自行决定。
 - 实现时在 CI 的三个平台上运行全部用到的命令，并为不支持的选项写出拒绝路径的测试（§11）。
+
+## 14. 实现中的细化（审查 058 之后，待复审）
+
+> 本节写于 2026-10-19，是 WP2.3 实现（PR #27）中发现、并按审查 058（NO-GO）修复后同步的实现细化，经审查 059 复审；其中 §14.3 已按审查 060 后负责人 B1-D1～D4 的明确批准调整（§71），实现经审查 063 技术复审通过（方案 B 下，§74），等待合并核验（[review-resolution.md §69](review-resolution.md)）。它们**不是审查 057 审查过的内容**，除 §14.3／§71 明确批准的局部保证调整外，不改变已冻结的业务语义：`clean` 的定义（data-model §1、D1）、P1 / P2 / P3、`worktree list -z` 的能力要求、关联的生命周期、`seq` 与写事务（§5.4、§5.5）都不变。记录见 [review-resolution.md §68](review-resolution.md)。
+
+### 14.1 子模块：被 `--ignore-submodules=all` 隐藏的四种变化（§4.3 第 3、4 步）
+
+- **发现**：超级项目的私有 `status` 固定 `--ignore-submodules=all`，它不只隐藏子模块自身的状态，还隐藏以下四种变化；定义命令（`=none`）都会显示它们（git 2.56 与 WSL 的 2.43 结果相同）：
+  - 已暂存的 gitlink（`M  sub`）；
+  - 从索引中移除的 gitlink（`D  sub`）；
+  - 子模块目录被删除（` D sub`）；
+  - 子模块目录被换成文件（` T sub`）。
+- 只按 §4.3 第 4 步比较子模块的 HEAD 与 gitlink，这四种情形会被报告为 `clean`。
+- **补充的读取**：
+  - 在私有目录上运行 `git diff-index --cached --raw -z --ignore-submodules=none <HEAD> -- <pathspec>`，比较索引与 HEAD 的树。它只比较索引与树，不进入子模块的工作区，trace2 显示没有子进程。有输出即为 `dirty`。分支还没有提交时，索引中有 gitlink 即为 `dirty`。
+  - 对索引中每个 stage 0 的 gitlink，检查它的路径：不存在为 `dirty`（` D`）；不是目录为 `dirty`（` T`）；是目录而没有 `.git` 时为未初始化，与定义相同，不读取；有 `.git` 时按 §4.3 第 4 步读取。
+  - stage 不为 0 的 gitlink（冲突中）为 `dirty`。
+- 这是保持定义所必需的补足，只对这几种情形成立；**不是**"私有读取与定义的差异只会多报 `dirty`"的一般证明。
+
+### 14.2 严格日志不运行签名程序（§5.2 第四步）
+
+- 仓库 local 配置有 `log.showSignature=true` 与 `gpg.program` 时，§5.2 第四步的命令按原文会为带签名的提交运行 `gpg.program`（两个版本都复现）。这违反"不执行仓库配置的程序"（architecture §6.1.2）。
+- `Log` 因此另加 `--no-show-signature`（git 2.10 起支持）。测试先以普通 `git log` 证明夹具确实会运行标记程序，再证明扫描的读取不运行它。
+
+### 14.3 私有临时区：获批方案 B（Review 060 之后）
+
+负责人已批准 B1-D1～D4（[决定 §71](review-resolution.md#71b1-方案-b-的批准与实施范围)）。这是**局部保证调整**，不是宣称审查 060 的旧保证已全部实现。历史反例及其精确窗口保留在原审查与 [设计报告](wp2.3-b1-design.md)。
+
+扫描：所有扫描对象调用显式传 `GIT_GRAFT_FILE=` 与 `GIT_SHALLOW_FILE=`；首次使用实际 Git 二进制前，在受保护的 v3 租约内以正反对照验证两空值完整读取、缺失／损坏严格失败。缓存绑定文件身份、大小与修改时间，变化重新探测；失败 exit 6，不回退路径。扫描实际读取不再使用私有防护路径。P3 浅克隆拒绝、PD-26、禁传输／外部程序、部分结果丢弃不变。
+
+Clean 与探测：`NewScratch` 先执行 `datadir.Ensure/EnsureSub`，不打开数据库。在 `tmp/git-reader-v3/` 中使用稳定合作锁，锁覆盖每个私有目录的建立、写入、Git 使用及清理；递归子模块逐个租约，不并行使用同一租约。竞争环境错误，不自动重试业务写入。正常合作进程互不清理活跃对象。v3 与 v1 顶层 `tmp/read-*`、v2 子树隔离，不接管两者的遗留；v2 没有消费者结束记录，不能安全升级认领。v3 内未知格式或条目保留并失败，不混用协议。旧二进制并发运行尚未动态验证；隔离依据为各版选择路径的源码与命名空间测试。
+
+**消费者生存期（Review 061 B1-R2，决定 §72）**：调用方持锁不能证明其崩溃后的真实 Git 已退出。每次消费私有目录的 Git（包括 Clean 全部有关调用与空覆盖行为探测）启动前，先将 owner 的 `consumer_pending=true` 完整写入并同步；不能建立屏障时不启动。只有实际 `Start` 失败，或已经 `Wait` 到 Git 结束，且完整输入检查通过，才写回并同步 `false`。取消同样等待实际 Git 退出。合作回收者一律拒绝未清除标记、损坏／缺失标记及无效记录，保留所有现存内容、返回 exit 6；不以父进程死亡、锁释放、PID、年龄或等待时长判断消费者结束。本机制不依赖 fd／handle 继承，也不执行仓库配置的程序。
+
+**完成持久化失败（Review 062 B1-R2-S）**：已 Wait 到 Git 结束与完成记录写入、Sync 成功是两个状态。只有后者成功，本次调用才允许清理／复用；完成记录写入或 Sync 失败时，保留本次不可覆盖的未确认状态、返回环境错误，清理只释放自身资源，保留目录、owner 及全部现存清单内容。不因当前已能读到完整 `false` 而忽略本次 Sync 错误，不通过再次 begin／finish 自动重试消除错误。
+
+后续 Scratch 按现行 v3 的实际可读记录、身份、清单及锁认领，不持有前次 Sync 的返回值。若仍是 `true`、记录不完整／无效或归属无法确认，保留并失败；若是完整规范 `false` 且全部归属预检通过，仍可可信回收（该记录仅在 Git 已结束并验证输入后生成）。这不证明前次 Sync 成功，也不承诺一次 Sync 错误永久禁止跨进程回收；若记录未保存下来，按其实际不确定状态拒绝。本次修复不升级协议、不增加自动恢复写入或恢复命令。
+
+调用方崩溃可能留下永久不可自动回收的目录，即使 Git 后来退出也如此；没有完成记录，不能从当前不活跃反推整个生存期安全。该分支明确保留并失败，需负责人／操作者另行确认消费者均已结束后人工处理，本轮不新增自动恢复命令。无在途消费者的可信完整遗留，或已由调用方持久记录正常／取消结束的遗留，仍可按清单回收。这是安全失败的可用性代价，不是把调用方崩溃归入不合作同用户排除范围。
+
+Windows 原子 FILE_CREATE 返回目录句柄，已有名字拒绝，不使用 OPEN_IF；持有必要目录保护句柄，删除在核对身份的同一个句柄上进行。Unix mkdir/open 与 fstatat/unlinkat 仍是分离操作，合作锁内没有其他合规名称修改者。所有平台的根链与条目检查只对发现的变化保守拒绝，不声称排除未观测到的往返替换。
+
+每个临时目录以创建清单记录相对路径、类型和身份；正常结束按清单清理，先复核所有内容，不递归猜测删除未知树。**在任何删除之前**必须验证路径上的 owner 存在、是普通文件、身份为原创建身份且记录与当前清单／消费状态一致；仍有效的旧文件句柄不能代替名称上的存在性。读取前后、清理预检及遗留认领都执行此校验。发现未知、额外、缺失或身份不符时保留对象、停止操作并返回环境错误；不能先删其他内容再发现 owner 缺失。只有本次可信清理已成功删除 owner 后，才进入不再要求该文件存在的目录删除重试阶段；进程崩溃后不能据此认领无 owner 目录。
+
+只有有效 v3 owner 记录、可取得锁、清单与对象一致且没有未确认消费者的崩溃遗留可清理；不按前缀、年龄或 PID 推断归属。失败只释放自身句柄和锁。清理失败 exit 6，不能报告 clean／发布扫描事实。协议需要的最小锁和标识长期保留，不含项目内容。
+
+**获批的局部边界**：不合作同用户进程干预 Git 私有临时命名空间（包括普通误操作）被排除；Unix mkdir/open 可接纳空替代目录，最后比较/unlink 或 rmdir 可删替代 owner 文件或空目录；Clean 可读替代输入，不能排除 false-clean。这不扩展到其他账户、合作进程并发、数据库、来源权限、隐私或交付证据；不豁免 Log 漏读成功。管理员/root 的主动控制仍不作为普通用户防线。Windows 重命名被 OS 阻止与实际替换后拒绝分别记录；未做的双账户／文件系统验证不得外推。
+
+公开 Scratch API、缺少／关闭时的内部错误不变。调用方正常 Close；取消等 Git 子进程结束后才清理与释放租约。读取失败不发布提交、关联、seq 或游标，沿用扫描事务，不引入业务重试。
+
+### 14.4 祖先判断：祖先本身缺失与路径中间的提交缺失（§5.2 第三步）
+
+- **祖先本身缺失**（实验 G2）：`merge-base --is-ancestor <A> <C>` 在 git 2.56、2.43、2.32 上都返回 128，与原文一致，扫描失败（退出码 6）。
+- **路径中间的提交缺失**：
+  - 关闭 commit-graph 时，git 2.56 返回 128；git 2.43 与 2.32 返回 **1**（"不是祖先"）。三者都不会返回 0。
+  - 2.43、2.32 的结果是作者在 WSL 中的实验记录；CI 上的 2.55、2.56 在测试中都报错。
+- 原文"关闭 commit-graph 之后，祖先判断也要读取对象（G2）"只对 G2 的情形成立。
+- **扫描的保证不变**：
+  - 返回 1 只会使该 ref 按改写处理，读取整段历史；随后的严格 `log` 在缺失的提交处失败，整次扫描不写提交、关联、`seq` 或游标。
+  - 实验中，路径中间的提交缺失时，三个版本都没有返回 0。即使返回 0，随后的增量读取 `<T> ^<A>` 仍然严格：它访问到的每一个提交都要读取，缺失即失败。
+
+### 14.5 worktree 的元数据文件（§4.3 第 1 步）
+
+- `info/exclude`、`info/attributes`、`info/sparse-checkout` 按 `git rev-parse --git-path` 给出的实际位置复制，这正是 git 自己读取的位置。
+- 主 worktree 的这三个文件都在公共目录中，与原文一致。关联 worktree 的 `info/sparse-checkout` 在它自己的 git 目录中（git 的 per-worktree 规则），不能统一写成公共目录。
+
+### 14.6 `.specmetry/` 的排除在所有读取中一致（审查 058 B3）
+
+- 原实现只有 `status` 与 `diff-index` 带了定义的 pathspec，`ls-files` 列出整个索引。因此由它得到的过滤器候选（`check-attr`、`diff-files`、racy 判断）与 gitlink 检查，仍会受 `.specmetry/` 中内容的影响：那里一个受过滤文件的变化会使结果成为 `unknown`，那里一个子模块目录被删除会使结果成为 `dirty`，而定义命令的输出为空。
+- 现在 `ls-files`、`diff-files` 与 `status`、`diff-index` 使用相同的 git pathspec：超级项目中为 `-- . ':(exclude).specmetry'`，子模块中为 `-- .`。子模块内部不排除：定义命令询问的是子模块自己的 `status`。
+- 由 git 自己匹配 pathspec，不用字符串前缀，因此 `.specmetry-not/` 之类名称相近的路径照常计入。
+- 整个索引的安全门禁不受 pathspec 影响：稀疏目录条目即使是 `.specmetry/`，也仍判为 `unknown`（P2）；损坏的索引仍是环境错误。
+
+### 14.7 `link` 扩展的位图（审查 058 B2，§4.3 第 2 步）
+
+- 一个 EWAH 位图至少有 12 字节：位数、字数与 running-length 位置。原实现只要求 8 字节：剩余 8～11 字节时，读取越过 `link` 的载荷；外层校验和为零（skipHash）时，`IndexIsSparse` 与 `Clean` 会 panic。
+- 现在的要求：
+  - 先要求完整的 12 字节框架；
+  - 字数必须容得下剩余的长度；
+  - running-length 位置必须是某个字；
+  - 两个位图必须正好用完载荷；
+  - 任何切片都不超出当前载荷。
+- 损坏时返回环境错误，不 panic；在任何读取索引的 git 命令之前失败。
+
+### 14.8 对应的测试（补充 §11）
+
+| 项 | 测试 |
+|---|---|
+| 14.1 | `TestCleanSubmodules`、`TestCleanSubmodulesAgreeWithTheDefinition` |
+| 14.2 | `TestLogRunsNoSignatureProgram`（含对照） |
+| 14.3 | `TestScratchNeedsAPrivateDataDirectory`、`TestPrivateDirectoryReplaced`、`TestScratchRootReplaced`、`TestScratchRemovesOnlyItsOwnLeftovers`、`TestPrivateDirectoryLifecycle`、`TestPrivateDirectoriesArePrivate`；审查 059 B1-R：`TestRemovalAttemptsCheckTheDirectory`（反例 1）、`TestScratchRootReplacedWhileInUse`（反例 2）、`TestScratchRootRedirected`（反例 3）、`TestRemovalChecksWhatItRemoves`、`TestPrivateDirectoryReplacedAsItIsMade`、正对照 `TestRemovalRetriesTheSameDirectory`；跨用户：`TestCrossUserScratch*`（`internal/store/sqlite`，以 root 运行） |
+| 14.4 | `TestIsAncestor`、`TestScanFailuresWriteNothing`、`TestScanDropsAPartialRead` |
+| 14.6 | `TestCleanLeavesOutSpecmetry`、`TestCleanLeavesOutSpecmetryGitlinks`（都以真实运行的定义命令为对照）、`TestCleanSparseGateIgnoresTheExclusion` |
+| 14.7 | `TestIndexIsSparseShortBitmapHeader`、`TestCleanWithAShortBitmapHeader`、`TestIndexIsSparseCutBitmaps`、`TestIndexIsSparseBadBitmapCounts`、`TestIndexIsSparseRandomDamage`、`FuzzIndexIsSparse` |
+
+### 14.9 B1 方案 B 的实现证据（本轮实施，不是独立审查）
+
+批准范围、代码／规范身份、平台与失败历史见 [实施交付记录](wp2.3-b1-implementation.md)。新测试包括 `TestScanEmptyOverrides`、`TestScanRefusesUnsupportedEmptyOverrides`、`TestScanCapabilityFollowsExecutableIdentity`、`TestScanProbeCancellationReleasesLease`、`TestScanEmptyMultiParentAndFailures`、`TestScanScratchContract`、`TestScratchManifestAnomalyIsRetained`、`TestScratchVersionNamespacesDoNotMix`、`TestScratchProtocolProcesses`、Windows 的 `TestWindowsAtomicPrivateDirectory`。原私有目录替换调度现在针对 Clean；Log 不再使用私有防护路径，以公开 Log 的真实往返回归覆盖。
+
+`TestCreationWindowWithApprovedBoundary` 与 Unix 的 `TestApprovedUnixFinalWindow` 明确记录获批的残余窗口，其通过表示边界如实保留，不表示域外干预已被阻止。早期 hook、最后身份核对／unlink 与实际 Git 消费是不同层次；不改写 Review 060 原文。B2、B3、N1 保持关闭，B1 结果交独立会话复核。

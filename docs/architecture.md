@@ -760,10 +760,10 @@ M1 的实现（独立确认，以及附带在审核中的确认）见 §6.1.7。
   - 新 ref 的范围见 WP2.3 规范 §5.2。
 - **读取**：
   - 扫描开始时一次取得所有 tip 的 SHA，之后只按这些 SHA 读取。
-  - 命令为 `git log -z --stdin --format=%H%x00%ct%x00%(trailers:key=Specmetry-Ref,valueonly,separator=%x2C)%x00%B`，经过 `internal/gitx` 的对象读取门禁（§6.1.2）。
+  - 命令为 `git log -z --stdin --format=%H%x00%ct%x00%(trailers:key=Specmetry-Ref,valueonly,separator=%x2C)%x00%B`，经过 `internal/gitx` 的对象读取门禁（§6.1.2）；另加 `--no-show-signature`，使仓库配置的 `log.showSignature` 不能运行 `gpg.program`（实现细化，WP2.3 规范 §14.2，待复审）。
   - stdin 中是正向 tip 与 `^<sha>` 形式的排除项。读取是严格的：不使用 `--ignore-missing`；排除项只用已确认存在的旧 tip；任何非 0 退出都使整次扫描失败（退出码 6），游标不前进，已读到的部分结果丢弃（审查 050 B1、B2）。
-  - 遍历必须读取对象：扫描的读取固定 `-c core.commitGraph=false -c core.multiPackIndex=false`，并让 grafts 失效（`GIT_GRAFT_FILE`），不让 commit-graph 等掩盖缺失的对象（审查 052 B1-R）。
-  - 浅克隆（产品负责人 2026-10-19 决定 P3）：扫描之前由 Specmetry 直接检查公共 git 目录中的 `shallow` 项；是浅克隆或无法确认都返回退出码 6，不写入，不伪装成空扫描，不自动拉取或修改浅边界。读取另设 `GIT_SHALLOW_FILE` 指向一个不存在的路径。
+  - 遍历必须读取对象：扫描的读取固定 `-c core.commitGraph=false -c core.multiPackIndex=false`，并让 grafts 失效（经行为探测的显式 `GIT_GRAFT_FILE=`，§71），不让 commit-graph 等掩盖缺失的对象（审查 052 B1-R）。
+  - 浅克隆（产品负责人 2026-10-19 决定 P3）：扫描之前由 Specmetry 直接检查公共 git 目录中的 `shallow` 项；是浅克隆或无法确认都返回退出码 6，不写入，不伪装成空扫描，不自动拉取或修改浅边界。读取另设经实际 Git 身份行为探测的显式 `GIT_SHALLOW_FILE=`（§71），不回退 missing 路径。
   - 需要的选项在某个 git 上不支持时（例如低于 2.36 的 `worktree list -z`），同样返回退出码 6；这不提高最低版本（WP2.3 规范 §13）。产品负责人 2026-10-19 决定：`worktree list -z` 是 MVP 扫描的能力要求，不增加按行解析的回退，其他命令的支持范围不变。
 - **匹配**：只匹配编号（data-model §4.12 的关联规则）；只保存 SHA、时间和关联关系。
 - **正文**：标题、正文与 trailer 的值在内存中处理，不保存、不记入日志、不出现在错误中。
@@ -791,7 +791,8 @@ $SPECMETRY_HOME/                  默认 ~/.specmetry（TD-02）；权限见 §1
 ├── spool/drops/                  丢弃计数标记（空文件，文件名中带原因）
 ├── spool/dead/                   无法解析的记录（7 天）
 ├── logs/specmetry.log            程序日志（不包含 C0 / C1 内容）
-└── backups/                      一致性备份（§11.3）
+├── backups/                      一致性备份（§11.3）
+└── tmp/                          git 读取的私有目录，各含其所有者文件（读取结束即删除；WP2.3 规范 §14.3，待复审）
 
 <主 worktree>/.specmetry/project.json   {"schema":"specmetry.project/v1","project_id":"…","name":"…"}
 ```
@@ -1077,6 +1078,7 @@ extra_rules = [
 - **Unix**：数据目录权限为 `0700`，文件为 `0600`。
 - **Windows**：对数据目录设置受保护的 DACL（关闭继承），只授予**当前用户 SID 和 SYSTEM** 完全控制权（TD-22，已确认）。SYSTEM 本来就能凭借特权绕过 DACL，加入它不会削弱对其他本地用户的保护，还能让 Defender、备份等系统服务正常工作。新建的文件继承这个 DACL。`doctor` 会检查实际权限，不符合时报告。
 - `run/dashboard.json` 和备份文件的权限与数据目录相同。
+- `tmp/`：Git 私有临时区；WP2.3 规范 §14.3 与 review-resolution §71 的方案 B 已获负责人明确批准。Review 061 后续协议 `tmp/git-reader-v3/`（§72）与 v1／v2 隔离，使用稳定合作锁、创建清单、持久消费者屏障及平台句柄保护。任何删除前验证路径上的 owner 存在、原身份和完整记录；消费者未确认结束、未知／替代条目保留并 exit 6。调用方崩溃后未清除的屏障不可自动回收，即使 Git 后来退出，也需另行确认并人工处理；不以锁释放或 PID 猜测结束。正常结束清理，清理失败仍失败。最小协议锁／标识可长期保留，不含项目内容。扫描采用经行为探测的显式空 graft/shallow 覆盖，不使用可替换的 missing 路径。局部排除不合作同用户进程（包括误操作）干预该命名空间；Unix 创建／最终删除窗口及 Clean 不能排除 false-clean 的后果已明确接受，不能声称旧绝对保证全部实现。其他账户、合作并发、数据库、来源权限、隐私和交付证据保证不变；Log 漏读成功未获豁免。它不是事实，不进入备份。
 - **写入前验证**（codex-review-004 B1）：数据目录不存在时按上述权限创建；**已存在时不予信任**，每个写入方在写入任何数据之前检查目录及其中所有条目（包括数据库、WAL、SHM、备份），任何一项不满足就拒绝写入（退出码 6），不自动修正，也不继续。检查内容：
   - Unix：属主是当前用户，没有 group 和 other 权限位。在 Linux 上这已足够：POSIX ACL 只能通过 group 类权限位（mask）授权，mask 为 0 时其他条目都不生效。macOS 的扩展 ACL 先于权限位生效，单独检查；有允许访问的条目即视为不满足。
   - Windows：只有当前用户和 SYSTEM 的允许条目；属主是当前用户、SYSTEM 或 Administrators 组；数据目录本身的 DACL 受保护；每个目录都有可继承给新文件的当前用户条目（否则 SQLite 新建的 WAL、SHM 会得到进程的默认 DACL）。

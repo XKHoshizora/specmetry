@@ -444,9 +444,10 @@ func supportedVersion(out string) bool {
 // PATH finds the same file, unchanged; any other git is checked anew. The
 // file found is the one run.
 type gitBinary struct {
-	path    string
-	size    int64
-	modTime int64
+	path     string
+	size     int64
+	modTime  int64
+	identity fileKey
 }
 
 var (
@@ -459,6 +460,7 @@ var (
 		versionOK bool
 		objects   objectSafety
 		sparse    sparseListing
+		scanEmpty bool
 	}
 )
 
@@ -468,11 +470,20 @@ func findGit() (gitBinary, error) {
 	if err != nil {
 		return gitBinary{}, apperr.New(apperr.Environment, "git is required but was not found on PATH")
 	}
-	fi, err := os.Stat(p)
+	f, err := os.Open(p)
+	if err != nil {
+		return gitBinary{}, apperr.New(apperr.Environment, "cannot identify git")
+	}
+	defer func() { _ = f.Close() }()
+	identity, _, err := keyOf(f)
+	if err != nil {
+		return gitBinary{}, apperr.New(apperr.Environment, "cannot identify git")
+	}
+	fi, err := f.Stat()
 	if err != nil {
 		return gitBinary{}, apperr.New(apperr.Environment, "cannot run git ("+osProblem(err)+")")
 	}
-	return gitBinary{path: p, size: fi.Size(), modTime: fi.ModTime().UnixNano()}, nil
+	return gitBinary{path: p, size: fi.Size(), modTime: fi.ModTime().UnixNano(), identity: identity}, nil
 }
 
 // gitToRun returns the git to run after refusing one too old to be
@@ -490,7 +501,7 @@ func gitToRunLocked(ctx context.Context) (string, error) {
 		return "", err
 	}
 	if bin != state.bin {
-		state.bin, state.versionOK, state.objects, state.sparse = bin, false, unprobed, sparseUnprobed
+		state.bin, state.versionOK, state.objects, state.sparse, state.scanEmpty = bin, false, unprobed, sparseUnprobed, false
 	}
 	if !state.versionOK {
 		out, code, err := exec1(ctx, bin.path, "", "--version")
@@ -558,11 +569,38 @@ func execTo(ctx context.Context, git, dir string, stdout io.Writer, args ...stri
 // command runs git once in dir with env. Its output goes to stdout, or
 // nowhere when stdout is nil; its messages go nowhere.
 func command(ctx context.Context, git, dir string, env []string, stdout io.Writer, args ...string) (int, error) {
+	return commandIO(ctx, git, dir, env, nil, stdout, nil, args...)
+}
+
+// testHookCommand brackets the actual Git process for deterministic lifecycle tests.
+var testHookCommand func(stage string, pid int, args []string)
+var testHookCommandSetup func(cmd *exec.Cmd)
+
+// commandIO is command with stdin as git's input, and git's messages
+// written to stderr, or nowhere when it is nil.
+func commandIO(ctx context.Context, git, dir string, env []string, stdin io.Reader, stdout, stderr io.Writer, args ...string) (int, error) {
 	cmd := exec.CommandContext(ctx, git, args...)
 	cmd.Dir = dir
 	cmd.Env = env
+	cmd.Stdin = stdin
 	cmd.Stdout = stdout
-	err := cmd.Run()
+	cmd.Stderr = stderr
+	if testHookCommandSetup != nil {
+		testHookCommandSetup(cmd)
+	}
+	var err error
+	if testHookCommand == nil {
+		err = cmd.Run()
+	} else {
+		err = cmd.Start()
+		if err == nil {
+			testHookCommand("started", cmd.Process.Pid, slices.Clone(cmd.Args))
+			err = cmd.Wait()
+			if testHookCommand != nil {
+				testHookCommand("waited", cmd.Process.Pid, slices.Clone(cmd.Args))
+			}
+		}
+	}
 	var exit *exec.ExitError
 	switch {
 	case ctx.Err() != nil:

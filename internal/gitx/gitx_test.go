@@ -18,6 +18,7 @@ var ctx = context.Background()
 
 func TestMain(m *testing.M) {
 	testutil.DispatchFakeGit()
+	testutil.DispatchHelper(map[string]func() int{"scratch-lease": helperScratchLease, "review61-consumer": helperReview61Consumer})
 	os.Exit(m.Run())
 }
 
