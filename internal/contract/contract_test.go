@@ -186,6 +186,31 @@ func TestErrorEnvelopeConformsToErrorV1(t *testing.T) {
 	}
 }
 
+// M-7: the CLI tests check an output with ValidateJSON, so it must take
+// exactly one whole document: whitespace may follow it (outputs end with a
+// newline), and nothing else may come before or after it.
+func TestValidateJSONTakesOneWholeDocument(t *testing.T) {
+	v := validator(t)
+	doc, err := os.ReadFile(filepath.Join(examplesDir, "valid", "question-list.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc = []byte(strings.TrimSpace(string(doc)))
+	for _, ok := range []string{"", "\n", " \r\n\t"} {
+		if err := v.ValidateJSON("question-list.v1", append(append([]byte{}, doc...), ok...)); err != nil {
+			t.Errorf("followed by %q: %v", ok, err)
+		}
+	}
+	for _, c := range []struct{ before, after string }{
+		{"", "x"}, {"", "\n{}"}, {"", string(doc)}, {"", "\nnull"}, {"", ","}, {"x", ""}, {"[", "]"},
+	} {
+		data := append(append([]byte(c.before), doc...), c.after...)
+		if err := v.ValidateJSON("question-list.v1", data); apperr.ExitCode(err) != apperr.ExitInvalidInput {
+			t.Errorf("%q before and %q after the document: %v; want it refused", c.before, c.after, err)
+		}
+	}
+}
+
 func TestValidationReportsJSONPointers(t *testing.T) {
 	v := validator(t)
 	err := v.ValidateJSON("source-ack.v1", []byte(`{"schema":"specmetry.source-ack/v1","source":"a.md","observed_sha256":"xyz"}`))

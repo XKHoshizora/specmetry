@@ -160,11 +160,30 @@ func TestCommandLineStillWorks(t *testing.T) {
 		t.Errorf("version: exit %d", code)
 	}
 	// The root and the groups know --json now, so it may also come before
-	// the command it is for, as any flag may.
-	for _, args := range [][]string{{"source", "list", "--json"}, {"proposal", "list", "--json", "--pending"}, {"question", "list", "--json", "--all"},
-		{"--json", "question", "list"}, {"question", "--json", "list", "--all"}} {
-		if code, stdout, stderr := specmetry(t, dir, "", args...); code != apperr.ExitOK || !strings.HasPrefix(stdout, "{") {
-			t.Errorf("%v: exit %d\n%s%s", args, code, stdout, stderr)
+	// the command it is for, as any flag may. Each output is checked as one
+	// whole document of its schema (M-7, review 029 N1: not only that it
+	// starts with "{"), and with --json earlier it is the same document as
+	// with --json after the command.
+	for _, c := range []struct {
+		schema      string
+		args, after []string
+	}{
+		{"source-list.v1", []string{"source", "list", "--json"}, nil},
+		{"proposal-list.v1", []string{"proposal", "list", "--json", "--pending"}, nil},
+		{"question-list.v1", []string{"question", "list", "--json", "--all"}, nil},
+		{"question-list.v1", []string{"--json", "question", "list"}, []string{"question", "list", "--json"}},
+		{"question-list.v1", []string{"question", "--json", "list", "--all"}, []string{"question", "list", "--json", "--all"}},
+	} {
+		code, stdout, stderr := specmetry(t, dir, c.schema, c.args...)
+		if code != apperr.ExitOK {
+			t.Errorf("%v: exit %d\n%s%s", c.args, code, stdout, stderr)
+			continue
+		}
+		if c.after == nil {
+			continue
+		}
+		if code, want, stderr := specmetry(t, dir, c.schema, c.after...); code != apperr.ExitOK || stdout != want {
+			t.Errorf("%v: exit %d; the output differs from %v's\n%s\n%s%s", c.args, code, c.after, stdout, want, stderr)
 		}
 	}
 	for _, c := range []struct {
