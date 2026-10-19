@@ -197,7 +197,7 @@ func TestScratchRootReplaced(t *testing.T) {
 func TestScratchRemovesOnlyItsOwnLeftovers(t *testing.T) {
 	s, d := scratchIn(t)
 	root := d.Join(datadir.TmpDir)
-	mk := func(name string, dir bool) string {
+	mk := func(name string, dir bool) {
 		p := filepath.Join(root, name)
 		var err error
 		if dir {
@@ -211,7 +211,6 @@ func TestScratchRemovesOnlyItsOwnLeftovers(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		return p
 	}
 	const crashed, lockOnly, noLock = "read-11111111111111111111111111111111", "read-22222222222222222222222222222222", "read-33333333333333333333333333333333"
 	mk(crashed+lockSuffix, false)

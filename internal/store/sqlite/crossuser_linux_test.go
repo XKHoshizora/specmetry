@@ -220,9 +220,9 @@ func TestCrossUserAncestorOwnedByAnotherUser(t *testing.T) {
 
 // repo makes a git repository with one commit, as root, and gives it to
 // the victim (git reads only repositories their user owns).
-func (c *crossUser) repo(rel string) string {
+func (c *crossUser) repo() string {
 	c.t.Helper()
-	p := filepath.Join(c.base, rel)
+	p := filepath.Join(c.base, "repo")
 	env := append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null",
 		"GIT_AUTHOR_NAME=v", "GIT_AUTHOR_EMAIL=v@v.invalid", "GIT_COMMITTER_NAME=v", "GIT_COMMITTER_EMAIL=v@v.invalid")
 	for _, args := range [][]string{{"init", "-q", "-b", "main", p}, {"-C", p, "commit", "-q", "--allow-empty", "-m", "one"}} {
@@ -268,7 +268,7 @@ func TestCrossUserScratchUnderAWritableParent(t *testing.T) {
 	c := newCrossUser(t)
 	shared := c.mkdir("shared", 0, 0o777)
 	trap := c.mkdir("trap", attackerUID, 0o777)
-	repo := c.repo("repo")
+	repo := c.repo()
 	home := filepath.Join(shared, "home")
 	stop := filepath.Join(c.base, "stop")
 	swapper := c.command(attackerUID, "attacker", "ATTACK_OP=swap", "ATTACK_A="+home, "ATTACK_B="+trap, "ATTACK_STOP="+stop)
@@ -301,7 +301,7 @@ func TestCrossUserScratchUnderASafeParent(t *testing.T) {
 	c := newCrossUser(t)
 	safe := c.mkdir("safe", 0, 0o755)
 	home := c.mkdir(filepath.Join("safe", "home"), victimUID, 0o700)
-	repo := c.repo("repo")
+	repo := c.repo()
 	if code, out, stderr := c.clean(home, repo); code != 0 || out != "0" {
 		t.Fatalf("the victim's read: exit %d, %q: %s", code, out, stderr)
 	}
@@ -322,7 +322,7 @@ func TestCrossUserScratchAncestorOwnedByAnotherUser(t *testing.T) {
 	c := newCrossUser(t)
 	c.mkdir("theirs", attackerUID, 0o755)
 	home := c.mkdir(filepath.Join("theirs", "home"), victimUID, 0o700)
-	code, _, stderr := c.clean(home, c.repo("repo"))
+	code, _, stderr := c.clean(home, c.repo())
 	if code != apperr.ExitEnvironment || !strings.Contains(stderr, "owned by uid 65534") {
 		t.Fatalf("exit %d: %s", code, stderr)
 	}
@@ -337,7 +337,7 @@ func TestCrossUserScratchStickyParent(t *testing.T) {
 	c := newCrossUser(t)
 	tmp := c.mkdir("tmp", 0, os.ModeSticky|0o777)
 	home := filepath.Join(tmp, "home")
-	if code, out, stderr := c.clean(home, c.repo("repo")); code != 0 || out != "0" {
+	if code, out, stderr := c.clean(home, c.repo()); code != 0 || out != "0" {
 		t.Fatalf("the victim's read under a sticky parent: exit %d, %q: %s", code, out, stderr)
 	}
 	if out := c.attack("rename", home, filepath.Join(tmp, "stolen")); !strings.Contains(out, "operation not permitted") {
