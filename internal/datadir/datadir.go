@@ -22,6 +22,8 @@ const (
 	TombstonesFile  = "tombstones.json"
 	MigrateLockFile = ".migrate.lock"
 	BackupsDir      = "backups"
+	// TmpDir holds the private directories of git reads (gitx.Scratch).
+	TmpDir = "tmp"
 	// CompactionFile marks a tombstone deletion whose file compaction
 	// (checkpoint and VACUUM) has not finished yet.
 	CompactionFile = ".compaction-pending"

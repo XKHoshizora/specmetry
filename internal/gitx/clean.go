@@ -65,14 +65,13 @@ const (
 //
 // Any failure is an error (exit 6), never clean. The private directories
 // are removed, and one that cannot be removed is an error too.
-func Clean(ctx context.Context, worktree string) (State, error) {
-	removeStalePrivateDirs()
-	return cleanRepo(ctx, worktree, true)
+func Clean(ctx context.Context, s *Scratch, worktree string) (State, error) {
+	return cleanRepo(ctx, s, worktree, true)
 }
 
 // cleanRepo reads one repository: the superproject (top), or a submodule.
-func cleanRepo(ctx context.Context, worktree string, top bool) (State, error) {
-	p, err := prepare(ctx, worktree)
+func cleanRepo(ctx context.Context, s *Scratch, worktree string, top bool) (State, error) {
+	p, err := prepare(ctx, s, worktree)
 	if err != nil {
 		return 0, err
 	}
@@ -84,7 +83,7 @@ func cleanRepo(ctx context.Context, worktree string, top bool) (State, error) {
 		return state, err
 	}
 	for _, l := range links {
-		sub, err := submoduleState(ctx, p.worktree, l)
+		sub, err := submoduleState(ctx, s, p.worktree, l)
 		if err != nil || sub == StateUndecidable {
 			return sub, err
 		}
@@ -159,7 +158,7 @@ func readPaths(ctx context.Context, worktree string) (repoPaths, error) {
 // prepare makes the private git directory of the repository whose worktree
 // root is worktree (step 1). It runs only git commands that read no index:
 // rev-parse for paths and HEAD, symbolic-ref, config.
-func prepare(ctx context.Context, worktree string) (*privateRepo, error) {
+func prepare(ctx context.Context, s *Scratch, worktree string) (*privateRepo, error) {
 	paths, err := readPaths(ctx, worktree)
 	if err != nil {
 		return nil, err
@@ -178,7 +177,7 @@ func prepare(ctx context.Context, worktree string) (*privateRepo, error) {
 	if err != nil {
 		return nil, err
 	}
-	d, err := newPrivateDir()
+	d, err := newPrivateDir(s)
 	if err != nil {
 		return nil, err
 	}
@@ -324,6 +323,9 @@ func quoteConfig(v string) string {
 
 // fill writes the private git directory's files.
 func (p *privateRepo) fill(paths repoPaths, head headState, config []byte) error {
+	if err := p.dir.verify(); err != nil {
+		return err
+	}
 	for _, d := range []string{"refs/heads", "refs/tags", "objects/info", "objects/pack", "info"} {
 		if err := os.MkdirAll(p.dir.join(filepath.FromSlash(d)), 0o700); err != nil {
 			return privateProblem(err)
@@ -441,6 +443,10 @@ type gitlink struct{ path, oid string }
 // read does steps 2, 3 and 5 for the repository, and returns its own state
 // and its gitlinks.
 func (p *privateRepo) read(ctx context.Context, top bool) (State, []gitlink, error) {
+	// The directory git is given must be the one prepare made and filled.
+	if err := p.dir.verify(); err != nil {
+		return 0, nil, err
+	}
 	sparse, err := IndexIsSparse(p.dir.join("index"))
 	if err != nil {
 		return 0, nil, err
@@ -582,7 +588,7 @@ func (p *privateRepo) filtered(ctx context.Context, paths, pathspec []string) (b
 
 // submoduleState applies step 4 to one gitlink of the repository at
 // worktree.
-func submoduleState(ctx context.Context, worktree string, l gitlink) (State, error) {
+func submoduleState(ctx context.Context, s *Scratch, worktree string, l gitlink) (State, error) {
 	dir := filepath.Join(worktree, filepath.FromSlash(l.path))
 	fi, err := os.Lstat(dir)
 	switch {
@@ -623,7 +629,7 @@ func submoduleState(ctx context.Context, worktree string, l gitlink) (State, err
 	default:
 		return 0, failed("rev-parse", r.code)
 	}
-	sub, err := cleanRepo(ctx, dir, false)
+	sub, err := cleanRepo(ctx, s, dir, false)
 	if err != nil || sub != StateClean {
 		return sub, err
 	}

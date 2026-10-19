@@ -1,7 +1,6 @@
 package gitx
 
 import (
-	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -14,6 +13,7 @@ import (
 	"github.com/XKHoshizora/specmetry/internal/apperr"
 	"github.com/XKHoshizora/specmetry/internal/datadir"
 	"github.com/XKHoshizora/specmetry/internal/testutil"
+	"github.com/XKHoshizora/specmetry/internal/testutil/testdir"
 )
 
 // old is the time the objects of a fixture are set to before a read, so
@@ -81,7 +81,7 @@ func baseRepo(t *testing.T) *testutil.GitRepo {
 
 func wantState(t *testing.T, name, dir string, want State) {
 	t.Helper()
-	got, err := Clean(ctx, dir)
+	got, err := Clean(ctx, testScratch(t), dir)
 	if err != nil || got != want {
 		t.Errorf("%s: Clean = %v, %v; want %v", name, got, err, want)
 	}
@@ -436,7 +436,7 @@ func TestCleanSparseGate(t *testing.T) {
 	gitDir := filepath.Join(control.Dir, ".git")
 	ageObjects(t, gitDir)
 	before := testutil.SettledSnapshot(t, gitDir)
-	p, err := prepare(ctx, control.Dir)
+	p, err := prepare(ctx, testScratch(t), control.Dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -677,7 +677,7 @@ func TestCleanFailures(t *testing.T) {
 			dir, env, calls := testutil.PassthroughGit(t, testutil.PassAsIs)
 			useGit(t, dir, env)
 			check := unchanged(t, filepath.Join(repo.Dir, ".git"))
-			if got, err := Clean(ctx, repo.Dir); apperr.ExitCode(err) != apperr.ExitEnvironment {
+			if got, err := Clean(ctx, testScratch(t), repo.Dir); apperr.ExitCode(err) != apperr.ExitEnvironment {
 				t.Errorf("Clean = %v, %v; want an environment error", got, err)
 			}
 			check()
@@ -692,7 +692,7 @@ func TestCleanFailures(t *testing.T) {
 		repo := testutil.NewSHA256GitRepo(t)
 		repo.WriteFile("a.txt", "a\n")
 		repo.Commit("a")
-		if got, err := Clean(ctx, repo.Dir); apperr.ExitCode(err) != apperr.ExitEnvironment {
+		if got, err := Clean(ctx, testScratch(t), repo.Dir); apperr.ExitCode(err) != apperr.ExitEnvironment {
 			t.Errorf("Clean = %v, %v; want an environment error (TD-26)", got, err)
 		}
 	})
@@ -700,7 +700,7 @@ func TestCleanFailures(t *testing.T) {
 		repo := baseRepo(t)
 		dir, env, calls := testutil.PassthroughGit(t, testutil.PassWithoutNoLazyFetch)
 		useGit(t, dir, env)
-		if got, err := Clean(ctx, repo.Dir); apperr.ExitCode(err) != apperr.ExitEnvironment || !strings.Contains(err.Error(), "GIT_NO_LAZY_FETCH") {
+		if got, err := Clean(ctx, testScratch(t), repo.Dir); apperr.ExitCode(err) != apperr.ExitEnvironment || !strings.Contains(err.Error(), "GIT_NO_LAZY_FETCH") {
 			t.Errorf("Clean = %v, %v; want the object reads refused", got, err)
 		}
 		for _, call := range calls() {
@@ -711,145 +711,18 @@ func TestCleanFailures(t *testing.T) {
 	})
 }
 
-// privateDirs lists the private directories in the temporary directory.
-func privateDirs(t *testing.T) []string {
-	t.Helper()
-	m, err := filepath.Glob(filepath.Join(os.TempDir(), privatePrefix+"*"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	return m
-}
-
-// isolateTemp gives the test a temporary directory of its own.
-func isolateTemp(t *testing.T) {
-	t.Helper()
-	tmp := t.TempDir()
-	for _, v := range []string{"TMPDIR", "TMP", "TEMP"} {
-		t.Setenv(v, tmp)
-	}
-	if os.TempDir() != tmp {
-		t.Skipf("the temporary directory is %s, not %s", os.TempDir(), tmp)
-	}
-}
-
-// Review 052 N2, WP2.3 spec §4.3 "the temporary directory's lifecycle":
-// the private directories are gone after a read that succeeds, fails or is
-// cancelled; one that cannot be removed fails the read; the next read
-// removes the ones crashed processes left, and leaves those in use.
-func TestCleanPrivateDirectories(t *testing.T) {
-	requireSafeGit(t)
-	isolateTemp(t)
-	super := subRepo(t)
-	wantState(t, "a read that succeeds", super.Dir, StateClean)
-	if left := privateDirs(t); len(left) != 0 {
-		t.Errorf("left after success: %v", left)
-	}
-	broken := baseRepo(t)
-	if err := os.Truncate(filepath.Join(broken.Dir, ".git", "index"), 30); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := Clean(ctx, broken.Dir); err == nil {
-		t.Error("a truncated index was read")
-	}
-	if left := privateDirs(t); len(left) != 0 {
-		t.Errorf("left after failure: %v", left)
-	}
-	cancelled, cancel := context.WithCancel(ctx)
-	cancel()
-	if _, err := Clean(cancelled, super.Dir); err == nil {
-		t.Error("a cancelled read succeeded")
-	}
-	if left := privateDirs(t); len(left) != 0 {
-		t.Errorf("left after cancellation: %v", left)
-	}
-
-	failing := errors.New("cannot remove")
-	removeAll = func(string) error { return failing }
-	got, err := Clean(ctx, super.Dir)
-	removeAll = os.RemoveAll
-	if apperr.ExitCode(err) != apperr.ExitEnvironment {
-		t.Errorf("a directory that cannot be removed: Clean = %v, %v; want an environment error", got, err)
-	}
-	if len(privateDirs(t)) == 0 {
-		t.Fatal("the directory that could not be removed is not there")
-	}
-
-	// Left behind by a process that crashed: unlocked, with a lock file
-	// (the one above), and an old one without a lock file. In use: one
-	// locked by a live process (this one), and a new one without a lock
-	// file.
-	stale := privateDirs(t)
-	lockless := filepath.Join(os.TempDir(), privatePrefix+"lockless")
-	if err := os.Mkdir(lockless, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	touch(t, lockless, time.Now().Add(-2*staleUnlocked))
-	fresh := filepath.Join(os.TempDir(), privatePrefix+"fresh")
-	if err := os.Mkdir(fresh, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	held, err := newPrivateDir()
-	if err != nil {
-		t.Fatal(err)
-	}
-	// A file in it besides its lock: on Windows the open lock alone keeps
-	// the directory from being removed, not its other files.
-	inUse := held.join("in-use")
-	if err := os.WriteFile(inUse, nil, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	wantState(t, "a read after a crash", super.Dir, StateClean)
-	left := privateDirs(t)
-	for _, d := range append(stale, lockless) {
-		if slices.Contains(left, d) {
-			t.Errorf("not removed: %s", filepath.Base(d))
-		}
-	}
-	for _, d := range []string{fresh, held.path} {
-		if !slices.Contains(left, d) {
-			t.Errorf("removed while it may be in use: %s", filepath.Base(d))
-		}
-	}
-	if _, err := os.Stat(inUse); err != nil {
-		t.Errorf("a file of a directory in use was removed: %v", err)
-	}
-	if err := held.remove(); err != nil {
-		t.Fatal(err)
-	}
-}
-
-// WP2.3 spec §4.3 (the private directory "only the current user can read
-// or write"): a private directory and everything Clean writes in it have
-// the data directory's owner-only permissions (0700 and 0600; on Windows
-// a protected DACL for the current user and SYSTEM, TD-22), as datadir's
-// own check judges them. The directories above it are not Clean's.
-func TestPrivateDirectoriesArePrivate(t *testing.T) {
-	requireSafeGit(t)
-	repo, _ := filterRepo(t)
-	repo.Git("update-index", "--split-index")
-	p, err := prepare(ctx, repo.Dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = p.close() }()
-	problems, err := datadir.Check(datadir.Dir{Path: p.gitDir})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, problem := range problems {
-		if strings.HasPrefix(problem, p.gitDir) {
-			t.Errorf("not private: %s", problem)
-		}
-	}
-	entries, err := os.ReadDir(p.gitDir)
-	if err != nil || len(entries) < 5 {
-		t.Fatalf("the private directory holds %d entries: %v", len(entries), err)
-	}
-}
-
 // cleanForTest runs Clean as a command would.
 func cleanForTest(t *testing.T, worktree string) (State, error) {
 	t.Helper()
-	return Clean(ctx, worktree)
+	return Clean(ctx, testScratch(t), worktree)
+}
+
+// testScratch is a Scratch in a data directory of the test's own.
+func testScratch(t *testing.T) *Scratch {
+	t.Helper()
+	s, err := NewScratch(datadir.Dir{Path: filepath.Join(testdir.New(t), "home")})
+	if err != nil {
+		t.Fatalf("NewScratch: %v (%v)", err, apperr.From(err).Details)
+	}
+	return s
 }

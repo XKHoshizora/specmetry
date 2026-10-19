@@ -29,10 +29,16 @@ var scanArgs = []string{"-c", "core.commitGraph=false", "-c", "core.multiPackInd
 
 // scanCall runs c as a scan read: an object read with scanArgs, and
 // GIT_GRAFT_FILE and GIT_SHALLOW_FILE naming a file that does not exist,
-// in a private directory of its own made for the call.
-func scanCall(ctx context.Context, c call) (result, error) {
-	d, err := newPrivateDir()
+// in a private directory of its own made for the call in s (only the
+// current user can make anything there, and it is checked to be the
+// directory made before git runs).
+func scanCall(ctx context.Context, s *Scratch, c call) (result, error) {
+	d, err := newPrivateDir(s)
 	if err != nil {
+		return result{}, err
+	}
+	if err := d.verify(); err != nil {
+		_ = d.remove()
 		return result{}, err
 	}
 	missing := d.join("none")
@@ -91,8 +97,8 @@ type Tip struct {
 // object is left out; one whose object cannot be read fails the listing.
 // A git without `worktree list -z` is an environment error: the list is
 // never read line by line, since a path may hold a line break.
-func Tips(ctx context.Context, worktree string) ([]Tip, error) {
-	r, err := scanCall(ctx, call{label: "for-each-ref", dir: worktree,
+func Tips(ctx context.Context, s *Scratch, worktree string) ([]Tip, error) {
+	r, err := scanCall(ctx, s, call{label: "for-each-ref", dir: worktree,
 		args: []string{"for-each-ref", "--format=%(refname)%00%(objectname)%00%(objecttype)", "refs/heads"}})
 	if err != nil {
 		return nil, err
@@ -210,7 +216,7 @@ const (
 // all from either, and the storage check; anything else (present but
 // unreadable, another type, an unexpected answer, any stderr output, a
 // failed storage check) is an environment error.
-func Classify(ctx context.Context, worktree string, ids []string) (map[string]Presence, error) {
+func Classify(ctx context.Context, s *Scratch, worktree string, ids []string) (map[string]Presence, error) {
 	var unique []string
 	for _, id := range ids {
 		if !commitID.MatchString(id) {
@@ -224,7 +230,7 @@ func Classify(ctx context.Context, worktree string, ids []string) (map[string]Pr
 	if len(unique) == 0 {
 		return got, nil
 	}
-	r, err := scanCall(ctx, call{label: "cat-file", dir: worktree,
+	r, err := scanCall(ctx, s, call{label: "cat-file", dir: worktree,
 		args: []string{"cat-file", "--batch-check"}, stdin: []byte(strings.Join(unique, "\n") + "\n")})
 	if err != nil {
 		return nil, err
@@ -257,7 +263,7 @@ func Classify(ctx context.Context, worktree string, ids []string) (map[string]Pr
 		return nil, unconfirmed
 	}
 	for _, id := range missing {
-		e, err := scanCall(ctx, call{label: "cat-file", dir: worktree, args: []string{"cat-file", "-e", id}})
+		e, err := scanCall(ctx, s, call{label: "cat-file", dir: worktree, args: []string{"cat-file", "-e", id}})
 		if err != nil {
 			return nil, err
 		}
@@ -294,11 +300,11 @@ func isDecimal(s string) bool {
 
 // IsAncestor reports whether ancestor, a Present commit, is an ancestor of
 // commit; any answer but yes (0) or no (1) is an environment error.
-func IsAncestor(ctx context.Context, worktree, ancestor, commit string) (bool, error) {
+func IsAncestor(ctx context.Context, s *Scratch, worktree, ancestor, commit string) (bool, error) {
 	if !commitID.MatchString(ancestor) || !commitID.MatchString(commit) {
 		return false, apperr.New(apperr.Internal, "IsAncestor needs full commit IDs")
 	}
-	r, err := scanCall(ctx, call{label: "merge-base", dir: worktree, args: []string{"merge-base", "--is-ancestor", ancestor, commit}})
+	r, err := scanCall(ctx, s, call{label: "merge-base", dir: worktree, args: []string{"merge-base", "--is-ancestor", ancestor, commit}})
 	if err != nil {
 		return false, err
 	}
@@ -334,7 +340,7 @@ const logFormat = "--format=%H%x00%ct%x00%(trailers:key=Specmetry-Ref,valueonly,
 // may print some commits before it fails (G3). log.showSignature is
 // turned off, so that no gpg.program runs. fn's error stops the read and
 // is returned.
-func Log(ctx context.Context, worktree, tip string, exclude []string, fn func(Commit) error) error {
+func Log(ctx context.Context, s *Scratch, worktree, tip string, exclude []string, fn func(Commit) error) error {
 	if !commitID.MatchString(tip) {
 		return apperr.New(apperr.Internal, "Log needs full commit IDs")
 	}
@@ -348,7 +354,7 @@ func Log(ctx context.Context, worktree, tip string, exclude []string, fn func(Co
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	lr := &logReader{fn: fn, stop: cancel}
-	r, err := scanCall(ctx, call{label: "log", dir: worktree, stdin: []byte(in), stdout: lr,
+	r, err := scanCall(ctx, s, call{label: "log", dir: worktree, stdin: []byte(in), stdout: lr,
 		args: []string{"log", "-z", "--stdin", "--no-show-signature", logFormat}})
 	if lr.err != nil {
 		return lr.err

@@ -36,14 +36,17 @@ const (
 // env is a project A whose repository is repo, in a data directory of its
 // own, with the requirements and criteria keys names.
 type env struct {
-	t     *testing.T
-	home  datadir.Dir
-	db    *sqlite.DB
-	repo  *testutil.GitRepo
-	ids   map[string]string // by key
-	n     int
-	clock int64
-	files int
+	t    *testing.T
+	home datadir.Dir
+	db   *sqlite.DB
+	repo *testutil.GitRepo
+	// scratch is in the database's own data directory, as a command
+	// would make it.
+	scratch *gitx.Scratch
+	ids     map[string]string // by key
+	n       int
+	clock   int64
+	files   int
 }
 
 func newEnv(t *testing.T, keys ...string) *env {
@@ -55,7 +58,11 @@ func newEnv(t *testing.T, keys ...string) *env {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 	repo := testutil.NewGitRepo(t)
-	e := &env{t: t, home: home, db: db, repo: repo, ids: map[string]string{}, clock: 1_700_000_000_000}
+	scratch, err := gitx.NewScratch(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := &env{t: t, home: home, db: db, repo: repo, scratch: scratch, ids: map[string]string{}, clock: 1_700_000_000_000}
 	common := gitx.Canonical(filepath.Join(repo.Dir, ".git"))
 	e.exec(`INSERT INTO projects (id, name, git_common_dir, main_worktree_id, stage, settings_json, created_at)
 VALUES (?1, 'a', ?2, '01J9Z3K5Q8R2T4V6W8X0Y2Z4B6', 'in_development', '{}', 1);
@@ -168,7 +175,7 @@ func (e *env) scan() (Result, error) {
 	if err != nil {
 		e.t.Fatal(err)
 	}
-	return Scan(ctx, e.db, projectA, e.repo.Dir, Options{Secrets: scanner, Now: func() time.Time {
+	return Scan(ctx, e.db, projectA, e.repo.Dir, Options{Secrets: scanner, Scratch: e.scratch, Now: func() time.Time {
 		e.clock += 1000
 		return time.UnixMilli(e.clock)
 	}})
@@ -813,14 +820,17 @@ func TestScanConcurrentSkip(t *testing.T) {
 	e.commit("", "B REQ-001")
 	e.repo.Git("branch", "feature")
 	var inner Result
+	// The state the inner scan left, taken before the outer one goes on to
+	// its write (review 058 N1: taken after the outer one returned, it
+	// could not show an outer write).
+	var afterInner dbState
 	testHookBeforeWrite = func() {
 		testHookBeforeWrite = nil
 		inner = e.mustScan()
+		afterInner = e.state()
 	}
 	t.Cleanup(func() { testHookBeforeWrite = nil })
-	var afterInner dbState
-	r, err := Scan(ctx, e.db, projectA, e.repo.Dir, Options{Secrets: mustScanner(t), Now: time.Now})
-	afterInner = e.state()
+	r, err := Scan(ctx, e.db, projectA, e.repo.Dir, Options{Secrets: mustScanner(t), Scratch: e.scratch, Now: time.Now})
 	if err != nil || !r.Concurrent || r.Stored != 0 {
 		t.Fatalf("the outer scan: %+v, %v; want a concurrent skip", r, err)
 	}
@@ -830,7 +840,7 @@ func TestScanConcurrentSkip(t *testing.T) {
 	if n := len(e.rows(`SELECT 1 FROM commits`)); n != 2 {
 		t.Errorf("%d commits, want 2", n)
 	}
-	requireUnchanged(t, "nothing after the skip", afterInner, e.state())
+	requireUnchanged(t, "the outer scan, after the inner one", afterInner, e.state())
 }
 
 func mustScanner(t *testing.T) *secrets.Scanner {
@@ -915,7 +925,12 @@ func helperScan() int {
 		fmt.Println(err)
 		return 1
 	}
-	r, err := Scan(ctx, db, os.Getenv("SCAN_PROJECT"), os.Getenv("SCAN_WORKTREE"), Options{Secrets: scanner})
+	scratch, err := gitx.NewScratch(home)
+	if err != nil {
+		fmt.Println(err)
+		return 1
+	}
+	r, err := Scan(ctx, db, os.Getenv("SCAN_PROJECT"), os.Getenv("SCAN_WORKTREE"), Options{Secrets: scanner, Scratch: scratch})
 	if err != nil {
 		fmt.Println(err)
 		return 1
@@ -935,14 +950,17 @@ func TestScanChecksTheRepository(t *testing.T) {
 	other.WriteFile("a", "REQ-001")
 	other.Commit("REQ-001")
 	before := e.state()
-	if r, err := Scan(ctx, e.db, projectA, other.Dir, Options{Secrets: mustScanner(t)}); apperr.ExitCode(err) != apperr.ExitInternal {
+	if r, err := Scan(ctx, e.db, projectA, other.Dir, Options{Secrets: mustScanner(t), Scratch: e.scratch}); apperr.ExitCode(err) != apperr.ExitInternal {
 		t.Errorf("Scan = %+v, %v; want an internal error", r, err)
 	}
 	requireUnchanged(t, "another repository", before, e.state())
-	if _, err := Scan(ctx, e.db, "01J9Z3K5Q8R2T4V6W8X0Y2Z4ZZ", e.repo.Dir, Options{Secrets: mustScanner(t)}); apperr.ExitCode(err) != apperr.ExitInternal {
+	if _, err := Scan(ctx, e.db, "01J9Z3K5Q8R2T4V6W8X0Y2Z4ZZ", e.repo.Dir, Options{Secrets: mustScanner(t), Scratch: e.scratch}); apperr.ExitCode(err) != apperr.ExitInternal {
 		t.Errorf("an unknown project: %v", err)
 	}
 	if _, err := Scan(ctx, e.db, projectA, e.repo.Dir, Options{}); apperr.ExitCode(err) != apperr.ExitInternal {
 		t.Errorf("no secret scanner: %v", err)
+	}
+	if _, err := Scan(ctx, e.db, projectA, e.repo.Dir, Options{Secrets: mustScanner(t)}); apperr.ExitCode(err) != apperr.ExitInternal {
+		t.Errorf("no Scratch: %v", err)
 	}
 }

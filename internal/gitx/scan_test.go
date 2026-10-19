@@ -164,7 +164,7 @@ func TestTips(t *testing.T) {
 	if !strings.Contains(repo.Git("worktree", "list", "--porcelain"), "prunable") {
 		t.Fatal("the removed worktree is not prunable")
 	}
-	tips, err := Tips(ctx, repo.Dir)
+	tips, err := Tips(ctx, testScratch(t), repo.Dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,7 +187,7 @@ func TestTips(t *testing.T) {
 	}
 	// The main worktree detached is a tip too.
 	repo.Git("checkout", "-q", "--detach", shas[0])
-	tips, err = Tips(ctx, repo.Dir)
+	tips, err = Tips(ctx, testScratch(t), repo.Dir)
 	if err != nil || !slices.Contains(tips, Tip{WorktreePath: Canonical(repo.Dir), Commit: shas[0]}) {
 		t.Errorf("the main worktree detached: %+v, %v", tips, err)
 	}
@@ -205,7 +205,7 @@ func TestTipsWithAnUnreadableBranch(t *testing.T) {
 	if err := os.Remove(p); err != nil {
 		t.Fatal(err)
 	}
-	if tips, err := Tips(ctx, repo.Dir); apperr.ExitCode(err) != apperr.ExitEnvironment {
+	if tips, err := Tips(ctx, testScratch(t), repo.Dir); apperr.ExitCode(err) != apperr.ExitEnvironment {
 		t.Errorf("Tips = %+v, %v; want an environment error", tips, err)
 	}
 }
@@ -218,7 +218,7 @@ func TestTipsNeedsWorktreeListZ(t *testing.T) {
 	repo, _ := chain(t, 1)
 	dir, env, calls := testutil.PassthroughGit(t, testutil.PassWithoutWorktreeListZ)
 	useGit(t, dir, env)
-	tips, err := Tips(ctx, repo.Dir)
+	tips, err := Tips(ctx, testScratch(t), repo.Dir)
 	if apperr.ExitCode(err) != apperr.ExitEnvironment || !strings.Contains(err.Error(), "worktree list -z") {
 		t.Fatalf("Tips = %+v, %v; want an environment error", tips, err)
 	}
@@ -241,21 +241,21 @@ func TestClassify(t *testing.T) {
 	never := strings.Repeat("e", 40)
 	gitDir := filepath.Join(repo.Dir, ".git")
 	before := testutil.SettledSnapshot(t, gitDir)
-	got, err := Classify(ctx, repo.Dir, []string{shas[0], gone, never, shas[1], shas[0]})
+	got, err := Classify(ctx, testScratch(t), repo.Dir, []string{shas[0], gone, never, shas[1], shas[0]})
 	want := map[string]Presence{shas[0]: Present, shas[1]: Present, gone: Absent, never: Absent}
 	if err != nil || !mapsEqual(got, want) {
 		t.Errorf("Classify = %v, %v; want %v", got, err, want)
 	}
 	testutil.AssertTreeUnchanged(t, gitDir, before)
-	if got, err := Classify(ctx, repo.Dir, nil); err != nil || len(got) != 0 {
+	if got, err := Classify(ctx, testScratch(t), repo.Dir, nil); err != nil || len(got) != 0 {
 		t.Errorf("Classify(none) = %v, %v", got, err)
 	}
 	tree := repo.Git("rev-parse", shas[0]+"^{tree}")
-	if _, err := Classify(ctx, repo.Dir, []string{tree}); apperr.ExitCode(err) != apperr.ExitEnvironment {
+	if _, err := Classify(ctx, testScratch(t), repo.Dir, []string{tree}); apperr.ExitCode(err) != apperr.ExitEnvironment {
 		t.Errorf("R5 a tree: %v; want an environment error", err)
 	}
 	for _, id := range []string{"HEAD", strings.ToUpper(shas[0]), shas[0][:39], "--all"} {
-		if _, err := Classify(ctx, repo.Dir, []string{id}); apperr.ExitCode(err) != apperr.ExitInternal {
+		if _, err := Classify(ctx, testScratch(t), repo.Dir, []string{id}); apperr.ExitCode(err) != apperr.ExitInternal {
 			t.Errorf("Classify(%q) = %v; want an internal error", id, err)
 		}
 	}
@@ -269,7 +269,7 @@ func TestClassify(t *testing.T) {
 		if err := os.WriteFile(p, c.content, 0o644); err != nil {
 			t.Fatal(err)
 		}
-		if got, err := Classify(ctx, repo.Dir, []string{shas[0]}); apperr.ExitCode(err) != apperr.ExitEnvironment {
+		if got, err := Classify(ctx, testScratch(t), repo.Dir, []string{shas[0]}); apperr.ExitCode(err) != apperr.ExitEnvironment {
 			t.Errorf("%s: Classify = %v, %v; want an environment error", c.name, got, err)
 		}
 	}
@@ -426,7 +426,7 @@ func TestClassifyChecksTheStorage(t *testing.T) {
 			gitDir := filepath.Join(dir, ".git")
 			before := testutil.SettledSnapshot(t, gitDir)
 			objects := testutil.SettledSnapshot(t, objectsDir(repo))
-			got, err := Classify(ctx, dir, []string{old})
+			got, err := Classify(ctx, testScratch(t), dir, []string{old})
 			switch {
 			case c.absent && (err != nil || got[old] != Absent):
 				t.Errorf("Classify = %v, %v; want Absent", got, err)
@@ -446,13 +446,13 @@ func TestClassifyChecksTheStorage(t *testing.T) {
 	if err := os.Rename(pack+".idx", away); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Classify(ctx, repo.Dir, []string{shas[0]}); apperr.ExitCode(err) != apperr.ExitEnvironment {
+	if _, err := Classify(ctx, testScratch(t), repo.Dir, []string{shas[0]}); apperr.ExitCode(err) != apperr.ExitEnvironment {
 		t.Fatalf("K18: %v", err)
 	}
 	if err := os.Rename(away, pack+".idx"); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := Classify(ctx, repo.Dir, []string{shas[0]}); err != nil || got[shas[0]] != Present {
+	if got, err := Classify(ctx, testScratch(t), repo.Dir, []string{shas[0]}); err != nil || got[shas[0]] != Present {
 		t.Errorf("K18 restored: %v, %v; want Present", got, err)
 	}
 }
@@ -476,7 +476,7 @@ func TestClassifyAlternatesTooDeep(t *testing.T) {
 		}
 		prev = next
 	}
-	if got, err := Classify(ctx, repo.Dir, []string{gone}); apperr.ExitCode(err) != apperr.ExitEnvironment {
+	if got, err := Classify(ctx, testScratch(t), repo.Dir, []string{gone}); apperr.ExitCode(err) != apperr.ExitEnvironment {
 		t.Errorf("Classify = %v, %v; want an environment error", got, err)
 	}
 }
@@ -517,7 +517,7 @@ func TestClassifyWithUnreadableStorage(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { _ = os.Chmod(p, info.Mode()) })
-			if got, err := Classify(ctx, repo.Dir, []string{shas[0]}); apperr.ExitCode(err) != apperr.ExitEnvironment {
+			if got, err := Classify(ctx, testScratch(t), repo.Dir, []string{shas[0]}); apperr.ExitCode(err) != apperr.ExitEnvironment {
 				t.Errorf("Classify = %v, %v; want an environment error", got, err)
 			}
 		})
@@ -532,7 +532,7 @@ func TestClassifyWithUnreadableStorage(t *testing.T) {
 		if err := os.Chmod(alt, 0); err != nil {
 			t.Fatal(err)
 		}
-		if got, err := Classify(ctx, other.Dir, []string{shas[0]}); apperr.ExitCode(err) != apperr.ExitEnvironment {
+		if got, err := Classify(ctx, testScratch(t), other.Dir, []string{shas[0]}); apperr.ExitCode(err) != apperr.ExitEnvironment {
 			t.Errorf("Classify = %v, %v; want an environment error", got, err)
 		}
 	})
@@ -548,13 +548,13 @@ func TestIsAncestor(t *testing.T) {
 	requireSafeGit(t)
 	repo, shas := chain(t, 3)
 	repo.Git("commit-graph", "write", "--reachable")
-	if yes, err := IsAncestor(ctx, repo.Dir, shas[0], shas[2]); err != nil || !yes {
+	if yes, err := IsAncestor(ctx, testScratch(t), repo.Dir, shas[0], shas[2]); err != nil || !yes {
 		t.Errorf("IsAncestor(A, C) = %v, %v", yes, err)
 	}
-	if yes, err := IsAncestor(ctx, repo.Dir, shas[2], shas[0]); err != nil || yes {
+	if yes, err := IsAncestor(ctx, testScratch(t), repo.Dir, shas[2], shas[0]); err != nil || yes {
 		t.Errorf("IsAncestor(C, A) = %v, %v", yes, err)
 	}
-	if _, err := IsAncestor(ctx, repo.Dir, strings.Repeat("e", 40), shas[2]); apperr.ExitCode(err) != apperr.ExitEnvironment {
+	if _, err := IsAncestor(ctx, testScratch(t), repo.Dir, strings.Repeat("e", 40), shas[2]); apperr.ExitCode(err) != apperr.ExitEnvironment {
 		t.Errorf("R4 a missing ancestor: %v", err)
 	}
 	// B's object gone, the commit-graph still knows it.
@@ -563,7 +563,7 @@ func TestIsAncestor(t *testing.T) {
 	if err := os.Remove(p); err != nil {
 		t.Fatal(err)
 	}
-	if yes, err := IsAncestor(ctx, repo.Dir, shas[0], shas[2]); yes {
+	if yes, err := IsAncestor(ctx, testScratch(t), repo.Dir, shas[0], shas[2]); yes {
 		t.Errorf("a missing commit on the way: IsAncestor = yes, %v", err)
 	} else {
 		t.Logf("a missing commit on the way: IsAncestor = no, %v", err)
@@ -576,10 +576,10 @@ func TestIsAncestor(t *testing.T) {
 	if err := os.Remove(p); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := IsAncestor(ctx, repo.Dir, shas[0], shas[2]); apperr.ExitCode(err) != apperr.ExitEnvironment {
+	if _, err := IsAncestor(ctx, testScratch(t), repo.Dir, shas[0], shas[2]); apperr.ExitCode(err) != apperr.ExitEnvironment {
 		t.Errorf("G2 the ancestor's object gone: %v", err)
 	}
-	if _, err := IsAncestor(ctx, repo.Dir, "HEAD", shas[2]); apperr.ExitCode(err) != apperr.ExitInternal {
+	if _, err := IsAncestor(ctx, testScratch(t), repo.Dir, "HEAD", shas[2]); apperr.ExitCode(err) != apperr.ExitInternal {
 		t.Errorf("IsAncestor(HEAD) = %v; want an internal error", err)
 	}
 }
@@ -588,7 +588,7 @@ func TestIsAncestor(t *testing.T) {
 func logAll(t *testing.T, dir, tip string, exclude ...string) ([]Commit, error) {
 	t.Helper()
 	var got []Commit
-	err := Log(ctx, dir, tip, exclude, func(c Commit) error {
+	err := Log(ctx, testScratch(t), dir, tip, exclude, func(c Commit) error {
 		got = append(got, c)
 		return nil
 	})
@@ -632,13 +632,13 @@ func TestLog(t *testing.T) {
 		t.Errorf("L2: %+v, %v", got, err)
 	}
 	for _, args := range [][]string{{"HEAD"}, {shas[2], "--all"}, {strings.ToUpper(shas[2])}} {
-		if err := Log(ctx, repo.Dir, args[0], args[1:], func(Commit) error { return nil }); apperr.ExitCode(err) != apperr.ExitInternal {
+		if err := Log(ctx, testScratch(t), repo.Dir, args[0], args[1:], func(Commit) error { return nil }); apperr.ExitCode(err) != apperr.ExitInternal {
 			t.Errorf("Log(%q) = %v; want an internal error", args, err)
 		}
 	}
 	// fn's error stops the read and is returned.
 	stop := errors.New("stop")
-	if err := Log(ctx, repo.Dir, shas[2], nil, func(Commit) error { return stop }); !errors.Is(err, stop) {
+	if err := Log(ctx, testScratch(t), repo.Dir, shas[2], nil, func(Commit) error { return stop }); !errors.Is(err, stop) {
 		t.Errorf("Log with fn failing = %v", err)
 	}
 }
@@ -856,10 +856,10 @@ func TestScanReadsNeedASafeGit(t *testing.T) {
 	useGit(t, dir, env)
 	for name, read := range map[string]func() error{
 		"TreeEntry": func() error { _, _, err := TreeEntry(ctx, repo.Dir, shas[1], "a.txt"); return err },
-		"Tips":      func() error { _, err := Tips(ctx, repo.Dir); return err },
-		"Classify":  func() error { _, err := Classify(ctx, repo.Dir, shas); return err },
+		"Tips":      func() error { _, err := Tips(ctx, testScratch(t), repo.Dir); return err },
+		"Classify":  func() error { _, err := Classify(ctx, testScratch(t), repo.Dir, shas); return err },
 		"IsAncestor": func() error {
-			_, err := IsAncestor(ctx, repo.Dir, shas[0], shas[1])
+			_, err := IsAncestor(ctx, testScratch(t), repo.Dir, shas[0], shas[1])
 			return err
 		},
 		"Log": func() error { _, err := logAll(t, repo.Dir, shas[1]); return err },
@@ -897,11 +897,11 @@ func TestWP23ReadsWithAGitThatFetches(t *testing.T) {
 	before := testutil.SettledSnapshot(t, gitDir)
 	for name, read := range map[string]func() error{
 		"TreeEntry":  func() error { _, _, err := TreeEntry(ctx, repo.Dir, second, "a.txt"); return err },
-		"Tips":       func() error { _, err := Tips(ctx, repo.Dir); return err },
-		"Classify":   func() error { _, err := Classify(ctx, repo.Dir, []string{first}); return err },
-		"IsAncestor": func() error { _, err := IsAncestor(ctx, repo.Dir, first, second); return err },
+		"Tips":       func() error { _, err := Tips(ctx, testScratch(t), repo.Dir); return err },
+		"Classify":   func() error { _, err := Classify(ctx, testScratch(t), repo.Dir, []string{first}); return err },
+		"IsAncestor": func() error { _, err := IsAncestor(ctx, testScratch(t), repo.Dir, first, second); return err },
 		"Log":        func() error { _, err := logAll(t, repo.Dir, second); return err },
-		"Clean":      func() error { _, err := Clean(ctx, repo.Dir); return err },
+		"Clean":      func() error { _, err := Clean(ctx, testScratch(t), repo.Dir); return err },
 	} {
 		if err := read(); apperr.ExitCode(err) != apperr.ExitEnvironment || !strings.Contains(err.Error(), "GIT_NO_LAZY_FETCH") {
 			t.Errorf("%s = %v; want the object reads refused", name, err)

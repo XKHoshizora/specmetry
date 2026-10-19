@@ -19,6 +19,9 @@ import (
 type Options struct {
 	// Secrets scans the names the scan would store in its cursors (D7).
 	Secrets *secrets.Scanner
+	// Scratch holds the private directories of the scan's git reads
+	// (gitx.NewScratch on the data directory).
+	Scratch *gitx.Scratch
 	// Now is the clock of scanned_at; nil means time.Now.
 	Now func() time.Time
 }
@@ -67,8 +70,8 @@ type candidate struct {
 //
 // Nothing is retried. A failure leaves no commit, link, seq or cursor.
 func Scan(ctx context.Context, db *sqlite.DB, project, worktree string, opts Options) (Result, error) {
-	if opts.Secrets == nil {
-		return Result{}, apperr.New(apperr.Internal, "Scan needs a secret scanner")
+	if opts.Secrets == nil || opts.Scratch == nil {
+		return Result{}, apperr.New(apperr.Internal, "Scan needs a secret scanner and a Scratch")
 	}
 	now := opts.Now
 	if now == nil {
@@ -91,7 +94,7 @@ func Scan(ctx context.Context, db *sqlite.DB, project, worktree string, opts Opt
 	if err := gitx.CheckShallow(ctx, worktree); err != nil {
 		return Result{}, err
 	}
-	tips, err := gitx.Tips(ctx, worktree)
+	tips, err := gitx.Tips(ctx, opts.Scratch, worktree)
 	if err != nil {
 		return Result{}, err
 	}
@@ -108,7 +111,7 @@ func Scan(ctx context.Context, db *sqlite.DB, project, worktree string, opts Opt
 			ids = append(ids, r.Tip)
 		}
 	}
-	presence, err := gitx.Classify(ctx, worktree, ids)
+	presence, err := gitx.Classify(ctx, opts.Scratch, worktree, ids)
 	if err != nil {
 		return Result{}, err
 	}
@@ -119,7 +122,7 @@ func Scan(ctx context.Context, db *sqlite.DB, project, worktree string, opts Opt
 		}
 	}
 	reads, err := planReads(cursors, refs, presence, func(a, c string) (bool, error) {
-		return gitx.IsAncestor(ctx, worktree, a, c)
+		return gitx.IsAncestor(ctx, opts.Scratch, worktree, a, c)
 	})
 	if err != nil {
 		return Result{}, err
@@ -130,7 +133,7 @@ func Scan(ctx context.Context, db *sqlite.DB, project, worktree string, opts Opt
 	seen := map[string]bool{}
 	var found []candidate
 	for _, rd := range reads {
-		err := gitx.Log(ctx, worktree, rd.Ref.Tip, rd.Exclude, func(c gitx.Commit) error {
+		err := gitx.Log(ctx, opts.Scratch, worktree, rd.Ref.Tip, rd.Exclude, func(c gitx.Commit) error {
 			if seen[c.SHA] {
 				return nil
 			}
