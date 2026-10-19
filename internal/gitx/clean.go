@@ -45,7 +45,11 @@ const (
 //     index is undecidable, with no git command run on it (P2), since git
 //     reading it may expand it and rewrite the repository's object files;
 //  3. status, ls-files, diff-index and diff-files on the private directory,
-//     with --ignore-submodules=all so that git never enters a submodule;
+//     with --ignore-submodules=all so that git never enters a submodule,
+//     each with the definition's pathspec (". :(exclude).specmetry" in the
+//     superproject, "." in a submodule, whose own status the definition
+//     asks), so that what it leaves out changes nothing through any of
+//     them; the gate of step 2 stays on the whole index;
 //  4. each submodule: missing or not a directory is a change, as is a HEAD
 //     other than the gitlink; an initialized one is read in turn, behind
 //     its own gate;
@@ -457,7 +461,11 @@ func (p *privateRepo) read(ctx context.Context, top bool) (State, []gitlink, err
 	if len(out) > 0 {
 		state = StateDirty
 	}
-	out, err = call{label: "ls-files", dir: p.worktree, list: true, args: p.args("ls-files", "-z", "--sparse", "--stage")}.must(ctx)
+	// The index listing, and so the gitlinks and the filter rule's
+	// candidates, take the definition's pathspec too (review 058 B3): what
+	// it leaves out cannot change the state through them either.
+	out, err = call{label: "ls-files", dir: p.worktree, list: true,
+		args: p.args(append([]string{"ls-files", "-z", "--sparse", "--stage"}, pathspec...)...)}.must(ctx)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -492,7 +500,7 @@ func (p *privateRepo) read(ctx context.Context, top bool) (State, []gitlink, err
 			state = StateDirty
 		}
 	}
-	undecidable, err := p.filtered(ctx, paths)
+	undecidable, err := p.filtered(ctx, paths, pathspec)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -526,7 +534,7 @@ func parseStage(out []byte) ([]stageEntry, error) {
 // the local configuration, and that the definition's status would compare
 // (listed by diff-files, or racy: not older than the original index),
 // makes the state undecidable.
-func (p *privateRepo) filtered(ctx context.Context, paths []string) (bool, error) {
+func (p *privateRepo) filtered(ctx context.Context, paths, pathspec []string) (bool, error) {
 	if len(p.drivers) == 0 || len(paths) == 0 {
 		return false, nil
 	}
@@ -552,7 +560,7 @@ func (p *privateRepo) filtered(ctx context.Context, paths []string) (bool, error
 		return false, nil
 	}
 	out, err = call{label: "diff-files", dir: p.worktree, objects: true,
-		args: p.args("diff-files", "--name-only", "-z", "--ignore-submodules=all")}.must(ctx)
+		args: p.args(append([]string{"diff-files", "--name-only", "-z", "--ignore-submodules=all"}, pathspec...)...)}.must(ctx)
 	if err != nil {
 		return false, err
 	}
