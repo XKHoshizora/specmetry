@@ -6,6 +6,7 @@ import (
 	"io"
 	"path"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/XKHoshizora/specmetry/internal/apperr"
@@ -35,6 +36,28 @@ type CheckedCodeRef struct {
 // the project root, also after resolving links. Nothing of a file but its
 // line count is read, and nothing is kept.
 func CheckCodeRefs(ctx context.Context, w project.Where, refs [][]CodeRef) ([][]CheckedCodeRef, error) {
+	return checkCodeRefs(ctx, w, refs, func() (string, error) { return gitx.CommitOf(ctx, w.Current, "HEAD") })
+}
+
+// fullCommit is a full commit ID (TD-26: SHA-1).
+var fullCommit = regexp.MustCompile(`^[0-9a-f]{40}$`)
+
+// CheckCodeRefsAt is CheckCodeRefs against head, the HEAD commit the caller
+// captured before (WP2.4 spec §7): HEAD is not resolved again, so every
+// reference is checked against, and names, the commit the caller records
+// with them, even if HEAD has moved since. head "" is a worktree with no
+// commit, and the only head outside git; a head that is not a full commit
+// ID is an internal error.
+func CheckCodeRefsAt(ctx context.Context, w project.Where, head string, refs [][]CodeRef) ([][]CheckedCodeRef, error) {
+	if (!w.Git && head != "") || (head != "" && !fullCommit.MatchString(head)) {
+		return nil, apperr.New(apperr.Internal, "CheckCodeRefsAt needs the full ID of a commit of a git project, or no head")
+	}
+	return checkCodeRefs(ctx, w, refs, func() (string, error) { return head, nil })
+}
+
+// checkCodeRefs checks refs, with headOf giving the commit of a git
+// project once the object reads are known to be safe.
+func checkCodeRefs(ctx context.Context, w project.Where, refs [][]CodeRef, headOf func() (string, error)) ([][]CheckedCodeRef, error) {
 	out := make([][]CheckedCodeRef, len(refs))
 	total := 0
 	for _, r := range refs {
@@ -46,7 +69,7 @@ func CheckCodeRefs(ctx context.Context, w project.Where, refs [][]CodeRef) ([][]
 		}
 		return out, nil
 	}
-	exists, err := fileChecker(ctx, w)
+	exists, err := fileChecker(ctx, w, headOf)
 	if err != nil {
 		return nil, err
 	}
@@ -81,7 +104,7 @@ type files struct {
 	lines func(ctx context.Context, p string) (int, bool, error)
 }
 
-func fileChecker(ctx context.Context, w project.Where) (*files, error) {
+func fileChecker(ctx context.Context, w project.Where, headOf func() (string, error)) (*files, error) {
 	if !w.Git {
 		root, err := filepath.EvalSymlinks(w.Root)
 		if err != nil {
@@ -118,9 +141,9 @@ func fileChecker(ctx context.Context, w project.Where) (*files, error) {
 	}
 	if partial {
 		return nil, apperr.New(apperr.Environment,
-			"this repository is a partial clone: git would fetch the objects it lacks from the promisor remote, which Specmetry never does, so code references cannot be checked here; check them in a full clone, or submit the proposal without code references")
+			"this repository is a partial clone: git would fetch the objects it lacks from the promisor remote, which Specmetry never does, so code references cannot be checked here; nothing was written; check them in a full clone, or submit without code references")
 	}
-	head, err := gitx.CommitOf(ctx, w.Current, "HEAD")
+	head, err := headOf()
 	if err != nil {
 		return nil, err
 	}
