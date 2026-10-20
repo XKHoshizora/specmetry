@@ -343,7 +343,7 @@ Question 在提案提交时立即创建（编号按 TD-14 分配），只能由�
 | kind | `sync` / `audit` / `manual` |
 | audit_scope_json | `audit` 时必填：`{"all": true}` 或 `{"requirements": ["REQ-001", ...]}` |
 | **base_version** | 提交者读取的基准版本号 |
-| worktree_id, head, tree_state | 提交时由 CLI 采集的代码上下文 |
+| worktree_id, head, tree_state | 提交时由 CLI 采集的代码上下文；工作区状态读取返回环境错误时，整个提交以退出码 6 拒绝，不写入、不分配 `seq`（WP2.4 规范 D1，2026-10-20；正常的 `undecidable` 记为 `unknown`） |
 | compare_from | `sync` 的比较起点（提交 SHA 或 NULL），以及起点来源：`previous_batch` / `session_start` / `none` |
 | session_id, summary, actor, channel | |
 
@@ -1242,7 +1242,7 @@ M0 的 CI 会校验这两者（WP0.4）。凡是需要数据库状态才能判�
 | V-C02 | `base_version` 和每个 `target_revision` 都是当前值 | 过期 |
 | V-C03 | `target` 是 `active` 的 AC 编号；同一批次内不重复；`unknown` 断言只能用于 `audit` | 拒绝 |
 | V-C04 | `summary` ≤ 500 字符，单段文字，不能包含代码围栏（三个反引号）；不能命中密钥规则 | 拒绝 |
-| V-C05 | `audit` 批次必须声明 `audit_scope` | 拒绝 |
+| V-C05 | `audit` 批次必须声明 `audit_scope`；`requirements` 中的编号必须是当前 `active` 的需求（D2），每条 Claim 的目标 AC 必须属于声明的需求，不要求覆盖全部 AC（D3）；后两项在写锁下判断（WP2.4 规范，2026-10-20 负责人决定，规范待审查） | 拒绝 |
 | V-C06 | 文件路径是否存在、提交能否被 git 解析 | 标记 |
 | V-D01 | 验收决定的 `acknowledged_risks` 恰好等于服务端推导的风险集合（§7.3） | 拒绝 |
 | V-D02 | 验收决定的全部读取版本（含 `seen_decision_id`）都是当前值（§7.1） | 过期 |

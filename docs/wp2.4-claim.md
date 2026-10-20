@@ -1,6 +1,6 @@
 # WP2.4 Claim 规范
 
-> 状态：**规范草案，待独立审查，尚未授权实现，未冻结**（2026-10-20）。产品负责人 2026-10-20 批准了 M2-Q6（TD-13 的建议默认）与 M2-Q9（`claim-receipt.v1` 的独立回执方向），见 [review-resolution.md §76](review-resolution.md)；本文据此写出可审查的契约，具体规范与 schema 仍须独立审查后冻结。本文不是实现：不含 Claim 的生产代码与迁移 SQL。
+> 状态：**规范草案，待独立审查，尚未授权实现，未冻结**（2026-10-20）。产品负责人 2026-10-20 批准了 M2-Q6（TD-13 的建议默认）与 M2-Q9（`claim-receipt.v1` 的独立回执方向），见 [review-resolution.md §76](review-resolution.md)；之后又决定了本文 §14 的 D1 ~ D3（§77）。本文据此写出可审查的契约；E1 ~ E6 仍是待审的工程细化，具体规范与 schema 仍须独立审查后冻结。本文不是实现：不含 Claim 的生产代码与迁移 SQL。
 >
 > 规范性的条文仍以 [data-model.md](data-model.md)（§4.10、§6.5、§6.6、§6.11、§6.13、§7.1、V-C01 ~ V-C06）、[architecture.md](architecture.md)（§5.1、§6.1.4、§6.3、§9.1、§10）、[prd.md](prd.md)（FR-CLM、FR-INV、FR-WT-02）、[acceptance-criteria.md](acceptance-criteria.md) 与 [`schemas/`](../schemas/) 为准；本文给出处理顺序、回执契约、待决事项与测试计划。两者不一致时，以那些文档为准，并修正本文。
 
@@ -29,7 +29,7 @@
 | 依据 | 内容 | 本文的用法 |
 |---|---|---|
 | data-model §4.10 | `claim_batches`、`claims` 的字段；一次提交一个 `seq`，批次与全部 Claim（含未映射工作）共用；worktree 首次出现时另取一个 `seq` | §6、§8 |
-| data-model §7.1 | Claim 批次携带 `base_version` 与每条 `target_revision`，写事务内比对，不一致整体拒绝（退出码 5） | §5 第 9 步 |
+| data-model §7.1 | Claim 批次携带 `base_version` 与每条 `target_revision`，写事务内比对，不一致整体拒绝（退出码 5） | §5 第 10 步 |
 | V-C01 ~ V-C06 | 严格 schema；`manual` 仅限 `human_cli`；当前值；`active` AC、批次内不重复、`unknown` 仅限 `audit`；摘要规则与密钥；`audit` 必须有 `audit_scope`；引用存在性只标记 | §4、§5 |
 | FR-CLM-01 ~ 05、FR-INV-01、02、06、07、FR-WT-02 | 提交、不单独产生 `accepted` / `ready`、摘要、前置条件与代码上下文、目标与 `manual` | §4 ~ §9 |
 | M2-Q6 / TD-13（2026-10-20 批准） | 沿用启发式通道识别、`RequireHuman`、现有 `confirm` 入口、操作者与通道审计；通道识别不是身份认证；不加签名或独立用户；不提前实现 M3 Hook。Claim 中只有 `manual` 批次是人类专属 | §4 |
@@ -82,13 +82,17 @@
 10. **写事务**（`BEGIN IMMEDIATE`，先取得写锁，再读取比较）：
     1. `base_version` 不等于当前基准版本（没有版本时为 0）→ 退出码 5，`error.current.base_version` 给出当前值（V-C02）。
     2. 每个 `target` 必须是 `active` 的 AC：不存在、已退役、只存在于待审提案中 → 退出码 2，`details` 逐项给出 `/claims/<i>/target`（V-C03，MVP-CLM-02）。
-    3. 每个 `target_revision` 必须等于该 AC 的当前 revision → 退出码 5，`error.current` 给出 `base_version` 与 `targets`（逐项的 JSON Pointer、编号与当前 revision；与 `propose` 相同）（V-C02，CX-13）。
-    4. `audit_scope` 的需求编号与范围外的 Claim：见待决事项 §14 的 D2、D3。
-    5. 当前 worktree 第一次出现时登记，另取一个 `seq`（data-model §4.10，与提案相同）。
-    6. `kind = sync` 时按 §6.3 计算 `compare_from`（读取同一事务内的既有批次）。
-    7. 分配**一个** `seq`，写入批次、全部 Claim（`target_type = criterion`）与全部未映射工作（`target_type = none`）。
-    8. **用刚写入的行构造回执，并按 `claim-receipt.v1` 校验**（§9.3）。校验失败是内部错误（退出码 1），整个事务回滚，不写入任何数据。
-    9. 提交。任何一步失败，整个事务回滚。
+    3. **D2**（2026-10-20 决定）：`audit_scope.requirements` 中的每个编号必须是当前 `active` 的需求；不存在或已退役 → 退出码 2，`details` 逐项给出 `/audit_scope/requirements/<j>`。
+    4. **D3**（2026-10-20 决定）：`audit_scope = {"requirements": [...]}` 时，每条 Claim 的目标 AC 当前所属的需求必须在声明的编号之中；否则退出码 2，`details` 给出 `/claims/<i>/target`。`{"all": true}` 时任何 `active` 的 AC 都属于范围。不要求一次提交覆盖范围内的全部 AC，空的 `claims` 照常合法，不新增完整盘点的门槛。
+    5. 第 2 ~ 4 步的问题在同一个错误中一并给出（与 `propose` 相同）；有这类问题时不再判断第 6 步。
+    6. 每个 `target_revision` 必须等于该 AC 的当前 revision → 退出码 5，`error.current` 给出 `base_version` 与 `targets`（逐项的 JSON Pointer、编号与当前 revision；与 `propose` 相同）（V-C02，CX-13）。
+    7. 当前 worktree 第一次出现时登记，另取一个 `seq`（data-model §4.10，与提案相同）。
+    8. `kind = sync` 时按 §6.3 计算 `compare_from`（读取同一事务内的既有批次）。
+    9. 分配**一个** `seq`，写入批次、全部 Claim（`target_type = criterion`）与全部未映射工作（`target_type = none`）。
+    10. **用刚写入的行构造回执，并按 `claim-receipt.v1` 校验**（§9.3）。校验失败是内部错误（退出码 1），整个事务回滚，不写入任何数据。
+    11. 提交。任何一步失败，整个事务回滚。
+
+第 2 ~ 6 步都在写锁之下读取当前的实体、修订与 AC 所属的需求（`BEGIN IMMEDIATE` 之后），不使用写锁之前读到的值。
 11. **输出**（§9）。
 
 客户端不自动重试：收到退出码 5 时，重新读取基准与 revision 之后再提交（data-model §7.1）。
@@ -106,10 +110,13 @@
 - 三个值在第 7 步一次采集，写入批次并原样出现在回执的 `context` 中；第 8 步的文件引用对照**同一个** `head`，不另行解析 HEAD。
 - 采集与提交之间 HEAD 或工作区可能变化；批次记录的是提交时 CLI 看到的上下文，不声称在写入时仍然成立（与观测级的说明一致）。
 
-### 6.2 读取失败
+### 6.2 读取失败（D1，2026-10-20 决定）
 
-- `gitx.Clean` 返回环境错误（例如 git 不满足 PD-26、部分克隆中缺少对象、私有临时区无法建立）时的处理是待决事项 D1（§14）：**推荐**退出码 6、不写入；备选为记 `tree_state = unknown` 并继续。
-- `head` 指向的提交无法读取时，`CommitOf` 返回环境错误 → 退出码 6，不写入（PD-26）。
+- `gitx.Clean` **返回实际的环境错误**（例如 git 不满足 PD-26、部分克隆中缺少对象、私有临时区无法建立或按方案 B 保留并失败）时：退出码 6，**不写入本次 Claim 的业务事实**（批次、Claim、未映射工作，以及只为本次提交而做的 worktree 登记），**不分配本次写入的 `seq`**。
+- `gitx.Clean` 正常返回 `undecidable`（P1）时仍记 `tree_state = unknown` 并继续；非 git 项目的 `unknown` 也不变（§6.1）。二者不是环境错误。
+- `head` 指向的提交无法读取时，`CommitOf` 返回环境错误 → 同样退出码 6，不写入（PD-26）。
+- **退出码 6 不表示数据目录或辅助文件绝对不变**：在这之前，打开数据库按既有契约进行（architecture §11）；私有临时区按 WP2.3 §14.3（方案 B）建立，并按其生命周期清理，或保留并报告（§10）。本条只保证不写入本次 Claim 的业务事实、不分配 `seq`，不扩大正常打开或方案 B 的保证。
+- **理由与代价**：`tree_state` 是批次必需的代码上下文（data-model §4.10），WP2.3 也规定读取失败不报告 `clean`；把读取失败记成 `unknown` 会让批次在不安全的 git 或残缺的仓库中照常写入。代价是这类环境中所有 `claim` 都不可用，直到环境修复。
 
 ### 6.3 `compare_from`（只用于 `sync`）
 
@@ -202,7 +209,12 @@ architecture §6.3 的优先级，在写事务内计算：
 - **拒绝而不替换**：任何字符串值命中密钥规则即退出码 2，不写入（§5 第 5 步）。
 - **不回显**：回执、文本输出、确认显示与错误都不包含摘要、测试名或环境变量的值；错误只给位置与约束。
 - **环境变量**：通道识别只检查已知 Agent 变量是否存在且非空，取到的值随即丢弃，从不保存、记录或输出（architecture §5.1）。
-- **对仓库的写入**：无（architecture §10.6）。私有临时区按 WP2.3 §14.3 在数据目录中建立，读取结束即删除。
+- **对仓库的写入**：无（architecture §10.6）。
+- **私有临时区**：按 WP2.3 §14.3（方案 B，review-resolution §71 ~ §74）在数据目录的 `tmp/git-reader-v3/` 中建立，并沿用它的生命周期：
+  - 满足可信清理条件时，按创建清单清理：owner 存在、身份与记录一致，清单与对象一致，Git 消费者已确认结束，完成记录已经持久化；
+  - 否则按既有要求保留并报告（退出码 6）：例如身份不符、未知、额外或缺失的条目，消费者状态未确认，完成记录写入或 Sync 失败，调用方崩溃。后续的 Scratch 按实际记录认领，或继续保留；
+  - 保留的私有副本（索引、白名单配置等）不是项目事实，不进入日志或备份；协议所需的最小锁与标识长期保留，不含项目内容。
+  - 本工作包不改变方案 B，也不扩大其中已接受的边界。
 - **日志**：不记录 C0 / C1 内容。
 
 ## 11. 与推导的关系（不改变）
@@ -220,9 +232,9 @@ architecture §6.3 的优先级，在写事务内计算：
 | MVP-CLM-01 | 写入 `done` 的 Claim；用写入的事实构造推导输入，得到进度 `claimed`、交付状态 `in_progress`（`claimed_without_evidence`）、`metrics.claimed_without_evidence` 加 1（纯函数层，与 WP2.1 的方式相同） | `status.v1` 的输出（WP2.7） |
 | MVP-CLM-02 | 目标只在待审提案中、已退役、不存在 → 退出码 2，不写入 | — |
 | MVP-CLM-03 | 摘要超过 500 字符、含代码围栏、含空行、含模拟密钥 → 退出码 2，不写入；Claim、未映射工作与批次摘要都覆盖 | — |
-| MVP-CLM-04 | 批次记录 `worktree_id`、`head`、`tree_state`、`base_version`，回执的 `context` 与之一致 | 会话关联（M3） |
+| MVP-CLM-04 | 批次记录 `worktree_id`、`head`、`tree_state`、`base_version`，回执的 `context` 与之一致；工作区状态读取的环境错误 → 退出码 6，不写入、不分配 `seq`（D1） | 会话关联（M3） |
 | MVP-CLM-05 | 非 TTY 提交 `manual` → 退出码 3；TTY 中但有已知 Agent 变量 → 退出码 3；`--file -` 管道 → 退出码 3；都不写入、不打开数据库（进程级用例） | M3 的拦截 |
-| MVP-INV-01 | `audit` 没有 `audit_scope` → 退出码 2；`sync` 中用 `unknown` → 退出码 2 | — |
+| MVP-INV-01 | `audit` 没有 `audit_scope` → 退出码 2；`sync` 中用 `unknown` → 退出码 2；范围中有不存在或已退役的需求（D2）、`audit` Claim 的目标不属于声明的需求（D3）→ 退出码 2 | — |
 | MVP-INV-02 | 不存在的文件、未知的提交 → 照常写入，`exists = false` / `resolved = false`，回执与 `refs_check_json` 一致 | 状态中的展示（WP2.7） |
 | MVP-INV-04 | 全量 `audit` 的事实交给推导，`inventory_coverage = 1`、`init_progress = inventoried`（纯函数层） | `status.v1`（WP2.7） |
 | MVP-INV-06（P1） | `unmapped_work` 保存为 `target_type = none` 的 Claim，回执逐项给出 | — |
@@ -240,6 +252,8 @@ architecture §6.3 的优先级，在写事务内计算：
 - `sync` 批次，上一批次干净 → `compare_from = previous_batch`；上一批次不干净或没有批次 → `none`。
 - `audit` 批次，`audit_scope = {"all": true}`，含 `unknown` 断言；回执没有 `compare_from`。
 - 空的 `claims`（`sync`、`audit` 都可以）；只有未映射工作的批次。
+- `audit` 批次声明 `REQ-001`、`REQ-002`，只对 `REQ-001` 下的一个 AC 提交 Claim：照常写入（D3 不要求覆盖范围内的全部 AC）。
+- `gitx.Clean` 正常返回 `undecidable`：`tree_state = unknown`，照常写入（D1 不适用）。
 - 人在终端中提交 `manual` 批次并确认。
 - 非 git 项目：`head = null`、`tree_state = unknown`，提交引用 `resolved = false`。
 
@@ -253,6 +267,10 @@ architecture §6.3 的优先级，在写事务内计算：
 | 摘要 501 字符、含代码围栏、含空行、含模拟密钥（任一摘要、测试名或路径） | 退出码 2，输出中没有该值 |
 | 路径越出仓库根、行号倒置或超出上限 | 退出码 2 |
 | 目标不存在、已退役、只在待审提案中 | 退出码 2 |
+| `audit_scope.requirements` 中有不存在或已退役的需求（D2） | 退出码 2，指向 `/audit_scope/requirements/<j>` |
+| `audit` 批次声明 `REQ-001`，其中一条 Claim 指向 `REQ-002` 下的 AC（D3） | 退出码 2，指向 `/claims/<i>/target` |
+| 读取之后、写锁之前，声明的需求或目标 AC 被退役（D2、V-C03） | 退出码 2（在写锁下判断） |
+| `gitx.Clean` 返回实际的环境错误（D1） | 退出码 6，不写入本次的批次、Claim 与 worktree 登记，`seq` 计数器不变 |
 | `base_version` 过期；任一 `target_revision` 过期（CX-13） | 退出码 5，`error.current` 给出当前值 |
 | `agent_cli` 提交 `manual`（非 TTY、Agent 变量、管道） | 退出码 3，不打开数据库 |
 | `manual` 确认取消、内容不一致、输入结束；带 `--json` 时 stderr 不是终端 | 退出码 3；6 |
@@ -264,17 +282,25 @@ architecture §6.3 的优先级，在写事务内计算：
 
 **标记而不拒绝**：不存在的文件、未提交的文件、行号超出文件、未知或有歧义的提交前缀 → 照常写入，`exists = false` / `resolved = false`。
 
-## 14. 待决事项与待审的工程细化
+## 14. 已决定的事项与待审的工程细化
 
-**需要负责人决定的**（涉及产品取舍；本文不自行决定）：
+**已由负责人决定**（2026-10-20，review-resolution §77）：
 
-| ID | 问题 | 推荐 | 备选 |
+| ID | 问题 | 决定 | 理由与代价 |
+|---|---|---|---|
+| D1 | 工作区状态无法读取 | `gitx.Clean` 返回实际的环境错误时退出码 6，不写入本次的业务事实，不分配本次写入的 `seq`；正常返回的 `undecidable` → `unknown` 与非 git 项目的 `unknown` 不变 | 见 §6.2；代价是这类环境中 `claim` 不可用；不扩大正常打开与方案 B 的保证 |
+| D2 | `audit_scope.requirements` 中的编号不存在或已退役 | 退出码 2 | 声明的范围必须指向当前的需求，与 V-C03 对 AC 编号的要求一致；代价是编号写错的批次被整体拒绝 |
+| D3 | `audit` Claim 的目标 AC 不属于声明的需求 | 退出码 2，在写锁下按当前的实体与所属关系判断；不要求覆盖范围内的全部 AC，空 `claims` 仍合法 | 声明的范围与实际写入的 `audit` Claim 保持一致，局部 audit 不能计入范围外的覆盖率；代价是跨需求的盘点要么一并声明，要么分批提交 |
+
+以下是决定之前的选项记录（保留，供追溯）：
+
+| ID | 问题 | 当时的推荐 | 当时的备选 |
 |---|---|---|---|
 | D1 | 工作区状态无法读取（`gitx.Clean` 返回环境错误，例如 git 不满足 PD-26、部分克隆、私有临时区无法建立）时 | 退出码 6，不写入：`tree_state` 是批次必需的代码上下文，WP2.3 也规定读取失败不报告 `clean`；后果是这类环境中所有 `claim` 都不可用 | 记 `tree_state = unknown` 并写入（`unknown` 不会被当作 `clean`，`compare_from` 也不会取这样的批次）；代价是批次可能在不安全的 git 下提交 |
 | D2 | `audit_scope.requirements` 中的编号不存在或已退役时 | 退出码 2（与 V-C03 对 AC 编号的要求一致） | 接受，推导只按存在的需求计算 |
 | D3 | `audit` 批次中，Claim 的目标不属于 `audit_scope` 声明的需求时 | 退出码 2：声明的范围应与实际盘点的条目一致；否则局部 audit 可以计入范围外的覆盖率 | 接受，覆盖率按实际写入的 `audit` Claim 计算 |
 
-**待审的工程细化**（在已批准的 Q6 / Q9 与既有规则之内，由审查确认）：
+**待审的工程细化**（在已批准的 Q6 / Q9 与既有规则之内，由审查确认；**不是本轮已获批的内容**）：
 
 - E1：`manual` 的确认内容为 `v<base_version>`（§4 第 4 步）。
 - E2：`kind = manual` 只能来自 `human_cli` 的数据库约束（§4 第 6 步）。
@@ -282,6 +308,12 @@ architecture §6.3 的优先级，在写事务内计算：
 - E4：有歧义的提交前缀记为 `resolved = false`（§7）。
 - E5：`propose` 在提交之后才校验回执；本文不改变它，是否统一由后续决定（§9.3）。
 - E6：回执中 `refs.tests` 只给数目，不回显测试名；`audit_scope` 不在回执中（输入中已有）。
+
+**其中可能含有的产品取舍**（审查时请负责人确认，本文不自行决定）：
+
+- E4：有歧义的提交前缀，是标记为 `resolved = false`，还是作为输入错误拒绝；回执是否需要把"有歧义"与"不存在"区分开。两者都是 Agent 可见的语义。
+- E6：回执的内容范围：测试名只计数而不回显，`audit_scope` 不回显。M2-Q9 批准的字段清单没有直接规定这两项。
+- E1、E2、E3、E5 是在既有机制与规则之内的工程细化：E3 是对 architecture §6.3"上一个批次"的读法；E5 不改变 `propose`。
 
 ## 15. 测试计划
 
@@ -295,6 +327,8 @@ architecture §6.3 的优先级，在写事务内计算：
 **集成**（真实的 git 仓库与数据库，进程内执行 CLI）：
 
 - §13 的每个反例：退出码，以及**数据库中没有任何新行、`seq` 计数器不变**（比较全部事实表，不只比较批次表）。
+- D1：注入 `gitx.Clean` 的环境错误（不安全的 git、部分克隆、私有临时区失败），退出码 6，没有新的批次、Claim 与 worktree 记录，`seq` 不变；正常的 `undecidable` 与非 git 项目照常写入 `unknown`。不断言数据目录或私有临时区完全不变：只按方案 B 的契约断言保留或清理。
+- D2、D3：在写锁之下判断——两个连接，一个在另一个读取之后、写锁之前退役声明的需求或目标 AC，提交方得到退出码 2。AC 所属的需求不能经更新改变（`proposal.v1` 的 `updateCriterion` 不允许 `requirement`），所以 D3 的所属关系只随 AC 本身的增加或退役变化。D3 的正例：声明两个需求、只覆盖其中一个 AC；`{"all": true}`；空 `claims`。
 - 写入成功：批次与 Claim 的行、共用的 `seq`、worktree 的首次登记（另一个 `seq`）、`refs_json` 与 `refs_check_json`；回执与这些行逐项一致（§9.2）。
 - 回执校验失败的注入（测试钩子把回执改为不合法）：退出码 1，事务回滚。
 - 推导：用写入的事实构造推导输入，验证 CLM-01、INV-04、CX-10、CX-12 (a)(e) 的结论（§12）；推导引擎与复核器不改。
