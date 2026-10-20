@@ -44,8 +44,8 @@ func manualDoc() map[string]any {
 //     and the unmapped work, and no summary.
 //
 // The project is outside git (claimsProjectOutsideGit): the commit prefix
-// is then unknown_commit too; TestClaimManualInTerminal confirms in a git
-// project.
+// is then unknown_commit too; TestClaimCompareFrom confirms a manual batch
+// in a git project.
 func TestClaimManualAsAPerson(t *testing.T) {
 	home, dir := claimsProjectOutsideGit(t)
 	doc := manualDoc()

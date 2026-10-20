@@ -20,8 +20,11 @@ import (
 //   - declined, exit 3;
 //   - none of these writes anything; confirmed, the batch is stored by a
 //     person on human_cli.
+//
+// The channel does not depend on git: the project is outside git
+// (TestClaimCompareFrom confirms a manual batch in a git project).
 func TestClaimManualInTerminal(t *testing.T) {
-	home, _, dir := claimsProject(t)
+	home, dir := claimsProjectOutsideGit(t)
 	doc := manualDoc()
 	file := writeClaims(t, doc)
 	args := []string{"claim", "--file", file}
