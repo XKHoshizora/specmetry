@@ -809,7 +809,7 @@ Agent 侧的安装位置（TD-03）：
 - 面向 Agent 的命令都支持 `--json`，输出符合 `schemas/`。
 - 输入通过 `--file <path|->` 传入。
 - 写命令在 JSON 中携带读取版本（[data-model.md §7.1](data-model.md#71-写入前置条件)）。
-- M2 的 `claim --json` 输出 `claim-receipt.v1`（M2-Q9；WP2.4 规范，待审查）。
+- M2 的 `claim --json` 输出 `claim-receipt.v1`（M2-Q9；WP2.4 规范，已冻结）。
 - M1 的结果与读取模型输出：`source-add.v1`、`proposal-receipt.v1`、`source-list.v1`、`proposal-list.v1`、`proposal-show.v1`、`baseline-show.v1`、`baseline-history.v1`、`question-list.v1`、`target-scope.v1`（[data-model.md §8](data-model.md#8-交换格式)）。人类专属的写命令在 MVP 中只输出人类可读文本；出错时带 `--json` 仍输出 `error.v1`；已有成功 JSON 契约的（`propose --apply` 的 `proposal-receipt.v1`、`source add` 的 `source-add.v1`）成功时输出该文档。带 `--json` 时，stdout 中只有这些输出，确认提示在 stderr（§5.1 规则 2）。
 
 **命令行错误**（codex-review-025 B1、codex-review-027 N1）：命令行本身的错误，不引用输入的任何内容。输入的内容尚未经过密钥扫描，可能是误粘贴的密钥。cobra 和 pflag 的消息会原样引用它们无法使用的内容，所以这些消息都不进入输出；所有命令统一在 `internal/cli/cmdline.go` 中处理：

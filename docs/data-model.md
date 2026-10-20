@@ -1141,7 +1141,7 @@ stateDiagram-v2
 | `source-list.v1` | `source list --json`：来源、观测哈希、引用与片段保存情况 | CLI → Agent 或人 |
 | `source-add.v1` | `source add --json` 的结果 | CLI → Agent |
 | `proposal-receipt.v1` | `propose --json` 的结果（条目 ID、校验标记；不回显片段） | CLI → Agent 或人 |
-| `claim-receipt.v1` | `claim --json` 的结果（批次身份、`seq`、采集的代码上下文、`sync` 的 `compare_from`、逐项的引用存在性结果；不回显摘要与测试名；M2-Q9，WP2.4 规范，待审查） | CLI → Agent |
+| `claim-receipt.v1` | `claim --json` 的结果（批次身份、`seq`、采集的代码上下文、`sync` 的 `compare_from`、逐项的引用存在性结果；不回显摘要与测试名；M2-Q9，WP2.4 规范，已冻结） | CLI → Agent |
 | `proposal-list.v1` | `proposal list --json` | CLI → Agent 或人 |
 | `proposal-show.v1` | `proposal show --json`：条目、审核状态、冲突条目的三方对比（`base` / `current` / `proposed`） | CLI → Agent 或人 |
 | `baseline-show.v1` | `baseline show --json`：已确认的基准（含 revision，供提案携带） | CLI → Agent 或人 |
@@ -1242,8 +1242,8 @@ M0 的 CI 会校验这两者（WP0.4）。凡是需要数据库状态才能判�
 | V-C02 | `base_version` 和每个 `target_revision` 都是当前值 | 过期 |
 | V-C03 | `target` 是 `active` 的 AC 编号；同一批次内不重复；`unknown` 断言只能用于 `audit` | 拒绝 |
 | V-C04 | `summary` ≤ 500 字符，单段文字，不能包含代码围栏（三个反引号）；不能命中密钥规则 | 拒绝 |
-| V-C05 | `audit` 批次必须声明 `audit_scope`；`requirements` 中的编号必须是当前 `active` 的需求（D2），每条 Claim 的目标 AC 必须属于声明的需求，不要求覆盖全部 AC（D3）；后两项在写锁下判断（WP2.4 规范，2026-10-20 负责人决定，规范待审查） | 拒绝 |
-| V-C06 | 文件路径是否存在、提交能否被 git 解析：格式合法的提交前缀只有唯一指向可读的提交才算解析成功；不存在、指向非提交对象或真实歧义为 `unknown_commit`（标记）；对象损坏、读取失败、无法可靠分类或 PD-26 拒绝时整个提交以退出码 6 拒绝（WP2.4 规范 E4，2026-10-20 负责人决定，规范待复审） | 标记 |
+| V-C05 | `audit` 批次必须声明 `audit_scope`；`requirements` 中的编号必须是当前 `active` 的需求（D2），每条 Claim 的目标 AC 必须属于声明的需求，不要求覆盖全部 AC（D3）；后两项在写锁下判断（WP2.4 规范，2026-10-20 负责人决定，规范已冻结） | 拒绝 |
+| V-C06 | 文件路径是否存在、提交能否被 git 解析：格式合法的提交前缀只有唯一指向可读的提交才算解析成功；不存在、指向非提交对象或真实歧义为 `unknown_commit`（标记）；对象损坏、读取失败、无法可靠分类或 PD-26 拒绝时整个提交以退出码 6 拒绝（WP2.4 规范 E4，2026-10-20 负责人决定，规范已冻结） | 标记 |
 | V-D01 | 验收决定的 `acknowledged_risks` 恰好等于服务端推导的风险集合（§7.3） | 拒绝 |
 | V-D02 | 验收决定的全部读取版本（含 `seen_decision_id`）都是当前值（§7.1） | 过期 |
 | V-R01 | 审核中被接受（`accepted`、`accepted_with_edits`，包括冲突条目）的 `update` 条目必须带 `change_class`；强制 `material` 的字段一律按 `material` 处理；提案中建议的类别不能代替审核者的选择（PD-04 方案 A） | 拒绝 |

@@ -1,6 +1,8 @@
 # WP2.4 Claim 规范
 
-> 状态：**规范草案，待独立审查，尚未授权实现，未冻结**（2026-10-20）。产品负责人 2026-10-20 批准了 M2-Q6（TD-13 的建议默认）与 M2-Q9（`claim-receipt.v1` 的独立回执方向），见 [review-resolution.md §76](review-resolution.md)；之后又决定了本文 §14 的 D1 ~ D3（§77）。审查 065（NO-GO，唯一 BLOCKER 为 B1）之后，本文按版本优先修正了 B1 的预期，收口了 N1、N2 的表述，并写入负责人对 E4、E6 的决定（§78）。**已修订，待独立复审**；具体规范与 schema 仍须独立审查后冻结。本文不是实现：不含 Claim 的生产代码与迁移 SQL。
+> 状态：**已冻结**（2026-10-20，产品负责人；审查 066 GO，见 [review-resolution.md §79](review-resolution.md)）。此前的经过：产品负责人 2026-10-20 批准了 M2-Q6（TD-13 的建议默认）与 M2-Q9（`claim-receipt.v1` 的独立回执方向，§76），并决定了本文 §14 的 D1 ~ D3（§77）；审查 065（NO-GO，唯一 BLOCKER 为 B1）之后，本文按版本优先修正了 B1，收口了 N1、N2，并写入负责人对 E4、E6 的决定（§78）；审查 066 关闭 B1，确认 N1、N2 在规范层面收口、E4、E6 已忠实落实，没有剩余的产品待决事项。
+>
+> **WP2.4 的实现获得条件授权**（§79）：本规范的 PR #29 合并、合并核验与对应的 master push CI 全部成功之后开工，另开 PR；不授权合并实现 PR、验收工作包，也不授权 WP2.5 或其他工作包。本文不是实现：不含 Claim 的生产代码与迁移 SQL。
 >
 > 规范性的条文仍以 [data-model.md](data-model.md)（§4.10、§6.5、§6.6、§6.11、§6.13、§7.1、V-C01 ~ V-C06）、[architecture.md](architecture.md)（§5.1、§6.1.4、§6.3、§9.1、§10）、[prd.md](prd.md)（FR-CLM、FR-INV、FR-WT-02）、[acceptance-criteria.md](acceptance-criteria.md) 与 [`schemas/`](../schemas/) 为准；本文给出处理顺序、回执契约、待决事项与测试计划。两者不一致时，以那些文档为准，并修正本文。
 
@@ -56,11 +58,11 @@
 3. **输入处理与数据库访问**：通过通道检查之后，与其他批次相同（§5 第 3 ~ 8 步）。
 4. **确认**：所有不需要确认就能判定的检查都通过之后，先在一个回滚的写事务中完整演练一次写入（与 `propose --apply` 相同），确认能写入，再经 `internal/cli` 的 `confirm`（它调用 `channel.Guard`）请人确认：
    - 显示：操作名 `claim (manual)`、批次类型、`base_version`、Claim 的条数，以及每条的 AC 编号、修订与断言、引用的存在性结果；未映射工作的数目与引用结果；摘要不显示（审查 065 对 E1 的说明）。显示经 `termtext` 转义。
-   - 确认内容：`v<base_version>`（与 `propose --apply` 的确认方式一致；工程细化，待审查）。
+   - 确认内容：`v<base_version>`（与 `propose --apply` 的确认方式一致；工程细化 E1）。
    - 带 `--json` 时，确认显示在 stderr；stderr 不是终端时退出码 6，不写入（architecture §5.1 规则 2）。
    - 取消、内容不一致、输入结束 → 退出码 3，不写入。不提供 `--yes`。
 5. **写入**：确认之后，在新的写事务中按 §5 第 10 步的同一优先级重新检查全部前置条件，然后写入。确认期间基准的任何合法变化（包括退役需求或 AC）都会推进基准版本，所以先返回退出码 5；退出码 2 只在版本前置条件通过之后适用，这类问题在确认之前的演练中已经报告。
-6. **审计**：批次记录 `actor` 与 `channel`：人在终端中为 `human:<显示名>` 与 `human_cli`；Agent 通道为 `agent:<agent>`（设置了 Claude Code 的变量时为 `agent:claude_code`，否则为 `agent:unknown`）与 `agent_cli`。实现须在迁移中加约束兜底：`kind = manual` 的批次 `channel` 只能是 `human_cli`（与 M2-Q6 对 `decisions` 的要求相同；工程细化，待审查）。
+6. **审计**：批次记录 `actor` 与 `channel`：人在终端中为 `human:<显示名>` 与 `human_cli`；Agent 通道为 `agent:<agent>`（设置了 Claude Code 的变量时为 `agent:claude_code`，否则为 `agent:unknown`）与 `agent_cli`。实现须在迁移中加约束兜底：`kind = manual` 的批次 `channel` 只能是 `human_cli`（与 M2-Q6 对 `decisions` 的要求相同；工程细化 E2）。
 7. **能力边界**（如实声明）：通道识别不是身份认证。Agent 经伪终端并清除环境变量执行时，可能被识别为 `human_cli`；交互式确认、Skill 禁令与审计记录只是补充（architecture §5.1）。M3 的 PreToolUse 拦截按参数位置匹配，看不出输入 JSON 中的 `kind = manual`，所以对 `manual` 批次只能依靠通道识别（architecture §5 的已知情形）。
 
 ## 5. 处理顺序
@@ -126,7 +128,7 @@ architecture §6.3 的优先级，在写事务内计算：
 2. **`session_start`**：本会话的 `head_start`（M3 才有会话；**M2 永不取此来源**）。
 3. **`none`**：`commit = NULL`。
 
-只有第 1 条最新的那个批次参与判断：最新的批次不满足条件时，不再向更早的批次回溯（与"上一批次"的含义一致；工程细化，待审查）。`audit`、`manual` 批次不记录 `compare_from`（NULL），回执中也没有这个字段。
+只有第 1 条最新的那个批次参与判断：最新的批次不满足条件时，不再向更早的批次回溯（与"上一批次"的含义一致；工程细化 E3）。`audit`、`manual` 批次不记录 `compare_from`（NULL），回执中也没有这个字段。
 
 ## 7. 引用检查（V-C06，只标记）
 
@@ -329,7 +331,7 @@ D2、D3 的退出码 2 只在 `base_version` 前置条件通过之后适用（§
 | D2 | `audit_scope.requirements` 中的编号不存在或已退役时 | 退出码 2（与 V-C03 对 AC 编号的要求一致） | 接受，推导只按存在的需求计算 |
 | D3 | `audit` 批次中，Claim 的目标不属于 `audit_scope` 声明的需求时 | 退出码 2：声明的范围应与实际盘点的条目一致；否则局部 audit 可以计入范围外的覆盖率 | 接受，覆盖率按实际写入的 `audit` Claim 计算 |
 
-**工程细化**：审查 065 判断 E1、E2、E3、E5 是符合既有契约的工程细化；它们随本规范的复审与冻结一并确认，不是本轮单独获批的内容。审查 065 的补充说明：
+**工程细化**：审查 065 判断 E1、E2、E3、E5 是符合既有契约的工程细化，审查 066 复审确认；它们随本规范于 2026-10-20 冻结。审查 065 的补充说明：
 
 - E1：`manual` 的确认内容为 `v<base_version>`（§4 第 4 步）。提示应写明批次的 `kind`、条数与逐项信息；未映射工作也给出数目与引用结果，不显示摘要。
 - E2：`kind = manual` 只能来自 `human_cli` 的数据库约束（§4 第 6 步）。这是第二道防线，约束不证明操作者的身份；迁移在实现阶段兑现。
@@ -347,9 +349,16 @@ D2、D3 的退出码 2 只在 `base_version` 前置条件通过之后适用（§
 
 **集成**（真实的 git 仓库与数据库，进程内执行 CLI）：
 
-- §13 的每个反例：退出码，以及**数据库中没有任何新行、`seq` 计数器不变**（比较全部事实表，不只比较批次表）。
+- §13 的每个反例：退出码，以及与比较基点相比**没有本次 Claim 的任何新行，`seq` 计数器没有为它前进**（比较全部事实表，不只比较批次表）。比较基点是被拒的 Claim 开始写事务之前的数据库快照；并发用例中，基点是另一个连接合法提交**之后**的快照（下一条）。
 - D1：注入 `gitx.Clean` 的环境错误（不安全的 git、部分克隆、私有临时区失败），退出码 6，没有新的批次、Claim 与 worktree 记录，`seq` 不变；正常的 `undecidable` 与非 git 项目照常写入 `unknown`。不断言数据目录或私有临时区完全不变：只按方案 B 的契约断言保留或清理。
-- 版本优先（审查 065 B1）：两个连接，一个读取之后，另一个经正常审核退役声明的需求或目标 AC 并提交新的基准版本；提交方得到**退出码 5**，`error.current.base_version` 为当前版本，没有本次 Claim 的业务事实，`seq` 计数器不变。`manual` 在确认期间发生同样的变更时，确认之后的写事务同样返回退出码 5。
+- 版本优先（审查 065 B1）：两个连接，按确定的调度执行：
+  1. 连接 A（被测的 Claim）读取之后，暂停在取得写锁（或 `manual` 的确认）之前；
+  2. 连接 B 经正常审核退役声明的需求或目标 AC，并完整提交新的基准版本；
+  3. 读取 B 提交之后的快照 S1；
+  4. 放行 A：A 得到**退出码 5**，`error.current.base_version` 为当前版本；
+  5. 与 S1 比较：没有 A 的批次、Claim、未映射工作与首次 worktree 登记，`seq` 没有为 A 前进；B 的全部事实（基准版本、退役、级联与它的 `seq`）保持不变。
+  - **不要求回退另一个连接已提交的事实或 `seq`**（审查 066）。如果还要与 B 提交之前的快照 S0 比较，必须精确地扣除 B 的合法增量；断言 S0 与最终数据库相同是测试缺陷，不能用非法历史或弱化事务来满足它。
+  - `manual` 在确认期间发生同样的变更时，确认之后的写事务同样返回退出码 5，比较基点同样是 S1。
 - D2、D3、V-C03 的退出码 2：输入携带**当前**的 `base_version`，引用不存在或已退役的需求或 AC，或者 `audit` Claim 指向范围外需求下的 `active` AC；断言精确的 JSON Pointer 与无写入。不构造"退役而不推进基准版本"的非法历史来测试退出码 2；AC 所属的需求不能经更新改变（`proposal.v1` 的 `updateCriterion` 不允许 `requirement`），不构造 AC 迁移到其他需求的场景。D3 的正例：声明两个需求、只覆盖其中一个 AC；`{"all": true}`；空 `claims`。
 - 写入成功：批次与 Claim 的行、共用的 `seq`、worktree 的首次登记（另一个 `seq`）、`refs_json` 与 `refs_check_json`；回执与这些行逐项一致（§9.2）。
 - 回执校验失败的注入（测试钩子把回执改为不合法）：退出码 1，事务回滚，包括首次的 worktree 登记。
@@ -381,4 +390,4 @@ D2、D3 的退出码 2 只在 `base_version` 前置条件通过之后适用（§
 
 ## 16. 同步的文档
 
-本 PR 同步：data-model §8（新增 `claim-receipt.v1`）、prd §6（面向 Agent 的输出）、architecture §9.1（输出列表）与 TD-13 的状态、AGENTS.md（必须通过 schema 校验的面向 Agent 的输出）、acceptance-criteria 的 MVP-CLM-04 与 MVP-INV-02（成功输出按 `claim-receipt.v1` 校验，待审查）。实现时再同步：迁移、`internal` 的实现与测试、development.md。
+本 PR 同步：data-model §8（新增 `claim-receipt.v1`）、prd §6（面向 Agent 的输出）、architecture §9.1（输出列表）与 TD-13 的状态、AGENTS.md（必须通过 schema 校验的面向 Agent 的输出）、acceptance-criteria 的 MVP-CLM-04 与 MVP-INV-02（成功输出按 `claim-receipt.v1` 校验）。实现时再同步：迁移、`internal` 的实现与测试、development.md。
