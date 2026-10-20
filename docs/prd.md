@@ -354,7 +354,7 @@
 
 ## 6. CLI 命令概览
 
-退出码与约定见 [architecture.md §9](architecture.md#9-接口约定)。面向 Agent 的 `--json` 输出 schema 是：`init.v1`、`status.v1`、`gaps.v1`、`check-run.v1`、`source-add.v1`、`proposal-receipt.v1`；读取模型是：`source-list.v1`、`proposal-list.v1`、`proposal-show.v1`、`baseline-show.v1`、`baseline-history.v1`、`question-list.v1`、`target-scope.v1`；错误输出是 `error.v1`。人类专属的写命令在 MVP 中只输出人类可读文本（出错时带 `--json` 仍输出 `error.v1`）。
+退出码与约定见 [architecture.md §9](architecture.md#9-接口约定)。面向 Agent 的 `--json` 输出 schema 是：`init.v1`、`status.v1`、`gaps.v1`、`check-run.v1`、`source-add.v1`、`proposal-receipt.v1`、`claim-receipt.v1`（M2-Q9，WP2.4 规范已冻结）；读取模型是：`source-list.v1`、`proposal-list.v1`、`proposal-show.v1`、`baseline-show.v1`、`baseline-history.v1`、`question-list.v1`、`target-scope.v1`；错误输出是 `error.v1`。人类专属的写命令在 MVP 中只输出人类可读文本（出错时带 `--json` 仍输出 `error.v1`）。
 
 | 命令 | 用途 | 通道 |
 |---|---|---|

@@ -39,6 +39,8 @@ var prefixes = map[string]string{
 	"baseline-history": "baseline-history.v1",
 	"question-list":    "question-list.v1",
 	"target-scope":     "target-scope.v1",
+	// The claim receipt (M2-Q9, WP2.4 spec, awaiting review).
+	"claim-receipt": "claim-receipt.v1",
 }
 
 func validator(t *testing.T) *Validator {
@@ -54,7 +56,7 @@ func validator(t *testing.T) *Validator {
 func TestAllSchemasCompile(t *testing.T) {
 	v := validator(t)
 	want := []string{
-		"baseline-history.v1", "baseline-show.v1", "check-run.v1", "claims.v1", "common.v1", "decision.v1",
+		"baseline-history.v1", "baseline-show.v1", "check-run.v1", "claim-receipt.v1", "claims.v1", "common.v1", "decision.v1",
 		"error.v1", "gaps.v1", "init.v1", "proposal-list.v1", "proposal-receipt.v1", "proposal-show.v1",
 		"proposal.v1", "question-answer.v1", "question-list.v1", "review.v1", "scope.v1", "source-ack.v1",
 		"source-add.v1", "source-list.v1", "spool-event.v1", "status.v1", "target-scope.v1",

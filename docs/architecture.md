@@ -809,6 +809,7 @@ Agent 侧的安装位置（TD-03）：
 - 面向 Agent 的命令都支持 `--json`，输出符合 `schemas/`。
 - 输入通过 `--file <path|->` 传入。
 - 写命令在 JSON 中携带读取版本（[data-model.md §7.1](data-model.md#71-写入前置条件)）。
+- M2 的 `claim --json` 输出 `claim-receipt.v1`（M2-Q9；WP2.4 规范，已冻结）。
 - M1 的结果与读取模型输出：`source-add.v1`、`proposal-receipt.v1`、`source-list.v1`、`proposal-list.v1`、`proposal-show.v1`、`baseline-show.v1`、`baseline-history.v1`、`question-list.v1`、`target-scope.v1`（[data-model.md §8](data-model.md#8-交换格式)）。人类专属的写命令在 MVP 中只输出人类可读文本；出错时带 `--json` 仍输出 `error.v1`；已有成功 JSON 契约的（`propose --apply` 的 `proposal-receipt.v1`、`source add` 的 `source-add.v1`）成功时输出该文档。带 `--json` 时，stdout 中只有这些输出，确认提示在 stderr（§5.1 规则 2）。
 
 **命令行错误**（codex-review-025 B1、codex-review-027 N1）：命令行本身的错误，不引用输入的任何内容。输入的内容尚未经过密钥扫描，可能是误粘贴的密钥。cobra 和 pflag 的消息会原样引用它们无法使用的内容，所以这些消息都不进入输出；所有命令统一在 `internal/cli/cmdline.go` 中处理：
@@ -1315,7 +1316,7 @@ schemas/  skill/  web/  testdata/fixtures/  docs/
 | TD-10 | CLI 框架 | **已确认**：cobra | 已确认（2026-10-13） |
 | ~~TD-11~~ | ~~证据新鲜度~~ | **已关闭**：由交付快照模型取代（AD-12） | — |
 | TD-12 | Claude Code Hook 事件名与字段的核实，以及兼容版本范围 | 以 §12.1 为初稿 | M3 开工前 |
-| TD-13 | 人类专属操作的防护强度 | 启发式通道识别 + 拦截 + 审计记录，并如实声明能力边界 | M2 |
+| TD-13 | 人类专属操作的防护强度 | **已确认（2026-10-20，产品负责人，M2-Q6）**：启发式通道识别 + `RequireHuman` + 现有 `confirm` 入口 + 操作者与通道的审计，并如实声明能力边界；M2 新增的人类专属操作沿用，不加签名或独立操作系统用户（review-resolution §76） | 已确认（2026-10-20） |
 | TD-14 | 编号格式 | **已确认（2026-10-14，产品负责人）**：稳定的编号，永不复用：`GOAL-1`、`REQ-001`、`AC-001-1`、`Q-001` | 已确认（2026-10-14） |
 | TD-15 | 分发渠道 | Releases + 安装脚本 | M6 |
 | TD-16 | 迁移策略 | **已确认**：只前向迁移 + 迁移锁 + `VACUUM INTO` 备份 + `min_binary_version` | 已确认（2026-10-13） |

@@ -1,0 +1,146 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/XKHoshizora/specmetry/schemas/claim-receipt.v1.schema.json",
+  "title": "Specmetry claim receipt v1",
+  "description": "Output of `specmetry claim --file <path|-> --json` (Agent-facing; a manual batch only from an interactive human terminal). Reports the stored batch: its identity, seq, kind and base_version, the code context the CLI captured, the comparison start of a sync batch, and, in input order, each claim's target, revision and assertion and each unmapped work item, with the existence results of their references (V-C06) exactly as stored in refs_check_json. A reference that exists only says the file or commit is there; it is not verification, evidence or acceptance, and a claim never produces accepted or ready on its own (FR-CLM-02). Summaries, test names, commands, outputs and environment values are never echoed. Conditions between this document and the input or the database (indexes, order, the stored values) are checked by business tests, not by this schema (WP2.4 spec).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "batch_id", "seq", "kind", "base_version", "context", "claims", "unmapped_work"],
+  "properties": {
+    "schema": { "const": "specmetry.claim-receipt/v1" },
+    "batch_id": { "$ref": "common.v1.schema.json#/$defs/ulid" },
+    "seq": {
+      "description": "The one seq of the batch and all its claims, unmapped work included (data-model §4.10).",
+      "$ref": "common.v1.schema.json#/$defs/seq"
+    },
+    "kind": { "enum": ["sync", "audit", "manual"] },
+    "base_version": { "$ref": "common.v1.schema.json#/$defs/baselineVersion" },
+    "context": {
+      "description": "The code context the CLI captured where the command ran (data-model §4.10): the worktree, its HEAD commit (null outside git or before the first commit) and its state (unknown when it cannot be told, never clean then).",
+      "$ref": "common.v1.schema.json#/$defs/codeContext"
+    },
+    "compare_from": {
+      "description": "Only for kind = sync: the comparison start recorded with the batch and where it came from (architecture §6.3). Before M3 the source is previous_batch or none.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commit", "source"],
+      "properties": {
+        "commit": { "oneOf": [{ "$ref": "common.v1.schema.json#/$defs/commitSha" }, { "type": "null" }] },
+        "source": { "enum": ["previous_batch", "session_start", "none"] }
+      },
+      "if": { "properties": { "source": { "const": "none" } } },
+      "then": { "properties": { "commit": { "type": "null" } } },
+      "else": { "properties": { "commit": { "$ref": "common.v1.schema.json#/$defs/commitSha" } } }
+    },
+    "claims": {
+      "description": "One entry per input claim, in input order.",
+      "type": "array",
+      "maxItems": 2000,
+      "items": { "$ref": "#/$defs/claim" }
+    },
+    "unmapped_work": {
+      "description": "One entry per input unmapped_work item, in input order; each is stored as a claim with target_type none (MVP-INV-06, P1). Empty when the input has none.",
+      "type": "array",
+      "maxItems": 50,
+      "items": { "$ref": "#/$defs/unmapped" }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "kind": { "const": "sync" } } },
+      "then": { "required": ["compare_from"] },
+      "else": { "not": { "required": ["compare_from"] } }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "audit" } } },
+      "else": {
+        "properties": {
+          "claims": { "items": { "properties": { "assertion": { "not": { "const": "unknown" } } } } }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "claim": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["index", "claim_id", "target", "target_revision", "assertion", "refs"],
+      "properties": {
+        "index": {
+          "description": "The claim's index in the input claims array.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "claim_id": { "$ref": "common.v1.schema.json#/$defs/ulid" },
+        "target": { "$ref": "common.v1.schema.json#/$defs/criterionKey" },
+        "target_revision": {
+          "description": "The criterion revision the claim was submitted and stored for (it equalled the current revision at commit).",
+          "$ref": "common.v1.schema.json#/$defs/revision"
+        },
+        "assertion": { "enum": ["done", "partial", "not_done", "blocked", "unknown"] },
+        "refs": { "$ref": "#/$defs/refsCheck" }
+      }
+    },
+    "unmapped": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["index", "claim_id", "refs"],
+      "properties": {
+        "index": {
+          "description": "The item's index in the input unmapped_work array.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "claim_id": { "$ref": "common.v1.schema.json#/$defs/ulid" },
+        "refs": { "$ref": "#/$defs/refsCheck" }
+      }
+    },
+    "refsCheck": {
+      "description": "The existence results of one claim's references, in input order; empty arrays and tests = 0 when it gave none. Test names are stored but neither checked nor echoed.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["files", "commits", "tests"],
+      "properties": {
+        "files": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "lines", "exists"],
+            "properties": {
+              "path": { "$ref": "common.v1.schema.json#/$defs/relPath" },
+              "lines": { "oneOf": [{ "$ref": "common.v1.schema.json#/$defs/lineRange" }, { "type": "null" }] },
+              "exists": {
+                "description": "The path is a regular file of the captured HEAD commit's tree (outside git: under the project root) and the line range lies within it. false is the missing mark of MVP-INV-02.",
+                "type": "boolean"
+              }
+            }
+          }
+        },
+        "commits": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["commit", "resolved"],
+            "properties": {
+              "commit": { "$ref": "common.v1.schema.json#/$defs/commitShaPrefix" },
+              "resolved": {
+                "description": "The prefix names exactly one commit the repository can read. false is the unknown_commit mark of MVP-INV-02.",
+                "type": "boolean"
+              }
+            }
+          }
+        },
+        "tests": {
+          "description": "How many test names the reference gave.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 50
+        }
+      }
+    }
+  }
+}

@@ -12,7 +12,7 @@
 
 除非用户明确要求开始某个里程碑，否则不要开始后续里程碑。开工条件见 `docs/implementation-plan.md §2`；开发环境与工程约定见 `docs/development.md`。
 
-**PR #27 状态**：负责人已明确批准方案 B 的 B1-D1～D4（`docs/review-resolution.md §71`）；经审查 061～063 与定向修复，审查 063 对 `c4dbfb1` 技术 GO，B1 在方案 B 下关闭（§74）；已合并为 `5985b31`，合并后核验完成，WP2.3 库层已验收（§75）。局部保证调整仅按 §71 适用。M-7 的修复 PR #28 审查 064 技术 GO，等待合并后核验。M2 未整体验收，WP2.4 及其他 M2 工作包仍未授权实现。
+**PR #27 状态**：负责人已明确批准方案 B 的 B1-D1～D4（`docs/review-resolution.md §71`）；经审查 061～063 与定向修复，审查 063 对 `c4dbfb1` 技术 GO，B1 在方案 B 下关闭（§74）；已合并为 `5985b31`，合并后核验完成，WP2.3 库层已验收（§75）。局部保证调整仅按 §71 适用。M-7 已关闭（PR #28，合并为 `7a36166`，§76）。M2-Q6、M2-Q9 已批准（§76）；WP2.4 规范经审查 066 GO，于 2026-10-20 由负责人冻结（`docs/wp2.4-claim.md`，§79）；**WP2.4 的实现获得条件授权**：PR #29 合并、合并核验与对应的 master push CI 全部成功之后开工，另开 PR，不授权合并该 PR 或验收工作包。M2 未整体验收，其他 M2 工作包仍未授权实现。
 
 ## 文档地图
 
@@ -75,7 +75,7 @@ Go（单一二进制）、SQLite（WAL，候选驱动 `modernc.org/sqlite`）、
 - `internal/domain/derive` 是纯函数包，测试先行；每条决策规则都要有表驱动测试和对应的 CX 反例。
 - 测试代码中维护一个独立的 `ready` 复核器，不复用推导引擎。
 - 事实类表只追加。
-- 所有写入类输入，以及面向 Agent 的输出（`init`、`status`、`gaps`、`check-run`、`error`），必须通过 `schemas/` 校验；面向人的读取模型的 schema，在对应模块开工前补齐。修改格式时，先改 schema，并同步更新 `schemas/examples/`。
+- 所有写入类输入，以及面向 Agent 的输出（`init`、`status`、`gaps`、`check-run`、`claim-receipt`、`error`），必须通过 `schemas/` 校验；面向人的读取模型的 schema，在对应模块开工前补齐。修改格式时，先改 schema，并同步更新 `schemas/examples/`。
 
 ## 常用命令
 

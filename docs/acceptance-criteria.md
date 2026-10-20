@@ -145,8 +145,8 @@
 
 | ID | 前置 → 操作 → 期望 | 验证 | 需求 | 里程碑 |
 |---|---|---|---|---|
-| MVP-INV-01 | `audit` 批次没有 `audit_scope` → 退出码 2；`sync` 批次中使用 `unknown` 断言 → 退出码 2 | 集成 | FR-INV-01 | M2 |
-| MVP-INV-02 | 引用了不存在的文件或未知的提交 → 照常写入，并标记为 `missing` 或 `unknown_commit` | 集成 | FR-INV-02 | M2 |
+| MVP-INV-01 | `audit` 批次没有 `audit_scope` → 退出码 2；`sync` 批次中使用 `unknown` 断言 → 退出码 2。（WP2.4 规范 D2、D3，2026-10-20 负责人决定，规范已冻结：`audit_scope` 中有不存在或已退役的需求 → 退出码 2；`audit` Claim 的目标 AC 不属于声明的需求 → 退出码 2，在写锁下判断；只覆盖范围内部分 AC 或空 `claims` 仍合法；这些退出码 2 只在 `base_version` 一致时适用，读取之后的合法退役会推进基准版本，先返回退出码 5，见审查 065 B1） | 集成 | FR-INV-01 | M2 |
+| MVP-INV-02 | 引用了不存在的文件或未知的提交 → 照常写入，并标记为 `missing` 或 `unknown_commit`。（WP2.4 规范，已冻结：回执中为 `exists = false` / `resolved = false`，与 `refs_check_json` 一致；E4：真实歧义的前缀同样为 `resolved = false`，对象读取失败为退出码 6） | 集成 | FR-INV-02 | M2 |
 | MVP-INV-03 | 4 个带检查的 AC → `check run --all` → 恰好 4 条执行记录，都属于当前 worktree；有任何一条不是 `pass` 时，退出码为 10 | 集成 | FR-INV-04 | M2 |
 | MVP-INV-04 | 全量 audit → `inventory_coverage = 1`，`init_progress = inventoried` | 集成 | FR-INV-07 | M2 |
 | MVP-INV-05 | `[P1]` `init --json` 返回提交数和最近提交时间 | 集成 | FR-INV-03 | M1 |
@@ -157,9 +157,9 @@
 | ID | 前置 → 操作 → 期望 | 验证 | 需求 | 里程碑 |
 |---|---|---|---|---|
 | MVP-CLM-01 | 提交 `done` 的 Claim → 进度为 `claimed`；交付状态仍然是 `in_progress`（`claimed_without_evidence`）；`metrics.claimed_without_evidence` 加 1 | 集成 | FR-CLM-01、02、FR-ST-07 | M2 |
-| MVP-CLM-02 | 目标只存在于待审提案中、已退役或不存在 → 退出码 2 | 集成 | FR-CLM-05 | M2 |
+| MVP-CLM-02 | 目标只存在于待审提案中、已退役或不存在 → 退出码 2。（WP2.4 规范，审查 065 B1 后的优先级，已冻结：输入携带当前的 `base_version` 时如此；读取之后另一个审核退役了目标时，基准版本已推进，返回退出码 5） | 集成 | FR-CLM-05 | M2 |
 | MVP-CLM-03 | 摘要超过 500 字符、包含代码围栏、包含空行、包含模拟密钥 → 都返回退出码 2 | 集成 | FR-CLM-03 | M2 |
-| MVP-CLM-04 | 写入的批次记录了 `worktree_id`、`head`、`tree_state` 和 `base_version`；同一 worktree 中恰好有一个活跃会话时，关联该会话 | 集成 | FR-CLM-04 | M2 / M3 |
+| MVP-CLM-04 | 写入的批次记录了 `worktree_id`、`head`、`tree_state` 和 `base_version`；同一 worktree 中恰好有一个活跃会话时，关联该会话。（WP2.4 规范，已冻结：成功输出按 `claim-receipt.v1` 校验，其 `context` 与写入的批次一致；D1：工作区状态读取的环境错误 → 退出码 6，不写入、不分配 `seq`） | 集成 | FR-CLM-04 | M2 / M3 |
 | MVP-CLM-05 | 非 TTY 提交 `kind = manual` → 退出码 3 | 集成 | FR-CLM-05 | M2 |
 
 ### 2.8 执行证据（EV）

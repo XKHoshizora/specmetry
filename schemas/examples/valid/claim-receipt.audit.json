@@ -1,0 +1,57 @@
+{
+  "schema": "specmetry.claim-receipt/v1",
+  "batch_id": "01JA0K7Q8R2T4V6W8X0Y2Z4B6G",
+  "seq": 12,
+  "kind": "audit",
+  "base_version": 1,
+  "context": {
+    "worktree_id": "01J9Z3K5Q8R2T4V6W8X0Y2Z4B6",
+    "head": "3f2a9c1b7d0e4a5f6c8b9d0e1f2a3b4c5d6e7f80",
+    "tree_state": "clean"
+  },
+  "claims": [
+    {
+      "index": 0,
+      "claim_id": "01JA0K7Q8R2T4V6W8X0Y2Z4B6H",
+      "target": "AC-001-1",
+      "target_revision": 1,
+      "assertion": "done",
+      "refs": {
+        "files": [
+          {
+            "path": "internal/auth/login.go",
+            "lines": null,
+            "exists": true
+          }
+        ],
+        "commits": [],
+        "tests": 1
+      }
+    },
+    {
+      "index": 1,
+      "claim_id": "01JA0K7Q8R2T4V6W8X0Y2Z4B6J",
+      "target": "AC-001-2",
+      "target_revision": 1,
+      "assertion": "unknown",
+      "refs": {
+        "files": [],
+        "commits": [],
+        "tests": 0
+      }
+    },
+    {
+      "index": 2,
+      "claim_id": "01JA0K7Q8R2T4V6W8X0Y2Z4B6K",
+      "target": "AC-002-1",
+      "target_revision": 1,
+      "assertion": "not_done",
+      "refs": {
+        "files": [],
+        "commits": [],
+        "tests": 0
+      }
+    }
+  ],
+  "unmapped_work": []
+}
