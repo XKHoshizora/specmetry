@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"compress/zlib"
 	"context"
-	"crypto/sha1" //nolint:gosec // git's own object IDs, to build a prefix collision
+	"crypto/sha1"
 	"encoding/hex"
 	"fmt"
 	"os"
@@ -78,7 +78,7 @@ func resolvedEqual(a, b map[string]bool) bool {
 
 // objectID is git's SHA-1 object ID of an object of type typ.
 func objectIDOf(typ, content string) string {
-	h := sha1.New() //nolint:gosec // git's object ID
+	h := sha1.New()
 	fmt.Fprintf(h, "%s %d\x00%s", typ, len(content), content)
 	return hex.EncodeToString(h.Sum(nil))
 }
@@ -322,7 +322,7 @@ func TestResolveCommitsWithUnreadableStorage(t *testing.T) {
 		path func(r *testutil.GitRepo, sha string) string
 	}{
 		{"a loose object's directory unreadable", func(r *testutil.GitRepo, sha string) string { return filepath.Dir(loose(r, sha)) }},
-		{"a loose object unreadable", func(r *testutil.GitRepo, sha string) string { return loose(r, sha) }},
+		{"a loose object unreadable", loose},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			repo, shas := chain(t, 2)

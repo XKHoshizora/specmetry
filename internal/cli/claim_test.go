@@ -484,7 +484,7 @@ func factState(t *testing.T, home datadir.Dir) string {
 			return err
 		}
 		for _, n := range names {
-			rs, err := tx.QueryContext(ctx, `SELECT * FROM "`+n+`" ORDER BY rowid`) //nolint:gosec // table names from sqlite_master
+			rs, err := tx.QueryContext(ctx, `SELECT * FROM "`+n+`" ORDER BY rowid`)
 			if err != nil {
 				return err
 			}

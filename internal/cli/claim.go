@@ -181,7 +181,7 @@ after confirming. Nothing is retried: on exit 5, read the baseline again.`,
 			// After COMMIT only the output is left: a write that fails or
 			// comes up short cannot be undone, nor followed by a second
 			// document.
-			var dst io.Writer = cmd.OutOrStdout()
+			dst := cmd.OutOrStdout()
 			if asJSON {
 				dst = termtext.Raw(dst)
 			}
