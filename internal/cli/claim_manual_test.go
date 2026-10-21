@@ -156,6 +156,104 @@ func TestClaimManualRefusedOnTheAgentChannel(t *testing.T) {
 	}
 }
 
+// Review 067 B2 (WP2.4 spec §5 step 10, §9.3): the receipt is built from
+// the rows written and validated against claim-receipt.v1 before COMMIT
+// whatever the output; --json only chooses how it is shown.
+//   - Sync, audit and manual batches are stored and reported, in text (which
+//     names the stored seq) and with --json (the receipt, as stored).
+//   - A receipt that does not conform (injected) is exit 1, internal, in
+//     both modes: no batch, claim, unmapped work or seq, no success output,
+//     the injected value not echoed. For a manual batch, a failing dry run
+//     ends before the prompt; a final transaction failing after the
+//     confirmation writes nothing either.
+func TestClaimReceiptCheckedInEveryMode(t *testing.T) {
+	home, dir := claimsProjectOutsideGit(t)
+	docs := map[string]map[string]any{
+		claim.Sync:   claimDoc(claim.Sync, 1, claimOn("AC-001-1", 1, "done", nil)),
+		claim.Audit:  claimDoc(claim.Audit, 1, claimOn("AC-001-2", 1, "unknown", nil)),
+		claim.Manual: manualDoc(),
+	}
+	run := func(kind, mode string) (int, string, string) {
+		t.Helper()
+		args := []string{"claim", "--file", writeClaims(t, docs[kind])}
+		if mode == "--json" {
+			args = append(args, "--json")
+		}
+		if kind == claim.Manual {
+			return asHuman(t, dir, "v1", args...)
+		}
+		return specmetry(t, dir, "", args...)
+	}
+	val, err := schemas()
+	if err != nil {
+		t.Fatal(err)
+	}
+	modes := []string{"text", "--json"}
+	for _, kind := range []string{claim.Sync, claim.Audit, claim.Manual} {
+		for _, mode := range modes {
+			code, stdout, stderr := run(kind, mode)
+			if code != apperr.ExitOK {
+				t.Fatalf("%s, %s: exit %d\n%s%s", kind, mode, code, stdout, stderr)
+			}
+			last := rows(t, home, `SELECT seq, kind FROM claim_batches ORDER BY seq DESC LIMIT 1`)
+			if mode == "text" {
+				if !strings.Contains(stdout, "stored at seq "+last[0][0]+" ("+kind+",") || last[0][1] != kind {
+					t.Errorf("%s, text: batch %v\n%s", kind, last, stdout)
+				}
+				continue
+			}
+			if err := val.ValidateJSON("claim-receipt.v1", []byte(wholeJSON(t, stdout))); err != nil {
+				t.Fatalf("%s: stdout is not claim-receipt.v1: %v\n%s", kind, err, stdout)
+			}
+			var r claimOut
+			if err := json.Unmarshal([]byte(stdout), &r); err != nil {
+				t.Fatal(err)
+			}
+			claimStored(t, home, docs[kind], r)
+		}
+	}
+
+	canary := testutil.NewCanary(t)
+	calls, failOn := 0, 0
+	testHookClaimReceipt = func(r *claim.Receipt) {
+		calls++
+		if calls == failOn {
+			r.BatchID = canary
+		}
+	}
+	t.Cleanup(func() { testHookClaimReceipt = nil })
+	refused := func(name, kind, mode string, fail int, prompted bool) {
+		t.Helper()
+		calls, failOn = 0, fail
+		before := factState(t, home)
+		code, stdout, stderr := run(kind, mode)
+		out := stdout + stderr
+		if code != apperr.ExitInternal || strings.Contains(out, "stored at seq") || strings.Contains(out, canary) || strings.Contains(out, "to confirm") != prompted {
+			t.Errorf("%s, %s: exit %d\n%s%s", name, mode, code, stdout, stderr)
+		}
+		if mode == "--json" {
+			var env apperr.Envelope
+			if err := json.Unmarshal([]byte(wholeJSON(t, stdout)), &env); err != nil || env.Error.Code != apperr.Internal || !strings.Contains(env.Error.Message, "claim-receipt.v1") {
+				t.Errorf("%s, --json: %v\n%s", name, err, stdout)
+			}
+		} else if !strings.Contains(stderr, "claim-receipt.v1") {
+			t.Errorf("%s, text: stderr %q", name, stderr)
+		}
+		if calls != fail {
+			t.Errorf("%s, %s: the receipt was built %d times, want %d", name, mode, calls, fail)
+		}
+		if after := factState(t, home); after != before {
+			t.Errorf("%s, %s wrote:\n%s\n---\n%s", name, mode, before, after)
+		}
+	}
+	for _, mode := range modes {
+		refused("sync", claim.Sync, mode, 1, false)
+		refused("audit", claim.Audit, mode, 1, false)
+		refused("manual, the dry run", claim.Manual, mode, 1, false)
+		refused("manual, the final transaction", claim.Manual, mode, 2, true)
+	}
+}
+
 func set(t *testing.T, doc map[string]any, pointer string, v any) map[string]any {
 	t.Helper()
 	return patched(t, doc, pointer, v).(map[string]any)

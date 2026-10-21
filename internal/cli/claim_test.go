@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"bytes"
+	"compress/zlib"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -849,24 +851,40 @@ func TestClaimRefuses(t *testing.T) {
 // WP2.4 spec §5 step 10 and §15: a worktree a claim names for the first
 // time is registered in the claim's transaction with a seq of its own, just
 // before the batch's; when the claim is refused there (a stale revision),
-// or its receipt does not conform (exit 1, the receipt validated before
-// COMMIT), the registration is rolled back with everything else.
+// or its receipt does not conform (exit 1: the receipt is validated before
+// COMMIT, in text as with --json, review 067 B2), the registration is
+// rolled back with everything else, nothing reports success, and the
+// injected value is not echoed.
 func TestClaimRegistersTheWorktreeOrNothing(t *testing.T) {
 	home, f, _ := claimsProject(t)
 	wt := f.Repo.AddWorktree("feature-a")
 	claimRefused(t, home, wt, claimDoc(claim.Sync, 1, claimOn("AC-001-1", 3, "done", nil)), 5, "/claims/0/target_revision")
 
-	testHookClaimReceipt = func(r *claim.Receipt) { r.Seq = 0 }
+	canary := testutil.NewCanary(t)
+	testHookClaimReceipt = func(r *claim.Receipt) { r.BatchID = canary }
 	t.Cleanup(func() { testHookClaimReceipt = nil })
-	before := factState(t, home)
 	doc := claimDoc(claim.Sync, 1, claimOn("AC-001-1", 1, "done", nil))
-	code, stdout, stderr := specmetry(t, wt, "", "claim", "--file", writeClaims(t, doc), "--json")
-	var env apperr.Envelope
-	if err := json.Unmarshal([]byte(wholeJSON(t, stdout)), &env); code != apperr.ExitInternal || err != nil || !strings.Contains(env.Error.Message, "claim-receipt.v1") {
-		t.Errorf("a receipt that does not conform: exit %d\n%s%s", code, stdout, stderr)
-	}
-	if after := factState(t, home); after != before {
-		t.Errorf("a receipt that does not conform wrote:\n%s\n---\n%s", before, after)
+	for _, mode := range []string{"--json", "text"} {
+		before := factState(t, home)
+		args := []string{"claim", "--file", writeClaims(t, doc)}
+		if mode == "--json" {
+			args = append(args, "--json")
+		}
+		code, stdout, stderr := specmetry(t, wt, "", args...)
+		if code != apperr.ExitInternal || strings.Contains(stdout, "stored at seq") || strings.Contains(stdout+stderr, canary) {
+			t.Errorf("%s, a receipt that does not conform: exit %d\n%s%s", mode, code, stdout, stderr)
+		}
+		if mode == "--json" {
+			var env apperr.Envelope
+			if err := json.Unmarshal([]byte(wholeJSON(t, stdout)), &env); err != nil || env.Error.Code != apperr.Internal || !strings.Contains(env.Error.Message, "claim-receipt.v1") {
+				t.Errorf("--json: %v\n%s", err, stdout)
+			}
+		} else if !strings.Contains(stderr, "claim-receipt.v1") || stdout != "" {
+			t.Errorf("text: stdout %q, stderr %q", stdout, stderr)
+		}
+		if after := factState(t, home); after != before {
+			t.Errorf("%s, a receipt that does not conform, wrote:\n%s\n---\n%s", mode, before, after)
+		}
 	}
 	testHookClaimReceipt = nil
 
@@ -934,6 +952,77 @@ func TestClaimWorktreeState(t *testing.T) {
 	r := claimOK(t, home, wt, claimDoc(claim.Sync, 1, claimOn("AC-001-1", 1, "done", nil)))
 	if r.Context.TreeState != "unknown" || r.Context.Head == nil {
 		t.Errorf("receipt = %+v", r)
+	}
+}
+
+// Review 067 B1 through the claim command: a commit prefix that names a
+// blob is marked unknown_commit and stored while the blob is healthy; once
+// the blob's loose file still inflates a header but no longer holds the
+// object its ID names, the same batch is exit 6 with nothing written (no
+// batch, claim, unmapped work, worktree registered for it, or seq), with
+// --json and in text, alone or among healthy references, and the blob's
+// content is in no output and nowhere in the data directory. Repaired, the
+// batch is stored again.
+func TestClaimRefusesADamagedCommitCandidate(t *testing.T) {
+	home, f, dir := claimsProject(t)
+	canary := testutil.NewCanary(t)
+	content := filepath.Join(t.TempDir(), "blob.txt")
+	if err := os.WriteFile(content, []byte("healthy "+canary+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	blob := f.Repo.Git("hash-object", "-w", content)
+	head := f.Repo.Git("rev-parse", "HEAD")
+	doc := func(commits ...any) map[string]any {
+		d := claimDoc(claim.Sync, 1, claimOn("AC-001-1", 1, "done", map[string]any{"commits": commits}))
+		d["unmapped_work"] = []any{map[string]any{"summary": "canary-unmapped-summary"}}
+		return d
+	}
+	if r := claimOK(t, home, dir, doc(blob)); r.Claims[0].Refs.marks() != "unknown_commit tests=0" {
+		t.Fatalf("a healthy blob: %s", r.Claims[0].Refs.marks())
+	}
+
+	p := filepath.Join(dir, ".git", "objects", blob[:2], blob[2:])
+	original, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var b bytes.Buffer
+	z := zlib.NewWriter(&b)
+	_, _ = z.Write([]byte("blob 500\x00cut " + canary))
+	_ = z.Close()
+	if err := os.Chmod(p, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, b.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, refs := range [][]any{{blob}, {head[:7], blob}} {
+		env := claimRefused(t, home, dir, doc(refs...), 6, "")
+		if !strings.Contains(env.Error.Message, "cannot be resolved reliably") || strings.Contains(env.Error.Message, canary) {
+			t.Errorf("refs %v: %s", refs, env.Error.Message)
+		}
+	}
+	wt := f.Repo.AddWorktree("feature-b1")
+	before := factState(t, home)
+	code, stdout, stderr := specmetry(t, wt, "", "claim", "--file", writeClaims(t, doc(blob)))
+	if code != apperr.ExitEnvironment || strings.Contains(stdout, "stored at seq") || !strings.Contains(stderr, "cannot be resolved reliably") {
+		t.Errorf("text, from a new worktree: exit %d\n%s%s", code, stdout, stderr)
+	}
+	if after := factState(t, home); after != before {
+		t.Errorf("text, from a new worktree, wrote:\n%s\n---\n%s", before, after)
+	}
+	if strings.Contains(stdout+stderr, canary) {
+		t.Errorf("the blob's content reached the output:\n%s%s", stdout, stderr)
+	}
+	if hits := testutil.FindInTree(t, home.Path, canary); len(hits) != 0 {
+		t.Errorf("the blob's content reached the data directory: %v", hits)
+	}
+
+	if err := os.WriteFile(p, original, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if r := claimOK(t, home, wt, doc(head[:7], blob)); r.Claims[0].Refs.marks() != "resolved unknown_commit tests=0" {
+		t.Errorf("repaired: %s", r.Claims[0].Refs.marks())
 	}
 }
 

@@ -214,20 +214,22 @@ func readClaims(file string, stdin io.Reader) ([]byte, error) {
 	return b, nil
 }
 
-// claimOutput is what the command prints on success: the claim-receipt.v1
-// document, validated against its schema (a document that does not
-// conform is an internal error), or the text.
+// claimOutput is what the command prints on success, made before COMMIT:
+// the receipt is validated against claim-receipt.v1 first, whatever is
+// printed (review 067 B2: --json only chooses how it is shown); one that
+// does not conform is an internal error, and the transaction is rolled
+// back. Then the claim-receipt.v1 document, or the text, is encoded.
 func claimOutput(r claim.Receipt, asJSON bool) ([]byte, error) {
-	if !asJSON {
-		return []byte(claimText(r)), nil
-	}
 	val, err := validator()
 	if err != nil {
 		return nil, apperr.Wrap(apperr.Internal, err, "cannot load the exchange schemas")
 	}
 	if err := val.ValidateValue("claim-receipt.v1", r); err != nil {
 		e := apperr.From(err)
-		return nil, apperr.Newf(apperr.Internal, "the claim-receipt.v1 output does not conform to its schema; nothing was written: %s", e.Message).WithDetails(e.Details...)
+		return nil, apperr.Newf(apperr.Internal, "the claim receipt does not conform to claim-receipt.v1; nothing was written: %s", e.Message).WithDetails(e.Details...)
+	}
+	if !asJSON {
+		return []byte(claimText(r)), nil
 	}
 	b, err := json.MarshalIndent(r, "", "  ")
 	if err != nil {
