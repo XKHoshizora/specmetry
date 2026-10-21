@@ -4,10 +4,12 @@ import (
 	"context"
 	"crypto/sha1" //nolint:gosec // git's own object IDs, not a security use
 	"encoding/hex"
-	"io"
+	"errors"
+	"hash"
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/XKHoshizora/specmetry/internal/apperr"
@@ -20,16 +22,27 @@ var commitPrefix = regexp.MustCompile(`^[0-9a-f]{7,40}$`)
 // whether it names exactly one commit the repository can read (WP2.4 spec
 // §7, decision E4):
 //   - true: git lists exactly one object whose ID starts with the prefix,
-//     the object is a commit, and it reads whole, its content hashing to
-//     its ID;
+//     and it is a commit;
 //   - false: git lists no object, the one object it lists is not a commit
-//     (a tree, a blob, a tag), or it lists several (a true ambiguity: a
-//     longer prefix or the full ID tells them apart);
-//   - an environment error (exit 6) otherwise, and no answer at all: an
-//     object git lists that it cannot read or classify, anything git
-//     writes to stderr, an exit status or an answer other than the
-//     expected ones, or a failed storage check. A failed git command is
-//     never taken for false.
+//     (a tree, a blob, or a tag, even one that points to a commit), or it
+//     lists several (a true ambiguity: a longer prefix or the full ID tells
+//     them apart);
+//   - an environment error (exit 6) otherwise, and no answer at all for any
+//     prefix: an object git lists that does not read whole as the object
+//     its ID names, anything git writes to stderr, an exit status or an
+//     answer other than the expected ones, or a failed storage check. A
+//     failed git command is never taken for false.
+//
+// Every object a prefix lists is read whole before any answer (review 067
+// B1): not only a commit that would resolve, but also a lone non-commit
+// and each candidate of an ambiguous prefix, since each decides the
+// answer. git does not check an object's hash when it reads it: a damaged
+// loose object whose header still inflates comes out cut short, or padded
+// with whatever was in memory, and one holding another object's bytes
+// comes out as that object, all with exit 0 (scratchpad experiments trunc
+// and trunc2, git 2.56). So each object's header must be the type and size
+// git listed it with, and its content, as it streams past and never kept,
+// must be exactly that size and hash to its ID.
 //
 // The prefixes are 7 to 40 lower-case hexadecimal digits (claims.v1
 // refuses anything else first); any other is an internal error, and never
@@ -37,10 +50,12 @@ var commitPrefix = regexp.MustCompile(`^[0-9a-f]{7,40}$`)
 // are the commit scan's (scanCall): a git shown never to fetch an object
 // (PD-26), with the commit-graph and the multi-pack-index out of use, so
 // that git lists the objects of the loose directories and of every pack
-// index itself. The storage check (storage.go) runs once whenever there is
-// a prefix: storage that is damaged, incomplete or unreadable can hide an
-// object from git, which would make an ambiguous prefix look unique or a
-// commit look absent. Nothing is written, and git's messages are not kept.
+// index itself. Each object is read once, however many prefixes list it,
+// in one cat-file --batch, which a cancelled context ends. The storage
+// check (storage.go) runs once whenever there is a prefix: storage that is
+// damaged, incomplete or unreadable can hide an object from git, which
+// would make an ambiguous prefix look unique or a commit look absent.
+// Nothing is written, and git's messages are not kept.
 func ResolveCommits(ctx context.Context, s *Scratch, worktree string, prefixes []string) (map[string]bool, error) {
 	var unique []string
 	for _, p := range prefixes {
@@ -56,7 +71,7 @@ func ResolveCommits(ctx context.Context, s *Scratch, worktree string, prefixes [
 		return got, nil
 	}
 	unreliable := apperr.New(apperr.Environment,
-		"a commit reference cannot be resolved reliably: git cannot read an object it lists, or the object storage is damaged, incomplete or unreadable; nothing was written; run git fsck in this directory")
+		"a commit reference cannot be resolved reliably: git cannot read an object it lists as the object its ID names, or the object storage is damaged, incomplete or unreadable; nothing was written; run git fsck in this directory")
 
 	// 1. The objects each prefix names, as git lists them.
 	candidates := map[string][]string{}
@@ -88,56 +103,21 @@ func ResolveCommits(ctx context.Context, s *Scratch, worktree string, prefixes [
 		candidates[p] = ids
 	}
 
-	// 2. The type and size of every listed object, from its header.
-	types, sizes := map[string]string{}, map[string]string{}
+	// 2. Every listed object read whole and checked against its ID.
+	types := map[string]string{}
 	if len(listed) > 0 {
+		v := &objectVerifier{ids: listed, types: types}
 		r, err := scanCall(ctx, s, call{label: "cat-file", dir: worktree,
-			args: []string{"cat-file", "--batch-check"}, stdin: []byte(strings.Join(listed, "\n") + "\n")})
+			args: []string{"cat-file", "--batch"}, stdin: []byte(strings.Join(listed, "\n") + "\n"), stdout: v})
 		if err != nil {
 			return nil, err
 		}
-		if r.code != 0 || r.stderr {
-			return nil, unreliable
-		}
-		lines := strings.Split(strings.TrimSuffix(string(r.out), "\n"), "\n")
-		if len(lines) != len(listed) {
-			return nil, unreliable
-		}
-		for i, line := range lines {
-			f := strings.Fields(line)
-			if len(f) != 3 || f[0] != listed[i] || !slices.Contains([]string{"commit", "tree", "blob", "tag"}, f[1]) || !isDecimal(f[2]) {
-				return nil, unreliable
-			}
-			types[listed[i]], sizes[listed[i]] = f[1], f[2]
-		}
-	}
-
-	// 3. Exactly one object, a commit, read whole. git does not check an
-	// object's hash when it reads it: a damaged loose object whose header
-	// still reads comes out at its stated size, padded, with exit 0
-	// (scratchpad experiment trunc, git 2.56). So the content is hashed
-	// as it streams past, never kept, and must be the object the ID names.
-	var read []string
-	for _, p := range unique {
-		ids := candidates[p]
-		got[p] = len(ids) == 1 && types[ids[0]] == "commit"
-		if got[p] && !slices.Contains(read, ids[0]) {
-			read = append(read, ids[0])
-		}
-	}
-	for _, id := range read {
-		h := sha1.New() //nolint:gosec // git's own object ID, not a security use
-		_, _ = io.WriteString(h, "commit "+sizes[id]+"\x00")
-		r, err := scanCall(ctx, s, call{label: "cat-file", dir: worktree, args: []string{"cat-file", "commit", id}, stdout: h})
-		if err != nil {
-			return nil, err
-		}
-		if r.code != 0 || r.stderr || hex.EncodeToString(h.Sum(nil)) != id {
+		if r.code != 0 || r.stderr || v.close() != nil {
 			return nil, unreliable
 		}
 	}
 
-	// 4. The storage git listed from, checked by Specmetry itself.
+	// 3. The storage git listed from, checked by Specmetry itself.
 	objects, err := call{label: "rev-parse", dir: worktree,
 		args: []string{"rev-parse", "--path-format=absolute", "--git-path", "objects"}}.must(ctx)
 	if err != nil {
@@ -147,5 +127,108 @@ func ResolveCommits(ctx context.Context, s *Scratch, worktree string, prefixes [
 	if strings.ContainsAny(dir, "\r\n") || !filepath.IsAbs(dir) || checkStorage(dir) != nil {
 		return nil, unreliable
 	}
+
+	// 4. The answers, only now that every object they rest on is checked.
+	for _, p := range unique {
+		ids := candidates[p]
+		got[p] = len(ids) == 1 && types[ids[0]] == "commit"
+	}
 	return got, nil
+}
+
+// errObject is an object cat-file --batch did not give as the object its
+// ID names. It is never shown: the caller reports the reference as one
+// that cannot be resolved reliably.
+var errObject = errors.New("an object does not read as the object its ID names")
+
+// maxBatchHeader bounds a header line of cat-file --batch: an ID, a type
+// and a size.
+const maxBatchHeader = 128
+
+// objectVerifier checks the output of cat-file --batch as it streams past,
+// for the objects ids in order: each the header "<id> <type> <size>" of
+// that ID with a known type, then exactly size bytes whose object ID,
+// recomputed over "<type> <size>\x00" and them, is the ID, then a line
+// break. It records each object's type and keeps nothing of its content.
+// After a mismatch it takes and drops the rest, so that git ends normally;
+// close reports it.
+type objectVerifier struct {
+	ids   []string
+	types map[string]string
+	next  int       // the index of the object being read
+	head  []byte    // the header line so far
+	hash  hash.Hash // nil while a header is read
+	left  int64     // content bytes still to come
+	err   error
+}
+
+func (v *objectVerifier) Write(p []byte) (int, error) {
+	n := len(p)
+	for len(p) > 0 && v.err == nil {
+		switch {
+		case v.hash == nil:
+			i := slices.Index(p, '\n')
+			if i < 0 {
+				v.head = append(v.head, p...)
+				p = nil
+			} else {
+				v.head = append(v.head, p[:i]...)
+				p = p[i+1:]
+				v.begin()
+			}
+			if len(v.head) > maxBatchHeader {
+				v.err = errObject
+			}
+		case v.left > 0:
+			k := int64(len(p))
+			if k > v.left {
+				k = v.left
+			}
+			_, _ = v.hash.Write(p[:k])
+			v.left -= k
+			p = p[k:]
+		default:
+			if p[0] != '\n' {
+				v.err = errObject
+				break
+			}
+			p = p[1:]
+			if hex.EncodeToString(v.hash.Sum(nil)) != v.ids[v.next] {
+				v.err = errObject
+				break
+			}
+			v.next++
+			v.hash = nil
+		}
+	}
+	return n, nil
+}
+
+// begin reads the header of the next object.
+func (v *objectVerifier) begin() {
+	f := strings.Fields(string(v.head))
+	v.head = v.head[:0]
+	if v.next >= len(v.ids) || len(f) != 3 || f[0] != v.ids[v.next] ||
+		!slices.Contains([]string{"commit", "tree", "blob", "tag"}, f[1]) || !isDecimal(f[2]) {
+		v.err = errObject
+		return
+	}
+	size, err := strconv.ParseInt(f[2], 10, 64)
+	if err != nil {
+		v.err = errObject
+		return
+	}
+	v.types[f[0]] = f[1]
+	v.hash = sha1.New() //nolint:gosec // git's own object ID, not a security use
+	_, _ = v.hash.Write([]byte(f[1] + " " + f[2] + "\x00"))
+	v.left = size
+}
+
+// close reports whether every object was given whole and as its ID names,
+// with nothing else.
+func (v *objectVerifier) close() error {
+	if v.err == nil && (v.next != len(v.ids) || v.hash != nil || len(v.head) != 0) {
+		v.err = errObject
+	}
+	return v.err
 }

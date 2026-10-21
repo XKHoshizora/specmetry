@@ -170,6 +170,122 @@ func TestResolveCommitsAmbiguous(t *testing.T) {
 	}
 }
 
+// damageLoose replaces the loose object oid with content, compressed: its
+// header may still inflate while the object is not the one its ID names.
+// It returns the original bytes, to restore it.
+func damageLoose(t *testing.T, repo *testutil.GitRepo, oid string, content []byte) []byte {
+	t.Helper()
+	p := loose(repo, oid)
+	original, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var b bytes.Buffer
+	z := zlib.NewWriter(&b)
+	_, _ = z.Write(content)
+	_ = z.Close()
+	writable(t, p)
+	if err := os.WriteFile(p, b.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return original
+}
+
+func restoreLoose(t *testing.T, repo *testutil.GitRepo, oid string, original []byte) {
+	t.Helper()
+	if err := os.WriteFile(loose(repo, oid), original, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Review 067 B1 (E4): every object a prefix lists is read whole and must
+// hash to its ID before any answer: a commit, and also the one non-commit
+// a prefix names and every candidate of an ambiguous prefix. A loose
+// object whose header inflates but whose content is cut, or that holds
+// another object's bytes (git then reads it as that object, exit 0), is an
+// environment error, not false; so is a batch with one such prefix among
+// healthy ones, with no partial answer. Healthy blobs, trees, annotated
+// tags (never taken for the commit they point to) and true ambiguities
+// stay false; a repaired object, or a longer prefix past the damaged
+// candidate, resolves again.
+func TestResolveCommitsVerifiesEveryCandidate(t *testing.T) {
+	requireSafeGit(t)
+	setup := func(t *testing.T) (*testutil.GitRepo, []string, string, string, string, string, string) {
+		repo, shas := chain(t, 2)
+		repo.Git("tag", "-a", "v1", "-m", "release", shas[1])
+		commit, blob, a, b := collisions(t, repo)
+		return repo, shas, repo.Git("rev-parse", "v1"), commit, blob, a, b
+	}
+	unreliable := func(t *testing.T, repo *testutil.GitRepo, what string, prefixes ...string) {
+		t.Helper()
+		got, err := ResolveCommits(ctx, testScratch(t), repo.Dir, prefixes)
+		if apperr.ExitCode(err) != apperr.ExitEnvironment || got != nil {
+			t.Errorf("%s: ResolveCommits(%v) = %v, %v; want an environment error and no answer", what, prefixes, got, err)
+		}
+	}
+	resolves := func(t *testing.T, repo *testutil.GitRepo, what string, want map[string]bool) {
+		t.Helper()
+		var prefixes []string
+		for p := range want {
+			prefixes = append(prefixes, p)
+		}
+		got, err := ResolveCommits(ctx, testScratch(t), repo.Dir, prefixes)
+		if err != nil || !resolvedEqual(got, want) {
+			t.Errorf("%s: ResolveCommits = %v, %v; want %v", what, got, err, want)
+		}
+	}
+	t.Run("healthy", func(t *testing.T) {
+		repo, shas, tag, commit, blob, a, _ := setup(t)
+		tree := repo.Git("rev-parse", shas[1]+"^{tree}")
+		resolves(t, repo, "healthy objects", map[string]bool{shas[1][:7]: true, shas[1]: true, blob: false, tree: false, tag: false, tag[:10]: false,
+			commit[:7]: false, a[:7]: false})
+	})
+	t.Run("a unique blob cut short", func(t *testing.T) {
+		repo, _, _, _, blob, _, _ := setup(t)
+		original := damageLoose(t, repo, blob, []byte("blob 500\x00short"))
+		unreliable(t, repo, "the blob", blob)
+		unreliable(t, repo, "the blob among healthy prefixes", blob, repo.Git("rev-parse", "HEAD")[:7])
+		restoreLoose(t, repo, blob, original)
+		resolves(t, repo, "the blob repaired", map[string]bool{blob: false})
+	})
+	t.Run("a unique tree cut short", func(t *testing.T) {
+		repo, shas, _, _, _, _, _ := setup(t)
+		tree := repo.Git("rev-parse", shas[0]+"^{tree}")
+		damageLoose(t, repo, tree, []byte("tree 300\x00100644 a.txt\x00"))
+		unreliable(t, repo, "the tree", tree)
+	})
+	t.Run("a tag cut short", func(t *testing.T) {
+		repo, _, tag, _, _, _, _ := setup(t)
+		damageLoose(t, repo, tag, []byte("tag 400\x00object "))
+		unreliable(t, repo, "the tag", tag[:10])
+	})
+	t.Run("a commit holding a blob's bytes", func(t *testing.T) {
+		repo, shas, _, _, _, _, _ := setup(t)
+		damageLoose(t, repo, shas[0], []byte("blob 8\x00another\n"))
+		unreliable(t, repo, "a commit git reads as a blob", shas[0][:7])
+	})
+	t.Run("a blob holding another blob's bytes", func(t *testing.T) {
+		repo, _, _, _, blob, _, _ := setup(t)
+		damageLoose(t, repo, blob, []byte("blob 6\x00other\n"))
+		unreliable(t, repo, "a blob of other content", blob)
+	})
+	t.Run("an ambiguous prefix with a damaged commit", func(t *testing.T) {
+		repo, _, _, _, _, a, b := setup(t)
+		original := damageLoose(t, repo, b, []byte("commit 500\x00tree "+emptyTree+"\n"))
+		unreliable(t, repo, "the shared prefix", a[:7])
+		unreliable(t, repo, "the damaged commit", b)
+		resolves(t, repo, "a longer prefix past it", map[string]bool{distinct(a, b): true})
+		restoreLoose(t, repo, b, original)
+		resolves(t, repo, "repaired", map[string]bool{a[:7]: false, b: true})
+	})
+	t.Run("an ambiguous prefix with a damaged blob", func(t *testing.T) {
+		repo, _, _, commit, blob, _, _ := setup(t)
+		damageLoose(t, repo, blob, []byte("blob 500\x00short"))
+		unreliable(t, repo, "the shared prefix", commit[:7])
+		resolves(t, repo, "the commit's longer prefix", map[string]bool{distinct(commit, blob): true})
+	})
+}
+
 // E4: an object that cannot be read, storage that is damaged or
 // incomplete, or one that cannot be checked, is no answer at all: an
 // environment error (exit 6), never false, whether the prefix names a
@@ -340,6 +456,24 @@ func TestResolveCommitsWithUnreadableStorage(t *testing.T) {
 			}
 		})
 	}
+	// Review 067 B1: an ambiguous prefix one of whose candidates cannot be
+	// read is no false either.
+	t.Run("an unreadable candidate of an ambiguous prefix", func(t *testing.T) {
+		repo, _ := chain(t, 1)
+		_, _, a, b := collisions(t, repo)
+		p := loose(repo, b)
+		info, err := os.Stat(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(p, 0); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(p, info.Mode()) })
+		if got, err := ResolveCommits(ctx, testScratch(t), repo.Dir, []string{a[:7]}); apperr.ExitCode(err) != apperr.ExitEnvironment || got != nil {
+			t.Errorf("ResolveCommits = %v, %v; want an environment error", got, err)
+		}
+	})
 }
 
 // PD-26: with a git that would fetch a missing object, no prefix is
@@ -355,7 +489,7 @@ func TestResolveCommitsNeedsASafeGit(t *testing.T) {
 		t.Errorf("ResolveCommits = %v, %v; want the object reads refused", got, err)
 	}
 	for _, c := range calls() {
-		for _, sub := range []string{"--disambiguate=" + shas[0][:7], "--batch-check", "commit"} {
+		for _, sub := range []string{"--disambiguate=" + shas[0][:7], "--batch", "--batch-check", "commit"} {
 			if slices.Contains(c.Args, sub) && !slices.ContainsFunc(c.Args, func(a string) bool { return strings.HasPrefix(a, "--git-dir=") }) {
 				t.Errorf("%s ran in the repository: %q", sub, c.Args)
 			}
