@@ -57,7 +57,13 @@ func TestResolveCommits(t *testing.T) {
 	if got, err := ResolveCommits(ctx, testScratch(t), repo.Dir, nil); err != nil || len(got) != 0 {
 		t.Errorf("ResolveCommits(none) = %v, %v", got, err)
 	}
-	for _, p := range []string{"HEAD", strings.ToUpper(shas[0][:7]), shas[0][:6], shas[0] + "0", "--all", shas[0][:7] + "^{tree}", ""} {
+	// Upper case: a fixed prefix, and the commit's own ID when it has a
+	// letter (an ID's first seven digits may all be decimal, run 39525308601).
+	invalid := []string{"HEAD", "ABCDEF1", shas[0][:6], shas[0] + "0", "--all", shas[0][:7] + "^{tree}", ""}
+	if upper := strings.ToUpper(shas[0]); upper != shas[0] {
+		invalid = append(invalid, upper)
+	}
+	for _, p := range invalid {
 		if got, err := ResolveCommits(ctx, testScratch(t), repo.Dir, []string{p}); apperr.ExitCode(err) != apperr.ExitInternal {
 			t.Errorf("ResolveCommits(%q) = %v, %v; want an internal error", p, got, err)
 		}
