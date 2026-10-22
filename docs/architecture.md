@@ -1309,7 +1309,7 @@ schemas/  skill/  web/  testdata/fixtures/  docs/
 | TD-03 | Skill 与 Hook 的安装范围 | 默认用户级，可选项目级 | M3 |
 | TD-04 | SQLite 驱动 | **已确认**：`modernc.org/sqlite`。spike（v1.60.1，Windows）验证了 WAL、`wal_checkpoint(TRUNCATE)`、`BEGIN IMMEDIATE` / `EXCLUSIVE`、触发器 `RAISE(ABORT)`、`VACUUM INTO`，以及两个连接各并发写 200 次时 `seq` 唯一且连续 | 已确认（2026-10-13） |
 | TD-05 | git 访问方式 | **已确认（2026-10-14，产品负责人）**：调用 `git` CLI；Hook 中只读文件 | 已确认（2026-10-14） |
-| TD-06 | Windows 上执行检查的 shell | 优先 `sh`（Git for Windows），找不到时用 `cmd /C`；AC 可以指定 `shell`。M2 开工准备报告第 5.1 节有修订后的草案（M2-Q1），尚未批准 | WP2.5 开工前（2026-10-18，产品负责人调整截止） |
+| TD-06 | Windows 上执行检查的 shell | 优先 `sh`（Git for Windows），找不到时用 `cmd /C`；AC 可以指定 `shell`。M2 开工准备报告第 5.1 节有修订后的草案（M2-Q1），尚未批准；WP2.5 规范草案（[wp2.5-check-runner.md](wp2.5-check-runner.md) §5、§6、§17.3 的 D1 ~ D5）按 2026-10-22 的实验与审查 071 再次修订，同样尚未批准 | WP2.5 开工前（2026-10-18，产品负责人调整截止） |
 | TD-07 | API 契约与 TS 类型 | OpenAPI 引用 `schemas/` 作为请求体定义；生成 TS 类型 | M5 |
 | TD-08 | Dashboard 刷新 | SSE 通知，断线时退回轮询 | M5 |
 | TD-09 | 前端 UI 方案 | 待定；约束：资源全部内嵌 | M5 |
