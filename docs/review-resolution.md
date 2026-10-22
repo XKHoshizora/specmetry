@@ -4372,3 +4372,64 @@ owner 预检、原消费者崩溃反例、空覆盖及 Windows 子机制按报�
 - PR #30 已修复，待独立复审；当前仍为 NO-GO，不合并，不宣布 B3 关闭。
 - WP2.4 与 M2 都未验收；WP2.5 等其他工作包未启动。
 - PR #31（M-16 的 CI 调整）单独审查，本轮不修改或合并。M-14、M-15、M-16 保持未解决；方案 B 不变；Auto-fix / Auto-merge 保持关闭。
+
+## 82．Review 069：PR #31（M-16 的风险缓解）GO、合并与核验；PR #30 整合合并后的 master
+
+**审查**：[Review 069](reviews/codex-review-069.md)，在 PR #31 的收尾中原样归档为 `b6b8a16bdf417a3d33954b9e10cb4f48ea6181a1`。源文件、归档与该提交 blob 的 SHA-256 均为 `eb257e9177ee514d40a288b9fa9325a0b083aeb6e87f3473ace06b0e3b1e41b7`，逐字节一致。
+
+**审查对象**（不随收尾提交而改变）：
+
+- PR #31，HEAD `0de32c5b4a319619b49a27fe1c8aaac1c80c5d8d`（树 `7406acf`），base `d8f8a50a7f01d9fec9ce7dd699495ff829c9229f`。
+- 一个提交、三个文件：`.github/workflows/ci.yml` 中 Go tests 的 Test 步骤、`docs/m1-exit-evidence.md` §9 的 M-16 行、实施计划的 M-16 行。
+- 审查依据的 CI 是 run 39600735762（attempt 1，8/8，检出 `3c901fb`）。
+
+**结论：GO**。
+
+- 没有 BLOCKER，也没有本 PR 新增的 NON-BLOCKER；报告没有提出新的产品决定。
+- **分组**：Windows 的全部包来自实时的 `go list -tags nowebui ./...`，恰好分成非 CLI 与 CLI 两组。前者保留默认的每包 10 分钟，后者单独使用 `-timeout 20m`。
+- **失败处理**：包枚举失败使步骤失败；任何一组失败都使步骤失败，第一组失败后第二组仍执行。没有自动重试、失败过滤、测试删减或固定的包数量。
+- **不变的部分**：Ubuntu 与 macOS 的执行方式、Ubuntu 的 `-race`、Linux 的 root 跨用户步骤，以及其他 Job。
+- **M-16 继续未解决**：一次成功不证明 20 分钟始终足够，也不证明 CI 变慢的原因。CLI 挂起的报告可能从 10 分钟推迟到 20 分钟；这是负责人批准的本次取舍，不延伸为其他保证豁免。
+
+**负责人决定**（2026-10-22）：
+
+- 条件授权合并 PR #31。
+- PR #31 合并核验及 master CI 全部成功后，把已核验的 master 整合进 PR #30。
+- 不授权合并 PR #30、关闭 B3、宣布验收或启动后续工作包。
+
+**PR #31 的收尾**（只有文档）：
+
+- `b6b8a16` 归档 Review 069；`f13d231` 在 M-16 的活跃记录（`docs/m1-exit-evidence.md` §9 与实施计划）中登记 GO 与条件授权。
+- 相对 `0de32c5` 只有上述三个文档文件。工作流、`internal`、`cmd`、`schemas`、`web`、`scripts`、`go.mod`、`go.sum` 都不变。
+- 收尾 HEAD `f13d23156932e48e558ac6b9609e3991fd8b73f0` 的 CI 是 run 39720152759：`pull_request`，attempt 1，8/8 正式成功，没有重跑。
+  - 8 个 Job 都检出 `949228c`（父提交 `d8f8a50`、`f13d231`），其树 `cd156ae` 等于 `git merge-tree --write-tree` 的结果。
+  - Windows 枚举出 31 个包，分成 30 + 1 两组，每个包执行一次；CLI 一组最后执行，用时 399 s。
+  - 三个平台的包集合相同，没有 FAIL。
+
+**合并与核验**：
+
+- 2026-10-22 以 merge commit 合并，用 `--match-head-commit f13d231…` 锁定完整的最终 HEAD。合并提交为 `8b45ef598da1599ea672072338fef5ed9c6f77ee`，父提交 `d8f8a50`、`f13d231`。
+- master 包含 `f13d231`；合并树 `cd156ae` 与最终 HEAD 相同，`git diff` 为空。
+- master push CI 是 run 39721731294：`push`，attempt 1，8/8 正式成功，没有重跑。
+  - 8 个 Job 都检出 `8b45ef5`。
+  - Windows 按新分组执行：31 个包，30 + 1，每个包一次；CLI 一组用 20 分钟预算，耗时 363 s。
+  - 三个平台的包集合相同，没有 FAIL；Ubuntu 的 root 步骤执行了 8 个 `TestCrossUser*`。
+- 两次 CI 都没有用到 M-15 的重跑许可。
+
+**M-16**：缓解已在 master 生效（Windows 分组执行，CLI 的包级超时为 20 分钟）。这是风险缓解，根因未验证，M-16 保持未解决；代价是 Windows CLI 的挂起最晚 20 分钟才被报告。
+
+**PR #30 的整合**：
+
+- 在 `feat/m2-wp24-claim` 上以 merge commit 合并 `8b45ef5`（不改基，不强推）。合并提交为 `cc2d006251d9d272914fdc9e0f27902caa9119ad`，父提交 `8c0db79`、`8b45ef5`。
+- 只有 `docs/implementation-plan.md` 的相邻两行冲突。PR #30 的 M2-Q6/Q9 行（含 §80、§81）与 master 的 M-16 行都保留，各一次。§80、§81 原样保留，本节接在其后。
+- 整合后：
+  - 源码、测试、Schema、迁移与依赖（`internal`、`cmd`、`schemas`、`web`、`scripts`、`go.mod`、`go.sum`）与 `8c0db79` 相同；
+  - `.github` 与 master `8b45ef5` 相同；
+  - 相对 `8c0db79` 的其余变化，只有 PR #31 带来的 M-16 文档与 Review 069 原文，以及本节与状态行的同步。
+- 整合后的 CI 结果记录在 PR #30 的描述中，不为记录 CI 追加提交。
+
+**状态**：
+
+- Review 067 的 B1、B2 已由 Review 068 关闭；Review 068 的 B3 与 N1 **已修复，待独立复审**。本节不改变这一点，也不改写此前任何审查的结论。PR #30 在复审前仍为 NO-GO，不合并。
+- 最终复审对象是整合后的 PR #30 HEAD，即本节所在的提交（SHA 见 PR #30 的描述）。相对 Review 068 的审查对象 `e70c09b`，源码与测试的增量仍只有 `87fb135`；工作流的变化全部来自已合并的 PR #31。
+- WP2.4 与 M2 都未验收；WP2.5 等其他工作包未启动。M-14、M-15、M-16 保持未解决；方案 B 不变；Auto-fix / Auto-merge 保持关闭。
