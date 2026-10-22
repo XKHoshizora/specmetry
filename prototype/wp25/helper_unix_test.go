@@ -11,7 +11,10 @@ import (
 	"time"
 )
 
-// runHelperPlatform runs the Unix-only helper modes.
+// runHelperPlatform runs the Unix-only helper modes. The parent helpers
+// wait for their children's records and then for their scenario's release
+// (awaitRelease), so their children are still their children when the
+// scenario verifies them.
 func runHelperPlatform(mode string, args []string) (int, bool) {
 	arg := func(i int) int {
 		if i >= len(args) {
@@ -20,28 +23,36 @@ func runHelperPlatform(mode string, args []string) (int, bool) {
 		n, _ := strconv.Atoi(args[i])
 		return n
 	}
+	rep := os.Getenv(reportEnv)
 	switch mode {
 	case "member-parent":
 		// One more member in the same group, then exit: the leader is
 		// gone while the group still has a member.
 		c := helper("sleep", nil)
 		if err := c.Start(); err != nil {
-			return 90, true
+			return exitStart, true
 		}
-		waitReport(os.Getenv(reportEnv), "pid", 1, 5*time.Second)
+		if _, err := awaitRecords(rep, "pid", 1, 5*time.Second); err != nil {
+			return exitWait, true
+		}
+		awaitRelease()
 		return 0, true
 	case "escape-parent":
 		// A descendant that leaves the group (setsid), then exit.
 		c := helper("sleep", nil)
 		c.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 		if err := c.Start(); err != nil {
-			return 90, true
+			return exitStart, true
 		}
-		waitReport(os.Getenv(reportEnv), "pid", 1, 5*time.Second)
+		if _, err := awaitRecords(rep, "pid", 1, 5*time.Second); err != nil {
+			return exitWait, true
+		}
+		awaitRelease()
 		return 0, true
 	case "chain-main":
 		// chain-main <depth>: a chain of depth processes in a new session,
-		// each the parent of the next; exit once all have reported.
+		// each the parent of the next; exit once all have reported and the
+		// scenario has released it.
 		depth := arg(0)
 		if injected("chain-short") {
 			depth--
@@ -49,16 +60,21 @@ func runHelperPlatform(mode string, args []string) (int, bool) {
 		c := helper("chain", nil, strconv.Itoa(depth))
 		c.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 		if err := c.Start(); err != nil {
-			return 90, true
+			return exitStart, true
 		}
-		waitReport(os.Getenv(reportEnv), "pid", arg(0), 10*time.Second)
+		if _, err := awaitRecords(rep, "pid", arg(0), 10*time.Second); err != nil {
+			return exitWait, true
+		}
+		awaitRelease()
 		return 0, true
 	case "chain":
-		report("pid")
+		if report("pid") != nil {
+			return exitReport, true
+		}
 		if d := arg(0); d > 1 {
 			c := helper("chain", nil, strconv.Itoa(d-1))
 			if err := c.Start(); err != nil {
-				return 90, true
+				return exitStart, true
 			}
 		}
 		select {}
@@ -71,7 +87,7 @@ func runHelperPlatform(mode string, args []string) (int, bool) {
 		ign := signal.Ignored(syscall.SIGCHLD)
 		c := helper("exit-after", nil, "100", "0")
 		if err := c.Start(); err != nil {
-			return 90, true
+			return exitStart, true
 		}
 		time.Sleep(600 * time.Millisecond)
 		_, err := waitidNoWait(c.Process.Pid)

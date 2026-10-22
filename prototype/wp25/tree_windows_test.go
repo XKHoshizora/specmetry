@@ -76,6 +76,7 @@ func (c *childProc) reaped() bool {
 }
 
 func (c *childProc) ended() bool { return c.reaped() }
+func (c *childProc) release()    {}
 
 func (c *childProc) stop() {
 	if !c.reaped() {
@@ -84,33 +85,60 @@ func (c *childProc) stop() {
 	}
 }
 
-// pidProc is a process learned from a helper's report, held by a handle
-// opened when it was learned.
+// pidProc is a reported process the scenario verified as its own, held by
+// a handle opened when it was verified; the handle is closed at the end.
 type pidProc struct {
 	pid int
 	h   windows.Handle
+	err error // why the last check could not confirm an end
 }
 
-func ownPID(pid int) (owned, error) {
+// ownReported verifies a reported PID before the scenario may act on it:
+// the process must be in this check's Job, which holds only processes
+// the check started. The PID in a report is never enough on its own.
+func (t *winTree) ownReported(pid int) owned {
 	h, err := windows.OpenProcess(windows.SYNCHRONIZE|windows.PROCESS_TERMINATE|
 		windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
 	if err != nil {
-		return nil, err
+		t.s.invalidf("ownership not established: process %d cannot be opened: %v", pid, err)
 	}
-	return &pidProc{pid: pid, h: h}, nil
+	in, err := isProcessInJob(h, t.job)
+	if err != nil || !in {
+		_ = windows.CloseHandle(h)
+		t.s.invalidf("ownership not established: process %d is not in the check's Job (%v)", pid, err)
+	}
+	p := &pidProc{pid: pid, h: h}
+	t.s.own(p)
+	return p
 }
 
-func (p *pidProc) String() string { return "pid " + strconv.Itoa(p.pid) }
+func (p *pidProc) String() string {
+	if p.err != nil {
+		return "pid " + strconv.Itoa(p.pid) + " (" + p.err.Error() + ")"
+	}
+	return "pid " + strconv.Itoa(p.pid)
+}
 
 func (p *pidProc) ended() bool {
 	if injected("cleanup-unconfirmed") {
 		return false
 	}
 	ev, err := windows.WaitForSingleObject(p.h, 0)
-	return err == nil && ev == windows.WAIT_OBJECT_0
+	if err != nil {
+		p.err = err // a wait that fails is not an end
+		return false
+	}
+	return ev == windows.WAIT_OBJECT_0
 }
 
 func (p *pidProc) stop() { _ = windows.TerminateProcess(p.h, 1) }
+
+func (p *pidProc) release() {
+	if p.h != 0 {
+		_ = windows.CloseHandle(p.h)
+		p.h = 0
+	}
+}
 
 // jobSeams injects a failure at one step of the Windows start and
 // teardown chain; the real call is then not made.
@@ -122,6 +150,7 @@ var errInjected = errors.New("injected failure")
 
 // winTree is one check's Job.
 type winTree struct {
+	s     *scen
 	cmd   *exec.Cmd
 	c     *childProc
 	job   windows.Handle
@@ -157,7 +186,7 @@ func startJob(s *scen, cmd *exec.Cmd, seams jobSeams) (*winTree, string, error) 
 		cmd.SysProcAttr = &syscall.SysProcAttr{}
 	}
 	cmd.SysProcAttr.CreationFlags |= windows.CREATE_SUSPENDED
-	t := &winTree{cmd: cmd, job: job, seams: seams}
+	t := &winTree{s: s, cmd: cmd, job: job, seams: seams}
 	if err := cmd.Start(); err != nil {
 		return t, "create", err
 	}
@@ -198,7 +227,7 @@ func startTree(s *scen, cmd *exec.Cmd) *winTree {
 	if step != "" {
 		s.invalidf("start failed at %s: %v", step, err)
 	}
-	s.defer_(t.close)
+	s.defer_(func() { _, _ = t.close() })
 	return t
 }
 
@@ -243,11 +272,15 @@ func (t *winTree) active() (int, error) {
 }
 
 // confirm waits within d for ActiveProcesses to be 0; a failed query
-// confirms nothing.
+// confirms nothing. A query that fails without an injected fault means
+// the scenario cannot observe what it predicts: it is invalid.
 func (t *winTree) confirm(d time.Duration) bool {
 	deadline := time.Now().Add(d)
 	for {
 		n, err := t.active()
+		if err != nil && t.seams.query == nil {
+			t.s.invalidf("observation failed: %v", err)
+		}
 		if err == nil && n == 0 {
 			return true
 		}
@@ -260,15 +293,18 @@ func (t *winTree) confirm(d time.Duration) bool {
 
 func (t *winTree) reap(d time.Duration) bool { return t.c.reap(d) }
 
-func (t *winTree) close() {
+// close closes this runner's own handles, the process's and the Job's,
+// and returns the results of the closes.
+func (t *winTree) close() (procErr, jobErr error) {
 	if t.proc != 0 {
-		_ = windows.CloseHandle(t.proc)
+		procErr = windows.CloseHandle(t.proc)
 		t.proc = 0
 	}
 	if t.job != 0 {
-		_ = windows.CloseHandle(t.job)
+		jobErr = windows.CloseHandle(t.job)
 		t.job = 0
 	}
+	return procErr, jobErr
 }
 
 // resumeThreads resumes the threads of a suspended process; Go closes the

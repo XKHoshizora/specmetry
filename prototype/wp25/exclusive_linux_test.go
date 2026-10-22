@@ -86,7 +86,11 @@ func (g *procGate) exclusive(fn func() error) error {
 		g.cond.Broadcast()
 		g.mu.Unlock()
 	}()
-	if kids := childrenOf(os.Getpid()); len(kids) > 0 {
+	kids, err := childrenOf(os.Getpid())
+	if err != nil {
+		return fmt.Errorf("%w: the baseline cannot be read: %v", errBaseline, err)
+	}
+	if len(kids) > 0 {
 		return fmt.Errorf("%w: %s", errBaseline, describe(kids))
 	}
 	if err := unix.Prctl(unix.PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0); err != nil {
@@ -116,7 +120,11 @@ func (g *procGate) overlaps() int {
 func describe(pids []int) string {
 	var out []string
 	for _, p := range pids {
-		st, _ := procInfo(p)
+		st, pr := procInfo(p)
+		if pr != present {
+			out = append(out, fmt.Sprintf("%d unreadable", p))
+			continue
+		}
 		mode := "?"
 		if env, err := os.ReadFile(fmt.Sprintf("/proc/%d/environ", p)); err == nil {
 			for _, kv := range strings.Split(string(env), "\x00") {
@@ -128,6 +136,15 @@ func describe(pids []int) string {
 		out = append(out, fmt.Sprintf("%d zombie=%v mode=%s", p, st.zombie, mode))
 	}
 	return strings.Join(out, ", ")
+}
+
+// childCount gives the number of this process's children, or the error.
+func childCount() string {
+	kids, err := childrenOf(os.Getpid())
+	if err != nil {
+		return "unreadable: " + err.Error()
+	}
+	return fmt.Sprint(len(kids))
 }
 
 func subreaper() int {
@@ -166,8 +183,13 @@ func sweep(main int, o sweepOpts) sweepResult {
 	}
 	deadline := time.Now().Add(o.deadline)
 	for {
+		kids, err := childrenOf(self)
+		if err != nil {
+			r.err = err
+			return r
+		}
 		var cand []int
-		for _, k := range childrenOf(self) {
+		for _, k := range kids {
 			if k != main {
 				cand = append(cand, k)
 			}
@@ -183,8 +205,12 @@ func sweep(main int, o sweepOpts) sweepResult {
 		progress := false
 		for _, pid := range cand {
 			r.seen = append(r.seen, pid)
-			st, ok := procInfo(pid)
-			if !ok || st.ppid != self || o.dryRun {
+			st, pr := procInfo(pid)
+			if pr == unknown {
+				r.err = errUnknownState
+				return r
+			}
+			if pr != present || st.ppid != self || o.dryRun {
 				continue
 			}
 			fd, err := open(pid)
@@ -192,12 +218,12 @@ func sweep(main int, o sweepOpts) sweepResult {
 				r.err = err // no fallback to signals by PID
 				return r
 			}
-			st2, ok2 := procInfo(pid)
+			st2, pr2 := procInfo(pid)
 			start := st2.start
 			if o.perturb != nil {
 				start = o.perturb(start)
 			}
-			if !ok2 || st2.ppid != self || start != st.start {
+			if pr2 != present || st2.ppid != self || start != st.start {
 				r.mismatched++
 				_ = unix.Close(fd)
 				continue
@@ -232,19 +258,20 @@ type checkRun struct {
 }
 
 func runCheck(s *scen, depth int, o sweepOpts, reapLeader bool) *checkRun {
-	rep := s.newReport()
+	rep := s.newReport(reportSpec{"pid": depth})
 	cmd := helper("chain-main", []string{reportEnv + "=" + rep}, fmt.Sprint(depth))
+	release := gated(s, cmd)
 	tr := startTree(s, cmd)
 	cr := &checkRun{tr: tr}
-	if ok, _, _ := tr.waitExit(10 * time.Second); !ok {
-		s.invalidf("check main did not exit")
-	}
-	cr.reported = waitReport(rep, "pid", depth, 5*time.Second)
+	// Every level of the chain, verified as a descendant of the check's
+	// main process while it still lives.
+	cr.reported = s.awaitReport(rep, "pid", depth, 5*time.Second)
 	for _, pid := range cr.reported {
-		if p, err := ownPID(pid); err == nil {
-			s.own(p)
-		}
+		tr.ownReported(pid)
 	}
+	release()
+	ok, status, _ := tr.waitExit(10 * time.Second)
+	s.needLoad(ok && status == "exit 0", "a chain of %d verified; the check's main exited 0 (%v, %s)", depth, ok, status)
 	_ = tr.kill()
 	cr.conf = tr.confirm(tKill)
 	if o.deadline == 0 {
@@ -334,7 +361,7 @@ func TestExclusiveGate(t *testing.T) {
 	s.expectTrue("shared children ran meanwhile", sharedRuns > 0, fmt.Sprint(sharedRuns))
 	s.expectTrue("git ran through the gate", git == "" || gitRuns > 0, fmt.Sprintf("%d git runs (%s)", gitRuns, git))
 	s.expect("subreaper after the intervals", 0, subreaper())
-	s.expect("children left", 0, len(childrenOf(os.Getpid())))
+	s.expect("children left", "0", childCount())
 	s.note("%v", notes)
 }
 
@@ -404,7 +431,7 @@ func TestExclusiveConcurrentChecks(t *testing.T) {
 	s.expect("checks refused", 0, refused)
 	s.expect("overlapping check intervals", 0, overlap)
 	s.expect("shared leases overlapping a check", 0, g.overlaps())
-	s.expect("children left", 0, len(childrenOf(os.Getpid())))
+	s.expect("children left", "0", childCount())
 }
 
 func TestExclusiveBypass(t *testing.T) {
@@ -467,7 +494,7 @@ func TestOtherReaper(t *testing.T) {
 	s.expectTrue("the rogue wait(-1) reaped the leader", reapedBy > 0, fmt.Sprint(reapedBy))
 	s.expect("leader still held", false, held)
 	s.expect("group signal refused", true, refused)
-	s.expect("children left", 0, len(childrenOf(os.Getpid())))
+	s.expect("children left", "0", childCount())
 }
 
 func TestExclusiveBaselineLive(t *testing.T) {
@@ -492,7 +519,7 @@ func TestExclusiveBaselineZombie(t *testing.T) {
 	startHelper(s, pre)
 	deadline := time.Now().Add(3 * time.Second)
 	for {
-		if st, ok := procInfo(pre.Process.Pid); ok && st.zombie {
+		if st, pr := procInfo(pre.Process.Pid); pr == present && st.zombie {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -531,7 +558,7 @@ func TestAdoptionChain(t *testing.T) {
 	s.expect("identity mismatches", 0, cr.sw.mismatched)
 	s.expectTrue("every candidate the check's", subset(cr.sw.seen, cr.reported), "")
 	s.expect("leader reaped after the sweep", true, cr.tr.c.reaped())
-	s.expect("children left", 0, len(childrenOf(os.Getpid())))
+	s.expect("children left", "0", childCount())
 }
 
 func TestSweepIdentityMismatch(t *testing.T) {
@@ -551,7 +578,7 @@ func TestSweepIdentityMismatch(t *testing.T) {
 		s.invalidf("interval did not run")
 	}
 	alive := false
-	if st, ok := procInfo(cr.reported[0]); ok && !st.zombie {
+	if st, pr := procInfo(cr.reported[0]); pr == present && !st.zombie {
 		alive = true
 	}
 	s.worked(int64(cr.sw.mismatched))
@@ -577,7 +604,7 @@ func TestSweepPidfdUnsupported(t *testing.T) {
 		s.invalidf("interval did not run")
 	}
 	alive := false
-	if st, ok := procInfo(cr.reported[0]); ok && !st.zombie {
+	if st, pr := procInfo(cr.reported[0]); pr == present && !st.zombie {
 		alive = true
 	}
 	s.worked(1)
@@ -612,7 +639,10 @@ func TestF1Resources(t *testing.T) {
 	if cr == nil {
 		s.invalidf("interval did not run")
 	}
-	kids := childrenOf(os.Getpid())
+	kids, kerr := childrenOf(os.Getpid())
+	if kerr != nil {
+		s.invalidf("observation failed: %v", kerr)
+	}
 	sort.Ints(kids)
 	called := false
 	err := g.exclusive(func() error { called = true; return nil })
@@ -631,21 +661,21 @@ func TestSubreaperCleared(t *testing.T) {
 	// another subreaper, never to this process.
 	s := begin(t, "T2", "T2.subreaper.cleared", normal, true, true)
 	defer s.done()
-	rep := s.newReport()
+	rep := s.newReport(reportSpec{"pid": 1})
 	cmd := helper("chain-main", []string{reportEnv + "=" + rep}, "1")
-	startHelper(s, cmd)
-	childOf(cmd).reap(10 * time.Second)
-	pids := waitReport(rep, "pid", 1, 5*time.Second)
-	if len(pids) != 1 {
-		s.invalidf("orphan did not report")
-	}
-	p, err := ownPID(pids[0])
-	if err != nil {
-		s.invalidf("orphan: %v", err)
-	}
-	s.own(p)
+	release := gated(s, cmd)
+	tr := startTree(s, cmd)
+	pids := s.awaitReport(rep, "pid", 1, 5*time.Second)
+	tr.ownReported(pids[0]) // verified while its parent lives
+	release()
+	ok, status, _ := tr.waitExit(10 * time.Second)
+	s.needLoad(ok && status == "exit 0", "the orphan's parent exited 0 (%v, %s)", ok, status)
+	tr.reap(time.Second)
 	time.Sleep(50 * time.Millisecond)
-	st, _ := procInfo(pids[0])
+	st, pr := procInfo(pids[0])
+	if pr != present {
+		s.invalidf("observation failed: the orphan cannot be read")
+	}
 	s.worked(1)
 	s.expect("subreaper", 0, subreaper())
 	s.expectTrue("orphan's parent is not this process", st.ppid != os.Getpid(), fmt.Sprintf("ppid %d", st.ppid))

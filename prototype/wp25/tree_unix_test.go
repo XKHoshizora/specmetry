@@ -14,6 +14,18 @@ import (
 	"time"
 )
 
+// presence is what a read of a process's state says about it. A state
+// that cannot be read is unknown, never absent.
+type presence int
+
+const (
+	absent presence = iota
+	present
+	unknown
+)
+
+var errUnknownState = errors.New("the process's state could not be read")
+
 // childProc is a direct child; it is reaped once, by reap, and never
 // before the scenario asks for it (the group identity rule, spec §8.2).
 type childProc struct {
@@ -70,6 +82,7 @@ func (c *childProc) reaped() bool {
 }
 
 func (c *childProc) ended() bool { return c.reaped() }
+func (c *childProc) release()    {}
 
 // stop kills the child: its PID cannot have been reused, it is not reaped.
 func (c *childProc) stop() {
@@ -79,25 +92,52 @@ func (c *childProc) stop() {
 	}
 }
 
-// pidProc is a process learned from a helper's report; its identity is
-// its start time, read when it was learned and again before every action.
+// pidProc is a reported process the scenario verified as its own; its
+// identity is its start time, read when it was verified and again before
+// every action.
 type pidProc struct {
 	pid int
 	id  string
-	err error // the last reaping error, for the report
+	err error // why the last check could not confirm an end
 }
 
-func ownPID(pid int) (owned, error) {
-	st, ok := procInfo(pid)
-	if !ok {
-		return nil, fmt.Errorf("process %d is not there", pid)
+// ownDescendant verifies a reported PID before the scenario may act on
+// it: the process must be in the group whose leader (anchor) the scenario
+// started and still holds unreaped, or its chain of parents must reach
+// the anchor. The PID in a report is never enough on its own.
+func ownDescendant(s *scen, anchor *unixTree, pid int) owned {
+	st, pr := procInfo(pid)
+	if pr != present {
+		s.invalidf("ownership not established: process %d cannot be read", pid)
 	}
-	return &pidProc{pid: pid, id: st.start}, nil
+	if st.pgid == anchor.pid && anchor.leaderHeld() {
+		p := &pidProc{pid: pid, id: st.start}
+		s.own(p)
+		return p
+	}
+	cur := st
+	for i := 0; i < 32; i++ {
+		if cur.ppid == anchor.pid {
+			p := &pidProc{pid: pid, id: st.start}
+			s.own(p)
+			return p
+		}
+		if cur.ppid <= 1 {
+			break
+		}
+		next, pr := procInfo(cur.ppid)
+		if pr != present {
+			break
+		}
+		cur = next
+	}
+	s.invalidf("ownership not established: process %d is not a descendant of %d", pid, anchor.pid)
+	return nil
 }
 
 func (p *pidProc) String() string {
 	if p.err != nil {
-		return "pid " + strconv.Itoa(p.pid) + " (reap: " + p.err.Error() + ")"
+		return "pid " + strconv.Itoa(p.pid) + " (" + p.err.Error() + ")"
 	}
 	return "pid " + strconv.Itoa(p.pid)
 }
@@ -106,17 +146,21 @@ func (p *pidProc) ended() bool {
 	if injected("cleanup-unconfirmed") {
 		return false
 	}
-	st, ok := procInfo(p.pid)
+	st, pr := procInfo(p.pid)
 	if injected("procinfo-unknown") {
-		ok = false // the read of the process's state failed
+		pr = unknown // the read of the process's state failed
 	}
-	if !ok || st.start != p.id {
+	switch {
+	case pr == absent:
 		return true
-	}
-	if st.zombie {
-		if st.ppid != os.Getpid() {
-			return true // someone else's zombie: it has ended
-		}
+	case pr == unknown:
+		p.err = errUnknownState
+		return false
+	case st.start != p.id:
+		return true // the PID names another process now: this one has ended
+	case st.zombie && st.ppid != os.Getpid():
+		return true // someone else's zombie: it has ended
+	case st.zombie:
 		// A zombie child of this process, one the scenario owns: it has
 		// ended once exactly this PID is reaped.
 		var ws syscall.WaitStatus
@@ -128,10 +172,12 @@ func (p *pidProc) ended() bool {
 }
 
 func (p *pidProc) stop() {
-	if st, ok := procInfo(p.pid); ok && st.start == p.id && !st.zombie {
+	if st, pr := procInfo(p.pid); pr == present && st.start == p.id && !st.zombie {
 		_ = syscall.Kill(p.pid, syscall.SIGKILL)
 	}
 }
+
+func (p *pidProc) release() {}
 
 type pinfo struct {
 	zombie     bool
@@ -141,6 +187,7 @@ type pinfo struct {
 
 // unixTree is one check's process group; the leader is the main process.
 type unixTree struct {
+	s     *scen
 	cmd   *exec.Cmd
 	c     *childProc
 	pid   int
@@ -156,18 +203,38 @@ func startTree(s *scen, cmd *exec.Cmd) *unixTree {
 	}
 	cmd.SysProcAttr.Setpgid = true
 	startHelper(s, cmd)
-	t := &unixTree{cmd: cmd, c: childOf(cmd), pid: cmd.Process.Pid}
-	if st, ok := procInfo(t.pid); ok {
-		t.start = st.start
+	t := &unixTree{s: s, cmd: cmd, c: childOf(cmd), pid: cmd.Process.Pid}
+	st, pr := procInfo(t.pid)
+	if pr != present {
+		s.invalidf("the main process %d cannot be read", t.pid)
 	}
+	t.start = st.start
 	obs, err := newExitObserver(t.pid)
 	if err != nil {
 		s.invalidf("exit observer: %v", err)
 	}
 	t.obs = obs
 	s.defer_(obs.close)
+	// If the scenario stops early, its group is still its own while the
+	// leader is held: end the group before the leader is reaped.
+	s.defer_(func() {
+		if t.c.reaped() || !t.leaderHeld() {
+			return
+		}
+		_ = syscall.Kill(-t.pid, syscall.SIGKILL)
+		deadline := time.Now().Add(tKill)
+		for time.Now().Before(deadline) {
+			if m, err := t.live(); err == nil && len(m) == 0 {
+				return
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	})
 	return t
 }
+
+// ownReported verifies and owns a PID its helpers reported.
+func (t *unixTree) ownReported(pid int) owned { return ownDescendant(t.s, t, pid) }
 
 // waitExit observes the main process's exit within d, without reaping it.
 func (t *unixTree) waitExit(d time.Duration) (bool, string, error) { return t.obs.wait(d) }
@@ -187,19 +254,24 @@ func (t *unixTree) kill() error {
 // the check; a concurrent reaper can still act between the check and the
 // signal (T2.other-reaper), which is why no other reaper may exist.
 func (t *unixTree) leaderHeld() bool {
-	st, ok := procInfo(t.pid)
-	return ok && st.start == t.start && st.ppid == os.Getpid()
+	st, pr := procInfo(t.pid)
+	return pr == present && st.start == t.start && st.ppid == os.Getpid()
 }
 
 // live lists the group's members that are not zombies.
 func (t *unixTree) live() ([]int, error) { return groupLive(t.pid) }
 
 // confirm repeats the kill until the group has no live member, within d.
+// A member list that cannot be read is not an empty group: the scenario
+// cannot observe what it predicts, so it is invalid.
 func (t *unixTree) confirm(d time.Duration) bool {
 	deadline := time.Now().Add(d)
 	for {
 		m, err := t.live()
-		if err == nil && len(m) == 0 {
+		if err != nil {
+			t.s.invalidf("observation failed: %v", err)
+		}
+		if len(m) == 0 {
 			return true
 		}
 		if time.Now().After(deadline) {
@@ -213,8 +285,8 @@ func (t *unixTree) confirm(d time.Duration) bool {
 func (t *unixTree) reap(d time.Duration) bool { return t.c.reap(d) }
 
 func (t *unixTree) zombieLeader() bool {
-	st, ok := procInfo(t.pid)
-	return ok && st.zombie
+	st, pr := procInfo(t.pid)
+	return pr == present && st.zombie
 }
 
 func (t *unixTree) leaderPgid() int {

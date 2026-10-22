@@ -17,7 +17,6 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
-	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
@@ -33,7 +32,7 @@ func failStart(t *testing.T, id string, seams jobSeams, wantStep string) {
 	marker := markerPath(s)
 	cmd := helper("marker", []string{markerEnv + "=" + marker})
 	tr, step, err := startJob(s, cmd, seams)
-	defer tr.close()
+	defer func() { _, _ = tr.close() }()
 	s.expect("failed step", wantStep, step)
 	s.expectTrue("error reported", err != nil, fmt.Sprint(err))
 	inJob := false
@@ -64,12 +63,13 @@ func failStart(t *testing.T, id string, seams jobSeams, wantStep string) {
 	s.expect("user code ran (marker)", false, statErr == nil)
 	s.expect("Go's handle released (Wait returned)", true, reaped)
 	// Every handle has an owner: the Job and the process handle are this
-	// runner's and are closed here; Go closed the main thread's handle at
-	// creation and releases its process handle in Wait.
-	jobH, procH := tr.job, tr.proc
-	tr.close()
-	s.expect("Job handle still open", false, handleValid(jobH))
-	s.expect("process handle still open", false, handleValid(procH))
+	// runner's and are closed here, and the closes must succeed (a closed
+	// handle is not probed again: using it is undefined); Go closed the
+	// main thread's handle at creation and releases its process handle in
+	// Wait.
+	procErr, jobErr := tr.close()
+	s.expect("process handle closed", "ok", errOK(procErr))
+	s.expect("Job handle closed", "ok", errOK(jobErr))
 }
 
 func errClass(err error) string {
@@ -81,18 +81,6 @@ func errClass(err error) string {
 	}
 	return "other"
 }
-
-// handleValid reports whether h is still an open handle of this process.
-func handleValid(h windows.Handle) bool {
-	if h == 0 {
-		return false
-	}
-	var flags uint32
-	r, _, _ := procGetHandleInformation.Call(uintptr(h), uintptr(unsafe.Pointer(&flags)))
-	return r != 0
-}
-
-var procGetHandleInformation = kernel32.NewProc("GetHandleInformation")
 
 func TestJobFailAssign(t *testing.T) {
 	failStart(t, "T4.start.fail-assign", jobSeams{assign: errInjected}, "assign")
@@ -120,8 +108,8 @@ func TestJobFailCreate(t *testing.T) {
 	s.expect("error class", "not exist", errClass(err))
 	s.expect("process created", false, cmd.Process != nil)
 	s.expect("launches", 0, s.r.Launches)
-	tr.close()
-	s.expect("Job handle left", windows.Handle(0), tr.job)
+	_, jobErr := tr.close()
+	s.expect("Job handle closed", "ok", errOK(jobErr))
 }
 
 func TestJobNormal(t *testing.T) {
@@ -130,7 +118,7 @@ func TestJobNormal(t *testing.T) {
 	marker := markerPath(s)
 	cmd := helper("marker", []string{markerEnv + "=" + marker})
 	tr, step, err := startJob(s, cmd, jobSeams{})
-	defer tr.close()
+	defer func() { _, _ = tr.close() }()
 	if step != "" {
 		s.invalidf("start failed at %s: %v", step, err)
 	}
@@ -140,14 +128,17 @@ func TestJobNormal(t *testing.T) {
 		ran = e == nil
 		time.Sleep(10 * time.Millisecond)
 	}
-	n0, _ := tr.active()
+	n0, err := tr.active()
+	if err != nil {
+		s.invalidf("observation failed: %v", err)
+	}
+	s.needLoad(n0 == 1, "the Job holds the one process (%d active)", n0)
 	since := stopwatch()
 	kerr := tr.kill()
 	ended := tr.confirm(tKill)
 	took := since()
 	s.worked(int64(n0))
 	s.expect("user code ran after the resume", true, ran)
-	s.expect("active before the kill", 1, n0)
 	s.expect("terminate request", "ok", errOK(kerr))
 	s.expect("ActiveProcesses reached 0", true, ended)
 	s.note("terminate to 0: %v", took)
@@ -198,7 +189,7 @@ func TestJobQueryFails(t *testing.T) {
 	defer s.done()
 	cmd := helper("sleep", nil)
 	tr, step, err := startJob(s, cmd, jobSeams{query: errInjected})
-	defer tr.close()
+	defer func() { _, _ = tr.close() }()
 	if step != "" {
 		s.invalidf("start failed at %s: %v", step, err)
 	}
@@ -221,28 +212,33 @@ func TestJobTerminateNotEnded(t *testing.T) {
 	var took []time.Duration
 	ended := 0
 	for i := 0; i < 5; i++ {
-		rep := s.newReport()
+		rep := s.newReport(reportSpec{"pid": 30, "fanout": 1})
 		cmd := helper("fanout", []string{reportEnv + "=" + rep}, "30")
 		tr, step, err := startJob(s, cmd, jobSeams{})
+		s.defer_(func() { _, _ = tr.close() })
 		if step != "" {
 			s.invalidf("start failed at %s: %v", step, err)
 		}
-		if len(waitReport(rep, "fanout", 1, 20*time.Second)) != 1 {
-			tr.close()
-			s.invalidf("fanout did not start its children")
+		// The load: 30 distinct descendants, each verified in this Job,
+		// the fanout's own record, and 31 processes active in the Job.
+		pids := s.awaitReport(rep, "pid", 30, 20*time.Second)
+		s.awaitReport(rep, "fanout", 1, 5*time.Second)
+		for _, pid := range pids {
+			tr.ownReported(pid)
 		}
-		for _, pid := range waitReport(rep, "pid", 30, time.Second) {
-			if p, err := ownPID(pid); err == nil {
-				s.own(p)
-			}
+		n0, err := tr.active()
+		if err != nil {
+			s.invalidf("observation failed: %v", err)
 		}
-		n0, _ := tr.active()
+		s.needLoad(n0 == 31, "round %d: 30 descendants verified in the Job, 31 active (%d)", i+1, n0)
 		since := stopwatch()
 		if err := tr.kill(); err != nil {
-			tr.close()
 			s.invalidf("terminate: %v", err)
 		}
-		n1, _ := tr.active()
+		n1, err := tr.active()
+		if err != nil {
+			s.invalidf("observation failed: %v", err)
+		}
 		first = append(first, n1)
 		if tr.confirm(tKill) {
 			ended++
@@ -250,7 +246,7 @@ func TestJobTerminateNotEnded(t *testing.T) {
 		}
 		s.worked(int64(n0))
 		tr.reap(time.Second)
-		tr.close()
+		_, _ = tr.close()
 	}
 	s.expect("Jobs that reached ActiveProcesses = 0", 5, ended)
 	s.note("active right after the request: %v; request to 0: %s", first, durations(took))

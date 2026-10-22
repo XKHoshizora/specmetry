@@ -1,19 +1,23 @@
 // Package wp25 holds test-only prototypes of the WP2.5 check runner's
 // teardown mechanisms (docs/wp2.5-prototype.md). Nothing here is product
 // code and nothing imports it. It starts only its own helper processes
-// (this test binary, run again), each with a hard limit, and every scenario
-// ends by checking that the processes it started or learned of are gone.
+// (this test binary, run again). Each helper has a hard limit of its own,
+// effective only once it runs Go code (not while it is created
+// suspended); the scenario's own waits are bounded and never rely on it.
+// Every scenario ends by checking that the processes it started or
+// verified as its own are gone.
 //
 // Each scenario prints one WP25RESULT line. Its verdict is "confirmed" when
 // the run showed what the candidate predicts, "refuted" when it showed
 // something else (a finding, not a pass), "unsupported" when the mechanism
 // is not available here, and "invalid" when the run cannot count either
 // way: a helper that did not start, crashed, reached its hard limit or was
-// not cleaned up, missing or corrupt results, or no work done.
+// not cleaned up, a report that is missing, corrupt or not what the
+// scenario needs, a load that was not built, or no work done. The gate
+// itself is tested in gate_test.go.
 package wp25
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -102,16 +106,21 @@ var (
 	results   []result
 )
 
-// owned is a process a scenario started, or learned of from its own
-// helper, with an identity it checks again before acting on it.
+// owned is a process a scenario started, or one its own helper reported
+// and the scenario verified as its own (a descendant of the process it
+// started, or in its group or Job): a reported PID alone is not enough.
+// Its identity is checked again before every action.
 type owned interface {
 	String() string
-	// ended reports whether the process has ended; a zombie that is not
-	// this process's child counts as ended.
+	// ended reports whether the process has reliably ended; a zombie that
+	// is not this process's child counts as ended. A state that cannot be
+	// read is not an end.
 	ended() bool
 	// stop kills the process while its identity still holds, and reaps
 	// it if it is this process's child.
 	stop()
+	// release gives up what observes it (a Windows handle); after ended.
+	release()
 }
 
 type scen struct {
@@ -125,7 +134,7 @@ type scen struct {
 	invalid    []string
 	unsup      string
 	procs      []owned
-	reports    []string
+	reports    []reportFile
 	after      []func()
 	goid       uint64     // the test goroutine
 	mu         sync.Mutex // the scenario may be used from several goroutines
@@ -215,15 +224,14 @@ func (s *scen) unsupported(f string, a ...any) {
 	s.t.SkipNow()
 }
 
-// newReport gives the scenario a report file for its helpers.
-func (s *scen) newReport() string {
-	f, err := os.CreateTemp(s.t.TempDir(), "report-*")
-	if err != nil {
-		s.invalidf("report file: %v", err)
+// needLoad stops the scenario as invalid unless the load it needs was
+// built: the roles, numbers and stages its prediction is about. A
+// different result under the full load is refuted instead.
+func (s *scen) needLoad(ok bool, f string, a ...any) {
+	if !ok {
+		s.invalidf("load not established: "+f, a...)
 	}
-	_ = f.Close()
-	s.locked(func() { s.reports = append(s.reports, f.Name()) })
-	return f.Name()
+	s.note("load: "+f, a...)
 }
 
 func (s *scen) done() {
@@ -231,13 +239,15 @@ func (s *scen) done() {
 		s.after[i]()
 	}
 	s.r.Cleanup = s.cleanup()
-	for _, rep := range s.reports {
-		for _, l := range readReport(rep) {
-			if l.kind == "limit" {
-				s.invalid = append(s.invalid, "a helper reached its hard limit")
-				break
-			}
+	// The writers have ended (or the cleanup says they have not): every
+	// report must now hold exactly what its scenario declared.
+	for _, rf := range s.reports {
+		if err := checkFinal(rf); err != nil {
+			s.invalid = append(s.invalid, "report: "+err.Error())
 		}
+	}
+	for _, p := range s.procs {
+		p.release()
 	}
 	switch {
 	case len(s.invalid) > 0:
@@ -347,52 +357,6 @@ func helper(mode string, env []string, args ...string) *exec.Cmd {
 		limitEnv+"="+strconv.Itoa(int(helperLimit/time.Millisecond)))
 	cmd.Env = append(cmd.Env, env...)
 	return cmd
-}
-
-type reportLine struct {
-	kind string
-	pid  int
-	rest []string
-}
-
-// readReport reads a helper report file: one "kind pid ..." line per event.
-func readReport(path string) []reportLine {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil
-	}
-	defer f.Close()
-	var out []reportLine
-	sc := bufio.NewScanner(f)
-	for sc.Scan() {
-		fs := strings.Fields(sc.Text())
-		if len(fs) < 2 {
-			continue
-		}
-		pid, err := strconv.Atoi(fs[1])
-		if err != nil {
-			continue
-		}
-		out = append(out, reportLine{kind: fs[0], pid: pid, rest: fs[2:]})
-	}
-	return out
-}
-
-// waitReport waits until the report holds n lines of the kind.
-func waitReport(path, kind string, n int, d time.Duration) []int {
-	deadline := time.Now().Add(d)
-	for {
-		var pids []int
-		for _, l := range readReport(path) {
-			if l.kind == kind {
-				pids = append(pids, l.pid)
-			}
-		}
-		if len(pids) >= n || time.Now().After(deadline) {
-			return pids
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
 }
 
 func durations(ds []time.Duration) string {

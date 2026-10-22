@@ -23,18 +23,29 @@ func osVersion() string {
 const sZomb = 5 // SZOMB in <sys/proc.h>
 
 // procInfo reads a process's state, parent, group and start time with
-// sysctl kern.proc.pid; zombies are included.
-func procInfo(pid int) (pinfo, bool) {
-	k, err := unix.SysctlKinfoProc("kern.proc.pid", pid)
-	if err != nil || k == nil || int(k.Proc.P_pid) != pid {
-		return pinfo{}, false
+// sysctl kern.proc.pid; zombies are included. An empty answer is absent; a
+// failed call or an answer of another size is unknown.
+func procInfo(pid int) (pinfo, presence) {
+	b, err := unix.SysctlRaw("kern.proc.pid", pid)
+	if err != nil {
+		return pinfo{}, unknown
+	}
+	if len(b) == 0 {
+		return pinfo{}, absent
+	}
+	if len(b) != int(unsafe.Sizeof(unix.KinfoProc{})) {
+		return pinfo{}, unknown
+	}
+	k := (*unix.KinfoProc)(unsafe.Pointer(&b[0]))
+	if int(k.Proc.P_pid) != pid {
+		return pinfo{}, unknown
 	}
 	return pinfo{
 		zombie: k.Proc.P_stat == sZomb,
 		ppid:   int(k.Eproc.Ppid),
 		pgid:   int(k.Eproc.Pgid),
 		start:  fmt.Sprintf("%d.%06d", k.Proc.P_starttime.Sec, k.Proc.P_starttime.Usec),
-	}, true
+	}, present
 }
 
 // groupLive lists the group's members that are not zombies, with sysctl
@@ -88,7 +99,7 @@ func newExitObserver(pid int) (exitObserver, error) {
 	ev := unix.Kevent_t{Ident: uint64(pid), Filter: unix.EVFILT_PROC,
 		Flags: unix.EV_ADD | unix.EV_ONESHOT, Fflags: unix.NOTE_EXIT | unix.NOTE_EXITSTATUS}
 	if _, err := unix.Kevent(kq, []unix.Kevent_t{ev}, nil, nil); err != nil {
-		if st, ok := procInfo(pid); errors.Is(err, unix.ESRCH) && ok && st.zombie {
+		if st, pr := procInfo(pid); errors.Is(err, unix.ESRCH) && pr == present && st.zombie {
 			s.early = true
 		} else {
 			_ = unix.Close(kq)

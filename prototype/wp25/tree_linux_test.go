@@ -5,6 +5,8 @@ package wp25
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
+	"io/fs"
 	"os"
 	"strconv"
 	"strings"
@@ -23,43 +25,79 @@ func osVersion() string {
 }
 
 // procInfo reads /proc/<pid>/stat: state, parent, group and start time.
-func procInfo(pid int) (pinfo, bool) {
+// Only "no such file" or "no such process" is absent; any other failure,
+// or a line that does not parse, is unknown.
+func procInfo(pid int) (pinfo, presence) {
 	b, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat")
 	if err != nil {
-		return pinfo{}, false
+		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, unix.ESRCH) {
+			return pinfo{}, absent
+		}
+		return pinfo{}, unknown
 	}
 	s := string(b)
 	i := strings.LastIndexByte(s, ')')
 	if i < 0 {
-		return pinfo{}, false
+		return pinfo{}, unknown
 	}
 	f := strings.Fields(s[i+1:])
 	if len(f) < 20 {
-		return pinfo{}, false
+		return pinfo{}, unknown
 	}
-	ppid, _ := strconv.Atoi(f[1])
-	pgid, _ := strconv.Atoi(f[2])
-	return pinfo{zombie: f[0] == "Z" || f[0] == "X", ppid: ppid, pgid: pgid, start: f[19]}, true
+	ppid, err1 := strconv.Atoi(f[1])
+	pgid, err2 := strconv.Atoi(f[2])
+	if err1 != nil || err2 != nil {
+		return pinfo{}, unknown
+	}
+	return pinfo{zombie: f[0] == "Z" || f[0] == "X", ppid: ppid, pgid: pgid, start: f[19]}, present
 }
 
-func allPIDs() []int {
+// allPIDs lists /proc; a failed read is an error, never an empty list.
+func allPIDs() ([]int, error) {
 	if injected("readdir-fail") {
-		return nil // ReadDir failed; its error is dropped, as below
+		return nil, errors.New("injected: reading /proc failed")
 	}
-	ents, _ := os.ReadDir("/proc")
+	ents, err := os.ReadDir("/proc")
+	if err != nil {
+		return nil, err
+	}
 	var out []int
 	for _, e := range ents {
 		if pid, err := strconv.Atoi(e.Name()); err == nil {
 			out = append(out, pid)
 		}
 	}
-	return out
+	return out, nil
+}
+
+// processes lists every process whose state was read; a process that
+// ended during the scan is left out, one that cannot be read is an error.
+func processes() (map[int]pinfo, error) {
+	pids, err := allPIDs()
+	if err != nil {
+		return nil, err
+	}
+	out := map[int]pinfo{}
+	for _, pid := range pids {
+		st, pr := procInfo(pid)
+		switch pr {
+		case present:
+			out[pid] = st
+		case unknown:
+			return nil, fmt.Errorf("process %d: %w", pid, errUnknownState)
+		}
+	}
+	return out, nil
 }
 
 func groupLive(pgid int) ([]int, error) {
+	ps, err := processes()
+	if err != nil {
+		return nil, err
+	}
 	var out []int
-	for _, pid := range allPIDs() {
-		if st, ok := procInfo(pid); ok && st.pgid == pgid && !st.zombie {
+	for pid, st := range ps {
+		if st.pgid == pgid && !st.zombie {
 			out = append(out, pid)
 		}
 	}
@@ -67,14 +105,18 @@ func groupLive(pgid int) ([]int, error) {
 }
 
 // childrenOf lists the children of pid, zombies included.
-func childrenOf(pid int) []int {
+func childrenOf(pid int) ([]int, error) {
+	ps, err := processes()
+	if err != nil {
+		return nil, err
+	}
 	var out []int
-	for _, p := range allPIDs() {
-		if st, ok := procInfo(p); ok && st.ppid == pid {
+	for p, st := range ps {
+		if st.ppid == pid {
 			out = append(out, p)
 		}
 	}
-	return out
+	return out, nil
 }
 
 // exitObserver is the Linux E-main: a bounded poll on the main process's

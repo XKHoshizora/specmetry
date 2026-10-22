@@ -76,21 +76,22 @@ func TestGroupZombieLeader(t *testing.T) {
 	// is reaped only after the group is confirmed empty.
 	s := begin(t, gate13(), "group.zombie-leader", normal, true, true)
 	defer s.done()
-	rep := s.newReport()
+	rep := s.newReport(reportSpec{"pid": 1})
 	cmd := helper("member-parent", []string{reportEnv + "=" + rep})
+	release := gated(s, cmd)
 	tr := startTree(s, cmd)
+	members := s.awaitReport(rep, "pid", 1, 5*time.Second)
+	tr.ownReported(members[0])
+	st, pr := procInfo(members[0])
+	s.needLoad(pr == present && st.pgid == tr.pid, "the member verified as the check's, in its group (pgid %d)", st.pgid)
+	release()
 	exited, status, _ := tr.waitExit(5 * time.Second)
-	members := waitReport(rep, "pid", 1, 5*time.Second)
-	if len(members) != 1 {
-		s.invalidf("member did not report")
+	s.needLoad(exited && status == "exit 0", "the leader exited 0 (%v, %s)", exited, status)
+	live, err := tr.live()
+	if err != nil {
+		s.invalidf("observation failed: %v", err)
 	}
-	if p, err := ownPID(members[0]); err == nil {
-		s.own(p)
-	}
-	live, _ := tr.live()
 	s.worked(int64(len(live)))
-	s.expect("leader exited", true, exited)
-	s.expect("status", "exit 0", status)
 	s.expect("leader unreaped (zombie)", true, tr.zombieLeader())
 	s.expect("live members besides the leader", fmt.Sprint(members), fmt.Sprint(live))
 	s.expect("kill(-pgid, 0)", "no error", errText(syscall.Kill(-tr.pid, 0)))
@@ -106,26 +107,22 @@ func TestGroupEscape(t *testing.T) {
 	// On macOS there is no subreaper to find it.
 	s := begin(t, gate13(), "group.escape-boundary", normal, true, true)
 	defer s.done()
-	rep := s.newReport()
+	rep := s.newReport(reportSpec{"pid": 1})
 	cmd := helper("escape-parent", []string{reportEnv + "=" + rep})
+	release := gated(s, cmd)
 	tr := startTree(s, cmd)
-	exited, _, _ := tr.waitExit(5 * time.Second)
-	esc := waitReport(rep, "pid", 1, 5*time.Second)
-	if len(esc) != 1 {
-		s.invalidf("escaped process did not report")
-	}
-	p, err := ownPID(esc[0])
-	if err != nil {
-		s.invalidf("escaped process: %v", err)
-	}
-	s.own(p)
+	esc := s.awaitReport(rep, "pid", 1, 5*time.Second)
+	// Verified while its parent still lives: a child of the leader.
+	p := tr.ownReported(esc[0])
+	st, pr := procInfo(esc[0])
+	s.needLoad(pr == present && st.pgid != tr.pid, "the escaped process verified as the check's, in another group (pgid %d vs %d)", st.pgid, tr.pid)
+	release()
+	exited, status, _ := tr.waitExit(5 * time.Second)
+	s.needLoad(exited && status == "exit 0", "the leader exited 0 (%v, %s)", exited, status)
 	conf := tr.confirm(tKill)
 	s.worked(1)
-	s.expect("leader exited", true, exited)
 	s.expect("group confirmed empty", true, conf)
 	s.expect("escaped process ended", false, p.ended())
-	st, _ := procInfo(esc[0])
-	s.expectTrue("it is in another group", st.pgid != tr.pid, fmt.Sprintf("pgid %d vs %d", st.pgid, tr.pid))
 	s.expect("reaped", true, tr.reap(time.Second))
 }
 

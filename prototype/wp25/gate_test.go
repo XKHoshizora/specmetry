@@ -76,6 +76,9 @@ var gateCases = []gateCase{
 	{id: "report.missing", test: "TestPipeSilentHolderReal", scenario: "T1.pipe.silent-holder", inject: "report-skip", want: invalid},
 	{id: "report.unknown-kind", test: "TestPipeSilentHolderReal", scenario: "T1.pipe.silent-holder", inject: "report-unknown", want: invalid},
 	{id: "report.duplicate", test: "TestPipeSilentHolderReal", scenario: "T1.pipe.silent-holder", inject: "report-dup", want: invalid},
+	// A well-formed record of a kind this scenario does not expect: only
+	// the final check against the scenario's spec can reject it.
+	{id: "report.unexpected-kind", test: "TestPipeSilentHolderReal", scenario: "T1.pipe.silent-holder", inject: "report-extra", want: invalid},
 	{id: "report.truncated", test: "TestPipeSilentHolderReal", scenario: "T1.pipe.silent-holder", inject: "report-truncated", want: invalid},
 	{id: "report.overlong", test: "TestPipeSilentHolderReal", scenario: "T1.pipe.silent-holder", inject: "report-overlong", want: invalid},
 	{id: "report.deleted", test: "TestPipeSilentHolderReal", scenario: "T1.pipe.silent-holder", inject: "report-delete", want: invalid},
@@ -87,6 +90,9 @@ var gateCases = []gateCase{
 	// A chain one level short: the load is not built, which is not the
 	// mechanism giving a different result.
 	{id: "load.chain-short", test: "TestAdoptionChain", scenario: "T2.adoption.chain", inject: "chain-short", want: invalid, goos: []string{"linux"}},
+	// Ownership: a reported PID that is the scenario's own process but not
+	// in the check's tree; only the ownership check can reject it.
+	{id: "ownership.foreign-pid", test: "TestInnerForeignPID", scenario: "gate.foreign-pid", want: invalid},
 	// Cleanup and observation: an end that cannot be confirmed, a process
 	// state that cannot be read, a process list that cannot be read.
 	{id: "cleanup.unconfirmed", test: "TestPipeSilentHolderReal", scenario: "T1.pipe.silent-holder", inject: "cleanup-unconfirmed", want: invalid},
@@ -114,6 +120,24 @@ func contains(xs []string, x string) bool {
 		}
 	}
 	return false
+}
+
+// TestInnerForeignPID runs only as an inner run of ownership.foreign-pid:
+// a check's tree is asked to own a process outside it (a sibling helper
+// this scenario started itself, so nothing unknown is touched). The
+// ownership check must stop the scenario as invalid.
+func TestInnerForeignPID(t *testing.T) {
+	if os.Getenv(innerEnv) == "" {
+		t.Skip("runs only as a gate regression")
+	}
+	s := begin(t, "gate", "gate.foreign-pid", fault, true, true)
+	defer s.done()
+	sibling := helper("sleep", nil)
+	startHelper(s, sibling)
+	tr := startTree(s, helper("sleep", nil))
+	s.worked(1)
+	tr.ownReported(sibling.Process.Pid)
+	s.expect("got past the ownership check", true, true)
 }
 
 type innerRun struct {

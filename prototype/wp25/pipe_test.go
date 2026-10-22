@@ -7,10 +7,12 @@ package wp25
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -58,8 +60,7 @@ func TestPipeNormalDrain(t *testing.T) {
 	buf, log := d.snapshot()
 	out, errb := streamOf(buf, log, "out"), streamOf(buf, log, "err")
 	s.worked(int64(len(out) + len(errb)))
-	s.expect("main exited", true, exited)
-	s.expect("status", "exit 0", status)
+	s.needLoad(exited && status == "exit 0", "the helper wrote all its bytes and exited 0 (%v, %s)", exited, status)
 	s.expect("tree confirmed", true, conf)
 	s.expect("stdout", o1, r.out["out"])
 	s.expect("stderr", o1, r.out["err"])
@@ -92,6 +93,7 @@ func TestPipeEscapedHolder(t *testing.T) {
 	tr := startTree(s, cmd)
 	_ = cmd.Stderr.(*os.File).Close()
 	var holderErr error
+	var holderWrites atomic.Int64
 	var wg sync.WaitGroup
 	stop := make(chan struct{})
 	wg.Add(1)
@@ -107,16 +109,19 @@ func TestPipeEscapedHolder(t *testing.T) {
 				holderErr = err
 				return
 			}
+			holderWrites.Add(1)
 			time.Sleep(10 * time.Millisecond)
 		}
 	}()
-	exited, _, _ := tr.waitExit(10 * time.Second)
+	exited, status, _ := tr.waitExit(10 * time.Second)
+	s.needLoad(exited && status == "exit 0", "the helper wrote and exited 0 (%v, %s)", exited, status)
 	_ = tr.kill()
 	conf := tr.confirm(tKill)
 	if conf {
 		tr.reap(tKill)
 	}
 	r := runS6(d, ss, tDrain, tJoin, !conf)
+	s.needLoad(holderWrites.Load() > 0, "the holder wrote before the stop (%d writes)", holderWrites.Load())
 	_, _ = d.ownerPort().Write(doc)
 	time.Sleep(200 * time.Millisecond)
 	close(stop)
@@ -124,7 +129,6 @@ func TestPipeEscapedHolder(t *testing.T) {
 	_ = wo.Close()
 	buf, log := d.snapshot()
 	s.worked(int64(len(buf)))
-	s.expect("main exited", true, exited)
 	s.expect("tree confirmed", true, conf)
 	s.expect("stdout (holder alive)", o2, r.out["out"])
 	s.expect("stderr", o1, r.out["err"])
@@ -143,24 +147,25 @@ func TestPipeF1SkipDrain(t *testing.T) {
 	// reach the destination, and its writes fail.
 	s := begin(t, "T1", "T1.pipe.F1-skip-drain", fault, true, true)
 	defer s.done()
-	rep := s.newReport()
+	rep := s.newReport(reportSpec{"pid": 1, "epipe": -1})
 	d := &dest{}
 	cmd := helper("holder-parent", []string{reportEnv + "=" + rep})
 	_, ss := piped(s, cmd, d, false)
+	release := gated(s, cmd)
 	tr := startTree(s, cmd)
 	closeWriteEnd(cmd)
+	holders := s.awaitReport(rep, "pid", 1, 5*time.Second)
+	tr.ownReported(holders[0])
+	release()
 	exited, status, _ := tr.waitExit(10 * time.Second)
-	holders := waitReport(rep, "pid", 1, 5*time.Second)
-	if len(holders) != 1 {
-		s.invalidf("holder did not report")
-	}
-	if p, err := ownPID(holders[0]); err == nil {
-		s.own(p)
-	}
+	s.needLoad(exited && status == "exit 3", "the holder verified as the check's; its parent exited 3 (%v, %s)", exited, status)
 	time.Sleep(100 * time.Millisecond) // the holder writes a few lines
 	r := runS6(d, ss, tDrain, tJoin, true)
 	_, _ = d.ownerPort().Write(doc)
-	epipe := waitReport(rep, "epipe", 1, 3*time.Second)
+	epipe, err := awaitRecords(rep, "epipe", 1, 3*time.Second)
+	if err != nil && !errors.Is(err, errNotYet) {
+		s.invalidf("%v", err)
+	}
 	buf, log := d.snapshot()
 	s.worked(int64(len(buf)))
 	_ = tr.kill()
@@ -168,8 +173,6 @@ func TestPipeF1SkipDrain(t *testing.T) {
 	if conf {
 		tr.reap(tKill)
 	}
-	s.expect("main exited", true, exited)
-	s.expect("status", "exit 3", status)
 	s.expect("stdout", o2, r.out["out"])
 	s.expect("stderr", o2, r.out["err"])
 	s.expect("phase D skipped", time.Duration(0), r.drain)
@@ -274,7 +277,7 @@ func TestPipeAliasConcurrent(t *testing.T) {
 			time.Sleep(time.Millisecond)
 		}
 	}()
-	exited, _, _ := tr.waitExit(10 * time.Second)
+	exited, status, _ := tr.waitExit(10 * time.Second)
 	_ = tr.kill()
 	conf := tr.confirm(tKill)
 	if conf {
@@ -292,12 +295,12 @@ func TestPipeAliasConcurrent(t *testing.T) {
 			wholeOwner = false
 		}
 	}
-	s.expect("main exited", true, exited)
+	s.needLoad(exited && status == "exit 0", "the helper wrote all its bytes and exited 0 (%v, %s)", exited, status)
+	s.needLoad(progress == 200, "the owner made its 200 progress writes (%d)", progress)
 	s.expect("stdout", o1, r.out["out"])
 	s.expect("stderr", o1, r.out["err"])
 	s.expectTrue("stdout intact in order", len(out) == 200000 && isPattern(out, 'o'), fmt.Sprintf("%d bytes", len(out)))
 	s.expectTrue("stderr intact in order", len(errb) == 200000 && isPattern(errb, 'e'), fmt.Sprintf("%d bytes", len(errb)))
-	s.expect("progress writes", 200, progress)
 	s.expectTrue("every owner write whole", wholeOwner, "")
 	s.expectTrue("document last and whole", lastIsWhole(buf, log, doc), "")
 }
@@ -328,7 +331,7 @@ func TestPipeStopReadLatency(t *testing.T) {
 		_ = w.Close()
 	}
 	s.worked(int64(returned))
-	s.expect("copiers blocked in Read before the stop", 50, blocked)
+	s.needLoad(blocked == 50, "every copier was blocked in Read before the stop (%d of 50)", blocked)
 	s.expect("copiers returned within 1 s", 50, returned)
 	s.note("latency %s", durations(lat))
 }
@@ -341,21 +344,22 @@ func TestPipeSilentHolderReal(t *testing.T) {
 	var lat []time.Duration
 	ok := 0
 	for i := 0; i < 3; i++ {
-		rep := s.newReport()
+		rep := s.newReport(reportSpec{"pid": 1})
 		d := &dest{}
 		cmd := helper("silent-parent", []string{reportEnv + "=" + rep})
 		_, ss := piped(s, cmd, d, false)
+		release := gated(s, cmd)
 		tr := startTree(s, cmd)
 		closeWriteEnd(cmd)
-		exited, _, _ := tr.waitExit(10 * time.Second)
-		for _, pid := range waitReport(rep, "pid", 1, 5*time.Second) {
-			if p, err := ownPID(pid); err == nil {
-				s.own(p)
-			}
-		}
+		holders := s.awaitReport(rep, "pid", 1, 5*time.Second)
+		tr.ownReported(holders[0])
+		release()
+		exited, status, _ := tr.waitExit(10 * time.Second)
+		s.needLoad(exited && status == "exit 0", "run %d: the holder verified as the check's; its parent exited 0 (%v, %s)", i+1, exited, status)
 		since := stopwatch()
 		r := runS6(d, ss, tDrain, tJoin, true)
-		if exited && r.pending == 2 && r.out["out"] == o2 && r.out["err"] == o2 {
+		s.needLoad(r.pending == 2, "run %d: both copiers blocked at the stop (%d)", i+1, r.pending)
+		if r.out["out"] == o2 && r.out["err"] == o2 {
 			ok++
 			lat = append(lat, since())
 		}
@@ -365,6 +369,6 @@ func TestPipeSilentHolderReal(t *testing.T) {
 		}
 	}
 	s.worked(int64(ok))
-	s.expect("runs with both copiers blocked at the stop and returned (O2) in phase J", 3, ok)
+	s.expect("runs with both copiers returned (O2) in phase J", 3, ok)
 	s.note("stop to return %s", durations(lat))
 }
