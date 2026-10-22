@@ -1,0 +1,59 @@
+name: WP2.5 prototype
+
+# The test-only prototype of WP2.5's teardown mechanisms
+# (docs/wp2.5-prototype.md) on the three platforms; macOS evidence can only
+# come from here. Not part of CI: ci.yml never runs the prototype's module.
+# It runs on pushes to the prototype branch that change the prototype or
+# this workflow; a change of the documents does not run it. There is no
+# manual trigger, so no run is repeated blindly, and no run is cancelled.
+on:
+  push:
+    branches: [proto/wp2.5-prototype]
+    paths:
+      - prototype/wp25/**
+      - .github/workflows/wp25-prototype.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wp25-prototype-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prototype:
+    name: WP2.5 prototype (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+        working-directory: prototype/wp25
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-go@v7.0.0
+        with:
+          go-version-file: prototype/wp25/go.mod
+          cache-dependency-path: prototype/wp25/go.sum
+      - name: Vet
+        run: |
+          go vet ./...
+          # Formatting once, on Linux (the Windows checkout may convert
+          # line endings).
+          if [ "$RUNNER_OS" = "Linux" ]; then test -z "$(gofmt -l .)"; fi
+      - name: Prototype
+        env:
+          WP25_SHA: ${{ github.sha }}
+        run: |
+          go version
+          race=""
+          if [ "$RUNNER_OS" = "Linux" ]; then race="-race"; fi
+          go test -count=1 -v $race -timeout 15m ./... 2>&1 | tee "$RUNNER_TEMP/wp25.log"
+          exit "${PIPESTATUS[0]}"
+      - name: Results
+        if: always()
+        run: grep -E '^WP25(META|RESULT|SUMMARY) ' "$RUNNER_TEMP/wp25.log" || echo "no result line"
