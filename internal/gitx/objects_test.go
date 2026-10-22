@@ -161,10 +161,9 @@ func TestAGitThatFetchesReadsNoObject(t *testing.T) {
 			gitDir := filepath.Join(r.repo.Dir, ".git")
 			before := testutil.SettledSnapshot(t, gitDir)
 			_, errCommit := CommitOf(ctx, r.repo.Dir, "HEAD")
-			_, errTree := TreeFiles(ctx, r.repo.Dir, r.head)
-			_, errLines := CountLines(ctx, r.repo.Dir, blob)
+			_, errLines := FileLines(ctx, r.repo.Dir, r.head, []string{"internal/auth/login.go"})
 			_, errFiles := ListFiles(ctx, r.repo.Dir)
-			for name, err := range map[string]error{"CommitOf": errCommit, "TreeFiles": errTree, "CountLines": errLines, "ListFiles": errFiles, "CheckObjectReads": CheckObjectReads(ctx)} {
+			for name, err := range map[string]error{"CommitOf": errCommit, "FileLines": errLines, "ListFiles": errFiles, "CheckObjectReads": CheckObjectReads(ctx)} {
 				if apperr.ExitCode(err) != apperr.ExitEnvironment || !strings.Contains(err.Error(), "does not honour GIT_NO_LAZY_FETCH") {
 					t.Errorf("%s: %v", name, err)
 				}

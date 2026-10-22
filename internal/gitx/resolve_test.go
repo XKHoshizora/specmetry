@@ -292,6 +292,34 @@ func TestResolveCommitsVerifiesEveryCandidate(t *testing.T) {
 	})
 }
 
+// Review 068 N1: a header line longer than maxBatchHeader is refused
+// however git's output is cut into writes: in one write with its content,
+// or byte by byte. The same object with a plain header is accepted both
+// ways.
+func TestObjectVerifierHeaderLimit(t *testing.T) {
+	content := "other\n"
+	id := objectIDOf("blob", content)
+	header := id + " blob 6\n"
+	padded := strings.Repeat(" ", maxBatchHeader+1) + header
+	for _, c := range []struct {
+		name   string
+		stream string
+		ok     bool
+	}{{"a plain header", header + content + "\n", true}, {"a padded header", padded + content + "\n", false}} {
+		for _, chunk := range []int{len(c.stream), 1, 7} {
+			v := &objectVerifier{ids: []string{id}, types: map[string]string{}}
+			for s := c.stream; s != ""; {
+				k := min(chunk, len(s))
+				_, _ = v.Write([]byte(s[:k]))
+				s = s[k:]
+			}
+			if err := v.close(); (err == nil) != c.ok {
+				t.Errorf("%s in writes of %d: close = %v", c.name, chunk, err)
+			}
+		}
+	}
+}
+
 // E4: an object that cannot be read, storage that is damaged or
 // incomplete, or one that cannot be checked, is no answer at all: an
 // environment error (exit 6), never false, whether the prefix names a

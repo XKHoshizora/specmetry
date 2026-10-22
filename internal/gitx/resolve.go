@@ -2,14 +2,9 @@ package gitx
 
 import (
 	"context"
-	"crypto/sha1" //nolint:gosec // git's own object IDs, not a security use
-	"encoding/hex"
-	"errors"
-	"hash"
 	"path/filepath"
 	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 
 	"github.com/XKHoshizora/specmetry/internal/apperr"
@@ -104,17 +99,12 @@ func ResolveCommits(ctx context.Context, s *Scratch, worktree string, prefixes [
 	}
 
 	// 2. Every listed object read whole and checked against its ID.
-	types := map[string]string{}
-	if len(listed) > 0 {
-		v := &objectVerifier{ids: listed, types: types}
-		r, err := scanCall(ctx, s, call{label: "cat-file", dir: worktree,
-			args: []string{"cat-file", "--batch"}, stdin: []byte(strings.Join(listed, "\n") + "\n"), stdout: v})
-		if err != nil {
-			return nil, err
-		}
-		if r.code != 0 || r.stderr || v.close() != nil {
-			return nil, unreliable
-		}
+	types, ok, err := readVerified(func(c call) (result, error) { return scanCall(ctx, s, c) }, worktree, listed, nil)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, unreliable
 	}
 
 	// 3. The storage git listed from, checked by Specmetry itself.
@@ -134,101 +124,4 @@ func ResolveCommits(ctx context.Context, s *Scratch, worktree string, prefixes [
 		got[p] = len(ids) == 1 && types[ids[0]] == "commit"
 	}
 	return got, nil
-}
-
-// errObject is an object cat-file --batch did not give as the object its
-// ID names. It is never shown: the caller reports the reference as one
-// that cannot be resolved reliably.
-var errObject = errors.New("an object does not read as the object its ID names")
-
-// maxBatchHeader bounds a header line of cat-file --batch: an ID, a type
-// and a size.
-const maxBatchHeader = 128
-
-// objectVerifier checks the output of cat-file --batch as it streams past,
-// for the objects ids in order: each the header "<id> <type> <size>" of
-// that ID with a known type, then exactly size bytes whose object ID,
-// recomputed over "<type> <size>\x00" and them, is the ID, then a line
-// break. It records each object's type and keeps nothing of its content.
-// After a mismatch it takes and drops the rest, so that git ends normally;
-// close reports it.
-type objectVerifier struct {
-	ids   []string
-	types map[string]string
-	next  int       // the index of the object being read
-	head  []byte    // the header line so far
-	hash  hash.Hash // nil while a header is read
-	left  int64     // content bytes still to come
-	err   error
-}
-
-func (v *objectVerifier) Write(p []byte) (int, error) {
-	n := len(p)
-	for len(p) > 0 && v.err == nil {
-		switch {
-		case v.hash == nil:
-			i := slices.Index(p, '\n')
-			if i < 0 {
-				v.head = append(v.head, p...)
-				p = nil
-			} else {
-				v.head = append(v.head, p[:i]...)
-				p = p[i+1:]
-				v.begin()
-			}
-			if len(v.head) > maxBatchHeader {
-				v.err = errObject
-			}
-		case v.left > 0:
-			k := int64(len(p))
-			if k > v.left {
-				k = v.left
-			}
-			_, _ = v.hash.Write(p[:k])
-			v.left -= k
-			p = p[k:]
-		default:
-			if p[0] != '\n' {
-				v.err = errObject
-				break
-			}
-			p = p[1:]
-			if hex.EncodeToString(v.hash.Sum(nil)) != v.ids[v.next] {
-				v.err = errObject
-				break
-			}
-			v.next++
-			v.hash = nil
-		}
-	}
-	return n, nil
-}
-
-// begin reads the header of the next object.
-func (v *objectVerifier) begin() {
-	f := strings.Fields(string(v.head))
-	v.head = v.head[:0]
-	if v.next >= len(v.ids) || len(f) != 3 || f[0] != v.ids[v.next] ||
-		!slices.Contains([]string{"commit", "tree", "blob", "tag"}, f[1]) || !isDecimal(f[2]) {
-		v.err = errObject
-		return
-	}
-	size, err := strconv.ParseInt(f[2], 10, 64)
-	if err != nil {
-		v.err = errObject
-		return
-	}
-	v.types[f[0]] = f[1]
-	v.hash = sha1.New() //nolint:gosec // git's own object ID, not a security use
-	_, _ = v.hash.Write([]byte(f[1] + " " + f[2] + "\x00"))
-	v.left = size
-}
-
-// close reports whether every object was given whole and as its ID names,
-// with nothing else.
-func (v *objectVerifier) close() error {
-	if v.err == nil && (v.next != len(v.ids) || v.hash != nil || len(v.head) != 0) {
-		v.err = errObject
-	}
-	return v.err
 }

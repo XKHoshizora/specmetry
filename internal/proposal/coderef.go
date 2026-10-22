@@ -7,6 +7,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/XKHoshizora/specmetry/internal/apperr"
@@ -32,9 +33,13 @@ type CheckedCodeRef struct {
 // the path must be a regular file of its tree (not a directory, symbolic
 // link or submodule) and a line range must lie within the file; a file
 // that is not committed is not there, and a worktree without a commit has
-// no file to point at. Outside git, the path must be a regular file under
-// the project root, also after resolving links. Nothing of a file but its
-// line count is read, and nothing is kept.
+// no file to point at. Every object the answer rests on (the commit, the
+// trees on the way to each path, each file's blob) is read whole and must
+// be the object its ID names (gitx.FileLines, review 068 B3): one that is
+// damaged, holds another object, or cannot be read is an environment error
+// (exit 6), never a mark. Outside git, the path must be a regular file
+// under the project root, also after resolving links. Nothing of a file
+// but its line count is read, and nothing is kept.
 func CheckCodeRefs(ctx context.Context, w project.Where, refs [][]CodeRef) ([][]CheckedCodeRef, error) {
 	return checkCodeRefs(ctx, w, refs, func() (string, error) { return gitx.CommitOf(ctx, w.Current, "HEAD") })
 }
@@ -69,7 +74,16 @@ func checkCodeRefs(ctx context.Context, w project.Where, refs [][]CodeRef, headO
 		}
 		return out, nil
 	}
-	exists, err := fileChecker(ctx, w, headOf)
+	clean := func(p string) string { return path.Clean(strings.ReplaceAll(p, `\`, "/")) }
+	var paths []string
+	for _, list := range refs {
+		for _, r := range list {
+			if p := clean(r.Path); !slices.Contains(paths, p) {
+				paths = append(paths, p)
+			}
+		}
+	}
+	exists, err := fileChecker(ctx, w, headOf, paths)
 	if err != nil {
 		return nil, err
 	}
@@ -81,8 +95,7 @@ func checkCodeRefs(ctx context.Context, w project.Where, refs [][]CodeRef, headO
 				lines := r.Lines
 				c.Lines = &lines
 			}
-			p := path.Clean(strings.ReplaceAll(r.Path, `\`, "/"))
-			lines, ok, err := exists.lines(ctx, p)
+			lines, ok, err := exists.lines(ctx, clean(r.Path))
 			if err != nil {
 				return nil, err
 			}
@@ -104,7 +117,9 @@ type files struct {
 	lines func(ctx context.Context, p string) (int, bool, error)
 }
 
-func fileChecker(ctx context.Context, w project.Where, headOf func() (string, error)) (*files, error) {
+// fileChecker readies the check of paths, every path its lines will be
+// asked for.
+func fileChecker(ctx context.Context, w project.Where, headOf func() (string, error), paths []string) (*files, error) {
 	if !w.Git {
 		root, err := filepath.EvalSymlinks(w.Root)
 		if err != nil {
@@ -150,25 +165,15 @@ func fileChecker(ctx context.Context, w project.Where, headOf func() (string, er
 	if head == "" {
 		return &files{lines: func(context.Context, string) (int, bool, error) { return 0, false, nil }}, nil
 	}
-	tree, err := gitx.TreeFiles(ctx, w.Current, head)
+	// The line counts of a checked read, not the objects themselves, are
+	// what is kept (review 068 B3).
+	counted, err := gitx.FileLines(ctx, w.Current, head, paths)
 	if err != nil {
 		return nil, err
 	}
-	counted := map[string]int{}
-	return &files{head: &head, lines: func(ctx context.Context, p string) (int, bool, error) {
-		object, ok := tree[p]
-		if !ok {
-			return 0, false, nil
-		}
-		if n, done := counted[object]; done {
-			return n, true, nil
-		}
-		n, err := gitx.CountLines(ctx, w.Current, object)
-		if err != nil {
-			return 0, false, err
-		}
-		counted[object] = n
-		return n, true, nil
+	return &files{head: &head, lines: func(_ context.Context, p string) (int, bool, error) {
+		n, ok := counted[p]
+		return n, ok, nil
 	}}, nil
 }
 

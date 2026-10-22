@@ -63,15 +63,15 @@ func TestMissingObjectsAreNotFetched(t *testing.T) {
 			func(repo *testutil.GitRepo, head string) string {
 				return repo.Git("rev-parse", head+":internal/auth/login.go")
 			},
-			func(repo *testutil.GitRepo, _, oid string) bool {
-				_, err := CountLines(ctx, repo.Dir, oid)
+			func(repo *testutil.GitRepo, head, _ string) bool {
+				_, err := FileLines(ctx, repo.Dir, head, []string{"internal/auth/login.go"})
 				return err == nil
 			},
 			[]string{"cat-file", "blob"}},
 		{"a missing tree",
 			func(repo *testutil.GitRepo, head string) string { return repo.Git("rev-parse", head+":internal/auth") },
 			func(repo *testutil.GitRepo, head, _ string) bool {
-				files, err := TreeFiles(ctx, repo.Dir, head)
+				files, err := FileLines(ctx, repo.Dir, head, []string{"internal/auth/login.go"})
 				return err == nil && len(files) > 0
 			},
 			[]string{"ls-tree", "-r"}},
