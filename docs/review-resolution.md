@@ -4871,3 +4871,46 @@ owner 预检、原消费者崩溃反例、空覆盖及 Windows 子机制按报�
 - PR #32：准备文档技术审查通过，收尾之后待按条件合并。
 - 规范没有冻结，WP2.5 没有实现或验收，M2 没有整体验收。
 - Auto-fix / Auto-merge 保持关闭。
+
+## 89．PR #32 的合并核验；WP2.5 冻结之前的 test-only 机制原型（PR #33，待独立审查）
+
+**PR #32 的合并**（按 §88 的条件；§88 约定合并结果随原型 PR 一并记入，没有为此直接向 master 追加提交）：
+
+- **最终 HEAD** `f54850ed0c53af4ab103dcb9c5d3d5bfeb4cf707`，base `bcbb21c169020e4140aa12fc8adf53477fd6245a`。收尾增量相对审查对象 `a53f2d3` 为 5 个文件，只有归档、非语义措辞与状态记录；代码、测试、Schema、迁移、依赖与 workflow 与 `a53f2d3` 相同。
+- **PR CI**：run 39808598954，`pull_request`，attempt 1，completed/success，8/8，没有重跑。每个 Job 检出 `11abea51d9bb16d63110707fd7408fdbf38606d5`（`f54850e` 合并进 `bcbb21c`），它的树 `3d77f4f` 等于 `git merge-tree --write-tree origin/master f54850e` 与 `f54850e` 自身的树。PASS / SKIP 行与上一轮逐行相同。
+- **合并之前**再次核对：远端为 `XKHoshizora/specmetry`，HEAD 与 base 未变，可合并，Auto-fix / Auto-merge 关闭。
+- **合并**：`gh pr merge 32 --merge --match-head-commit f54850ed0c53af4ab103dcb9c5d3d5bfeb4cf707`，得到 **`ecb83ba433079ab87fbe57eedd5977f9b1f42ea2`**（2026-10-22T16:07:59Z），父提交 `bcbb21c` 与 `f54850e`；没有强推，没有空提交。master 包含 `f54850e`；base 没有移动，合并树等于 `f54850e` 的树，`git diff f54850e ecb83ba` 为空。
+- **master push CI**：run 39811328918，`push`，attempt 1，completed/success，8/8，每个 Job 检出 `ecb83ba` 本身；PASS / SKIP 行与 PR CI 逐行相同；Ubuntu 的 root 步骤运行了 8 个 `TestCrossUser*`；Windows 的 `internal/cli` 以 `-timeout 20m` 用时 456 s，Ubuntu 的 `internal/cli` 用时 521 s（低于默认的 600 s；M-16 的观察）。
+- 合并结果与 CI 回执也已写入 PR #32 的描述。合并准备文档**不是**规范冻结、实现授权或验收。
+
+**原型**（按 §88 的授权：合并核验与 master push CI 全部成功之后，从已核验的 master 另开 PR）：
+
+- **PR #33**，分支 `proto/wp2.5-prototype`，起点 `ecb83ba`。不合并，待独立审查。
+- **内容**：
+  - `prototype/wp25/`：独立的 Go 模块，只有测试文件，依赖只有 `golang.org/x/sys` v0.49.0。Specmetry 的模块不包含它、无法导入它，根目录的 `./...` 不进入它。
+  - `.github/workflows/wp25-prototype.yml`：只在原型分支、并且原型代码或该 workflow 改动时运行的三平台诊断；没有手动触发，不取消运行，文档改动不触发。
+  - [wp2.5-prototype.md](wp2.5-prototype.md)：方法、有效性规则、逐平台结果、候选规格 C-1 ~ C-18、产品决定单与仍缺的部分。
+  - 本节，以及 AGENTS.md、实施计划与草案头部的状态记录。
+- **没有改动**：生产代码、`schemas/`、迁移、SQLite 的保护、重试与错误映射、`ci.yml`（Job、名称、预算与保护步骤）、已冻结的文档与历史审查原文；没有 `check run` 命令。
+- **证据**（原型代码固定为 `475414228b995c8dbabeb35d78ce6c1dd9bd9a95`）：诊断 workflow run 39816938304 在 Ubuntu（带 `-race`）38/38、macOS 26.6.2（arm64）27/27、Windows Server 2025 29/29 都是 `confirmed`；上一轮 run 39815658463（对 `bcf080f`）同样全部 `confirmed`。作者本机 Windows 11 29/29，WSL2 37 个 `confirmed` 与 1 个 `unsupported`（没有 pwsh）。作者本地草稿运行中发现并修正的 5 个原型或测试基座问题如实记在原型文档 §2.5。
+- **按门槛**（细节与边界见原型文档）：
+  - **T1 / T6**：管道路径的时间线与封闭入口在三平台成立；`os.Pipe` 读端上的停止读取在 0.4 ms 以内返回，没有出现 O3。O3 只在阻塞模式的读端上出现（反例），这时“不再写出”从封闭起成立，“资源已结束”要等 Read 返回。容量耗尽时应继续读并丢弃（反例：否则检查被迫超时）。O3 之后的后续调用推荐“拒绝”（候选，C-4）。
+  - **T2**（Linux）：进程级闸门把排他区间变成可强制的规则，覆盖 git 与进程内并发的检查；重复收养、pidfd 身份、拒绝路径与 F1 之后的资源都已执行。旁路启动与其他回收者是反例，需要静态规则（C-9）。
+  - **T3**（真实 macOS）：kqueue 的有时限、不回收的退出观察，`waitid(WNOWAIT)` 可用，组身份规则成立；`setsid` 的后代无法发现（边界保留）；只剩僵尸组长时 `kill(-pgid, 0)` 返回 EPERM（新发现，C-12）。
+  - **T4**（Windows）：启动链每一步的失败都不恢复、确认结束、句柄有主、用户代码没有运行；终止或查询失败时不确认结束。测试负载下没有观察到“请求之后仍有活动进程”的窗口，这一区别只由注入证明。
+  - **T5**：所测解释器上命令文本 23/23 原样到达，MSVCRT 引号交给 MSYS 的反例复现，`cmd` 的多行只执行第一行。
+- **候选规格 C-1 ~ C-18** 都待审查，不改变产品行为；**14 项产品选择**（D1 ~ D9、D11、D13、D18 ~ D20）仍待负责人决定，原型文档 §10 给出按行为分组的推荐、代价与本轮证据，都**没有批准**。
+
+**保持不变**：
+
+- 规范草案仍是第 4 版，未冻结；T1 ~ T6 的规格待审查之后定稿；
+- 观测级与方案 B 的边界；M-14、M-15、M-16 的未解决状态；
+- 既有的决定、验收结论与历史审查原文（§84 ~ §88 没有改动）。
+
+**不授权**：原型 PR 的合并、产品选项的批准、规范冻结、生产 Check Runner、迁移 0009、CLI 接线、WP2.5 或 M2 的验收。
+
+**状态**：
+
+- PR #32：已合并为 `ecb83ba`，合并核验与 master push CI 正式成功。
+- PR #33：原型已提交，三平台诊断全部 `confirmed`，**待独立审查**，不合并。
+- Auto-fix / Auto-merge 保持关闭。
