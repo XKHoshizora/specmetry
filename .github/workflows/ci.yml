@@ -31,7 +31,33 @@ jobs:
           race=""
           if [ "$RUNNER_OS" = "Linux" ]; then race="-race"; fi
           # -v lists every test, so the log shows which ones each platform skipped.
-          go test -tags nowebui -count=1 -v $race ./...
+          if [ "$RUNNER_OS" != "Windows" ]; then
+            go test -tags nowebui -count=1 -v $race ./...
+            exit 0
+          fi
+          # Windows (maintenance item M-16, a risk mitigation the owner approved
+          # on 2026-10-21; the cause is not established): internal/cli runs on
+          # its own with a 20-minute package timeout, every other package with
+          # go test's default 10 minutes. The packages are those of ./..., each
+          # in exactly one of the two runs; both runs go to the end, and either
+          # failing fails the step.
+          cli=github.com/XKHoshizora/specmetry/internal/cli
+          all=$(go list -tags nowebui ./...)
+          rest=$(printf '%s\n' "$all" | grep -vxF "$cli" || true)
+          n_all=$(($(printf '%s\n' "$all" | grep -c .)))
+          n_rest=$(($(printf '%s\n' "$rest" | grep -c . || true)))
+          n_cli=$(($(printf '%s\n' "$all" | grep -cxF "$cli" || true)))
+          dups=$(printf '%s\n' "$all" | sort | uniq -d)
+          echo "packages: $n_all in ./..., $n_rest without $cli, $n_cli of it"
+          if [ -n "$dups" ] || [ "$n_cli" -ne 1 ] || [ $((n_rest + 1)) -ne "$n_all" ]; then
+            echo "the package set does not split into the two runs"
+            exit 1
+          fi
+          rc=0
+          # shellcheck disable=SC2086 # one argument per package
+          go test -tags nowebui -count=1 -v $rest || rc=1
+          go test -tags nowebui -count=1 -v -timeout 20m "$cli" || rc=1
+          exit $rc
       - name: Cross-user path tests (Linux, needs root)
         if: runner.os == 'Linux'
         shell: bash
