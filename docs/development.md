@@ -28,12 +28,13 @@ export SPECMETRY_HOME="$(mktemp -d)/specmetry-home"
 | `internal/config/` | `config.toml` 读取（未知键视为错误；错误只给出行列位置，不回显文件内容）；`[secrets]` 追加规则 |
 | `internal/channel/` | CLI 通道识别（architecture §5.1）：`Detect`（stdin、stdout 是否为终端或 Windows 控制台，已核实的 Agent 环境变量只看是否存在且非空，值只用于这次判断，从不保存、记录或输出）、`Guard`（人类专属操作的拦截与交互式确认，没有跳过参数）。防止误操作，不是身份认证 |
 | `internal/secrets/` | 密钥识别（architecture §10.8）：14 条内置规则、追加规则校验、按字段扫描（JSON Pointer）、不回显命中文本的拒绝错误。只能降低泄露风险，不能保证检测出所有秘密 |
-| `internal/store/sqlite/` | SQLite 存储基础：打开顺序、迁移框架、备份、墓碑、`seq`、只追加触发器、只读检查；迁移 v2 起是业务表（`projects`、`worktrees`、`delivery_targets`）；v7 是提交扫描的 `commits`、`commit_links`、`git_scan_cursors`（WP2.3） |
+| `internal/store/sqlite/` | SQLite 存储基础：打开顺序、迁移框架、备份、墓碑、`seq`、只追加触发器、只读检查；迁移 v2 起是业务表（`projects`、`worktrees`、`delivery_targets`）；v7 是提交扫描的 `commits`、`commit_links`、`git_scan_cursors`（WP2.3）；v8 是 Claim 的 `claim_batches`、`claims`（WP2.4：项目外键、只追加、批次与 Claim 共用 `seq`、`manual` 只能来自 `human_cli`、目标须为本项目当前修订的 `active` AC、`unknown` 只用于 `audit`） |
 | `internal/project/` | 项目登记与 `init`（architecture §6.1.1、§6.1.2）：阶段识别与候选来源（只看路径和大小，不读内容）、marker、exclude 条目、项目与 worktree 的登记、默认交付目标 |
 | `internal/source/` | 来源（architecture §6.1.3）：路径解析（`in_repo` / `external`）、分块计算 sha256（可取消，不保存内容）、磁盘观测、来源集合哈希、登记、确认与移除、引用列表 |
 | `internal/baseline/` | 读取已确认的基准（当前版本、按编号查找条目），按 TD-14 分配编号（`GOAL-n`、`REQ-nnn`、`AC-<需求号>-n`、`Q-nnn`，永不复用） |
-| `internal/proposal/` | 提案（architecture §6.1.4）：静态规则、来源解析、流式片段校验（不保存原文）、代码引用检查、在一个写事务中保存提案、条目、问题与问题的来源引用 |
-| `internal/gitx/` | 调用 git CLI（只读）：定位仓库与 worktree、分支与提交、文件列表；不传递 `GIT_DIR` 等定位变量。WP2.3（[规范](wp2.3-git-reader.md)）：输入路径的树条目（`TreeEntry`）；工作区状态（`Clean`：私有 git 目录、白名单配置、直接解析索引的稀疏门禁 `IndexIsSparse`，不执行仓库配置的程序）；提交扫描的严格读取（`CheckShallow`、`Tips`、`Classify` 与存储检查、`IsAncestor`、`Log`：关闭 commit-graph、multi-pack-index，经行为探测传显式空 graft/shallow 覆盖）。Clean 与探测使用 `tmp/git-reader-v3/` 的合作租约、创建清单、路径 owner 校验和持久消费者屏障；无法确认归属或消费者结束时保留并 exit 6，Windows 用原子创建和同句柄删除。Unix 创建／最终删除及 Clean false-clean 的局部排除仅按获批方案 B 适用，不声称句柄与前后检查消除所有往返替换（规范 §14.3、review-resolution §71～72） |
+| `internal/proposal/` | 提案（architecture §6.1.4）：静态规则、来源解析、流式片段校验（不保存原文）、代码引用检查、在一个写事务中保存提案、条目、问题与问题的来源引用。代码引用的静态规则（`CodeRefProblems`）与按调用方采集的 head 检查（`CheckCodeRefsAt`）也供 Claim 使用；git 项目中的文件与行数经 `gitx.FileLines` 的受校验读取判断（审查 068 B3），提案与 Claim 共用 |
+| `internal/claim/` | Claim（WP2.4，[规范](wp2.4-claim.md)）：`claims.v1` 解析与不需要数据库的规则；代码上下文采集（`CommitOf`、`Clean`；无法判定记为 `unknown`）；引用检查（文件对照采集的 head，提交前缀经 `gitx.ResolveCommits`）；写锁下先比较基准版本，再检查目标、审计范围（D2、D3）与修订，登记首次出现的 worktree，计算 `compare_from`，用一个 `seq` 写入批次、Claim 与未映射工作，并用写入的行构造 `claim-receipt.v1`。回执在提交前校验并编码；提交之后的输出故障为退出码 6，不再追加 `error.v1`（`internal/cli`） |
+| `internal/gitx/` | 调用 git CLI（只读）：定位仓库与 worktree、分支与提交、文件列表；不传递 `GIT_DIR` 等定位变量。WP2.3（[规范](wp2.3-git-reader.md)）：输入路径的树条目（`TreeEntry`）；工作区状态（`Clean`：私有 git 目录、白名单配置、直接解析索引的稀疏门禁 `IndexIsSparse`，不执行仓库配置的程序）；提交扫描的严格读取（`CheckShallow`、`Tips`、`Classify` 与存储检查、`IsAncestor`、`Log`：关闭 commit-graph、multi-pack-index，经行为探测传显式空 graft/shallow 覆盖）。WP2.4 的提交前缀解析（`ResolveCommits`，规范 E4）沿用同样的读取方式：列出前缀对应的全部候选对象，每个都完整读取并由 Specmetry 重新计算对象 ID（git 读取对象时不校验哈希；审查 067 B1），再做存储检查；无法可靠判断时 exit 6，不记为未解析。代码引用的文件与行数（`FileLines`，审查 068 B3）同样只用受校验的读取：固定提交、通往每个路径的树（逐层）、文件的 blob，按对象 ID 去重，只读这些对象；共用的校验器与一次 `cat-file --batch` 的读取在 `verify.go`。Clean 与探测使用 `tmp/git-reader-v3/` 的合作租约、创建清单、路径 owner 校验和持久消费者屏障；无法确认归属或消费者结束时保留并 exit 6，Windows 用原子创建和同句柄删除。Unix 创建／最终删除及 Clean false-clean 的局部排除仅按获批方案 B 适用，不声称句柄与前后检查消除所有往返替换（规范 §14.3、review-resolution §71～72） |
 | `internal/gitscan/` | 提交扫描（WP2.3）：编号匹配（`Mentions`）、各 ref 的读取范围、计划之后的一个写事务（并发跳过、只入库至少关联一个本项目编号的新提交、共享一个 `seq`、写游标）。不输出、不节流，由调用的命令决定何时扫描（WP2.7） |
 | `internal/domain/derive/` | 推导引擎（纯函数，data-model §6、§6.13、§6.13.1）：`Derive` 是截止 `as_of_seq` 的完整推导，`ChangesSince` 是 `--diff-since` 的 AC 投影。全部输入显式给出，只导入不做 I/O 的标准库包（由测试检查），不读取数据库、git、文件、网络、环境变量或时钟；缺少输入时返回 `*InputError`，不用缺省值或当前值补齐 |
 | `internal/ulid/` | ULID 生成（只用于标识，不用于排序） |
@@ -131,6 +132,7 @@ go build -o dist/ ./cmd/specmetry
     - `Random` 用固定种子生成合法事实历史与当前值输入。每个生成的提交有一棵固定的树（`Case.Trees`），执行只在 HEAD 的树缺少声明的输入时为 `input_missing`。
     - `factgen/legality` 只读转储行，按冻结的写入规则独立检查历史是否合法，不使用 `History`、推导器或复核器；`CheckTrees` 用生成器的提交树核对输入记录。性质测试与双向对照只使用经它们确认的历史。
     - `factgen/toderive` 把转储映射为推导引擎的输入，只做映射，不选择、不过滤、不计算。
+  - `dbdump`：把数据库中一个项目的行读成 `factgen` 的转储（只映射，JSON 列保持文本，NULL 为 nil），经 `toderive` 交给推导，用来验证命令写入的事实的推导结论（WP2.4 规范 §12）。
   - `readycheck`：独立的 `ready` 复核器（WP2.2，acceptance-criteria §3.1）。按谓词 R1 ~ R10 自行从事实判断交付是否 `ready`，只导入标准库，不导入推导引擎或任何生产包；`readycheck/fromdump` 是它自己的转换器，与 `factgen/toderive` 分别实现。两个方向的导入关系都由测试检查。
   - `testdir.New`：放数据目录的测试目录。Windows 上位于 `%LOCALAPPDATA%\specmetry-test`：`%TEMP%` 可能授予其他账户修改权限（例如编码代理的沙箱账户），按路径规则会被拒绝。
 - 存储包的测试用辅助子进程模拟崩溃（写入后不关闭数据库直接退出）、进行中的未提交事务、并发升级和持锁进程。

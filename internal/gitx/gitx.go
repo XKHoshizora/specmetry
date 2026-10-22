@@ -266,51 +266,9 @@ func ListFiles(ctx context.Context, worktree string) ([]string, error) {
 	return files, nil
 }
 
-// objectID matches a full object or commit ID (SHA-1 or SHA-256), the only
-// form TreeFiles and CountLines accept, so that no argument reaches git as
-// an option.
+// objectID matches a full object or commit ID (SHA-1 or SHA-256), as
+// git rev-parse prints one.
 var objectID = regexp.MustCompile(`^[0-9a-f]{40}([0-9a-f]{24})?$`)
-
-// TreeFiles lists the regular files of commit in the repository of
-// worktree: the blob of each, by its path from the top with forward
-// slashes. Symbolic links, submodules and directories are not files.
-func TreeFiles(ctx context.Context, worktree, commit string) (map[string]string, error) {
-	if !objectID.MatchString(commit) {
-		return nil, apperr.New(apperr.Internal, "TreeFiles needs a full commit ID")
-	}
-	out, err := runObjects(ctx, worktree, "ls-tree", "-r", "-z", "--full-tree", commit)
-	if err != nil {
-		return nil, err
-	}
-	files := map[string]string{}
-	for _, entry := range strings.Split(string(out), "\x00") {
-		if entry == "" {
-			continue
-		}
-		meta, path, ok := strings.Cut(entry, "\t")
-		fields := strings.Fields(meta)
-		if !ok || len(fields) != 3 {
-			return nil, apperr.New(apperr.Environment, "cannot read the tree of the commit")
-		}
-		if fields[1] == "blob" && (fields[0] == "100644" || fields[0] == "100755") {
-			files[path] = fields[2]
-		}
-	}
-	return files, nil
-}
-
-// CountLines counts the lines of a blob without keeping its content: its
-// line breaks, and one more for a last line without one.
-func CountLines(ctx context.Context, worktree, object string) (int, error) {
-	if !objectID.MatchString(object) {
-		return 0, apperr.New(apperr.Internal, "CountLines needs a full object ID")
-	}
-	var c lineCounter
-	if err := runObjectsTo(ctx, worktree, &c, "cat-file", "blob", object); err != nil {
-		return 0, err
-	}
-	return c.lines(), nil
-}
 
 // lineCounter counts line breaks in what is written to it and keeps
 // nothing else.

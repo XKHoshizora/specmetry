@@ -28,10 +28,10 @@ import (
 // before it runs, in every repository: whether a repository is a partial
 // clone can change between a check and a read (codex-review-022).
 //
-// Every command that may read an object runs through runObjects,
-// runObjectsCode or runObjectsTo, and future ones must too: rev-parse of a
-// ref's commit, ls-tree, cat-file, and ls-files (git expands a sparse index
-// from the trees it names). Commands that read only refs, the
+// Every command that may read an object runs through runObjectsCode or a
+// call with objects (or list) set, and future ones must too: rev-parse of
+// a ref's commit, ls-tree, cat-file, and ls-files (git expands a sparse
+// index from the trees it names). Commands that read only refs, the
 // configuration or the git directory's layout (rev-parse --show-toplevel
 // and --git-path, worktree list, symbolic-ref, config) run through run and
 // runCode.
@@ -177,18 +177,6 @@ func probeSparse(ctx context.Context, git string) (bool, error) {
 	return false, refused(msgUnknown)
 }
 
-// runObjects is run for a command that may read an object.
-func runObjects(ctx context.Context, dir string, args ...string) ([]byte, error) {
-	out, code, err := runObjectsCode(ctx, dir, args...)
-	if err != nil {
-		return nil, err
-	}
-	if code != 0 {
-		return nil, failed(args[0], code)
-	}
-	return out, nil
-}
-
 // runObjectsCode is runCode for a command that may read an object.
 func runObjectsCode(ctx context.Context, dir string, args ...string) ([]byte, int, error) {
 	git, err := objectGit(ctx)
@@ -196,23 +184,6 @@ func runObjectsCode(ctx context.Context, dir string, args ...string) ([]byte, in
 		return nil, -1, err
 	}
 	return runWith(ctx, git, dir, args...)
-}
-
-// runObjectsTo runs a command that may read an object and must succeed,
-// with its output written to stdout as it comes.
-func runObjectsTo(ctx context.Context, dir string, stdout io.Writer, args ...string) error {
-	git, err := objectGit(ctx)
-	if err != nil {
-		return err
-	}
-	code, err := execTo(ctx, git, dir, stdout, append(slices.Clone(globalArgs), args...)...)
-	if err != nil {
-		return err
-	}
-	if code != 0 {
-		return failed(args[0], code)
-	}
-	return nil
 }
 
 // probeTimeout bounds the probe.

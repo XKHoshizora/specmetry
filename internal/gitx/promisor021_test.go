@@ -200,8 +200,8 @@ func TestARepositoryThatBecomesAPartialCloneIsNotFetchedFrom(t *testing.T) {
 			if c, err := CommitOf(ctx, repo.Dir, "HEAD"); err != nil || c != head {
 				t.Fatalf("CommitOf before = %q, %v", c, err)
 			}
-			if _, err := CountLines(ctx, repo.Dir, blob); err != nil {
-				t.Fatalf("CountLines before = %v", err)
+			if n, err := FileLines(ctx, repo.Dir, head, []string{"internal/auth/login.go"}); err != nil || n["internal/auth/login.go"] != 1 {
+				t.Fatalf("FileLines before = %v, %v", n, err)
 			}
 			script, ran := standIn(t)
 			repo.Git("config", "remote.origin.url", filepath.ToSlash(t.TempDir()))
@@ -210,8 +210,8 @@ func TestARepositoryThatBecomesAPartialCloneIsNotFetchedFrom(t *testing.T) {
 			removeObject(t, repo, blob)
 			gitDir := filepath.Join(repo.Dir, ".git")
 			before := testutil.SettledSnapshot(t, gitDir)
-			if _, err := CountLines(ctx, repo.Dir, blob); apperr.ExitCode(err) != apperr.ExitEnvironment {
-				t.Errorf("CountLines of the removed blob = %v; want exit 6", err)
+			if _, err := FileLines(ctx, repo.Dir, head, []string{"internal/auth/login.go"}); apperr.ExitCode(err) != apperr.ExitEnvironment {
+				t.Errorf("FileLines with the blob removed = %v; want exit 6", err)
 			}
 			if ranAt(ran) {
 				t.Error("the promisor remote's upload-pack ran")

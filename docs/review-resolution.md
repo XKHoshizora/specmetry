@@ -4280,3 +4280,212 @@ owner 预检、原消费者崩溃反例、空覆盖及 Windows 子机制按报�
 - WP2.4 规范已冻结，实现须等上述核验全部完成之后开工。
 - M2 未整体验收。
 - M-14、M-15、M-16 等维护事项保持未解决；方案 B 的边界不变；Auto-fix / Auto-merge 保持关闭。
+
+## 80．Review 067：PR #30 的 WP2.4 实现 NO-GO（实现 B1、B2）与定向修复
+
+**审查**：[Review 067](reviews/codex-review-067.md)，原样归档为 `cb70356f9b843a0830edcd483ee4f634d25fa653`。源文件、归档与该提交 blob 的 SHA-256 均为 `3794cd450746b76d6f5f623d647ec762a0ed39d2e3b57d4889309746302be7b6`，逐字节一致。
+
+**审查对象**（不随之后的修复提交而改变）：PR #30，HEAD `69d2f86bb1c9f2b3f842e127576ef04b7d886d7a`（树 `e828b90`），base `d8f8a50a7f01d9fec9ce7dd699495ff829c9229f`；首次实现审查，覆盖 base→HEAD 的全部 21 个文件。
+
+**结论：NO-GO，两项 BLOCKER**；合并检查（CI run 39464343744，attempt 1，8/8，检出 `1a2caaf`）成功与技术审查 NO-GO 分别成立。
+
+- **B1（实现）**：`gitx.ResolveCommits` 只完整读取并核对将返回 `true` 的那个提交。唯一的非提交对象与歧义前缀的候选只凭对象头分类，头部可读、正文损坏的对象被当作普通的 `resolved = false`，整个批次照常写入。审查方在 Windows git 2.56 与 WSL git 2.43 上经公开 CLI 复现了新增的批次、Claim 与 `seq`。这违反冻结的 E4 / V-C06："对象损坏 → 退出码 6"。
+- **B2（实现）**：默认文本模式跳过了提交前的回执 Schema 校验（`claimOutput` 在校验之前返回文本）。同一个注入的非法回执，在 `--json` 下被拒绝并回滚，在文本模式下却被提交，还打印出错误的 `seq`。这违反规范 §5 第 10 步与 §9.3。
+- **NON-BLOCKER N1**：PR 描述把最终改为非 git 项目的 PTY 测试仍列为 git 相关用例；应分开陈述"PTY 证明通道""真实 git 用例证明上下文"。
+- **PRODUCT DECISION**：没有新增；Q6、Q9、D1 ~ D3、E4、E6 都是冻结输入。PR 描述中"并发 Claim 是否等待合作锁"的设想不是当前实现必需的决定，本轮不批准等待策略，也不授权修改方案 B。
+- **ACCEPTED RISK**：没有新增；只沿用 §71 的方案 B 局部排除。M-14、M-15、M-16 不是接受的风险。
+- **审查方的验证边界**：
+  - 在仓库外的隔离副本中运行（Windows/amd64 与 WSL Ubuntu/amd64、Go 1.27.1）；
+  - 没有独立重跑作者的桩阶段红灯、全部变异或真实 git 2.32.0 实验，不把作者的变异计数当作穷尽证明；
+  - 没有 macOS 本机（macOS 结果来自 CI）。
+
+**与既往结论的区分**：Review 065 的规范 B1（并发退役的版本优先）已由 Review 066 关闭，不因本轮重开。Review 067 的 B1、B2 是实现层面的另两项发现，**尚未关闭**，须经独立复审确认。
+
+**修复**（实施方，提交 `dd353d9`、`8b8311f`；**已修复，待独立复审**）：
+
+- **B1**（`internal/gitx/resolve.go`）：
+  - 前缀列出的每个对象，在给出任何 `true` / `false` 之前，都经同一次 `cat-file --batch` 流式读取：对象头须是该 ID、已知类型；正文须恰好是声明的长度，并按 `"<type> <size>\0"` 与正文重新计算对象 ID。
+  - 正文只流过哈希，不保存；按对象 ID 去重；取消沿用现有机制。
+  - 任何不一致、stderr 输出或意外状态都是退出码 6，不返回任何前缀的部分结果。
+  - 健康的 blob、tree、标签对象（不因可解引用到提交就当作提交）与真实歧义仍为 `false`（E4 不变）；存储检查与 PD-26 不变。
+  - 根因的补充事实（实施方实验，git 2.56）：头部可读的损坏 loose 对象，blob 在 `cat-file --batch` 下只输出残存的内容（短于声明长度）；tree（`--batch`）与 commit（`cat-file commit`）则以进程内存中的内容补足到声明长度；一个对象的文件装着另一个合法对象的字节时，git 按那个对象（及其类型）输出。以上情况退出码都是 0，所以只能以声明长度与重新计算的对象 ID 判断。
+- **B2**（`internal/cli/claim.go`）：`claimOutput` 先按 `claim-receipt.v1` 校验回执，再按所选模式编码；`--json` 只决定呈现方式。不符合时为内部错误（退出码 1），整个事务回滚，包括首次的 worktree 登记。`manual` 的预演与最终写事务共用这一路径。提交之后的输出故障行为不变。
+- **回归**（均先在旧实现上确认失败，证据见 PR #30 描述）：
+  - gitx：`TestResolveCommitsVerifiesEveryCandidate`（8 个子场景）；Unix 上歧义前缀中不可读的候选。
+  - CLI：`TestClaimRefusesADamagedCommitCandidate`（文本与 JSON、新 worktree、正常与异常混合的引用、修复后的对照；对象内容不进入任何输出或数据目录）；`TestClaimReceiptCheckedInEveryMode`（三种批次在两种模式下的正常对照；注入失败在两种模式下回滚，`manual` 分预演失败与确认之后最终事务失败）；`TestClaimRegistersTheWorktreeOrNothing` 扩展到文本模式。
+  - 变异检查 4 处全部捕获：不比较重算的 ID；接受短于声明长度的正文；只验证唯一候选；只在 `--json` 时校验。另有一处首次写错而偶然通过的变异，更正后捕获，记录保留。
+- **N1**：PR 描述已更正测试口径。
+
+**发现的其他直接关联问题（本轮未修复，待决定）**：Claim 的文件引用检查，与 `propose` 共用 `proposal` 的代码引用检查，同样信任 git 的成功读取：
+
+- HEAD 提交只按对象头解析（`CommitOf`）；
+- 文件列表来自 `ls-tree -r`，一棵装着另一棵树字节的树会被照常列出；
+- 行数来自 `cat-file blob`，头部可读的损坏 blob 按残存内容计数（实施方实验，退出码 0）。
+
+结果可能是错误的 `exists` 标记，而不是退出码 6。修复须沿每个引用路径逐个验证 commit、tree、blob 对象，并且会改变 M1 已验收的 `propose` 的行为（共用路径），超出 Review 067 B1（提交前缀候选）的范围。建议由负责人决定：是否在 WP2.4 内为 Claim 的文件引用补上沿路径的对象验证，以及 `propose` 是否同步（M1 的变更）。决定之前，行为不变。
+
+**状态**：
+
+- PR #30 已修复，待独立复审；不合并，不宣布 B1、B2 关闭。
+- WP2.4 与 M2 都未验收；WP2.5 等其他工作包未启动。
+- M-14、M-15、M-16 等维护事项保持未解决；方案 B 不变；Auto-fix / Auto-merge 保持关闭。
+
+## 81．Review 068：PR #30 定向复审，实现 B1、B2 关闭，B3（文件引用完整性）阻塞
+
+**审查**：[Review 068](reviews/codex-review-068.md)，原样归档为 `1c0a0f7930c5f3eb102297af6e9593642561f5a3`。源文件、归档与该提交 blob 的 SHA-256 均为 `09c6b472d610162f9a47aab709e3fd2f3aacc6446b48b66d476ff299a95b31a7`，逐字节一致。
+
+**审查对象**（不随之后的修复提交而改变）：PR #30，HEAD `e70c09bb404db8371ac268c2bf64c4379141f26f`（树 `245c4da`），base `d8f8a50a7f01d9fec9ce7dd699495ff829c9229f`；增量是 §80 之后的 5 个提交、9 个文件。
+
+**结论：仍为 NO-GO**；CI run 39526415079（attempt 1，8/8，检出 `b0ffc03`）成功与技术审查 NO-GO 分别成立，CI 成功与验证边界不能替代缺陷的关闭。
+
+- **Review 067 B1 关闭**：提交前缀的全部候选，包括唯一的非提交对象与歧义前缀的每个候选，都先完整读取并核对长度与对象 ID，再给出结果；失败不返回部分结果。
+- **Review 067 B2 关闭**：文本与 JSON 都在事务内、COMMIT 之前校验规范回执并准备输出；`manual` 的预演与最终事务共用这一路径。
+- **B3（新的阻塞，沿用报告原编号）**：文件引用检查没有可靠核对对象的完整性。
+  - 位置：`proposal` 的 `CheckCodeRefs` / `CheckCodeRefsAt` 共用的检查，经 `gitx.TreeFiles`（信任 `ls-tree -r`）与 `gitx.CountLines`（信任 `cat-file blob` 的字节）。
+  - 审查方在 Windows git 2.56 与 WSL git 2.43 上独立复现了三种假成功：头部可读、正文截断的 blob 被标为存在；blob 装着另一个合法 blob 的字节时按替代内容计数；子树装着另一棵树的字节时，把固定提交中没有的文件标为存在。
+  - 经公开命令入口，Claim 在 JSON 与文本模式下都成功提交了批次、Claim、首次 worktree 与 `seq`。
+  - 这违反 WP2.4 规范 §6.1、§7 与 V-C06。缺口在本 PR 之前的共用路径中，但直接影响 WP2.4 的交付行为。
+- **NON-BLOCKER N1**：batch 解析器的头长限制依赖写入的分块（同一块中先 `begin()`，之后的长度检查看不到已处理的头）。
+- **PRODUCT DECISION**：没有新增；E4、E6、D1 ~ D3、版本优先与存在性的含义都不变。负责人把文件引用的修复（包括共用的 `propose` 路径）纳入 WP2.4，是实施范围的决定，不是放宽保证。
+- **ACCEPTED RISK**：没有新增；只沿用 §71 的方案 B 局部排除。M-14、M-15、M-16 不是接受的风险。
+- **审查方的验证边界**：仓库外隔离副本（Windows/amd64 与 WSL Ubuntu/amd64，Go 1.27.1）；没有独立重跑真实 git 2.32.0、作者的全部变异、正式发布二进制的 E2E 或物理故障；macOS 结果来自 CI。
+
+**修复**（实施方，提交 `87fb135`；**已修复，待独立复审**，不宣布 B3 关闭）：
+
+- **B3**：
+  - `gitx.FileLines` 取代 `TreeFiles` 与 `CountLines`。它只读答案所依据的对象：固定提交、通往每个路径的树（逐层）与文件的 blob（按对象 ID 去重），不读其他树、blob 或历史。
+  - 每个对象都经与 Review 067 B1 相同的受校验读取（共用的 `verify.go`：一次 `cat-file --batch`，核对 ID、类型、长度与完整内容），并须是树条目给出的类型。
+  - 解析树与计算行数都用同一次已核对的读取；只缓存已验证的派生结果（解析后的树、行数）；不保存 blob 内容。
+  - 任何不一致、读取失败或 stderr 输出都是退出码 6，不返回任何路径的结果，不记为 `exists = true` 或普通的 `missing`。
+  - 健康树中不存在的路径、行号越界、目录、符号链接、子模块、unborn、非 git 项目的既有语义不变；PD-26 与部分克隆的拒绝仍在先。
+  - `propose` 与 Claim 共用这一路径；Claim 仍绑定采集的 HEAD。不再使用的 `runObjects`、`runObjectsTo` 一并删除。WP2.3 的 check.inputs（`TreeEntry`）不变。
+- **N1**：校验器在换行分支中先检查完整头长再 `begin()`，判定与分块无关。
+- **回归**（均先在旧实现上确认失败，证据见 PR #30 描述）：
+  - `TestCheckCodeRefsVerifiesTheObjects`（两个接口；Review 068 的反例；修复后的对照；HEAD 移动）；
+  - `TestFileLines`（原 `TreeFiles` 的预期值）、`TestFileLinesVerifiesTheObjects`、`TestFileLinesChecksTheTypes`、`TestObjectVerifierHeaderLimit`；
+  - CLI：`TestClaimRefusesADamagedFileObject`、`TestProposeRefusesADamagedFileObject`（文本与 JSON；Claim 的首次 worktree；对象内容与 git 的 stderr 不出现在输出或数据目录中）。
+  - 既有的 promisor 与 PD-26 测试改为经 `FileLines` 读取，断言不变。
+  - 变异检查 4 处全部捕获：不比较重算的 ID、接受短于声明长度的内容（两者在 gitx 与 `propose` 的共用路径上都被捕获）、不检查对象类型（补 `TestFileLinesChecksTheTypes` 之后捕获，首次未捕获的记录保留）、N1 改回旧写法。
+
+**状态**：
+
+- PR #30 已修复，待独立复审；当前仍为 NO-GO，不合并，不宣布 B3 关闭。
+- WP2.4 与 M2 都未验收；WP2.5 等其他工作包未启动。
+- PR #31（M-16 的 CI 调整）单独审查，本轮不修改或合并。M-14、M-15、M-16 保持未解决；方案 B 不变；Auto-fix / Auto-merge 保持关闭。
+
+## 82．Review 069：PR #31（M-16 的风险缓解）GO、合并与核验；PR #30 整合合并后的 master
+
+**审查**：[Review 069](reviews/codex-review-069.md)，在 PR #31 的收尾中原样归档为 `b6b8a16bdf417a3d33954b9e10cb4f48ea6181a1`。源文件、归档与该提交 blob 的 SHA-256 均为 `eb257e9177ee514d40a288b9fa9325a0b083aeb6e87f3473ace06b0e3b1e41b7`，逐字节一致。
+
+**审查对象**（不随收尾提交而改变）：
+
+- PR #31，HEAD `0de32c5b4a319619b49a27fe1c8aaac1c80c5d8d`（树 `7406acf`），base `d8f8a50a7f01d9fec9ce7dd699495ff829c9229f`。
+- 一个提交、三个文件：`.github/workflows/ci.yml` 中 Go tests 的 Test 步骤、`docs/m1-exit-evidence.md` §9 的 M-16 行、实施计划的 M-16 行。
+- 审查依据的 CI 是 run 39600735762（attempt 1，8/8，检出 `3c901fb`）。
+
+**结论：GO**。
+
+- 没有 BLOCKER，也没有本 PR 新增的 NON-BLOCKER；报告没有提出新的产品决定。
+- **分组**：Windows 的全部包来自实时的 `go list -tags nowebui ./...`，恰好分成非 CLI 与 CLI 两组。前者保留默认的每包 10 分钟，后者单独使用 `-timeout 20m`。
+- **失败处理**：包枚举失败使步骤失败；任何一组失败都使步骤失败，第一组失败后第二组仍执行。没有自动重试、失败过滤、测试删减或固定的包数量。
+- **不变的部分**：Ubuntu 与 macOS 的执行方式、Ubuntu 的 `-race`、Linux 的 root 跨用户步骤，以及其他 Job。
+- **M-16 继续未解决**：一次成功不证明 20 分钟始终足够，也不证明 CI 变慢的原因。CLI 挂起的报告可能从 10 分钟推迟到 20 分钟；这是负责人批准的本次取舍，不延伸为其他保证豁免。
+
+**负责人决定**（2026-10-22）：
+
+- 条件授权合并 PR #31。
+- PR #31 合并核验及 master CI 全部成功后，把已核验的 master 整合进 PR #30。
+- 不授权合并 PR #30、关闭 B3、宣布验收或启动后续工作包。
+
+**PR #31 的收尾**（只有文档）：
+
+- `b6b8a16` 归档 Review 069；`f13d231` 在 M-16 的活跃记录（`docs/m1-exit-evidence.md` §9 与实施计划）中登记 GO 与条件授权。
+- 相对 `0de32c5` 只有上述三个文档文件。工作流、`internal`、`cmd`、`schemas`、`web`、`scripts`、`go.mod`、`go.sum` 都不变。
+- 收尾 HEAD `f13d23156932e48e558ac6b9609e3991fd8b73f0` 的 CI 是 run 39720152759：`pull_request`，attempt 1，8/8 正式成功，没有重跑。
+  - 8 个 Job 都检出 `949228c`（父提交 `d8f8a50`、`f13d231`），其树 `cd156ae` 等于 `git merge-tree --write-tree` 的结果。
+  - Windows 枚举出 31 个包，分成 30 + 1 两组，每个包执行一次；CLI 一组最后执行，用时 399 s。
+  - 三个平台的包集合相同，没有 FAIL。
+
+**合并与核验**：
+
+- 2026-10-22 以 merge commit 合并，用 `--match-head-commit f13d231…` 锁定完整的最终 HEAD。合并提交为 `8b45ef598da1599ea672072338fef5ed9c6f77ee`，父提交 `d8f8a50`、`f13d231`。
+- master 包含 `f13d231`；合并树 `cd156ae` 与最终 HEAD 相同，`git diff` 为空。
+- master push CI 是 run 39721731294：`push`，attempt 1，8/8 正式成功，没有重跑。
+  - 8 个 Job 都检出 `8b45ef5`。
+  - Windows 按新分组执行：31 个包，30 + 1，每个包一次；CLI 一组用 20 分钟预算，耗时 363 s。
+  - 三个平台的包集合相同，没有 FAIL；Ubuntu 的 root 步骤执行了 8 个 `TestCrossUser*`。
+- 两次 CI 都没有用到 M-15 的重跑许可。
+
+**M-16**：缓解已在 master 生效（Windows 分组执行，CLI 的包级超时为 20 分钟）。这是风险缓解，根因未验证，M-16 保持未解决；代价是 Windows CLI 的挂起最晚 20 分钟才被报告。
+
+**PR #30 的整合**：
+
+- 在 `feat/m2-wp24-claim` 上以 merge commit 合并 `8b45ef5`（不改基，不强推）。合并提交为 `cc2d006251d9d272914fdc9e0f27902caa9119ad`，父提交 `8c0db79`、`8b45ef5`。
+- 只有 `docs/implementation-plan.md` 的相邻两行冲突。PR #30 的 M2-Q6/Q9 行（含 §80、§81）与 master 的 M-16 行都保留，各一次。§80、§81 原样保留，本节接在其后。
+- 整合后：
+  - 源码、测试、Schema、迁移与依赖（`internal`、`cmd`、`schemas`、`web`、`scripts`、`go.mod`、`go.sum`）与 `8c0db79` 相同；
+  - `.github` 与 master `8b45ef5` 相同；
+  - 相对 `8c0db79` 的其余变化，只有 PR #31 带来的 M-16 文档与 Review 069 原文，以及本节与状态行的同步。
+- 整合后的 CI 结果记录在 PR #30 的描述中，不为记录 CI 追加提交。
+
+**状态**：
+
+- Review 067 的 B1、B2 已由 Review 068 关闭；Review 068 的 B3 与 N1 **已修复，待独立复审**。本节不改变这一点，也不改写此前任何审查的结论。PR #30 在复审前仍为 NO-GO，不合并。
+- 最终复审对象是整合后的 PR #30 HEAD，即本节所在的提交（SHA 见 PR #30 的描述）。相对 Review 068 的审查对象 `e70c09b`，源码与测试的增量仍只有 `87fb135`；工作流的变化全部来自已合并的 PR #31。
+- WP2.4 与 M2 都未验收；WP2.5 等其他工作包未启动。M-14、M-15、M-16 保持未解决；方案 B 不变；Auto-fix / Auto-merge 保持关闭。
+
+## 83．Review 070：PR #30 定向复审 GO，B3、N1 关闭
+
+**审查**：[Review 070](reviews/codex-review-070.md)，原样归档为 `6b78cddd9e3c9bf56401da4bc9b5b7584e695c8a`。源文件、归档与该提交 blob 的 SHA-256 均为 `13396f52b21153658ff6c5ad390231a0ed9be35484cf8f0ddea571696dc24b80`，逐字节一致。
+
+**审查对象**（不随收尾提交而改变）：
+
+- PR #30，HEAD `b8606b5e51ee2ca7de5cf9bfe0b2f45f6d431827`（树 `abaf20d`），base `8b45ef598da1599ea672072338fef5ed9c6f77ee`。
+- 核心修复是 `87fb135`，整合提交是 `cc2d006`；Review 068 的对象 `e70c09b` 及其当时的 base `d8f8a50` 保持原样。
+- 审查依据的 CI 是 run 39723458143（attempt 1，8/8，检出 `1041a85`）。
+
+**结论：GO**。
+
+- **B3 关闭**：
+  - 固定提交、必要的树与目标普通文件的 blob 都完整验证；解析路径与计数使用同一次已验证的读取，失败不返回部分结果。
+  - 保证只覆盖本次引用判定实际需要的对象，不扩展到未引用的 blob、无关的树或历史，也不要求 `check.inputs` 的 `TreeEntry` 因此读取 blob。
+- **N1 关闭**：头长检查在解析和清空头部缓冲区之前进行，判定与分块无关。
+- **Review 067 的 B1、B2**：没有发现直接回归，保持关闭。
+- **BLOCKER**：无。**NON-BLOCKER**：没有新增确定的实现缺陷。**PRODUCT DECISION**：没有新增待决事项。
+- **ACCEPTED RISK**：没有新增。
+  - 只沿用 §71 的方案 B 局部边界，PR #31 的 CLI 预算调整按已批准的范围适用。
+  - M-14、M-15、M-16 不是接受的风险，都未关闭。
+- **验收**：审查认为，结合 Review 067、068 仍适用的证据，足以支持负责人对 WP2.4 本工作包范围作出验收决定。报告本身不宣布验收，不覆盖后续的检查执行、`status`/`gaps` 或 E2E 工作包，也不宣布 M2 整体验收。
+
+**审查方的独立验证**（仓库外的隔离副本；Windows/amd64，Go 1.27.1，git 2.56.0.windows.2；WSL Ubuntu/amd64，普通用户，git 2.43.0）：
+
+- **B3 反例**：Review 068 的反例原样重放，两个接口都是 exit 6、没有结果；每个场景都有健康与恢复后的对照。
+- **同次读取调度**：新增四个场景（提交、根树、中间树、blob），证明判定来自已验证的读取流。
+- **`propose`**：三类损坏 × 文本与 JSON。完整业务快照不变；输出与数据目录中都没有 Canary。
+- **直接回归**：B1、B2 以及 Claim 与 `propose` 的直接回归。
+
+**必须保留的本机失败与边界**（不计为通过）：
+
+1. **首次完整的 `gitx` 包没有通过**：
+   - 在默认 10 分钟的累计超时处中止，包记录 601.103 s；当时 `TestClassifyChecksTheStorage` 已运行约 10 s。超时的这次运行不计为通过。
+   - 之后以相同的默认超时定向补跑必要子集，包括该存储分类测试、中断的子例、`Clean` 与 `TreeEntry`，结果通过（431.437 s）。
+   - 根因没有独立证明，不定性为死锁、M-16 或资源竞争，也没有修改超时或测试门槛。
+2. **首次 WSL 启动没有执行测试**：内联 shell 的参数传递使目录变量未按预期传入。这不是产品检出，也不计为通过。
+3. **没有独立验证的部分**：
+   - 本机没有 macOS，macOS 结果来自 CI。
+   - 作者的真实 git 2.32.0 实验、全部变异与桩阶段的红灯、整套 M1、整个 WP2.3 的安全审查、正式发布包的 E2E，都没有独立重跑。
+   - CI 中按条件跳过的测试不是通过：真实旧 git、Windows 的权限用例、Ubuntu 普通步骤中的 root 用例，以及 M-14 诊断。
+
+**负责人决定**（2026-10-22）：
+
+- 条件授权合并 PR #30。
+- 合并核验与对应的 master push CI 全部成功之后，正式验收 WP2.4 本工作包范围。
+- 随后授权 WP2.5 的规范准备、必要的隔离实验、文档提交与独立 PR；不授权 WP2.5 的生产实现、规范冻结或准备 PR 的合并。
+
+**收尾**：只有 Review 070 的归档、本节与活跃状态的同步（AGENTS.md、README、实施计划）。代码、测试、Schema、迁移、依赖与工作流都保持受审内容。
+
+**状态**：
+
+- PR #30 技术审查通过，待合并核验。
+- WP2.4 的验收在合并核验与 master push CI 全部成功之后生效，实际的合并证据与验收记录随下一阶段（WP2.5 规范准备）的 PR 入库。
+- M2 未整体验收。M-14、M-15、M-16 保持未解决；方案 B 不变；Auto-fix / Auto-merge 保持关闭。

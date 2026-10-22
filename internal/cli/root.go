@@ -72,7 +72,10 @@ func executeAs(ctx context.Context, d channel.Detection, root *cobra.Command, ar
 	if errors.As(err, &unparsed) {
 		asJSON = jsonInArgs(cmd, args)
 	}
-	if asJSON {
+	// Once a command's output has begun (claim, after COMMIT), stdout may
+	// hold part of its document: no error.v1 is appended to it, and the
+	// error goes to stderr (WP2.4 spec §9.3).
+	if asJSON && !errors.Is(e, errOutputCut) {
 		printErrorJSON(root.OutOrStdout(), stderr, e)
 	} else {
 		printError(stderr, e)
@@ -95,7 +98,7 @@ func newRoot(stdout, stderr io.Writer) *cobra.Command {
 	root.SetErr(termtext.NewWriter(stderr))
 	root.CompletionOptions.DisableDefaultCmd = true
 	root.AddCommand(newVersionCmd(), newDoctorCmd(), newInitCmd(), newSourceCmd(), newProposeCmd(), newProposalCmd(),
-		newReviewCmd(), newBaselineCmd(), newQuestionCmd(), newTargetCmd(), newScopeCmd())
+		newReviewCmd(), newBaselineCmd(), newQuestionCmd(), newTargetCmd(), newScopeCmd(), newClaimCmd())
 	secureCommandLine(root)
 	return root
 }

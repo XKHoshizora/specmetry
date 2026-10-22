@@ -304,8 +304,9 @@ func TestGitPath(t *testing.T) {
 // Code references are checked against a commit's tree: its regular files,
 // by path from the top, and their line counts. A symbolic link, a
 // directory or a file that is not committed is not a file of the tree.
-// Expected values are written out.
-func TestTreeFilesAndLines(t *testing.T) {
+// Expected values are written out. (TreeFiles and CountLines before
+// review 068 B3; the same expectations through FileLines.)
+func TestFileLines(t *testing.T) {
 	repo := testutil.NewGitRepo(t)
 	repo.WriteFile("internal/auth/login.go", "package auth\n\nfunc Login() {}\n")
 	repo.WriteFile("docs/客户 需求.md", "第一行\r\n第二行\r\n第三行")
@@ -330,31 +331,21 @@ func TestTreeFilesAndLines(t *testing.T) {
 	}
 	repo.WriteFile("later.go", "package later\n")
 
-	files, err := TreeFiles(ctx, repo.Dir, head)
-	if err != nil {
-		t.Fatal(err)
+	asked := []string{"docs/客户 需求.md", "empty.txt", "internal/auth/login.go", "link-target.txt", "run.sh",
+		"link.go", "vendor/sub", "vendor", "internal", "internal/auth", "internal/auth/login.go/x", "later.go", "none", ".", "/run.sh"}
+	files, err := FileLines(ctx, repo.Dir, head, asked)
+	want := map[string]int{"docs/客户 需求.md": 3, "empty.txt": 0, "internal/auth/login.go": 3, "link-target.txt": 1, "run.sh": 2}
+	if err != nil || !reflect.DeepEqual(files, want) {
+		t.Fatalf("FileLines = %v, %v; want %v", files, err, want)
 	}
-	var paths []string
-	for p := range files {
-		paths = append(paths, p)
+	if files, err := FileLines(ctx, repo.Dir, head, nil); err != nil || len(files) != 0 {
+		t.Errorf("FileLines(no paths) = %v, %v", files, err)
 	}
-	slices.Sort(paths)
-	want := []string{"docs/客户 需求.md", "empty.txt", "internal/auth/login.go", "link-target.txt", "run.sh"}
-	if !reflect.DeepEqual(paths, want) {
-		t.Fatalf("TreeFiles = %v, want %v", paths, want)
-	}
-	for path, lines := range map[string]int{"internal/auth/login.go": 3, "docs/客户 需求.md": 3, "empty.txt": 0, "run.sh": 2} {
-		n, err := CountLines(ctx, repo.Dir, files[path])
-		if err != nil || n != lines {
-			t.Errorf("CountLines(%s) = %d, %v; want %d", path, n, err, lines)
+	// Only a full commit ID is accepted: an argument never reaches git as
+	// an option.
+	for _, commit := range []string{"--output=x", head[:12], strings.ToUpper(head) + "0"} {
+		if _, err := FileLines(ctx, repo.Dir, commit, []string{"run.sh"}); apperr.ExitCode(err) != apperr.ExitInternal {
+			t.Errorf("FileLines(%q) = %v; want an internal error", commit, err)
 		}
-	}
-	// Only object and commit IDs are accepted: an argument never reaches
-	// git as an option.
-	if _, err := TreeFiles(ctx, repo.Dir, "--output=x"); err == nil {
-		t.Error("TreeFiles accepted an option as the commit")
-	}
-	if _, err := CountLines(ctx, repo.Dir, "-p"); err == nil {
-		t.Error("CountLines accepted an option as the object")
 	}
 }

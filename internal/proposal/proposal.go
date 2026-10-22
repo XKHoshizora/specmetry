@@ -202,13 +202,7 @@ func CheckStatic(doc any, p *Proposal) error {
 			}
 		}
 		for k, c := range it.CodeRefs {
-			if !insideRepository(c.Path) {
-				ps.add(itemPointer(i, "code_refs", strconv.Itoa(k), "path"), "leaves the repository")
-			}
-			if _, ok := parseLines(c.Lines); !ok {
-				ps.add(itemPointer(i, "code_refs", strconv.Itoa(k), "lines"),
-					"is not a valid line range: lines are numbered from 1 to 2147483647, and a range does not end before it starts")
-			}
+			ps = append(ps, CodeRefProblems(itemPointer(i, "code_refs", strconv.Itoa(k)), c)...)
 		}
 		excerpts(it.Sources, itemPointer(i, "sources"), &ps)
 	}
@@ -240,6 +234,22 @@ func CheckEditedData(data map[string]json.RawMessage, pointer string) []apperr.D
 				ps.add(pointer+"/check/inputs/"+strconv.Itoa(k), "leaves the repository")
 			}
 		}
+	}
+	return ps
+}
+
+// CodeRefProblems applies the rules of a code reference that need no
+// database (V-P04, V-P08), for proposals and claims alike (WP2.4 spec §5
+// step 4): its path stays in the repository once normalized, and its
+// lines are a valid range. pointer locates the reference; the problems
+// name its fields, never their values.
+func CodeRefProblems(pointer string, c CodeRef) []apperr.Detail {
+	var ps problems
+	if !insideRepository(c.Path) {
+		ps.add(pointer+"/path", "leaves the repository")
+	}
+	if _, ok := parseLines(c.Lines); !ok {
+		ps.add(pointer+"/lines", "is not a valid line range: lines are numbered from 1 to 2147483647, and a range does not end before it starts")
 	}
 	return ps
 }
