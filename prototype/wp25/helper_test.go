@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -80,11 +81,20 @@ func runHelper(mode string, args []string) int {
 		if err := c.Start(); err != nil {
 			return 90
 		}
+		if injected("parent-fail") {
+			return 5 // the helper fails after starting its child
+		}
 		waitReport(os.Getenv(reportEnv), "pid", 1, 5*time.Second)
 		return 0
 	case "fanout":
 		// fanout <n>: n sleeping children, then sleep.
 		n := arg(0)
+		switch {
+		case injected("fanout-zero"):
+			n = 0
+		case injected("fanout-partial"):
+			n /= 3
+		}
 		for i := 0; i < n; i++ {
 			c := helper("sleep", nil)
 			if err := c.Start(); err != nil {
@@ -116,8 +126,28 @@ func report(kind string, rest ...string) {
 	for _, r := range rest {
 		line += " " + r
 	}
-	_, _ = f.WriteString(line + "\n")
+	// Faults of the gate regressions (gate_test.go); none is set in a
+	// normal run.
+	payload := line + "\n"
+	switch {
+	case injected("report-skip") && kind == "pid":
+		payload = ""
+	case injected("report-malformed"):
+		payload = line + "\nlimit not-a-pid\n" // Review 075's counterexample A
+	case injected("report-unknown"):
+		payload = line + "\nbogus " + strconv.Itoa(os.Getpid()) + "\n"
+	case injected("report-dup"):
+		payload = line + "\n" + line + "\n"
+	case injected("report-truncated"):
+		payload = line
+	case injected("report-overlong"):
+		payload = strings.Repeat("x", 70000) + "\n" + line + "\n"
+	}
+	_, _ = f.WriteString(payload)
 	_ = f.Close()
+	if injected("report-delete") && kind == "pid" {
+		_ = os.Remove(path)
+	}
 }
 
 // patternByte is the i-th byte a "write" helper sends on a stream.

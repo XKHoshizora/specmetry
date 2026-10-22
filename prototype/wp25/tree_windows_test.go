@@ -103,6 +103,9 @@ func ownPID(pid int) (owned, error) {
 func (p *pidProc) String() string { return "pid " + strconv.Itoa(p.pid) }
 
 func (p *pidProc) ended() bool {
+	if injected("cleanup-unconfirmed") {
+		return false
+	}
 	ev, err := windows.WaitForSingleObject(p.h, 0)
 	return err == nil && ev == windows.WAIT_OBJECT_0
 }

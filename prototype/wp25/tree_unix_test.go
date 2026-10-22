@@ -103,7 +103,13 @@ func (p *pidProc) String() string {
 }
 
 func (p *pidProc) ended() bool {
+	if injected("cleanup-unconfirmed") {
+		return false
+	}
 	st, ok := procInfo(p.pid)
+	if injected("procinfo-unknown") {
+		ok = false // the read of the process's state failed
+	}
 	if !ok || st.start != p.id {
 		return true
 	}

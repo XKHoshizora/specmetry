@@ -43,6 +43,9 @@ func procInfo(pid int) (pinfo, bool) {
 }
 
 func allPIDs() []int {
+	if injected("readdir-fail") {
+		return nil // ReadDir failed; its error is dropped, as below
+	}
 	ents, _ := os.ReadDir("/proc")
 	var out []int
 	for _, e := range ents {

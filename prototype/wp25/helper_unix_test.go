@@ -42,7 +42,11 @@ func runHelperPlatform(mode string, args []string) (int, bool) {
 	case "chain-main":
 		// chain-main <depth>: a chain of depth processes in a new session,
 		// each the parent of the next; exit once all have reported.
-		c := helper("chain", nil, strconv.Itoa(arg(0)))
+		depth := arg(0)
+		if injected("chain-short") {
+			depth--
+		}
+		c := helper("chain", nil, strconv.Itoa(depth))
 		c.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 		if err := c.Start(); err != nil {
 			return 90, true

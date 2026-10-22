@@ -314,9 +314,19 @@ func summarize(code int) int {
 	for _, r := range results {
 		count[r.Verdict]++
 	}
+	gateMu.Lock()
+	gatePass := 0
+	for _, g := range gateResults {
+		if g.Pass {
+			gatePass++
+		}
+	}
+	gates := len(gateResults)
+	gateMu.Unlock()
 	b, _ := json.Marshal(map[string]any{
 		"scenarios": len(results), "confirmed": count[confirmed], "refuted": count[refuted],
 		"unsupported": count[unsupported], "invalid": count[invalid],
+		"gate_checks": gates, "gate_passed": gatePass, "gate_failed": gates - gatePass,
 	})
 	fmt.Println("WP25SUMMARY " + string(b))
 	if len(results) == 0 {
