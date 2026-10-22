@@ -12,10 +12,12 @@ package wp25
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
@@ -61,7 +63,36 @@ func failStart(t *testing.T, id string, seams jobSeams, wantStep string) {
 	s.expect("end confirmed", true, ended)
 	s.expect("user code ran (marker)", false, statErr == nil)
 	s.expect("Go's handle released (Wait returned)", true, reaped)
+	// Every handle has an owner: the Job and the process handle are this
+	// runner's and are closed here; Go closed the main thread's handle at
+	// creation and releases its process handle in Wait.
+	jobH, procH := tr.job, tr.proc
+	tr.close()
+	s.expect("Job handle still open", false, handleValid(jobH))
+	s.expect("process handle still open", false, handleValid(procH))
 }
+
+func errClass(err error) string {
+	switch {
+	case err == nil:
+		return "none"
+	case errors.Is(err, fs.ErrNotExist):
+		return "not exist"
+	}
+	return "other"
+}
+
+// handleValid reports whether h is still an open handle of this process.
+func handleValid(h windows.Handle) bool {
+	if h == 0 {
+		return false
+	}
+	var flags uint32
+	r, _, _ := procGetHandleInformation.Call(uintptr(h), uintptr(unsafe.Pointer(&flags)))
+	return r != 0
+}
+
+var procGetHandleInformation = kernel32.NewProc("GetHandleInformation")
 
 func TestJobFailAssign(t *testing.T) {
 	failStart(t, "T4.start.fail-assign", jobSeams{assign: errInjected}, "assign")
@@ -85,11 +116,12 @@ func TestJobFailCreate(t *testing.T) {
 	tr, step, err := startJob(s, cmd, jobSeams{})
 	s.worked(1)
 	s.expect("failed step", "create", step)
-	s.expectTrue("error reported", err != nil, fmt.Sprint(err))
+	// Only the class of the error, not its text, which names a path.
+	s.expect("error class", "not exist", errClass(err))
 	s.expect("process created", false, cmd.Process != nil)
 	s.expect("launches", 0, s.r.Launches)
 	tr.close()
-	s.expect("Job handle closed", windows.Handle(0), tr.job)
+	s.expect("Job handle left", windows.Handle(0), tr.job)
 }
 
 func TestJobNormal(t *testing.T) {

@@ -135,10 +135,11 @@ type pinfo struct {
 
 // unixTree is one check's process group; the leader is the main process.
 type unixTree struct {
-	cmd *exec.Cmd
-	c   *childProc
-	pid int
-	obs exitObserver
+	cmd   *exec.Cmd
+	c     *childProc
+	pid   int
+	start string // the leader's start time
+	obs   exitObserver
 }
 
 var errGroupGone = errors.New("the group leader is reaped: no more signals to the group")
@@ -150,6 +151,9 @@ func startTree(s *scen, cmd *exec.Cmd) *unixTree {
 	cmd.SysProcAttr.Setpgid = true
 	startHelper(s, cmd)
 	t := &unixTree{cmd: cmd, c: childOf(cmd), pid: cmd.Process.Pid}
+	if st, ok := procInfo(t.pid); ok {
+		t.start = st.start
+	}
 	obs, err := newExitObserver(t.pid)
 	if err != nil {
 		s.invalidf("exit observer: %v", err)
@@ -165,10 +169,20 @@ func (t *unixTree) waitExit(d time.Duration) (bool, string, error) { return t.ob
 // kill signals the whole group; only while the leader is unreaped, so the
 // group ID still names this check's group.
 func (t *unixTree) kill() error {
-	if t.c.reaped() {
+	if t.c.reaped() || !t.leaderHeld() {
 		return errGroupGone
 	}
 	return syscall.Kill(-t.pid, syscall.SIGKILL)
+}
+
+// leaderHeld reports whether the leader's PID still names this process's
+// own, unreaped child: same start time, this process its parent. It
+// detects a leader reaped by someone else, but only up to the moment of
+// the check; a concurrent reaper can still act between the check and the
+// signal (T2.other-reaper), which is why no other reaper may exist.
+func (t *unixTree) leaderHeld() bool {
+	st, ok := procInfo(t.pid)
+	return ok && st.start == t.start && st.ppid == os.Getpid()
 }
 
 // live lists the group's members that are not zombies.

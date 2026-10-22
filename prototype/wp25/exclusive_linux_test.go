@@ -280,9 +280,13 @@ func TestExclusiveGate(t *testing.T) {
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	sharedRuns := 0
+	// One of the four runs Specmetry's own kind of child, git, where git
+	// is installed; the others run short helpers.
+	git, _ := exec.LookPath("git")
+	gitRuns := 0
 	for i := 0; i < 4; i++ {
 		wg.Add(1)
-		go func() {
+		go func(i int) {
 			defer wg.Done()
 			for {
 				select {
@@ -290,13 +294,20 @@ func TestExclusiveGate(t *testing.T) {
 					return
 				default:
 				}
-				if g.run(helper("exit-after", nil, "5", "0")) == nil {
+				cmd := helper("exit-after", nil, "5", "0")
+				if i == 0 && git != "" {
+					cmd = exec.Command(git, "--version")
+				}
+				if g.run(cmd) == nil {
 					mu.Lock()
 					sharedRuns++
+					if i == 0 && git != "" {
+						gitRuns++
+					}
 					mu.Unlock()
 				}
 			}
-		}()
+		}(i)
 	}
 	time.Sleep(200 * time.Millisecond)
 	good := 0
@@ -321,6 +332,7 @@ func TestExclusiveGate(t *testing.T) {
 	s.expect("checks with an empty baseline, every adopted process the check's, all reaped", 3, good)
 	s.expect("shared leases overlapping an interval", 0, g.overlaps())
 	s.expectTrue("shared children ran meanwhile", sharedRuns > 0, fmt.Sprint(sharedRuns))
+	s.expectTrue("git ran through the gate", git == "" || gitRuns > 0, fmt.Sprintf("%d git runs (%s)", gitRuns, git))
 	s.expect("subreaper after the intervals", 0, subreaper())
 	s.expect("children left", 0, len(childrenOf(os.Getpid())))
 	s.note("%v", notes)
@@ -424,6 +436,38 @@ func TestExclusiveBypass(t *testing.T) {
 	s.expect("the bypassing child is a sweep candidate", true, seenBypass)
 	s.expect("it is not among the check's processes", false, subset([]int{bypass.Process.Pid}, cr.reported))
 	cr.tr.reap(time.Second)
+}
+
+func TestOtherReaper(t *testing.T) {
+	// Counterexample to "the leader stays unreaped": other code in the
+	// process calls wait(-1) and reaps the leader. The check before each
+	// group signal (same start time, still this process's child) sees it
+	// and refuses the signal; but a reaper acting between that check and
+	// the signal cannot be seen. Hence the static rule: no wait(-1), no
+	// reaping outside the runner.
+	s := begin(t, "T2", "T2.other-reaper", counter, true, true)
+	defer s.done()
+	g := newGate2()
+	var reapedBy int
+	var held, refused bool
+	_ = g.exclusive(func() error {
+		cmd := helper("exit-after", nil, "50", "0")
+		tr := startTree(s, cmd)
+		if ok, _, _ := tr.waitExit(5 * time.Second); !ok {
+			s.invalidf("main did not exit")
+		}
+		var ws syscall.WaitStatus
+		reapedBy, _ = syscall.Wait4(-1, &ws, syscall.WNOHANG, nil) // the rogue reaper
+		held = tr.leaderHeld()
+		refused = errors.Is(tr.kill(), errGroupGone)
+		tr.reap(time.Second) // Go's Wait now finds no child
+		return nil
+	})
+	s.worked(1)
+	s.expectTrue("the rogue wait(-1) reaped the leader", reapedBy > 0, fmt.Sprint(reapedBy))
+	s.expect("leader still held", false, held)
+	s.expect("group signal refused", true, refused)
+	s.expect("children left", 0, len(childrenOf(os.Getpid())))
 }
 
 func TestExclusiveBaselineLive(t *testing.T) {

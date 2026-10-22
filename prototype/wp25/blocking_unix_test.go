@@ -59,5 +59,5 @@ func TestPipeBlockingReadEnd(t *testing.T) {
 	s.expect("its end", endWrite, endOf(ss[0]))
 	s.expect("late write refused", 1, d.rejectedBy(port))
 	s.expectTrue("nothing after the document", lastIsWhole(buf, log, doc) && !bytes.Contains(buf, []byte("late")), "")
-	s.expect("descriptor closed after the read returned", false, fdOpen(rfd))
+	s.expect("descriptor still open after the read returned", false, fdOpen(rfd))
 }

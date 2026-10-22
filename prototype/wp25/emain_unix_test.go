@@ -123,7 +123,7 @@ func TestGroupEscape(t *testing.T) {
 	s.worked(1)
 	s.expect("leader exited", true, exited)
 	s.expect("group confirmed empty", true, conf)
-	s.expect("escaped process still alive", false, p.ended())
+	s.expect("escaped process ended", false, p.ended())
 	st, _ := procInfo(esc[0])
 	s.expectTrue("it is in another group", st.pgid != tr.pid, fmt.Sprintf("pgid %d vs %d", st.pgid, tr.pid))
 	s.expect("reaped", true, tr.reap(time.Second))
