@@ -125,6 +125,9 @@ type owned interface {
 	release()
 	// pidOf is its PID, 0 if it never started.
 	pidOf() int
+	// observeErr is the first observation of it that failed, if any. It is
+	// kept: a later observation that succeeds does not undo it.
+	observeErr() error
 }
 
 type scen struct {
@@ -138,7 +141,8 @@ type scen struct {
 	invalid    []string
 	unsup      string
 	procs      []owned
-	reports    []reportFile
+	reports    []*reportFile
+	baseKids   []int // this process's children when the scenario began (Linux)
 	after      []func()
 	goid       uint64     // the test goroutine
 	mu         sync.Mutex // the scenario may be used from several goroutines
@@ -154,7 +158,15 @@ func begin(t *testing.T, gate, id string, k kind, needLaunch, needWork bool) *sc
 		needLaunch: needLaunch,
 		needWork:   needWork,
 		goid:       goid(),
+		baseKids:   ownChildren(),
 	}
+}
+
+// flag makes the run invalid without stopping it: for what is found
+// while the scenario ends, or for an observation that failed but did not
+// end the scenario's control flow. Once flagged, a run stays invalid.
+func (s *scen) flag(f string, a ...any) {
+	s.locked(func() { s.invalid = append(s.invalid, fmt.Sprintf(f, a...)) })
 }
 
 // goid gives the current goroutine's ID, read from its stack header.
@@ -246,9 +258,22 @@ func (s *scen) done() {
 	// The writers have ended (or the cleanup says they have not): every
 	// report must now hold exactly what its scenario declared.
 	for _, rf := range s.reports {
-		if err := checkFinal(rf); err != nil {
+		if err := checkFinal(*rf); err != nil {
 			s.invalid = append(s.invalid, "report: "+err.Error())
 		}
+		s.r.Missing += rf.missing
+	}
+	// Processes a rejection left unaccounted: never reported, or reported
+	// in a report that could not be read, so neither owned nor signalled.
+	if s.r.Missing > 0 {
+		s.invalid = append(s.invalid, fmt.Sprintf("cleanup not verified: %d expected processes were never accounted for", s.r.Missing))
+		s.r.Cleanup = fmt.Sprintf("NOT verified: %d expected processes never accounted for; %s", s.r.Missing, s.r.Cleanup)
+	}
+	// Children of this process that the scenario left (Linux): not reaped,
+	// or never owned.
+	if left := newChildren(s.baseKids); left != "" {
+		s.invalid = append(s.invalid, "cleanup: children of this process left: "+left)
+		s.r.Cleanup = "NOT verified: children left (" + left + "); " + s.r.Cleanup
 	}
 	for _, p := range s.procs {
 		p.release()
@@ -311,8 +336,19 @@ func (s *scen) cleanup() string {
 		}
 		if len(left) == 0 {
 			names := make([]string, 0, len(s.procs))
+			var failed []string
 			for _, p := range s.procs {
 				names = append(names, p.String())
+				if err := p.observeErr(); err != nil {
+					failed = append(failed, fmt.Sprintf("%s (%v)", p.String(), err))
+				}
+			}
+			// The ends are confirmed now, but an observation that failed on
+			// the way stays a failure of this run (Review 076 B1-R1): a
+			// later success does not restore what was not observed.
+			if len(failed) > 0 {
+				s.invalid = append(s.invalid, "observation failed during the cleanup: "+strings.Join(failed, ", "))
+				return fmt.Sprintf("ended, but observations failed: %d processes gone (%s)", len(s.procs), strings.Join(names, ", "))
 			}
 			return fmt.Sprintf("verified: %d processes gone (%s)", len(s.procs), strings.Join(names, ", "))
 		}

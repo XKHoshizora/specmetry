@@ -80,8 +80,7 @@ func TestGroupZombieLeader(t *testing.T) {
 	cmd := helper("member-parent", []string{reportEnv + "=" + rep})
 	release := gated(s, cmd)
 	tr := startTree(s, cmd)
-	members := s.awaitReport(rep, "pid", 1, 5*time.Second)
-	tr.ownReported(members[0])
+	members := s.awaitOwned(rep, 1, 5*time.Second, func(pid int) { tr.ownReported(pid) })
 	st, pr := procInfo(members[0])
 	s.needLoad(pr == present && st.pgid == tr.pid, "the member verified as the check's, in its group (pgid %d)", st.pgid)
 	release()
@@ -111,9 +110,9 @@ func TestGroupEscape(t *testing.T) {
 	cmd := helper("escape-parent", []string{reportEnv + "=" + rep})
 	release := gated(s, cmd)
 	tr := startTree(s, cmd)
-	esc := s.awaitReport(rep, "pid", 1, 5*time.Second)
 	// Verified while its parent still lives: a child of the leader.
-	p := tr.ownReported(esc[0])
+	var p owned
+	esc := s.awaitOwned(rep, 1, 5*time.Second, func(pid int) { p = tr.ownReported(pid) })
 	st, pr := procInfo(esc[0])
 	s.needLoad(pr == present && st.pgid != tr.pid, "the escaped process verified as the check's, in another group (pgid %d vs %d)", st.pgid, tr.pid)
 	release()

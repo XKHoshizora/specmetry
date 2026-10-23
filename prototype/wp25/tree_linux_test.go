@@ -209,3 +209,36 @@ func sigchldDisposition() string {
 	}
 	return "unknown"
 }
+
+// ownChildren lists this process's children, zombies included; nil if
+// the list cannot be read.
+func ownChildren() []int {
+	kids, err := childrenOf(os.Getpid())
+	if err != nil {
+		return nil
+	}
+	return kids
+}
+
+// newChildren describes the children of this process that were not there
+// at the start (base): a scenario must not leave any, alive or a zombie
+// it did not reap. "" when there are none.
+func newChildren(base []int) string {
+	kids, err := childrenOf(os.Getpid())
+	if err != nil {
+		return "unreadable: " + err.Error()
+	}
+	before := map[int]bool{}
+	for _, k := range base {
+		before[k] = true
+	}
+	var out []string
+	for _, k := range kids {
+		if before[k] {
+			continue
+		}
+		st, _ := procInfo(k)
+		out = append(out, fmt.Sprintf("%d zombie=%v", k, st.zombie))
+	}
+	return strings.Join(out, ", ")
+}

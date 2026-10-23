@@ -174,3 +174,8 @@ func waitidNoWait(pid int) (string, error) {
 // sigchldDisposition is not read on macOS (no /proc); the probe relies on
 // signal.Ignored and the observed reaping.
 func sigchldDisposition() string { return "n/a" }
+
+// ownChildren and newChildren: macOS has no simple list of a process's
+// children here; the leftover check is Linux's (see tree_linux_test.go).
+func ownChildren() []int       { return nil }
+func newChildren([]int) string { return "" }

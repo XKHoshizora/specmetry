@@ -75,8 +75,9 @@ func (c *childProc) reaped() bool {
 	}
 }
 
-func (c *childProc) ended() bool { return c.reaped() }
-func (c *childProc) release()    {}
+func (c *childProc) ended() bool       { return c.reaped() }
+func (c *childProc) release()          {}
+func (c *childProc) observeErr() error { return nil }
 func (c *childProc) pidOf() int {
 	if c.cmd.Process == nil {
 		return 0
@@ -97,6 +98,7 @@ type pidProc struct {
 	pid      int
 	h        windows.Handle
 	err      error // why the last check could not confirm an end
+	obsErr   error // the first observation that failed; never cleared
 	injected bool  // the observe-fail-once fault has acted on it
 }
 
@@ -138,6 +140,9 @@ func (p *pidProc) ended() bool {
 	}
 	if err != nil {
 		p.err = err // a wait that fails is not an end
+		if p.obsErr == nil {
+			p.obsErr = err
+		}
 		return false
 	}
 	return ev == windows.WAIT_OBJECT_0
@@ -145,7 +150,8 @@ func (p *pidProc) ended() bool {
 
 func (p *pidProc) stop() { _ = windows.TerminateProcess(p.h, 1) }
 
-func (p *pidProc) pidOf() int { return p.pid }
+func (p *pidProc) pidOf() int        { return p.pid }
+func (p *pidProc) observeErr() error { return p.obsErr }
 
 func (p *pidProc) release() {
 	if p.h != 0 {
@@ -241,13 +247,44 @@ func startTree(s *scen, cmd *exec.Cmd) *winTree {
 	if step != "" {
 		s.invalidf("start failed at %s: %v", step, err)
 	}
-	s.defer_(func() { _, _ = t.close() })
+	s.defer_(func() {
+		if t.job != 0 {
+			t.endJob()
+		}
+		_, _ = t.close()
+	})
 	return t
+}
+
+// endJob ends what is left in the Job when the scenario ends and confirms
+// it with the real query (not a fault seam): a Job that cannot be
+// confirmed empty, or a query that fails, is flagged.
+func (t *winTree) endJob() {
+	_ = windows.TerminateJobObject(t.job, 1)
+	deadline := time.Now().Add(tKill)
+	for {
+		var a basicAccounting
+		err := windows.QueryInformationJobObject(t.job, windows.JobObjectBasicAccountingInformation,
+			uintptr(unsafe.Pointer(&a)), uint32(unsafe.Sizeof(a)), nil)
+		if err != nil {
+			t.s.flag("observation failed while ending the Job: %v", err)
+			return
+		}
+		if a.ActiveProcesses == 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.s.flag("cleanup: the Job could not be confirmed empty (%d active)", a.ActiveProcesses)
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
 }
 
 func (t *winTree) waitExit(d time.Duration) (bool, string, error) {
 	ev, err := windows.WaitForSingleObject(t.proc, uint32(d.Milliseconds()))
 	if err != nil {
+		t.s.flag("observation failed: waiting for the main process %d: %v", t.pid, err)
 		return false, "", err
 	}
 	if ev != windows.WAIT_OBJECT_0 {
@@ -255,6 +292,7 @@ func (t *winTree) waitExit(d time.Duration) (bool, string, error) {
 	}
 	var code uint32
 	if err := windows.GetExitCodeProcess(t.proc, &code); err != nil {
+		t.s.flag("observation failed: the exit code of %d: %v", t.pid, err)
 		return true, "", err
 	}
 	return true, "exit " + strconv.Itoa(int(code)), nil
@@ -362,3 +400,8 @@ func isProcessInJob(h, job windows.Handle) (bool, error) {
 }
 
 func runHelperPlatform(string, []string) (int, bool) { return 0, false }
+
+// ownChildren and newChildren: the leftover-children check is Linux's;
+// on Windows every check's processes are in its Job.
+func ownChildren() []int       { return nil }
+func newChildren([]int) string { return "" }

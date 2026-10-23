@@ -49,8 +49,10 @@ type reportLine struct {
 type reportSpec map[string]int
 
 type reportFile struct {
-	path string
-	spec reportSpec
+	path    string
+	spec    reportSpec
+	owned   map[int]bool // PIDs of its "pid" records the scenario verified and owns
+	missing int          // expected processes it could not account for
 }
 
 func clip(s string) string {
@@ -163,8 +165,67 @@ func (s *scen) newReport(spec reportSpec) string {
 		s.invalidf("report file: %v", err)
 	}
 	_ = f.Close()
-	s.locked(func() { s.reports = append(s.reports, reportFile{path: f.Name(), spec: spec}) })
+	s.locked(func() {
+		s.reports = append(s.reports, &reportFile{path: f.Name(), spec: spec, owned: map[int]bool{}})
+	})
 	return f.Name()
+}
+
+func (s *scen) reportFile(path string) *reportFile {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, rf := range s.reports {
+		if rf.path == path {
+			return rf
+		}
+	}
+	return nil
+}
+
+// awaitOwned waits for n "pid" records and verifies and owns each process
+// as soon as its record arrives (own, the tree's ownership check), so that
+// a rejection on the way, a deadline or a corrupt report, leaves every
+// process seen so far owned and cleaned up (Review 076 B1-R2). What it
+// could not own is counted as unaccounted; the PIDs in a report are never
+// acted on without the ownership check.
+func (s *scen) awaitOwned(path string, n int, d time.Duration, own func(pid int)) []int {
+	rf := s.reportFile(path)
+	if rf == nil {
+		s.invalidf("report %s was not created by this scenario", path)
+	}
+	var got []int
+	deadline := time.Now().Add(d)
+	for {
+		rf.missing = n - len(got) // until owned, an expected process is unaccounted
+		lines, err := parseReport(path, false)
+		if err == nil {
+			var by map[string][]int
+			by, err = tally(lines)
+			if err == nil && len(by["pid"]) > n {
+				err = fmt.Errorf("%d pid records, want %d", len(by["pid"]), n)
+			}
+			if err == nil {
+				for _, pid := range by["pid"] {
+					if !rf.owned[pid] {
+						rf.missing = n - len(got)
+						own(pid)
+						rf.owned[pid] = true
+						got = append(got, pid)
+					}
+				}
+			}
+		}
+		rf.missing = n - len(got)
+		switch {
+		case err != nil:
+			s.invalidf("load not established: report: %v", err)
+		case len(got) == n:
+			return got
+		case time.Now().After(deadline):
+			s.invalidf("load not established: report: only %d of %d pid records within %v", len(got), n, d)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 // awaitReport waits until the report holds exactly n records of the kind

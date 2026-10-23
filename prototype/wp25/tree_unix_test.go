@@ -81,8 +81,9 @@ func (c *childProc) reaped() bool {
 	}
 }
 
-func (c *childProc) ended() bool { return c.reaped() }
-func (c *childProc) release()    {}
+func (c *childProc) ended() bool       { return c.reaped() }
+func (c *childProc) release()          {}
+func (c *childProc) observeErr() error { return nil }
 func (c *childProc) pidOf() int {
 	if c.cmd.Process == nil {
 		return 0
@@ -105,6 +106,7 @@ type pidProc struct {
 	pid      int
 	id       string
 	err      error // why the last check could not confirm an end
+	obsErr   error // the first observation that failed; never cleared
 	injected bool  // the observe-fail-once fault has acted on it
 }
 
@@ -167,6 +169,9 @@ func (p *pidProc) ended() bool {
 		return true
 	case pr == unknown:
 		p.err = errUnknownState
+		if p.obsErr == nil {
+			p.obsErr = errUnknownState
+		}
 		return false
 	case st.start != p.id:
 		return true // the PID names another process now: this one has ended
@@ -189,8 +194,9 @@ func (p *pidProc) stop() {
 	}
 }
 
-func (p *pidProc) release()   {}
-func (p *pidProc) pidOf() int { return p.pid }
+func (p *pidProc) release()          {}
+func (p *pidProc) pidOf() int        { return p.pid }
+func (p *pidProc) observeErr() error { return p.obsErr }
 
 type pinfo struct {
 	zombie     bool
@@ -236,8 +242,17 @@ func startTree(s *scen, cmd *exec.Cmd) *unixTree {
 		}
 		_ = syscall.Kill(-t.pid, syscall.SIGKILL)
 		deadline := time.Now().Add(tKill)
-		for time.Now().Before(deadline) {
-			if m, err := t.live(); err == nil && len(m) == 0 {
+		for {
+			m, err := t.live()
+			if err != nil {
+				s.flag("observation failed while ending the group %d: %v", t.pid, err)
+				return
+			}
+			if len(m) == 0 {
+				return
+			}
+			if time.Now().After(deadline) {
+				s.flag("cleanup: the group %d could not be confirmed empty", t.pid)
 				return
 			}
 			time.Sleep(5 * time.Millisecond)
@@ -250,7 +265,15 @@ func startTree(s *scen, cmd *exec.Cmd) *unixTree {
 func (t *unixTree) ownReported(pid int) owned { return ownDescendant(t.s, t, pid) }
 
 // waitExit observes the main process's exit within d, without reaping it.
-func (t *unixTree) waitExit(d time.Duration) (bool, string, error) { return t.obs.wait(d) }
+// A wait that fails is an observation failure of the run, whatever the
+// caller makes of the answer.
+func (t *unixTree) waitExit(d time.Duration) (bool, string, error) {
+	ok, st, err := t.obs.wait(d)
+	if err != nil {
+		t.s.flag("observation failed: waiting for the main process %d: %v", t.pid, err)
+	}
+	return ok, st, err
+}
 
 // kill signals the whole group; only while the leader is unreaped, so the
 // group ID still names this check's group.
@@ -268,6 +291,9 @@ func (t *unixTree) kill() error {
 // signal (T2.other-reaper), which is why no other reaper may exist.
 func (t *unixTree) leaderHeld() bool {
 	st, pr := procInfo(t.pid)
+	if pr == unknown {
+		t.s.flag("observation failed: the state of the leader %d cannot be read", t.pid)
+	}
 	return pr == present && st.start == t.start && st.ppid == os.Getpid()
 }
 
@@ -299,11 +325,17 @@ func (t *unixTree) reap(d time.Duration) bool { return t.c.reap(d) }
 
 func (t *unixTree) zombieLeader() bool {
 	st, pr := procInfo(t.pid)
+	if pr == unknown {
+		t.s.flag("observation failed: the state of the leader %d cannot be read", t.pid)
+	}
 	return pr == present && st.zombie
 }
 
 func (t *unixTree) leaderPgid() int {
-	st, _ := procInfo(t.pid)
+	st, pr := procInfo(t.pid)
+	if pr == unknown {
+		t.s.flag("observation failed: the state of the leader %d cannot be read", t.pid)
+	}
 	return st.pgid
 }
 

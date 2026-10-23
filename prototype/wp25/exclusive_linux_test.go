@@ -166,7 +166,8 @@ type sweepResult struct {
 	rounds, reaped, mismatched int
 	seen                       []int
 	converged                  bool
-	err                        error
+	err                        error // the mechanism stopped (no pidfd)
+	obsErr                     error // a list or a state could not be read
 }
 
 // sweep ends the adopted descendants: every child of this process except
@@ -185,7 +186,7 @@ func sweep(main int, o sweepOpts) sweepResult {
 	for {
 		kids, err := childrenOf(self)
 		if err != nil {
-			r.err = err
+			r.err, r.obsErr = err, err
 			return r
 		}
 		var cand []int
@@ -207,7 +208,7 @@ func sweep(main int, o sweepOpts) sweepResult {
 			r.seen = append(r.seen, pid)
 			st, pr := procInfo(pid)
 			if pr == unknown {
-				r.err = errUnknownState
+				r.err, r.obsErr = errUnknownState, errUnknownState
 				return r
 			}
 			if pr != present || st.ppid != self || o.dryRun {
@@ -263,12 +264,15 @@ func runCheck(s *scen, depth int, o sweepOpts, reapLeader bool) *checkRun {
 	release := gated(s, cmd)
 	tr := startTree(s, cmd)
 	cr := &checkRun{tr: tr}
+	completed := false
+	defer func() {
+		if !completed {
+			cr.abort(s)
+		}
+	}()
 	// Every level of the chain, verified as a descendant of the check's
 	// main process while it still lives.
-	cr.reported = s.awaitReport(rep, "pid", depth, 5*time.Second)
-	for _, pid := range cr.reported {
-		tr.ownReported(pid)
-	}
+	cr.reported = s.awaitOwned(rep, depth, 5*time.Second, func(pid int) { tr.ownReported(pid) })
 	release()
 	ok, status, _ := tr.waitExit(10 * time.Second)
 	s.needLoad(ok && status == "exit 0", "a chain of %d verified; the check's main exited 0 (%v, %s)", depth, ok, status)
@@ -278,10 +282,51 @@ func runCheck(s *scen, depth int, o sweepOpts, reapLeader bool) *checkRun {
 		o.deadline = tKill
 	}
 	cr.sw = sweep(tr.pid, o)
+	if cr.sw.obsErr != nil {
+		s.flag("observation failed during the sweep: %v", cr.sw.obsErr)
+	}
 	if reapLeader && cr.conf && cr.sw.converged {
 		tr.reap(time.Second)
 	}
+	completed = true
 	return cr
+}
+
+// abort ends a check rejected before its end (a load not built, a report
+// that cannot be read, an ownership that cannot be established), while
+// the exclusive interval still holds and the subreaper is set: the group
+// first, then every process adopted meanwhile, which by the interval's
+// rule is the check's, reported or not (Review 076 B1-R2). The reported
+// processes it owns are ended by the cleanup as well. It never signals by
+// a PID read from a report.
+func (cr *checkRun) abort(s *scen) {
+	// Not confirm: a failed observation here is flagged, it must not stop
+	// the run a second time while it unwinds.
+	deadline := time.Now().Add(tKill)
+	for {
+		_ = cr.tr.kill()
+		m, err := cr.tr.live()
+		if err != nil {
+			s.flag("observation failed while ending the rejected check's group: %v", err)
+			break
+		}
+		if len(m) == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			s.flag("cleanup: the rejected check's group could not be confirmed empty")
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	sw := sweep(cr.tr.pid, sweepOpts{deadline: tKill})
+	switch {
+	case sw.obsErr != nil:
+		s.flag("observation failed while ending the rejected check: %v", sw.obsErr)
+	case sw.err != nil || !sw.converged:
+		s.flag("cleanup: the rejected check's adopted processes could not all be ended (%d reaped, %v)", sw.reaped, sw.err)
+	}
+	s.note("rejected check ended in its interval: %d adopted processes reaped in %d rounds", sw.reaped, sw.rounds)
 }
 
 func subset(a, b []int) bool {
@@ -665,8 +710,7 @@ func TestSubreaperCleared(t *testing.T) {
 	cmd := helper("chain-main", []string{reportEnv + "=" + rep}, "1")
 	release := gated(s, cmd)
 	tr := startTree(s, cmd)
-	pids := s.awaitReport(rep, "pid", 1, 5*time.Second)
-	tr.ownReported(pids[0]) // verified while its parent lives
+	pids := s.awaitOwned(rep, 1, 5*time.Second, func(pid int) { tr.ownReported(pid) }) // verified while its parent lives
 	release()
 	ok, status, _ := tr.waitExit(10 * time.Second)
 	s.needLoad(ok && status == "exit 0", "the orphan's parent exited 0 (%v, %s)", ok, status)

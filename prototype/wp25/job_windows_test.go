@@ -221,11 +221,8 @@ func TestJobTerminateNotEnded(t *testing.T) {
 		}
 		// The load: 30 distinct descendants, each verified in this Job,
 		// the fanout's own record, and 31 processes active in the Job.
-		pids := s.awaitReport(rep, "pid", 30, 20*time.Second)
+		s.awaitOwned(rep, 30, 20*time.Second, func(pid int) { tr.ownReported(pid) })
 		s.awaitReport(rep, "fanout", 1, 5*time.Second)
-		for _, pid := range pids {
-			tr.ownReported(pid)
-		}
 		n0, err := tr.active()
 		if err != nil {
 			s.invalidf("observation failed: %v", err)
