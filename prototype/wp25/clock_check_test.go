@@ -1,8 +1,14 @@
 package wp25
 
 // Direct checks of the output step's clock (Review 078 N6). runS6On runs on
-// a clock the test moves itself, with real pipes whose write ends the test
-// holds, so no copier ends before the stop. Phase D must end on its
+// a clock the test moves itself, with in-memory pipes whose write ends the
+// test holds, so no copier ends before the stop. Closing such a pipe's read
+// end ends a pending or a later Read at once. An OS pipe does not do that on
+// Windows: Close cancels only a read already issued (CancelIoEx) and then
+// waits for the reads in progress, so a read issued just after it blocks
+// Close; with phase D taking no real time, that happened in 12 of 180 local
+// runs of these checks. The real pipes are the scenarios' own (pipe_test.go).
+// Phase D must end on its
 // deadline only once its own clock reads at least start + T_drain, and its
 // length must be read on that same clock: the boundary, a phase D that
 // ends exactly at T_drain, has used T_drain. A wake-up that comes before
@@ -10,6 +16,7 @@ package wp25
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"sync"
 	"testing"
@@ -81,17 +88,14 @@ func (f *fakeClock) fireEarly() {
 	}
 }
 
-// startS6On runs runS6On (phase D not skipped) on clk with n real pipes, in
-// a goroutine; the returned function closes the write ends.
-func startS6On(t *testing.T, clk *fakeClock, n int) (<-chan s6Result, func()) {
+// startS6On runs runS6On (phase D not skipped) on clk with n in-memory
+// pipes, in a goroutine; the returned function closes the write ends.
+func startS6On(clk *fakeClock, n int) (<-chan s6Result, func()) {
 	d := &dest{}
 	var ss []*stream
-	var ws []*os.File
+	var ws []*io.PipeWriter
 	for i := 0; i < n; i++ {
-		r, w, err := os.Pipe()
-		if err != nil {
-			t.Fatal(err)
-		}
+		r, w := io.Pipe()
 		name := fmt.Sprintf("s%d", i)
 		p := d.copyPort(name)
 		ss = append(ss, &stream{name: name, r: r, c: startCopy(r, p, false), p: p})
@@ -155,7 +159,7 @@ func TestPhaseClock(t *testing.T) {
 	}
 	t.Run("deadline-exact", func(t *testing.T) {
 		clk := newFakeClock()
-		res, closeW := startS6On(t, clk, 2)
+		res, closeW := startS6On(clk, 2)
 		defer closeW()
 		if d := asked(t, clk); d != tDrain {
 			t.Fatalf("phase D asked for a wake after %v, want T_drain %v", d, tDrain)
@@ -165,7 +169,7 @@ func TestPhaseClock(t *testing.T) {
 	})
 	t.Run("one-nanosecond-short", func(t *testing.T) {
 		clk := newFakeClock()
-		res, closeW := startS6On(t, clk, 2)
+		res, closeW := startS6On(clk, 2)
 		defer closeW()
 		asked(t, clk)
 		clk.advance(tDrain - time.Nanosecond)
@@ -183,7 +187,7 @@ func TestPhaseClock(t *testing.T) {
 		// performance counter).
 		const early = 450 * time.Microsecond
 		clk := newFakeClock()
-		res, closeW := startS6On(t, clk, 1)
+		res, closeW := startS6On(clk, 1)
 		defer closeW()
 		asked(t, clk)
 		clk.advance(tDrain - early)
