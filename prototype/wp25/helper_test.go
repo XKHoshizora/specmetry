@@ -32,6 +32,7 @@ func runHelper(mode string, args []string) int {
 		_ = report("limit")
 		os.Exit(limitExit)
 	})
+	witness("launched", mode)
 	arg := func(i int) int {
 		if i >= len(args) {
 			return 0

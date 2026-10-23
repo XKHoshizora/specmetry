@@ -77,6 +77,12 @@ func (c *childProc) reaped() bool {
 
 func (c *childProc) ended() bool { return c.reaped() }
 func (c *childProc) release()    {}
+func (c *childProc) pidOf() int {
+	if c.cmd.Process == nil {
+		return 0
+	}
+	return c.cmd.Process.Pid
+}
 
 func (c *childProc) stop() {
 	if !c.reaped() {
@@ -88,9 +94,10 @@ func (c *childProc) stop() {
 // pidProc is a reported process the scenario verified as its own, held by
 // a handle opened when it was verified; the handle is closed at the end.
 type pidProc struct {
-	pid int
-	h   windows.Handle
-	err error // why the last check could not confirm an end
+	pid      int
+	h        windows.Handle
+	err      error // why the last check could not confirm an end
+	injected bool  // the observe-fail-once fault has acted on it
 }
 
 // ownReported verifies a reported PID before the scenario may act on it:
@@ -124,6 +131,11 @@ func (p *pidProc) ended() bool {
 		return false
 	}
 	ev, err := windows.WaitForSingleObject(p.h, 0)
+	if injected("observe-fail-once") && !p.injected {
+		p.injected = true // this one wait fails; the next ones do not
+		injectHit("pidProc.ended", p.pid)
+		err = errors.New("injected: one observation failed")
+	}
 	if err != nil {
 		p.err = err // a wait that fails is not an end
 		return false
@@ -132,6 +144,8 @@ func (p *pidProc) ended() bool {
 }
 
 func (p *pidProc) stop() { _ = windows.TerminateProcess(p.h, 1) }
+
+func (p *pidProc) pidOf() int { return p.pid }
 
 func (p *pidProc) release() {
 	if p.h != 0 {

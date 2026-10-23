@@ -56,6 +56,7 @@ func runHelperPlatform(mode string, args []string) (int, bool) {
 		depth := arg(0)
 		if injected("chain-short") {
 			depth--
+			witness("inject", "chain-short")
 		}
 		c := helper("chain", nil, strconv.Itoa(depth))
 		c.SysProcAttr = &syscall.SysProcAttr{Setsid: true}

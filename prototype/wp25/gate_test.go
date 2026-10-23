@@ -38,20 +38,27 @@ type gateCase struct {
 	inject   string // "" for a control
 	want     verdict
 	goos     []string // empty: every platform
+	hit      bool     // the fault must be seen reaching its site
 }
 
 type gateResult struct {
-	ID        string  `json:"id"`
-	Test      string  `json:"test"`
-	Inject    string  `json:"inject"`
-	Want      verdict `json:"want"`
-	Got       verdict `json:"got"`
-	Reason    string  `json:"reason,omitempty"`
-	InnerExit int     `json:"inner_exit"`
-	Launches  int     `json:"launches"`
-	Work      int64   `json:"work"`
-	Pass      bool    `json:"pass"`
-	Millis    int64   `json:"ms"`
+	ID        string   `json:"id"`
+	Test      string   `json:"test"`
+	Inject    string   `json:"inject"`
+	Want      verdict  `json:"want"`
+	Got       verdict  `json:"got"`
+	Reason    string   `json:"reason,omitempty"`
+	InnerExit int      `json:"inner_exit"`
+	Launches  int      `json:"launches"`
+	Work      int64    `json:"work"`
+	Hits      int      `json:"inject_hits"`
+	Launched  int      `json:"launched"` // helpers the witness file saw start
+	Unowned   int      `json:"unowned"`  // of those, not in the inner run's owned list
+	Missing   int      `json:"missing"`  // processes the inner run declared unaccounted
+	Left      []int    `json:"left"`     // still alive after the inner run, stopped by the gate check
+	Problems  []string `json:"problems,omitempty"`
+	Pass      bool     `json:"pass"`
+	Millis    int64    `json:"ms"`
 }
 
 var (
@@ -88,14 +95,21 @@ var gateCases = []gateCase{
 	{id: "load.fanout-zero", test: "TestJobTerminateNotEnded", scenario: "T4.teardown.request-is-not-end", inject: "fanout-zero", want: invalid, goos: []string{"windows"}},
 	{id: "load.fanout-partial", test: "TestJobTerminateNotEnded", scenario: "T4.teardown.request-is-not-end", inject: "fanout-partial", want: invalid, goos: []string{"windows"}},
 	// A chain one level short: the load is not built, which is not the
-	// mechanism giving a different result.
-	{id: "load.chain-short", test: "TestAdoptionChain", scenario: "T2.adoption.chain", inject: "chain-short", want: invalid, goos: []string{"linux"}},
+	// mechanism giving a different result. Review 076 B1-R2: the levels that
+	// were started must still end when the scenario is rejected.
+	{id: "load.chain-short", test: "TestAdoptionChain", scenario: "T2.adoption.chain", inject: "chain-short", want: invalid, goos: []string{"linux"}, hit: true},
+	// The same chain with a report that cannot be read: the levels' PIDs
+	// are not even known from it.
+	{id: "load.chain-corrupt", test: "TestAdoptionChain", scenario: "T2.adoption.chain", inject: "report-malformed", want: invalid, goos: []string{"linux"}},
 	// Ownership: a reported PID that is the scenario's own process but not
 	// in the check's tree; only the ownership check can reject it.
 	{id: "ownership.foreign-pid", test: "TestInnerForeignPID", scenario: "gate.foreign-pid", want: invalid},
 	// Cleanup and observation: an end that cannot be confirmed, a process
 	// state that cannot be read, a process list that cannot be read.
 	{id: "cleanup.unconfirmed", test: "TestPipeSilentHolderReal", scenario: "T1.pipe.silent-holder", inject: "cleanup-unconfirmed", want: invalid},
+	// Review 076 B1-R1: one observation fails, the ones after it succeed.
+	// The failure must still make the run invalid.
+	{id: "observe.fail-once", test: "TestPipeSilentHolderReal", scenario: "T1.pipe.silent-holder", inject: "observe-fail-once", want: invalid, hit: true},
 	{id: "cleanup.state-unknown", test: "TestPipeSilentHolderReal", scenario: "T1.pipe.silent-holder", inject: "procinfo-unknown", want: invalid, goos: []string{"linux", "darwin"}},
 	{id: "observe.readdir-fails", test: "TestPipeNormalDrain", scenario: "T1.pipe.normal-drain", inject: "readdir-fail", want: invalid, goos: []string{"linux"}},
 }
@@ -143,19 +157,20 @@ func TestInnerForeignPID(t *testing.T) {
 type innerRun struct {
 	exit    int
 	results map[string]result
+	hits    int
 	err     error
 }
 
 // runInner runs one test function in a new process of this binary, with
 // the fault injected, under a hard limit of its own and one of the
-// parent's.
-func runInner(test, inject string) innerRun {
+// parent's. The helpers it starts write to the witness file.
+func runInner(test, inject, witnessFile string) innerRun {
 	self, err := os.Executable()
 	if err != nil {
 		return innerRun{err: err}
 	}
 	cmd := exec.Command(self, "-test.run", "^"+test+"$", "-test.count=1", "-test.v", "-test.timeout=150s")
-	cmd.Env = append(os.Environ(), innerEnv+"=1", injectEnv+"="+inject)
+	cmd.Env = append(os.Environ(), innerEnv+"=1", injectEnv+"="+inject, witnessEnv+"="+witnessFile)
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
 	if err := cmd.Start(); err != nil {
@@ -175,6 +190,9 @@ func runInner(test, inject string) innerRun {
 	sc.Buffer(make([]byte, 1<<20), 1<<20)
 	for sc.Scan() {
 		line := sc.Text()
+		if strings.Contains(line, "WP25INJECT ") {
+			r.hits++
+		}
 		i := strings.Index(line, "WP25RESULT ")
 		if i < 0 {
 			continue
@@ -194,9 +212,15 @@ func runInner(test, inject string) innerRun {
 
 func checkGate(t *testing.T, c gateCase) {
 	begin := time.Now()
-	r := runInner(c.test, c.inject)
-	g := gateResult{ID: c.id, Test: c.test, Inject: c.inject, Want: c.want, InnerExit: r.exit}
+	wf, err := os.CreateTemp(t.TempDir(), "witness-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = wf.Close()
+	r := runInner(c.test, c.inject, wf.Name())
+	g := gateResult{ID: c.id, Test: c.test, Inject: c.inject, Want: c.want, InnerExit: r.exit, Hits: r.hits}
 	got, ok := r.results[c.scenario]
+	verdictOK := false
 	switch {
 	case r.err != nil:
 		g.Reason = "inner run: " + r.err.Error()
@@ -206,8 +230,56 @@ func checkGate(t *testing.T, c gateCase) {
 		g.Got, g.Reason, g.Launches, g.Work = got.Verdict, got.Reason, got.Launches, got.Work
 		// A control must be accepted and exit 0; a broken run must be
 		// rejected as invalid and make the diagnostic fail.
-		g.Pass = got.Verdict == c.want && (r.exit == 0) == (c.want == confirmed)
+		verdictOK = got.Verdict == c.want && (r.exit == 0) == (c.want == confirmed)
 	}
+	// What the witness file saw, independently of the inner run's account.
+	ws, err := readWitness(wf.Name())
+	if err != nil {
+		g.Problems = append(g.Problems, "witness: "+err.Error())
+	}
+	for _, w := range ws {
+		if w.kind == "inject" {
+			g.Hits++
+		}
+	}
+	if c.hit && g.Hits == 0 {
+		g.Problems = append(g.Problems, "the fault never reached its site")
+	}
+	// Every helper the inner run started must have ended once it is over.
+	alive, err := witnessEnded(ws, 10*time.Second)
+	if err != nil {
+		g.Problems = append(g.Problems, "witness state: "+err.Error())
+	}
+	for _, w := range alive {
+		g.Left = append(g.Left, w.pid)
+		witnessStop(w) // this round's own helper, by its witnessed identity
+	}
+	if len(g.Left) > 0 {
+		g.Problems = append(g.Problems, fmt.Sprintf("%d helpers left alive by the inner run", len(g.Left)))
+		if still, _ := witnessEnded(alive, 10*time.Second); len(still) > 0 {
+			g.Problems = append(g.Problems, fmt.Sprintf("%d of them still alive after the gate check stopped them", len(still)))
+		}
+	}
+	// Every helper started must be in the inner run's owned list, or be
+	// declared unaccounted by it: a rejection must not skip objects.
+	owned := map[int]bool{}
+	for _, pid := range got.Owned {
+		owned[pid] = true
+	}
+	for _, w := range ws {
+		if w.kind != "launched" {
+			continue
+		}
+		g.Launched++
+		if !owned[w.pid] {
+			g.Unowned++
+		}
+	}
+	g.Missing = got.Missing
+	if g.Unowned > g.Missing {
+		g.Problems = append(g.Problems, fmt.Sprintf("%d started helpers neither owned nor declared unaccounted", g.Unowned-g.Missing))
+	}
+	g.Pass = verdictOK && len(g.Problems) == 0
 	g.Millis = time.Since(begin).Milliseconds()
 	b, _ := json.Marshal(g)
 	fmt.Println("WP25GATE " + string(b))
@@ -215,7 +287,7 @@ func checkGate(t *testing.T, c gateCase) {
 	gateResults = append(gateResults, g)
 	gateMu.Unlock()
 	if !g.Pass {
-		t.Errorf("%s: want %s (exit %s), got %s (exit %d): %s", c.id, c.want,
-			map[bool]string{true: "0", false: "non-zero"}[c.want == confirmed], g.Got, g.InnerExit, g.Reason)
+		t.Errorf("%s: want %s (exit %s), got %s (exit %d): %s; %v", c.id, c.want,
+			map[bool]string{true: "0", false: "non-zero"}[c.want == confirmed], g.Got, g.InnerExit, g.Reason, g.Problems)
 	}
 }

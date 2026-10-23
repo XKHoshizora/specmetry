@@ -83,6 +83,12 @@ func (c *childProc) reaped() bool {
 
 func (c *childProc) ended() bool { return c.reaped() }
 func (c *childProc) release()    {}
+func (c *childProc) pidOf() int {
+	if c.cmd.Process == nil {
+		return 0
+	}
+	return c.cmd.Process.Pid
+}
 
 // stop kills the child: its PID cannot have been reused, it is not reaped.
 func (c *childProc) stop() {
@@ -96,9 +102,10 @@ func (c *childProc) stop() {
 // identity is its start time, read when it was verified and again before
 // every action.
 type pidProc struct {
-	pid int
-	id  string
-	err error // why the last check could not confirm an end
+	pid      int
+	id       string
+	err      error // why the last check could not confirm an end
+	injected bool  // the observe-fail-once fault has acted on it
 }
 
 // ownDescendant verifies a reported PID before the scenario may act on
@@ -150,6 +157,11 @@ func (p *pidProc) ended() bool {
 	if injected("procinfo-unknown") {
 		pr = unknown // the read of the process's state failed
 	}
+	if injected("observe-fail-once") && !p.injected {
+		p.injected = true // this one read fails; the next ones do not
+		injectHit("pidProc.ended", p.pid)
+		pr = unknown
+	}
 	switch {
 	case pr == absent:
 		return true
@@ -177,7 +189,8 @@ func (p *pidProc) stop() {
 	}
 }
 
-func (p *pidProc) release() {}
+func (p *pidProc) release()   {}
+func (p *pidProc) pidOf() int { return p.pid }
 
 type pinfo struct {
 	zombie     bool

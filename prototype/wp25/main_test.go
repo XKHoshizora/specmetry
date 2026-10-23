@@ -99,6 +99,8 @@ type result struct {
 	Cleanup  string  `json:"cleanup"`
 	Reason   string  `json:"reason,omitempty"`
 	Millis   int64   `json:"ms"`
+	Owned    []int   `json:"owned,omitempty"`   // PIDs of the processes the scenario owned
+	Missing  int     `json:"missing,omitempty"` // expected processes it could not account for
 }
 
 var (
@@ -121,6 +123,8 @@ type owned interface {
 	stop()
 	// release gives up what observes it (a Windows handle); after ended.
 	release()
+	// pidOf is its PID, 0 if it never started.
+	pidOf() int
 }
 
 type scen struct {
@@ -248,6 +252,9 @@ func (s *scen) done() {
 	}
 	for _, p := range s.procs {
 		p.release()
+		if pid := p.pidOf(); pid > 0 {
+			s.r.Owned = append(s.r.Owned, pid)
+		}
 	}
 	switch {
 	case len(s.invalid) > 0:
