@@ -63,7 +63,20 @@ func notBefore(a, b string) bool {
 	return au >= bu
 }
 
-func tagged(pid int, tag string) bool {
+// environOf reads a process's arguments and environment (sysctl
+// kern.procargs2, after its argument count), NUL-separated.
+func environOf(pid int) ([]byte, error) {
 	b, err := unix.SysctlRaw("kern.procargs2", pid)
-	return err == nil && len(b) >= 4 && hasToken(b[4:], tag)
+	if err != nil {
+		return nil, err
+	}
+	if len(b) < 4 {
+		return nil, fmt.Errorf("kern.procargs2 of %d: %d bytes", pid, len(b))
+	}
+	return b[4:], nil
+}
+
+func tagged(pid int, tag string) bool {
+	env, err := environOf(pid)
+	return err == nil && hasToken(env, tag)
 }

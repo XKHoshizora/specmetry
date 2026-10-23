@@ -184,6 +184,57 @@ func TestGateJudge(t *testing.T) {
 	}
 }
 
+// TestCandidates: who the outer check may act on by PID (Review 079 B2),
+// on fixed rows. What the census found is acted on; a process alive only
+// by a record is acted on only once verified; a refusal, or a verification
+// that cannot be read, is an ownership failure and never an action.
+func TestCandidates(t *testing.T) {
+	if os.Getenv(innerEnv) != "" {
+		t.Skip("inner run")
+	}
+	census := []survivor{{11, ident(1)}}
+	mine, other, unread := survivor{12, ident(2)}, survivor{13, ident(3)}, survivor{14, ident(4)}
+	verify := func(v survivor) (bool, error) {
+		switch v {
+		case mine:
+			return true, nil
+		case unread:
+			return false, errors.New("environment cannot be read")
+		}
+		return false, nil
+	}
+	rows := []struct {
+		name    string
+		census  []survivor
+		claimed []survivor
+		act     []survivor
+		refused []string
+	}{
+		{"census only", census, nil, census, nil},
+		{"claimed and proven", nil, []survivor{mine}, []survivor{mine}, nil},
+		{"claimed, not this round's", nil, []survivor{other}, nil, []string{other.key()}},
+		{"claimed, ownership unreadable", nil, []survivor{unread}, nil, []string{unread.key()}},
+		{"mixed", census, []survivor{mine, other, unread}, []survivor{census[0], mine}, []string{other.key(), unread.key()}},
+	}
+	for _, r := range rows {
+		t.Run(r.name, func(t *testing.T) {
+			act, refused, probs := sortCandidates(r.census, r.claimed, verify)
+			if fmt.Sprint(act) != fmt.Sprint(r.act) || fmt.Sprint(refused) != fmt.Sprint(r.refused) {
+				t.Errorf("act %v refused %v, want %v and %v", act, refused, r.act, r.refused)
+			}
+			if len(probs) != len(r.refused) {
+				t.Errorf("%d problems for %d refusals: %v", len(probs), len(r.refused), probs)
+			}
+			// A refusal fails the check whatever was expected.
+			g := gateResult{Problems: append([]string{"left: 1"}, probs...), Remedy: "succeeded", Final: "ended"}
+			judge(gateCase{reject: "left"}, &g, true)
+			if g.Pass == (len(r.refused) > 0) {
+				t.Errorf("pass %v with %d refusals", g.Pass, len(r.refused))
+			}
+		})
+	}
+}
+
 // TestRecordAlive: a recorded identity that is this process's own says it
 // runs; another identity of the same PID says it ended, which is reliable
 // only because parseWitness admits identities of the platform's form

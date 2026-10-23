@@ -79,8 +79,11 @@ type gateResult struct {
 	Raised    bool     `json:"raised"`
 	Insurance string   `json:"insurance"` // the experiment's own last cleanup, after the judgment
 	// Acted: the identities handed to the entries that act on a process by
-	// its PID (the remediation and the insurance cleanup).
+	// its PID (the remediation and the insurance cleanup), each of them
+	// proven this round's. Refused: the ones alive by a record whose
+	// ownership was not proven, never handed on.
 	Acted    []string `json:"acted,omitempty"`
+	Refused  []string `json:"refused,omitempty"`
 	Problems []string `json:"problems,omitempty"`
 	// The judgment's dimensions, kept apart (Review 078 B1-R2-W-R): the
 	// expected rejection, other problems of the evidence, the outer
@@ -366,7 +369,35 @@ func (p *innerProc) testedRemediate(ss []survivor) ([]survivor, error) {
 // starts, its census and reads, the injection it needs, the remediation
 // and the end it confirms, the insurance cleanup's contradiction. No
 // expected rejection excuses them (Review 078 B1-R2-W-R).
-var toolClasses = map[string]bool{"inner": true, "census": true, "state-unknown": true, "hit": true, "still-alive": true, "insurance": true}
+var toolClasses = map[string]bool{"inner": true, "census": true, "state-unknown": true, "hit": true, "still-alive": true, "insurance": true, "ownership": true}
+
+// sortCandidates decides which processes the outer check may act on by
+// their PID (Review 079 B2). A process the census found is this round's by
+// the census's own proof: this check's tag in its environment (Unix) or
+// membership of the check's Job (Windows). A process alive only by a
+// creation record is the inner run's claim, and the witness may be wrong:
+// it is acted on only if verify proves it this round's now. A matching
+// identity, a well-formed record, or its kind proves nothing about
+// ownership. Every other claimed process is refused, never acted on, and
+// each refusal is an "ownership" failure of the outer check, which no
+// expected rejection excuses.
+func sortCandidates(census, claimed []survivor, verify func(survivor) (bool, error)) (act []survivor, refused, problems []string) {
+	act = append(act, census...)
+	for _, v := range claimed {
+		ok, err := verify(v)
+		switch {
+		case err != nil:
+			refused = append(refused, v.key())
+			problems = append(problems, fmt.Sprintf("ownership: process %s, alive by its record, cannot be shown to be this round's (%v): not acted on", v.key(), err))
+		case !ok:
+			refused = append(refused, v.key())
+			problems = append(problems, fmt.Sprintf("ownership: process %s, alive by its record, is not shown to be this round's: not acted on", v.key()))
+		default:
+			act = append(act, v)
+		}
+	}
+	return act, refused, problems
+}
 
 // judge decides a gate check on dimensions kept apart:
 //
@@ -500,7 +531,7 @@ func runGate(t *testing.T, c gateCase, f outerFault) gateResult {
 	}
 	g.Created = len(created)
 	state := map[string]string{}
-	left := map[int]bool{}
+	var claimed []survivor // alive by a record only: the inner run's claim
 	for k, w := range created {
 		a, err := r.proc.testedAlive(w)
 		switch {
@@ -509,9 +540,9 @@ func runGate(t *testing.T, c gateCase, f outerFault) gateResult {
 			g.Problems = append(g.Problems, fmt.Sprintf("state-unknown: process %s: %v", k, err))
 		case a:
 			state[k] = "alive"
-			left[w.pid] = true
 			if !inCensus[k] {
 				g.Problems = append(g.Problems, fmt.Sprintf("census: process %s alive by its record, not found by the census", k))
+				claimed = append(claimed, survivor{w.pid, w.start})
 			}
 		default:
 			state[k] = "ended"
@@ -520,8 +551,17 @@ func runGate(t *testing.T, c gateCase, f outerFault) gateResult {
 			}
 		}
 	}
-	for _, v := range survivors {
+	// Who may be acted on by PID (Review 079 B2): what the census found,
+	// and a claimed process only once its ownership is proven now. The
+	// others are refused, an ownership failure of the outer check.
+	act, refused, oprobs := sortCandidates(survivors, claimed, r.proc.ownedNow)
+	g.Problems = append(g.Problems, oprobs...)
+	g.Refused = refused
+	left := map[int]bool{}
+	for _, v := range act {
 		left[v.pid] = true
+	}
+	for _, v := range survivors {
 		if _, ok := created[v.key()]; !ok {
 			g.Unrecord = append(g.Unrecord, v.pid)
 		}
@@ -538,15 +578,11 @@ func runGate(t *testing.T, c gateCase, f outerFault) gateResult {
 	}
 
 	// Remediation, after the state was recorded: this round's own
-	// survivors only (the Job's members; on Unix, still carrying this
-	// check's tag, with the same identity). It never makes the check pass;
-	// whether it was needed, run, and succeeded is kept as it is.
-	known := append([]survivor(nil), survivors...)
-	for k, w := range created {
-		if state[k] == "alive" && !inCensus[k] {
-			known = append(known, survivor{w.pid, w.start})
-		}
-	}
+	// processes only, the ones whose ownership is proven (the Job's
+	// members; on Unix, carrying this check's tag, with the same identity).
+	// It never makes the check pass; whether it was needed, run, and
+	// succeeded is kept as it is.
+	known := act
 	for _, v := range known {
 		g.Acted = append(g.Acted, v.key())
 	}
@@ -577,8 +613,9 @@ func runGate(t *testing.T, c gateCase, f outerFault) gateResult {
 	}
 	// The final state of this round's processes, from the tested path's
 	// own facts: alive if any is known alive, unknown if a read, the
-	// census or the remediation's confirmation failed, ended only if none
-	// of that happened. An unknown state is never an end.
+	// census or the remediation's confirmation failed, or a claimed process
+	// was refused (its ownership not proven), ended only if none of that
+	// happened. An unknown state is never an end.
 	unknown := 0
 	for _, st := range state {
 		if st == "unknown" {
@@ -588,7 +625,7 @@ func runGate(t *testing.T, c gateCase, f outerFault) gateResult {
 	switch {
 	case len(g.Still) > 0:
 		g.Final = "alive"
-	case cerr != nil || unknown > 0 || remedyErr != nil:
+	case cerr != nil || unknown > 0 || remedyErr != nil || len(refused) > 0:
 		g.Final = "unknown"
 	default:
 		g.Final = "ended"

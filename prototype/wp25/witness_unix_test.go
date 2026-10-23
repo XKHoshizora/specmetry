@@ -149,14 +149,33 @@ func (p *innerProc) remediate(ss []survivor) ([]survivor, error) {
 
 func (p *innerProc) close() {}
 
+// ownedNow proves, when asked, that a process is this round's: still the
+// same process (its start time), alive, and carrying this check's tag in
+// its environment, which only the inner run's processes inherit. A state
+// or an environment that cannot be read is an error, never a yes.
+func (p *innerProc) ownedNow(v survivor) (bool, error) {
+	st, pr := procInfo(v.pid)
+	switch {
+	case pr == unknown:
+		return false, errUnknownState
+	case pr == absent, st.start != v.start, st.zombie:
+		return false, nil
+	}
+	env, err := environOf(v.pid)
+	if err != nil {
+		return false, err
+	}
+	return hasToken(env, p.tag), nil
+}
+
 // insure is the experiment's own last cleanup, after the tested path was
 // judged and apart from it. It ends first the processes the tested path
-// already identified (known: PID and start time, from its census or its
-// records), each while its start time still holds, so it does not depend
-// on reading their environment again; then whatever a fresh census of this
-// round's tag finds. It reports only what was still alive, and confirms
-// the end by identity and by a last census. Its result never makes a
-// check pass.
+// already proved this round's (known: only what its census found, or what
+// sortCandidates verified; never a record alone, Review 079 B2), each while
+// its start time still holds, so it does not depend on reading their
+// environment again; then whatever a fresh census of this round's tag
+// finds. It reports only what was still alive, and confirms the end by
+// identity and by a last census. Its result never makes a check pass.
 func (p *innerProc) insure(known []survivor) string {
 	alive := map[string]survivor{}
 	for _, v := range known {

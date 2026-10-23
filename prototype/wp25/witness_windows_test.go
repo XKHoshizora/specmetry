@@ -256,6 +256,19 @@ func (p *innerProc) insure(_ []survivor) string {
 	}
 }
 
+// ownedNow proves, when asked, that a process is this round's: still the
+// same process (its creation time) and a member of the check's own Job,
+// which every process of the inner run is in and none can leave. A query
+// that fails is an error, never a yes.
+func (p *innerProc) ownedNow(v survivor) (bool, error) {
+	h, same, err := openRecorded(witnessRec{pid: v.pid, start: v.start}, 0)
+	if err != nil || !same {
+		return false, err
+	}
+	defer windows.CloseHandle(h)
+	return isProcessInJob(h, p.job)
+}
+
 // recordSignals: on Windows the outer check signals no process by its PID
 // (it terminates its Job), so there is nothing to record.
 func recordSignals(int) (func(), func() int) { return func() {}, func() int { return 0 } }

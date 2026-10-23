@@ -94,8 +94,13 @@ func censusOne(pid int, tag string, floor uint64) (survivor, bool, error) {
 
 func gone(err error) bool { return errors.Is(err, fs.ErrNotExist) || errors.Is(err, unix.ESRCH) }
 
+// environOf reads a process's environment, NUL-separated.
+func environOf(pid int) ([]byte, error) {
+	return os.ReadFile("/proc/" + strconv.Itoa(pid) + "/environ")
+}
+
 // tagged reports whether the process's environment still carries tag.
 func tagged(pid int, tag string) bool {
-	env, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/environ")
+	env, err := environOf(pid)
 	return err == nil && hasToken(env, tag)
 }

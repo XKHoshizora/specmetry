@@ -112,9 +112,12 @@ var comboCases = []comboCase{
 	// outside the inner run (the combination's own fixture): in a healthy
 	// run; alongside one of the run's own processes left alive; and with
 	// the fixture's PID but another start time (an identity that changed).
-	{id: "combo.forge-owner", gate: "control.silent-holder", fault: "forge-owner", fixture: "owner"},
-	{id: "combo.forge-owner-mixed", gate: "witness.leak-unreceipted", fault: "forge-owner", fixture: "owner"},
-	{id: "combo.forge-stale", gate: "control.silent-holder", fault: "forge-owner", fixture: "stale"},
+	{id: "combo.forge-owner", gate: "control.silent-holder", fault: "forge-owner", fixture: "owner",
+		tool: "ownership", unexpected: true, remedy: "not-needed", final: "unknown"},
+	{id: "combo.forge-owner-mixed", gate: "witness.leak-unreceipted", fault: "forge-owner", fixture: "owner",
+		expected: true, tool: "ownership", unexpected: true, remedy: "succeeded", final: "unknown"},
+	{id: "combo.forge-stale", gate: "control.silent-holder", fault: "forge-owner", fixture: "stale",
+		unexpected: true, remedy: "not-needed", final: "ended"},
 }
 
 func TestGateCombos(t *testing.T) {
