@@ -187,7 +187,14 @@ func report(kind string) error {
 	if path == "" {
 		return nil
 	}
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0o600)
+	flag := os.O_WRONLY | os.O_APPEND
+	if injected("epipe-report-fail") && kind == "epipe" {
+		// Review 076 N4: a holder's record cannot be written. The report is
+		// opened read-only, so the real write fails.
+		injectHit("report", os.Getpid())
+		flag = os.O_RDONLY
+	}
+	f, err := os.OpenFile(path, flag, 0o600)
 	if err != nil {
 		return err
 	}

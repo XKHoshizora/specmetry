@@ -189,8 +189,30 @@ func startCopy(src io.Reader, dst io.Writer, discard bool) *copier {
 	return c
 }
 
+// phaseClock bounds the output step's phases and reads their lengths
+// (Review 078 N6). wake gives a channel that fires after about d, and a
+// function that stops it.
+type phaseClock interface {
+	now() time.Time
+	wake(d time.Duration) (<-chan time.Time, func() bool)
+}
+
+// goClock is Go's clock: time.Now's monotonic reading and the runtime's
+// timers.
+type goClock struct{}
+
+func (goClock) now() time.Time { return time.Now() }
+
+func (goClock) wake(d time.Duration) (<-chan time.Time, func() bool) {
+	t := time.NewTimer(d)
+	return t.C, t.Stop
+}
+
 // wait waits until the copier returns or the deadline passes.
-func (c *copier) wait(deadline time.Time) bool {
+func (c *copier) wait(deadline time.Time) bool { return c.waitOn(goClock{}, deadline) }
+
+// waitOn is wait on the given clock.
+func (c *copier) waitOn(clk phaseClock, deadline time.Time) bool {
 	if c.res != nil {
 		return true
 	}
@@ -200,17 +222,17 @@ func (c *copier) wait(deadline time.Time) bool {
 		return true
 	default:
 	}
-	left := time.Until(deadline)
+	left := deadline.Sub(clk.now())
 	if left <= 0 {
 		return false
 	}
-	timer := time.NewTimer(left)
-	defer timer.Stop()
+	ch, stop := clk.wake(left)
+	defer stop()
 	select {
 	case r := <-c.done:
 		c.res = &r
 		return true
-	case <-timer.C:
+	case <-ch:
 		return false
 	}
 }
@@ -243,11 +265,16 @@ type s6Result struct {
 // confirmed), stopping the read, phase J, then sealing every copy port of
 // the run, whatever came before.
 func runS6(d *dest, ss []*stream, tDrain, tJoin time.Duration, skipDrain bool) s6Result {
+	return runS6On(goClock{}, d, ss, tDrain, tJoin, skipDrain)
+}
+
+// runS6On is runS6 with its phases bounded on clk.
+func runS6On(clk phaseClock, d *dest, ss []*stream, tDrain, tJoin time.Duration, skipDrain bool) s6Result {
 	res := s6Result{out: map[string]outcome{}}
 	all := func(deadline time.Time) bool {
 		ok := true
 		for _, s := range ss {
-			if !s.c.wait(deadline) {
+			if !s.c.waitOn(clk, deadline) {
 				ok = false
 			}
 		}
@@ -256,13 +283,13 @@ func runS6(d *dest, ss []*stream, tDrain, tJoin time.Duration, skipDrain bool) s
 	ended := false
 	if !skipDrain {
 		since := stopwatch()
-		ended = all(time.Now().Add(tDrain))
+		ended = all(clk.now().Add(tDrain))
 		res.drain = since()
 	}
 	if !ended {
 		res.stopped = true
 		for _, s := range ss {
-			if !s.c.wait(time.Now()) {
+			if !s.c.waitOn(clk, clk.now()) {
 				res.pending++
 			}
 		}
@@ -270,7 +297,7 @@ func runS6(d *dest, ss []*stream, tDrain, tJoin time.Duration, skipDrain bool) s
 			_ = s.r.Close()
 		}
 		since := stopwatch()
-		all(time.Now().Add(tJoin))
+		all(clk.now().Add(tJoin))
 		res.join = since()
 	}
 	ps := make([]*port, 0, len(ss))

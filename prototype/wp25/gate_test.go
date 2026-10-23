@@ -5,7 +5,8 @@ package wp25
 // fault injected through WP25_INJECT, and checks the verdict and the exit
 // status the real diagnostic gives. A gate check passes when the real
 // diagnostic rejects the broken run (invalid, non-zero exit), or, for a
-// control, accepts the healthy one. The outer check also judges its own
+// control, accepts the healthy one or, with a working tool and a wrong
+// prediction, refutes it (non-zero exit). The outer check also judges its own
 // evidence (witness_test.go): a case that injects a fault of the witness
 // passes only when the outer check rejects that evidence for the named
 // reason. A passing gate check is not a mechanism confirmed: it is
@@ -163,6 +164,15 @@ var gateCases = []gateCase{
 	{id: "observe.prctl-fails", test: "TestExclusiveBaselineLive", scenario: "T2.baseline.live-child", inject: "prctl-get-fail", want: invalid, goos: []string{"linux"}, hit: true},
 	// Whether the process is in the Job cannot be read.
 	{id: "observe.injob-once", test: "TestJobFailResume", scenario: "T4.start.fail-resume", inject: "injob-fail-once", want: invalid, goos: []string{"windows"}, hit: true},
+
+	// Review 076 N4: the F1 scenario's holder sees its writes fail but
+	// cannot write its record: the observation failed, so the run is
+	// invalid, not a finding. The controls: the healthy run is confirmed; a
+	// second handle on the read ends keeps the writes from failing, a wrong
+	// prediction with a working tool, which stays refuted.
+	{id: "control.f1-skip-drain", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", want: confirmed},
+	{id: "control.f1-read-kept", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "read-end-kept", want: refuted, hit: true},
+	{id: "report.epipe-unwritable", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "epipe-report-fail", want: invalid, hit: true},
 
 	// Review 077 B1-R2-W: the witness itself fails. The outer check must
 	// reject the evidence, whatever the inner run gives.

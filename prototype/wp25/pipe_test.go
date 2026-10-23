@@ -159,6 +159,20 @@ func TestPipeF1SkipDrain(t *testing.T) {
 	exited, status, _ := tr.waitExit(10 * time.Second)
 	s.needLoad(exited && status == "exit 3", "the holder verified as the check's; its parent exited 3 (%v, %s)", exited, status)
 	time.Sleep(100 * time.Millisecond) // the holder writes a few lines
+	if injected("read-end-kept") {
+		// A gate regression's healthy counter-case (Review 076 N4): the
+		// scenario keeps a second handle on both read ends, so the stop
+		// leaves the pipes open and the holder's writes do not fail. The
+		// tool still works: the prediction is wrong, which is refuted.
+		for _, st := range ss {
+			closeKept, err := keepOpen(st.r.(*os.File))
+			if err != nil {
+				s.invalidf("a second handle on the read end: %v", err)
+			}
+			s.defer_(closeKept)
+		}
+		injectHit("TestPipeF1SkipDrain", os.Getpid())
+	}
 	r := runS6(d, ss, tDrain, tJoin, true)
 	_, _ = d.ownerPort().Write(doc)
 	epipe, err := awaitRecords(rep, "epipe", 1, 3*time.Second)
