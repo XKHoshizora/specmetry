@@ -16,7 +16,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -32,11 +34,19 @@ type comboCase struct {
 	// The self-check's dimensions this combination must show: the expected
 	// rejection found or not, a tool error of a class ("" none), other
 	// problems of the evidence, the remediation and the final state.
+	// The dimensions are checked where remedy is set.
 	expected   bool
 	tool       string
 	unexpected bool
 	remedy     string
 	final      string
+	// fixture (Review 079 B2): a process this combination starts and holds
+	// itself, outside the inner run, that a forged creation record names
+	// ("owner": its real identity; "stale": its PID with another start
+	// time). The outer check must hand it to no entry that acts by PID and
+	// signal it never; it must still be alive afterwards. The combination
+	// then ends it itself.
+	fixture string
 }
 
 type comboResult struct {
@@ -47,8 +57,16 @@ type comboResult struct {
 	Strict   bool       `json:"strict,omitempty"`
 	WantPass bool       `json:"want_pass"`
 	Self     gateResult `json:"self"` // the self-check under test
-	Pass     bool       `json:"pass"`
-	Reason   string     `json:"reason,omitempty"`
+	// The fixture: handed to an acting entry, signals that would have been
+	// sent to it (recorded, not sent), alive after the outer check, ended
+	// by this combination's own cleanup.
+	Fixture        string `json:"fixture,omitempty"`
+	FixtureActed   bool   `json:"fixture_acted,omitempty"`
+	FixtureSignals int    `json:"fixture_signals,omitempty"`
+	FixtureAlive   bool   `json:"fixture_alive,omitempty"`
+	FixtureEnded   bool   `json:"fixture_ended,omitempty"`
+	Pass           bool   `json:"pass"`
+	Reason         string `json:"reason,omitempty"`
 }
 
 var (
@@ -90,6 +108,13 @@ var comboCases = []comboCase{
 		remedy: "not-needed", final: "ended"},
 	{id: "combo.healthy-state-unknown", gate: "control.silent-holder", fault: "record-unknown",
 		tool: "state-unknown", remedy: "not-needed", final: "unknown"},
+	// Review 079 B2: a well-formed creation record names a live process
+	// outside the inner run (the combination's own fixture): in a healthy
+	// run; alongside one of the run's own processes left alive; and with
+	// the fixture's PID but another start time (an identity that changed).
+	{id: "combo.forge-owner", gate: "control.silent-holder", fault: "forge-owner", fixture: "owner"},
+	{id: "combo.forge-owner-mixed", gate: "witness.leak-unreceipted", fault: "forge-owner", fixture: "owner"},
+	{id: "combo.forge-stale", gate: "control.silent-holder", fault: "forge-owner", fixture: "stale"},
 }
 
 func TestGateCombos(t *testing.T) {
@@ -120,24 +145,73 @@ func checkCombo(t *testing.T, cc comboCase, c gateCase) {
 	if cc.strict {
 		c.also = nil
 	}
-	self := runGate(t, c, cc.fault)
-	res := comboResult{ID: cc.id, Gate: cc.gate, Fault: cc.fault, NoInject: cc.noInject, Strict: cc.strict, WantPass: cc.wantPass, Self: self}
+	f := outerFault{name: cc.fault}
+	var fx *exec.Cmd
+	var fxID survivor
+	signals := func() int { return 0 }
+	if cc.fixture != "" {
+		// The fixture: started and held by this combination, never by the
+		// inner run; its identity is read while it is this process's child.
+		fx = helper("sleep", nil)
+		if err := start(fx); err != nil {
+			t.Fatalf("fixture: %v", err)
+		}
+		id, err := childIdentity(fx)
+		if err != nil {
+			_ = fx.Process.Kill()
+			_ = fx.Wait()
+			t.Fatalf("fixture identity: %v", err)
+		}
+		fxID = survivor{fx.Process.Pid, id}
+		f.forge = fxID
+		if cc.fixture == "stale" {
+			f.forge.start = shiftIdentity(id)
+		}
+		var restore func()
+		restore, signals = recordSignals(fxID.pid)
+		defer restore()
+	}
+	self := runGate(t, c, f)
+	res := comboResult{ID: cc.id, Gate: cc.gate, Fault: cc.fault, NoInject: cc.noInject, Strict: cc.strict, WantPass: cc.wantPass, Self: self, Fixture: cc.fixture}
 	var why []string
 	if self.Pass != cc.wantPass {
 		why = append(why, fmt.Sprintf("the self-check gave pass=%v, want %v", self.Pass, cc.wantPass))
 	}
 	// Each dimension as the combination makes it, not only the verdict.
-	if self.Expected != cc.expected {
-		why = append(why, fmt.Sprintf("expected rejection found %v, want %v", self.Expected, cc.expected))
+	if cc.remedy != "" {
+		if self.Expected != cc.expected {
+			why = append(why, fmt.Sprintf("expected rejection found %v, want %v", self.Expected, cc.expected))
+		}
+		if cc.tool == "" && len(self.ToolErrors) > 0 || cc.tool != "" && !hasClass(self.ToolErrors, cc.tool) {
+			why = append(why, fmt.Sprintf("tool errors %v, want class %q", self.ToolErrors, cc.tool))
+		}
+		if (len(self.Unexpected) > 0) != cc.unexpected {
+			why = append(why, fmt.Sprintf("other problems %v, want some: %v", self.Unexpected, cc.unexpected))
+		}
+		if self.Remedy != cc.remedy || self.Final != cc.final {
+			why = append(why, fmt.Sprintf("remediation %s and final state %s, want %s and %s", self.Remedy, self.Final, cc.remedy, cc.final))
+		}
 	}
-	if cc.tool == "" && len(self.ToolErrors) > 0 || cc.tool != "" && !hasClass(self.ToolErrors, cc.tool) {
-		why = append(why, fmt.Sprintf("tool errors %v, want class %q", self.ToolErrors, cc.tool))
-	}
-	if (len(self.Unexpected) > 0) != cc.unexpected {
-		why = append(why, fmt.Sprintf("other problems %v, want some: %v", self.Unexpected, cc.unexpected))
-	}
-	if self.Remedy != cc.remedy || self.Final != cc.final {
-		why = append(why, fmt.Sprintf("remediation %s and final state %s, want %s and %s", self.Remedy, self.Final, cc.remedy, cc.final))
+	if fx != nil {
+		// Nothing outside the inner run may be acted on: not handed to an
+		// entry that acts by PID, never signalled, still alive.
+		res.FixtureActed = contains(self.Acted, fxID.key())
+		res.FixtureSignals = signals()
+		a, err := recordAlive(witnessRec{pid: fxID.pid, start: fxID.start})
+		res.FixtureAlive = a && err == nil
+		if res.FixtureActed || res.FixtureSignals > 0 || !res.FixtureAlive {
+			why = append(why, fmt.Sprintf("the fixture outside the inner run was acted on: handed to an acting entry %v, %d signals, alive %v (%v)",
+				res.FixtureActed, res.FixtureSignals, res.FixtureAlive, err))
+		}
+		// The combination's own cleanup of its own fixture, apart from the
+		// outer check: it started the fixture and holds it.
+		_ = fx.Process.Kill()
+		_ = fx.Wait()
+		a, err = recordAlive(witnessRec{pid: fxID.pid, start: fxID.start})
+		res.FixtureEnded = !a && err == nil
+		if !res.FixtureEnded {
+			why = append(why, fmt.Sprintf("the fixture could not be confirmed ended (%v)", err))
+		}
 	}
 	// Whatever the tested path did, the experiment's own cleanup must
 	// leave nothing of this round behind.
@@ -156,3 +230,14 @@ func checkCombo(t *testing.T, cc comboCase, c gateCase) {
 }
 
 func insured(s string) bool { return s == "nothing left" || strings.HasPrefix(s, "ended ") }
+
+// shiftIdentity gives another identity of the same form: one second later
+// on macOS, one tick later elsewhere.
+func shiftIdentity(s string) string {
+	sec, usec, ok := strings.Cut(s, ".")
+	n, _ := strconv.ParseUint(sec, 10, 64)
+	if ok {
+		return strconv.FormatUint(n+1, 10) + "." + usec
+	}
+	return strconv.FormatUint(n+1, 10)
+}

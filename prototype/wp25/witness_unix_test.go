@@ -114,13 +114,18 @@ func (p *innerProc) census() ([]survivor, int, error) {
 	return ss, -1, err
 }
 
+// outerSignal is how the outer check ends a process (its remediation and
+// its insurance cleanup). A combination check replaces it to record what
+// would be signalled (Review 079 B2).
+var outerSignal = func(pid int) error { return syscall.Kill(pid, syscall.SIGKILL) }
+
 // remediate ends the survivors, each only while its identity holds and it
 // still carries the tag (this round's own processes), and returns the ones
 // still alive after a bounded wait.
 func (p *innerProc) remediate(ss []survivor) ([]survivor, error) {
 	for _, v := range ss {
 		if st, pr := procInfo(v.pid); pr == present && st.start == v.start && !st.zombie && tagged(v.pid, p.tag) {
-			_ = syscall.Kill(v.pid, syscall.SIGKILL)
+			_ = outerSignal(v.pid)
 		}
 	}
 	deadline := time.Now().Add(10 * time.Second)
@@ -179,7 +184,7 @@ func (p *innerProc) insure(known []survivor) string {
 		for _, v := range alive {
 			pids = append(pids, v.pid)
 			if st, pr := procInfo(v.pid); pr == present && st.start == v.start && !st.zombie {
-				_ = syscall.Kill(v.pid, syscall.SIGKILL)
+				_ = outerSignal(v.pid)
 			}
 		}
 		sort.Ints(pids)
@@ -202,6 +207,22 @@ func (p *innerProc) insure(known []survivor) string {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
+}
+
+// recordSignals makes outerSignal record, and not send, every signal to
+// pid (a combination's own fixture); other processes are signalled as
+// before. It returns the restore and the count.
+func recordSignals(pid int) (func(), func() int) {
+	prev := outerSignal
+	n := 0
+	outerSignal = func(p int) error {
+		if p == pid {
+			n++
+			return nil
+		}
+		return prev(p)
+	}
+	return func() { outerSignal = prev }, func() int { return n }
 }
 
 // recordAlive reports whether the process a record names still runs: the

@@ -256,6 +256,10 @@ func (p *innerProc) insure(_ []survivor) string {
 	}
 }
 
+// recordSignals: on Windows the outer check signals no process by its PID
+// (it terminates its Job), so there is nothing to record.
+func recordSignals(int) (func(), func() int) { return func() {}, func() int { return 0 } }
+
 // openRecorded opens the process a record names and checks that it is the
 // one recorded (same creation time). The identity has the platform's form
 // (parseWitness), so a different creation time is reliably another process.

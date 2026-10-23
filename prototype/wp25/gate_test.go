@@ -78,7 +78,10 @@ type gateResult struct {
 	Total     int      `json:"job_total"` // Windows: processes the Job saw created (inner included); -1 elsewhere
 	Raised    bool     `json:"raised"`
 	Insurance string   `json:"insurance"` // the experiment's own last cleanup, after the judgment
-	Problems  []string `json:"problems,omitempty"`
+	// Acted: the identities handed to the entries that act on a process by
+	// its PID (the remediation and the insurance cleanup).
+	Acted    []string `json:"acted,omitempty"`
+	Problems []string `json:"problems,omitempty"`
 	// The judgment's dimensions, kept apart (Review 078 B1-R2-W-R): the
 	// expected rejection, other problems of the evidence, the outer
 	// check's own failures, the remediation and the final state of this
@@ -320,6 +323,13 @@ func runInner(test, inject string, env []string) innerRun {
 	return r
 }
 
+// outerFault is an outer-side fault of the tested path, for
+// TestGateCombos; the zero value in TestGate.
+type outerFault struct {
+	name  string   // remedy-error, remedy-unconfirmed, census-error, record-unknown, forge-owner
+	forge survivor // forge-owner: the process a forged creation record names
+}
+
 // The tested path's own steps, where a combination check (TestGateCombos)
 // can inject an outer-side fault: the census, one read of a recorded
 // process, the remediation. In TestGate the fault is "" and they are the
@@ -403,7 +413,7 @@ func emptyFile(t *testing.T, dir, pattern string) string {
 
 // checkGate runs one gate regression and records it.
 func checkGate(t *testing.T, c gateCase) {
-	g := runGate(t, c, "")
+	g := runGate(t, c, outerFault{})
 	b, _ := json.Marshal(g)
 	fmt.Println("WP25GATE " + string(b))
 	gateMu.Lock()
@@ -419,11 +429,11 @@ func checkGate(t *testing.T, c gateCase) {
 // inner run's verdict; the state it left, read before anything is ended
 // (the census, then each recorded process by its identity); only then the
 // remediation of this round's own survivors, which never makes the check
-// pass; then the witness itself and the inner run's registrations. fault
-// is an outer-side fault of the tested path (TestGateCombos), "" in
-// TestGate. After the judgment, the experiment's own insurance cleanup
-// ends what the tested path left, and is recorded apart.
-func runGate(t *testing.T, c gateCase, fault string) gateResult {
+// pass; then the witness itself and the inner run's registrations. f is an
+// outer-side fault of the tested path (TestGateCombos), none in TestGate.
+// After the judgment, the experiment's own insurance cleanup ends what the
+// tested path left, and is recorded apart.
+func runGate(t *testing.T, c gateCase, f outerFault) gateResult {
 	begin := time.Now()
 	dir := t.TempDir()
 	wf := emptyFile(t, dir, "witness-*")
@@ -454,7 +464,12 @@ func runGate(t *testing.T, c gateCase, fault string) gateResult {
 		return finishGate(c, g, verdictOK, begin)
 	}
 	defer r.proc.close()
-	r.proc.fault = fault
+	r.proc.fault = f.name
+	if f.name == "forge-owner" {
+		// A well-formed creation record, written as the inner run's, that
+		// names a process outside the inner run (Review 079 B2).
+		appendFile(wf, fmt.Sprintf("created %d %s %d sleep\n", f.forge.pid, f.forge.start, r.proc.pid))
+	}
 
 	// The state the inner run left: first the census, independent of the
 	// records; then every recorded process by its identity.
@@ -532,6 +547,10 @@ func runGate(t *testing.T, c gateCase, fault string) gateResult {
 			known = append(known, survivor{w.pid, w.start})
 		}
 	}
+	for _, v := range known {
+		g.Acted = append(g.Acted, v.key())
+	}
+	sort.Strings(g.Acted)
 	g.Remedy = "not-needed"
 	var remedyErr error
 	if len(g.Left) > 0 {
