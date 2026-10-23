@@ -49,7 +49,8 @@ func newGate2() *procGate {
 }
 
 // run starts cmd under a shared lease and holds it until cmd is reaped.
-func (g *procGate) run(cmd *exec.Cmd) error {
+// The scenario owns the process, so its end is accounted like any other.
+func (g *procGate) run(s *scen, cmd *exec.Cmd) error {
 	g.mu.Lock()
 	for g.excl || g.waiting > 0 {
 		g.cond.Wait()
@@ -57,7 +58,19 @@ func (g *procGate) run(cmd *exec.Cmd) error {
 	g.active++
 	g.mu.Unlock()
 	from := time.Now()
-	err := cmd.Run()
+	err := cmd.Start()
+	if err == nil {
+		c := childOf(cmd)
+		s.own(c)
+		if !c.reap(time.Minute) {
+			c.stop()
+		}
+		if c.reaped() {
+			err = c.err
+		} else {
+			err = errors.New("not reaped")
+		}
+	}
 	to := time.Now()
 	g.mu.Lock()
 	g.active--
@@ -149,7 +162,11 @@ func childCount() string {
 
 func subreaper() int {
 	var v int32
-	_ = unix.Prctl(unix.PR_GET_CHILD_SUBREAPER, uintptr(unsafe.Pointer(&v)), 0, 0, 0)
+	err := unix.Prctl(unix.PR_GET_CHILD_SUBREAPER, uintptr(unsafe.Pointer(&v)), 0, 0, 0)
+	if injectOnce("prctl-get-fail", "subreaper", os.Getpid()) {
+		err = unix.EFAULT // the real call was made; its answer is replaced
+	}
+	_ = err
 	return int(v)
 }
 
@@ -220,6 +237,9 @@ func sweep(main int, o sweepOpts) sweepResult {
 				return r
 			}
 			st2, pr2 := procInfo(pid)
+			if injectOnce("sweep-recheck-once", "sweep.recheck", pid) {
+				pr2 = unknown // this one read after the bind fails; the next ones do not
+			}
 			start := st2.start
 			if o.perturb != nil {
 				start = o.perturb(start)
@@ -232,7 +252,13 @@ func sweep(main int, o sweepOpts) sweepResult {
 			_ = unix.PidfdSendSignal(fd, unix.SIGKILL, nil, 0)
 			if n, _ := unix.Poll([]unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}, pollMillis(deadline)); n == 1 {
 				var info unix.Siginfo
-				if unix.Waitid(unix.P_PIDFD, fd, &info, unix.WEXITED|unix.WNOHANG, nil) == nil {
+				var werr error
+				if injectOnce("sweep-wait-once", "sweep.waitid", pid) {
+					werr = errors.New("injected: waitid failed") // this once the call is not made
+				} else {
+					werr = unix.Waitid(unix.P_PIDFD, fd, &info, unix.WEXITED|unix.WNOHANG, nil)
+				}
+				if werr == nil {
 					r.reaped++
 					progress = true
 				}
@@ -370,7 +396,7 @@ func TestExclusiveGate(t *testing.T) {
 				if i == 0 && git != "" {
 					cmd = exec.Command(git, "--version")
 				}
-				if g.run(cmd) == nil {
+				if g.run(s, cmd) == nil {
 					mu.Lock()
 					sharedRuns++
 					if i == 0 && git != "" {
@@ -428,7 +454,7 @@ func TestExclusiveConcurrentChecks(t *testing.T) {
 				return
 			default:
 			}
-			if g.run(helper("exit-after", nil, "5", "0")) == nil {
+			if g.run(s, helper("exit-after", nil, "5", "0")) == nil {
 				s.launched(1)
 			}
 		}

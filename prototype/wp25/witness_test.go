@@ -15,6 +15,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -38,15 +39,100 @@ func witness(kind, detail string) {
 	if err != nil {
 		return
 	}
-	_, _ = fmt.Fprintf(f, "%s %d %s %s\n", kind, os.Getpid(), selfStart(), detail)
+	line := fmt.Sprintf("%s %d %s %s\n", kind, os.Getpid(), selfStart(), detail)
+	// Faults of the witness itself (Review 077 B1-R2-W), in helpers only.
+	switch {
+	case inHelper() && injected("witness-write-fail"):
+		injectHit("witness", os.Getpid())
+		_ = f.Close() // the write below then really fails
+	case inHelper() && injected("witness-short-write"):
+		injectHit("witness", os.Getpid())
+		line = line[:len(line)/2] // only part of the record is written
+	}
+	_, _ = f.WriteString(line)
 	_ = f.Close()
 }
 
-// injectHit records, from the inner test process, that an injected fault
-// reached its site.
+func inHelper() bool { return os.Getenv(helperEnv) != "" }
+
+// injectLogEnv names the file where helpers record that an injected fault
+// reached its site; the inner test process prints a WP25INJECT line
+// instead. Neither is the witness file, so a fault of the witness itself
+// is still seen to have acted.
+const injectLogEnv = "WP25_INJECT_LOG"
+
+// injectHit records that an injected fault reached its site.
 func injectHit(site string, pid int) {
 	b, _ := json.Marshal(map[string]any{"fault": os.Getenv(injectEnv), "site": site, "pid": pid})
-	fmt.Println("WP25INJECT " + string(b))
+	if !inHelper() {
+		fmt.Println("WP25INJECT " + string(b))
+		return
+	}
+	if path := os.Getenv(injectLogEnv); path != "" {
+		if f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0o600); err == nil {
+			_, _ = f.Write(append(b, '\n'))
+			_ = f.Close()
+		}
+	}
+}
+
+var (
+	onceMu   sync.Mutex
+	onceDone = map[string]bool{}
+)
+
+// injectOnce reports whether the named fault is injected and has not acted
+// yet in this process; the call that says so records the hit.
+func injectOnce(name, site string, pid int) bool {
+	if !injected(name) {
+		return false
+	}
+	onceMu.Lock()
+	defer onceMu.Unlock()
+	if onceDone[name] {
+		return false
+	}
+	onceDone[name] = true
+	injectHit(site, pid)
+	return true
+}
+
+// tamperWitness damages the witness file at the end of an inner run, as a
+// failure of the file itself would (Review 077 B1-R2-W): the end of the
+// last record lost, a record twice, a record of an unknown kind, the file
+// gone.
+func tamperWitness() {
+	path := os.Getenv(witnessEnv)
+	if path == "" {
+		return
+	}
+	b, err := os.ReadFile(path)
+	if err != nil || len(b) == 0 {
+		return
+	}
+	lines := strings.SplitAfter(strings.TrimSuffix(string(b), "\n"), "\n")
+	last := strings.TrimSuffix(lines[len(lines)-1], "\n") + "\n"
+	switch {
+	case injected("witness-truncated"):
+		injectHit("witness-file", os.Getpid())
+		_ = os.Truncate(path, int64(len(b)-1))
+	case injected("witness-duplicate"):
+		injectHit("witness-file", os.Getpid())
+		appendFile(path, last)
+	case injected("witness-unknown-kind"):
+		injectHit("witness-file", os.Getpid())
+		appendFile(path, "bogus"+last[strings.IndexByte(last, ' '):])
+	case injected("witness-deleted"):
+		injectHit("witness-file", os.Getpid())
+		_ = os.Remove(path)
+	}
+}
+
+func appendFile(path, s string) {
+	if f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0o600); err == nil {
+		_, _ = f.WriteString(s)
+		_ = f.Close()
+	}
 }
 
 func readWitness(path string) ([]witnessLine, error) {

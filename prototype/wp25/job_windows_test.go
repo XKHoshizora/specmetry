@@ -37,7 +37,12 @@ func failStart(t *testing.T, id string, seams jobSeams, wantStep string) {
 	s.expectTrue("error reported", err != nil, fmt.Sprint(err))
 	inJob := false
 	if tr.proc != 0 {
-		inJob, _ = isProcessInJob(tr.proc, tr.job)
+		var ierr error
+		inJob, ierr = isProcessInJob(tr.proc, tr.job)
+		if injectOnce("injob-fail-once", "failStart.isProcessInJob", tr.pid) {
+			inJob, ierr = false, errors.New("injected: IsProcessInJob failed") // the real call was made
+		}
+		_ = ierr
 	}
 	var how string
 	var ended bool

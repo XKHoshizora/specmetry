@@ -58,6 +58,9 @@ func TestMain(m *testing.M) {
 	b, _ := json.Marshal(meta)
 	fmt.Println("WP25META " + string(b))
 	code := m.Run()
+	if os.Getenv(innerEnv) != "" {
+		tamperWitness() // a gate regression's fault of the witness file, if any
+	}
 	os.Exit(summarize(code))
 }
 

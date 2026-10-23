@@ -57,6 +57,9 @@ func allPIDs() ([]int, error) {
 	if injected("readdir-fail") {
 		return nil, errors.New("injected: reading /proc failed")
 	}
+	if injectOnce("readdir-fail-once", "allPIDs", os.Getpid()) {
+		return nil, errors.New("injected: reading /proc failed once")
+	}
 	ents, err := os.ReadDir("/proc")
 	if err != nil {
 		return nil, err

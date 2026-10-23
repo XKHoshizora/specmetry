@@ -7,6 +7,10 @@ import "syscall"
 // selfStart is this process's start time as procInfo reads it.
 func selfStart() string {
 	st, pr := procInfo(syscall.Getpid())
+	if inHelper() && injected("witness-identity-unknown") {
+		injectHit("selfStart", syscall.Getpid())
+		pr = unknown // the read of its own state failed
+	}
 	if pr != present {
 		return "unknown"
 	}

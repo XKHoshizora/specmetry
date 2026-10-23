@@ -24,6 +24,10 @@ func selfStart() string {
 		return "unknown"
 	}
 	s, err := creationTime(h)
+	if inHelper() && injected("witness-identity-unknown") {
+		injectHit("selfStart", int(windows.GetCurrentProcessId()))
+		err = errors.New("injected: the creation time could not be read")
+	}
 	if err != nil {
 		return "unknown"
 	}

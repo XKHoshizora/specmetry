@@ -32,6 +32,16 @@ func runHelper(mode string, args []string) int {
 		_ = report("limit")
 		os.Exit(limitExit)
 	})
+	// Faults of the gate regressions (Review 077 B1-R2-W): a helper that
+	// ends before it leaves its own record, or one that lives on without it.
+	if (injected("helper-exit-at-start") && mode == "silent-parent") || (injected("unrecorded-ended") && mode == "linger") {
+		injectHit("runHelper", os.Getpid())
+		return 0
+	}
+	if injected("leak-unreceipted") && mode == "linger" {
+		injectHit("runHelper", os.Getpid())
+		select {}
+	}
 	witness("launched", mode)
 	arg := func(i int) int {
 		if i >= len(args) {
@@ -56,6 +66,10 @@ func runHelper(mode string, args []string) int {
 		if report("pid") != nil {
 			return exitReport
 		}
+		select {}
+	case "linger":
+		// A process a gate regression's inner run leaves behind on purpose
+		// (TestInnerLeak), ended by its own short limit at the latest.
 		select {}
 	case "marker":
 		// The user code of the Windows failure chain: it leaves a marker,
