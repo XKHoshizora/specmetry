@@ -5434,3 +5434,87 @@ owner 预检、原消费者崩溃反例、空覆盖及 Windows 子机制按报�
 - PR #33：技术审查通过，待合并核验。B2 经 Review 080 关闭，B1-R1-S、B1-R2-W-R 保持关闭；N4、N6 没有修复。
 - 规范没有冻结，WP2.5 没有实现或验收，M2 没有整体验收。
 - Auto-fix / Auto-merge 保持关闭。
+
+## 96．PR #33 的合并核验；原型 N4、N6 的修复（独立小 PR）
+
+### 96.1 PR #33 的合并与核验（§95 的条件授权）
+
+**收尾**：
+
+- `3f2377843da1ace5aef4802ba37010a42826c167`：Review 080 原样归档，SHA-256 `8fff4fb5cf31f1f986c5a93152ec57e8ba31e8c351506d04dc00363aef86ded8`（源文件、暂存与提交 blob 相同）。
+- `38d15ef950fc1b7ba79ea08dfb47ab042a14cafa`：§95 与状态记录。
+- 相对审查对象 `0621316` 共 5 个文件，都是文档。`prototype/wp25` 的子树仍为 `e70f83a0be9492805fbee8e692382ae7ee1c5cb7`，与已诊断的 `8a2b97c` 相同；`git diff 8a2b97c 38d15ef -- prototype .github` 为空，没有重新触发诊断。
+
+**收尾 HEAD 的常规 CI**：run 39986318364，pull_request，attempt 1，completed/success，8/8，没有重跑。
+
+- 8 个 Job 都检出合并快照 `2ecee7478cb7d2fcb031d4dbba9ae44d870152b9`；它的父提交为 `ecb83ba` 与 `38d15ef`，树 `daa0e2b02b1345d092766d04b4721953814b1e70` 与收尾 HEAD 相同。
+- 三个 Go 测试 Job 的 PASS / SKIP 行与 run 39979587006 相同；没有 `FAIL`，没有原型包。
+
+**合并**：
+
+- 合并之前再核对：PR HEAD `38d15ef`，base 与 master 都是 `ecb83ba`（没有移动），CLEAN，8/8；Auto-fix / Auto-merge 关闭。
+- 以 merge commit 合并，`--match-head-commit 38d15ef950fc1b7ba79ea08dfb47ab042a14cafa`，时间 2026-10-23T16:40:24Z（UTC）。
+- 合并提交 `5e9a42c5bbe9b6f7bbb36174a5b53c76c701719a`：
+  - 父提交 `ecb83ba`（master）与 `38d15ef`（收尾 HEAD）；master 包含收尾 HEAD；
+  - 树 `daa0e2b` 与收尾 HEAD 相同，`git diff 38d15ef 5e9a42c` 为空；
+  - 相对 `ecb83ba` 共 43 个文件，+11139/−4，即 PR 的内容。
+
+**master push CI**：run 39988732786，push，attempt 1，completed/success，8/8，没有重跑。
+
+- 8 个 Job 都检出 `5e9a42c` 本身。
+- 三个 Go 测试 Job 的 PASS / SKIP 行与 run 39986318364 相同。
+- 原型 workflow 没有在 master 上运行（它的 push 只针对原型的分支）。
+
+**其余**：
+
+- 本轮没有失败、取消或跳过的 Job，没有用到受控重跑；M-15 不因此关闭或确认根因。
+- 结果写入了 PR #33 的描述；没有为此向 master 追加提交。本节随 N4、N6 的 PR 记入。
+- PR #33 的合并**不是**规范冻结、生产授权或 WP2.5 / M2 的验收。
+
+### 96.2 原型 N4、N6 的修复（§95 授权的独立小 PR）
+
+**分支** `test/wp2.5-prototype-n4-n6`，从已核验的 master `5e9a42c` 开出；细节见原型文档 §2.12。
+
+| 提交 | 内容 |
+|---|---|
+| `e7dbcdcf5690e6cbbca50515f37cefe1c49c2845` | 诊断 workflow：push 的分支列表加入本分支一项精确匹配（单独列出；其余不变，`ci.yml` 不变） |
+| `91229b5beb7b6b06fe3a2d97b3e99f25d1a9e882` | **回归先行**，判定没有改：三项 F1 门禁回归、`phaseClock` 接缝（默认仍是 Go 的时钟）、`TestPhaseClock` |
+| `3fe5701f0c602ffdcf42200ce93b793341603da3` | N4 的修复 |
+| `5054e54a14d3e9084aa675880175232e61361c17` | N6 的修复 |
+| `ac3b3bed4489404124d51181c1e8ed902d55c82e` | 直接检查 `TestPhaseClock` 改用内存管道（**修复代码固定于此**） |
+| 之后 | 只有文档 |
+
+**N4**：持有者的 `epipe` 记录写不出时，F1 场景曾把“没有记录”记为 refuted。
+
+- 修复之后，没有记录时先读持有者的状态：仍在运行为 refuted（写入没有失败），已结束为 invalid（观察工具没能报告）。
+- 持有者自己在记录写不出时以 `exitReport` 退出。
+- 回归：`report.epipe-unwritable`（要求 invalid）、`control.f1-read-kept`（另持读端，工具正常而预测不成立，要求 refuted）、`control.f1-skip-drain`（要求 confirmed）。
+
+**N6**：阶段 D 的截止在 Go 的时钟上，时长却在 stopwatch（Windows 上为性能计数器）上计量，两者在 Windows 上可以相差一个中断周期。
+
+- 修复之后，阶段 D 与阶段 J 都在同一个 `phaseClock` 上限定与计量；等待只在这个时钟读到截止之后才以截止结束；stopwatch 的读数另记，不作判定。
+- 没有改动 `T_kill`、`T_drain`、`T_join` 或任何超时，没有容差；不宣称硬实时保证。
+- 确定性的边界回归 `TestPhaseClock`：恰好到截止、差 1 ns、早到 450 µs 的唤醒。实际管道的对照 `T1.pipe.escaped-holder` 保留严格比较。
+
+**证据**：
+
+- **回归先行**：三平台诊断 run 39991866363（push，attempt 1，completed/failure，预期；检出 `91229b5`）：`report.epipe-unwritable` 三平台都得到 refuted；`TestPhaseClock` 三行三平台都失败；场景 38、27、29 confirmed；组合 13/13。作者本机 Windows 与 WSL 相同。
+- **`5054e54` 的诊断** run 39992975299（completed/success）保留为历史观测：其后作者本机发现 `TestPhaseClock` 在 Windows 上的超时（60 次重复中 180 个子检查失败 12 个），原因是检查自己用了操作系统的管道（Windows 上关闭读端只取消已发出的读取）。`ac3b3be` 改用内存管道，200 次重复中 600 个子检查 0 失败。
+- **修复后**：三平台诊断 run 39994591073（push，attempt 1，completed/success，没有重跑；检出 `ac3b3be`）：
+  - 场景 38/38、27/27、29/29 confirmed（Ubuntu 带 `-race`，没有数据竞争的报告），并集 53；
+  - 门禁回归 39/39、30/30、35/35；组合 13/13；
+  - B2 的两项 `forge-owner` 组合中夹具零动作、零信号；
+  - 直接检查都通过；SKIP 只有两个只供内层运行的测试。
+- **作者本机**（`ac3b3be`）：Windows 29/29、门禁回归 35/35、组合 13/13；WSL 37 + 1 unsupported、39/39、13/13。
+- **隔离变异** M35 ~ M38：每个都只被对应的检查检出（原型文档 §2.12 的表）。
+- **常规 CI**：PR 打开之后对最终 HEAD 运行，结果记录在 PR 描述中；常规 CI 不运行原型。
+
+**新的观察**（登记，待审查，不由本轮决定）：Windows 上关闭读端只取消已经发出的读取；“停止读取会使复制器返回”依赖读取先到达系统。是否需要另外的保证，属于冻结之前要明确的技术前提（原型文档 §2.12、§13）。
+
+**不改动**：生产代码、根模块的依赖、Schema、迁移、`ci.yml`；规范草案 `docs/wp2.5-check-runner.md`（包括它头部的状态记录，仍写到审查 079）；§84 ~ §95 与历史审查原文。
+
+**状态**：
+
+- PR #33：已合并为 `5e9a42c`，合并核验与 master push CI 正式成功。
+- N4、N6：**已修复，待独立审查**；不宣布关闭。修复的 PR 保持未合并。
+- 14 项产品选择未批准；规范草案第 4 版未冻结；生产 WP2.5 未授权；WP2.5 与 M2 未验收；M-14、M-15、M-16 未解决；Auto-fix / Auto-merge 关闭。
