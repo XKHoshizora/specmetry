@@ -117,9 +117,12 @@ func (o exitObserver) wait(d time.Duration) (bool, string, error) {
 		return true, s.status, nil
 	}
 	if s.early {
+		// It exited before the registration: its status is read without
+		// reaping it. A read that fails is an observation failure, not a
+		// status (Review 077 B1-R1-S).
 		st, err := waitidNoWait(s.pid)
 		if err != nil {
-			st = "unknown (exited before the registration)"
+			return true, "", err
 		}
 		s.exited, s.status = true, st
 		return true, st, nil
@@ -177,5 +180,5 @@ func sigchldDisposition() string { return "n/a" }
 
 // ownChildren and newChildren: macOS has no simple list of a process's
 // children here; the leftover check is Linux's (see tree_linux_test.go).
-func ownChildren() []int       { return nil }
-func newChildren([]int) string { return "" }
+func ownChildren() ([]int, error) { return nil, nil }
+func newChildren([]int) string    { return "" }

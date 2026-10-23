@@ -58,7 +58,7 @@ func (g *procGate) run(s *scen, cmd *exec.Cmd) error {
 	g.active++
 	g.mu.Unlock()
 	from := time.Now()
-	err := cmd.Start()
+	err := start(cmd)
 	if err == nil {
 		c := childOf(cmd)
 		s.own(c)
@@ -151,22 +151,30 @@ func describe(pids []int) string {
 	return strings.Join(out, ", ")
 }
 
-// childCount gives the number of this process's children, or the error.
-func childCount() string {
+// childCount gives the number of this process's children. A list that
+// cannot be read is an observation failure of the run, not a count that
+// differs (Review 077 B1-R1-S).
+func childCount(s *scen) string {
 	kids, err := childrenOf(os.Getpid())
 	if err != nil {
-		return "unreadable: " + err.Error()
+		s.flag("observation failed: the children of this process cannot be read: %v", err)
+		return "unreadable"
 	}
 	return fmt.Sprint(len(kids))
 }
 
-func subreaper() int {
+// subreaper reads whether this process is a subreaper. A read that fails
+// is an observation failure of the run, never a 0 (Review 077 B1-R1-S).
+func subreaper(s *scen) int {
 	var v int32
 	err := unix.Prctl(unix.PR_GET_CHILD_SUBREAPER, uintptr(unsafe.Pointer(&v)), 0, 0, 0)
 	if injectOnce("prctl-get-fail", "subreaper", os.Getpid()) {
 		err = unix.EFAULT // the real call was made; its answer is replaced
 	}
-	_ = err
+	if err != nil {
+		s.flag("observation failed: the subreaper setting cannot be read: %v", err)
+		return -1
+	}
 	return int(v)
 }
 
@@ -183,8 +191,29 @@ type sweepResult struct {
 	rounds, reaped, mismatched int
 	seen                       []int
 	converged                  bool
-	err                        error // the mechanism stopped (no pidfd)
-	obsErr                     error // a list or a state could not be read
+	err                        error // the mechanism stopped (no pidfd, a signal that failed)
+	obsErr                     error // the first list, state, wait or reap that could not be read; kept
+}
+
+// failed keeps the first observation of the sweep that failed: a later
+// round that succeeds does not undo it (Review 077 B1-R1-S).
+func (r *sweepResult) failed(err error) {
+	if err != nil && r.obsErr == nil {
+		r.obsErr = err
+	}
+}
+
+// pollIn waits until the pidfd is readable or the deadline passes. An
+// interrupted poll is repeated within the deadline: EINTR is the one
+// retry the protocol allows, and only until the deadline.
+func pollIn(fd int, deadline time.Time) (int, error) {
+	for {
+		n, err := unix.Poll([]unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}, pollMillis(deadline))
+		if errors.Is(err, unix.EINTR) {
+			continue
+		}
+		return n, err
+	}
 }
 
 // sweep ends the adopted descendants: every child of this process except
@@ -203,7 +232,8 @@ func sweep(main int, o sweepOpts) sweepResult {
 	for {
 		kids, err := childrenOf(self)
 		if err != nil {
-			r.err, r.obsErr = err, err
+			r.err = err
+			r.failed(err)
 			return r
 		}
 		var cand []int
@@ -225,7 +255,8 @@ func sweep(main int, o sweepOpts) sweepResult {
 			r.seen = append(r.seen, pid)
 			st, pr := procInfo(pid)
 			if pr == unknown {
-				r.err, r.obsErr = errUnknownState, errUnknownState
+				r.err = errUnknownState
+				r.failed(errUnknownState)
 				return r
 			}
 			if pr != present || st.ppid != self || o.dryRun {
@@ -240,17 +271,33 @@ func sweep(main int, o sweepOpts) sweepResult {
 			if injectOnce("sweep-recheck-once", "sweep.recheck", pid) {
 				pr2 = unknown // this one read after the bind fails; the next ones do not
 			}
+			if pr2 == unknown {
+				// Not another process: a read that failed (Review 077
+				// B1-R1-S). Not signalled, and kept for the verdict,
+				// whatever the next rounds find.
+				r.failed(errUnknownState)
+				_ = unix.Close(fd)
+				continue
+			}
 			start := st2.start
 			if o.perturb != nil {
 				start = o.perturb(start)
 			}
-			if pr2 != present || st2.ppid != self || start != st.start {
-				r.mismatched++
+			if pr2 == absent || st2.ppid != self || start != st.start {
+				r.mismatched++ // reliably gone, or another process now
 				_ = unix.Close(fd)
 				continue
 			}
-			_ = unix.PidfdSendSignal(fd, unix.SIGKILL, nil, 0)
-			if n, _ := unix.Poll([]unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}, pollMillis(deadline)); n == 1 {
+			if err := unix.PidfdSendSignal(fd, unix.SIGKILL, nil, 0); err != nil {
+				_ = unix.Close(fd)
+				r.err = err // no fallback to signals by PID
+				return r
+			}
+			n, err := pollIn(fd, deadline)
+			switch {
+			case err != nil:
+				r.failed(err)
+			case n == 1:
 				var info unix.Siginfo
 				var werr error
 				if injectOnce("sweep-wait-once", "sweep.waitid", pid) {
@@ -258,11 +305,17 @@ func sweep(main int, o sweepOpts) sweepResult {
 				} else {
 					werr = unix.Waitid(unix.P_PIDFD, fd, &info, unix.WEXITED|unix.WNOHANG, nil)
 				}
-				if werr == nil {
+				switch {
+				case werr != nil:
+					r.failed(werr) // a later round may reap it; the run stays invalid
+				case siginfoPID(&info) == pid:
 					r.reaped++
 					progress = true
 				}
+				// No process in the answer: nothing to reap yet, the next
+				// round looks again (bounded by the deadline).
 			}
+			// n == 0: not ended before the deadline; the loop ends at it.
 			_ = unix.Close(fd)
 		}
 		if o.dryRun {
@@ -431,8 +484,8 @@ func TestExclusiveGate(t *testing.T) {
 	s.expect("shared leases overlapping an interval", 0, g.overlaps())
 	s.expectTrue("shared children ran meanwhile", sharedRuns > 0, fmt.Sprint(sharedRuns))
 	s.expectTrue("git ran through the gate", git == "" || gitRuns > 0, fmt.Sprintf("%d git runs (%s)", gitRuns, git))
-	s.expect("subreaper after the intervals", 0, subreaper())
-	s.expect("children left", "0", childCount())
+	s.expect("subreaper after the intervals", 0, subreaper(s))
+	s.expect("children left", "0", childCount(s))
 	s.note("%v", notes)
 }
 
@@ -502,7 +555,7 @@ func TestExclusiveConcurrentChecks(t *testing.T) {
 	s.expect("checks refused", 0, refused)
 	s.expect("overlapping check intervals", 0, overlap)
 	s.expect("shared leases overlapping a check", 0, g.overlaps())
-	s.expect("children left", "0", childCount())
+	s.expect("children left", "0", childCount(s))
 }
 
 func TestExclusiveBypass(t *testing.T) {
@@ -565,7 +618,7 @@ func TestOtherReaper(t *testing.T) {
 	s.expectTrue("the rogue wait(-1) reaped the leader", reapedBy > 0, fmt.Sprint(reapedBy))
 	s.expect("leader still held", false, held)
 	s.expect("group signal refused", true, refused)
-	s.expect("children left", "0", childCount())
+	s.expect("children left", "0", childCount(s))
 }
 
 func TestExclusiveBaselineLive(t *testing.T) {
@@ -579,7 +632,7 @@ func TestExclusiveBaselineLive(t *testing.T) {
 	s.worked(1)
 	s.expect("refused", true, errors.Is(err, errBaseline))
 	s.expect("check started", false, called)
-	s.expect("subreaper", 0, subreaper())
+	s.expect("subreaper", 0, subreaper(s))
 }
 
 func TestExclusiveBaselineZombie(t *testing.T) {
@@ -603,7 +656,7 @@ func TestExclusiveBaselineZombie(t *testing.T) {
 	s.worked(1)
 	s.expect("refused", true, errors.Is(err, errBaseline))
 	s.expect("check started", false, called)
-	s.expect("subreaper", 0, subreaper())
+	s.expect("subreaper", 0, subreaper(s))
 }
 
 func TestAdoptionChain(t *testing.T) {
@@ -629,7 +682,7 @@ func TestAdoptionChain(t *testing.T) {
 	s.expect("identity mismatches", 0, cr.sw.mismatched)
 	s.expectTrue("every candidate the check's", subset(cr.sw.seen, cr.reported), "")
 	s.expect("leader reaped after the sweep", true, cr.tr.c.reaped())
-	s.expect("children left", "0", childCount())
+	s.expect("children left", "0", childCount(s))
 }
 
 func TestSweepIdentityMismatch(t *testing.T) {
@@ -719,7 +772,7 @@ func TestF1Resources(t *testing.T) {
 	err := g.exclusive(func() error { called = true; return nil })
 	s.worked(int64(len(kids)))
 	s.expect("converged", false, cr.sw.converged)
-	s.expect("subreaper cleared", 0, subreaper())
+	s.expect("subreaper cleared", 0, subreaper(s))
 	s.expect("leader left unreaped", true, cr.tr.zombieLeader())
 	s.expectTrue("adopted process still a child", subset(cr.reported[:1], kids), fmt.Sprint(kids))
 	s.expect("next check refused", true, errors.Is(err, errBaseline))
@@ -747,6 +800,6 @@ func TestSubreaperCleared(t *testing.T) {
 		s.invalidf("observation failed: the orphan cannot be read")
 	}
 	s.worked(1)
-	s.expect("subreaper", 0, subreaper())
+	s.expect("subreaper", 0, subreaper(s))
 	s.expectTrue("orphan's parent is not this process", st.ppid != os.Getpid(), fmt.Sprintf("ppid %d", st.ppid))
 }

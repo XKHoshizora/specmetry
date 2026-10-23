@@ -84,6 +84,7 @@ func (c *childProc) pidOf() int {
 	}
 	return c.cmd.Process.Pid
 }
+func (c *childProc) identity() string { return idKey(c.pidOf(), identityOf(c.cmd)) }
 
 func (c *childProc) stop() {
 	if !c.reaped() {
@@ -97,9 +98,10 @@ func (c *childProc) stop() {
 type pidProc struct {
 	pid      int
 	h        windows.Handle
-	err      error // why the last check could not confirm an end
-	obsErr   error // the first observation that failed; never cleared
-	injected bool  // the observe-fail-once fault has acted on it
+	start    string // its creation time, read through the handle
+	err      error  // why the last check could not confirm an end
+	obsErr   error  // the first observation that failed; never cleared
+	injected bool   // the observe-fail-once fault has acted on it
 }
 
 // ownReported verifies a reported PID before the scenario may act on it:
@@ -116,7 +118,12 @@ func (t *winTree) ownReported(pid int) owned {
 		_ = windows.CloseHandle(h)
 		t.s.invalidf("ownership not established: process %d is not in the check's Job (%v)", pid, err)
 	}
-	p := &pidProc{pid: pid, h: h}
+	st, err := creationTime(h)
+	if err != nil {
+		_ = windows.CloseHandle(h)
+		t.s.invalidf("ownership not established: the creation time of %d cannot be read: %v", pid, err)
+	}
+	p := &pidProc{pid: pid, h: h, start: st}
 	t.s.own(p)
 	return p
 }
@@ -151,6 +158,7 @@ func (p *pidProc) ended() bool {
 func (p *pidProc) stop() { _ = windows.TerminateProcess(p.h, 1) }
 
 func (p *pidProc) pidOf() int        { return p.pid }
+func (p *pidProc) identity() string  { return idKey(p.pid, p.start) }
 func (p *pidProc) observeErr() error { return p.obsErr }
 
 func (p *pidProc) release() {
@@ -207,7 +215,12 @@ func startJob(s *scen, cmd *exec.Cmd, seams jobSeams) (*winTree, string, error) 
 	}
 	cmd.SysProcAttr.CreationFlags |= windows.CREATE_SUSPENDED
 	t := &winTree{s: s, cmd: cmd, job: job, seams: seams}
-	if err := cmd.Start(); err != nil {
+	if err := start(cmd); err != nil {
+		if errors.Is(err, errWitness) {
+			// The child was created and is already ended by start: a
+			// failure of the outer check's record, not of the start chain.
+			s.invalidf("start: %v", err)
+		}
 		return t, "create", err
 	}
 	s.launched(1)
@@ -403,5 +416,5 @@ func runHelperPlatform(string, []string) (int, bool) { return 0, false }
 
 // ownChildren and newChildren: the leftover-children check is Linux's;
 // on Windows every check's processes are in its Job.
-func ownChildren() []int       { return nil }
-func newChildren([]int) string { return "" }
+func ownChildren() ([]int, error) { return nil, nil }
+func newChildren([]int) string    { return "" }

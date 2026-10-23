@@ -17,6 +17,9 @@ const (
 	exitReport = 91 // a report record could not be written
 	exitWait   = 92 // the children's records did not arrive as required
 	exitWrite  = 93 // the output could not be written
+	// exitWitness: under a gate check, the helper's records could not be
+	// made (witness_test.go); it did nothing else.
+	exitWitness = 94
 )
 
 // runHelper runs this binary as one of the scenarios' helper processes.
@@ -33,16 +36,18 @@ func runHelper(mode string, args []string) int {
 		os.Exit(limitExit)
 	})
 	// Faults of the gate regressions (Review 077 B1-R2-W): a helper that
-	// ends before it leaves its own record, or one that lives on without it.
+	// ends before it leaves its own record.
 	if (injected("helper-exit-at-start") && mode == "silent-parent") || (injected("unrecorded-ended") && mode == "linger") {
 		injectHit("runHelper", os.Getpid())
 		return 0
 	}
-	if injected("leak-unreceipted") && mode == "linger" {
-		injectHit("runHelper", os.Getpid())
-		select {}
+	// Under a gate check, nothing before the helper's own record, which
+	// needs its creation record first (witness_test.go).
+	if witnessOn() {
+		if receipt(mode, !(injected("leak-unreceipted") && mode == "linger")) != nil {
+			return exitWitness
+		}
 	}
-	witness("launched", mode)
 	arg := func(i int) int {
 		if i >= len(args) {
 			return 0
@@ -102,7 +107,7 @@ func runHelper(mode string, args []string) int {
 		// scenario's release, and exits 3.
 		c := helper("holder", nil)
 		c.Stdout, c.Stderr = os.Stdout, os.Stderr
-		if err := c.Start(); err != nil {
+		if err := start(c); err != nil {
 			return exitStart
 		}
 		if _, err := awaitRecords(rep, "pid", 1, 5*time.Second); err != nil {
@@ -117,7 +122,7 @@ func runHelper(mode string, args []string) int {
 		// 0 once its scenario has verified the descendant and released it.
 		c := helper("sleep", nil)
 		c.Stdout, c.Stderr = os.Stdout, os.Stderr
-		if err := c.Start(); err != nil {
+		if err := start(c); err != nil {
 			return exitStart
 		}
 		if injected("parent-fail") {
@@ -139,7 +144,7 @@ func runHelper(mode string, args []string) int {
 		}
 		for i := 0; i < n; i++ {
 			c := helper("sleep", nil)
-			if err := c.Start(); err != nil {
+			if err := start(c); err != nil {
 				return exitStart
 			}
 		}
@@ -257,7 +262,7 @@ func isPattern(b []byte, seed byte) bool {
 // startHelper starts a helper with a null stdin (unless gated) and the
 // given output, and makes the scenario own it.
 func startHelper(s *scen, cmd *exec.Cmd) {
-	if err := cmd.Start(); err != nil {
+	if err := start(cmd); err != nil {
 		s.invalidf("helper did not start: %v", err)
 	}
 	s.launched(1)

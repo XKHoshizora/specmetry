@@ -42,7 +42,11 @@ func failStart(t *testing.T, id string, seams jobSeams, wantStep string) {
 		if injectOnce("injob-fail-once", "failStart.isProcessInJob", tr.pid) {
 			inJob, ierr = false, errors.New("injected: IsProcessInJob failed") // the real call was made
 		}
-		_ = ierr
+		if ierr != nil {
+			// Not "not in the Job": which branch the run takes is not
+			// known (Review 077 B1-R1-S).
+			s.flag("observation failed: whether the process is in the Job: %v", ierr)
+		}
 	}
 	var how string
 	var ended bool
@@ -56,8 +60,7 @@ func failStart(t *testing.T, id string, seams jobSeams, wantStep string) {
 		// Not (known to be) in the Job: terminate the process itself.
 		how = "TerminateProcess"
 		_ = windows.TerminateProcess(tr.proc, 1)
-		ev, _ := windows.WaitForSingleObject(tr.proc, uint32(tKill.Milliseconds()))
-		ended = ev == windows.WAIT_OBJECT_0
+		ended = waitHandle(s, tr.proc, tKill)
 	}
 	time.Sleep(50 * time.Millisecond)
 	_, statErr := os.Stat(marker)
@@ -75,6 +78,17 @@ func failStart(t *testing.T, id string, seams jobSeams, wantStep string) {
 	procErr, jobErr := tr.close()
 	s.expect("process handle closed", "ok", errOK(procErr))
 	s.expect("Job handle closed", "ok", errOK(jobErr))
+}
+
+// waitHandle waits at most d for a process handle to be signalled. A wait
+// that fails is an observation failure of the run, not "not ended".
+func waitHandle(s *scen, h windows.Handle, d time.Duration) bool {
+	ev, err := windows.WaitForSingleObject(h, uint32(d.Milliseconds()))
+	if err != nil {
+		s.flag("observation failed: waiting for a process handle: %v", err)
+		return false
+	}
+	return ev == windows.WAIT_OBJECT_0
 }
 
 func errClass(err error) string {
@@ -171,18 +185,21 @@ func TestJobTerminateFails(t *testing.T) {
 	}
 	kerr := tr.kill()
 	conf := tr.confirm(300 * time.Millisecond)
-	stillActive, _ := tr.active()
+	stillActive, aerr := tr.active()
+	if aerr != nil {
+		s.flag("observation failed: the Job's active processes: %v", aerr)
+	}
 	h := tr.proc
 	tr.proc = 0
 	_ = windows.CloseHandle(tr.job)
 	tr.job = 0
-	ev, _ := windows.WaitForSingleObject(h, uint32(tKill.Milliseconds()))
+	ended := waitHandle(s, h, tKill)
 	_ = windows.CloseHandle(h)
 	s.worked(1)
 	s.expectTrue("terminate request failed", errors.Is(kerr, errInjected), fmt.Sprint(kerr))
 	s.expect("end confirmed by the protocol", false, conf)
 	s.expect("still active", 1, stillActive)
-	s.expect("ended after the Job handle was closed (observed, not claimed)", true, ev == windows.WAIT_OBJECT_0)
+	s.expect("ended after the Job handle was closed (observed, not claimed)", true, ended)
 	s.expect("reaped", true, tr.reap(time.Second))
 }
 
@@ -200,11 +217,11 @@ func TestJobQueryFails(t *testing.T) {
 	}
 	kerr := tr.kill()
 	conf := tr.confirm(300 * time.Millisecond)
-	ev, _ := windows.WaitForSingleObject(tr.proc, uint32(tKill.Milliseconds()))
+	ended := waitHandle(s, tr.proc, tKill)
 	s.worked(1)
 	s.expect("terminate request", "ok", errOK(kerr))
 	s.expect("end confirmed by the protocol", false, conf)
-	s.expect("process ended (observed by its handle)", true, ev == windows.WAIT_OBJECT_0)
+	s.expect("process ended (observed by its handle)", true, ended)
 	s.expect("reaped", true, tr.reap(time.Second))
 }
 

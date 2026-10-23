@@ -176,6 +176,13 @@ func waitidNoWait(pid int) (string, error) {
 	return siginfoStatus(&info), nil
 }
 
+// siginfoPID reads si_pid of a SIGCHLD siginfo: 0 when a WNOHANG wait
+// found nothing to reap.
+func siginfoPID(info *unix.Siginfo) int {
+	raw := (*[128]byte)(unsafe.Pointer(info))[:]
+	return int(int32(binary.LittleEndian.Uint32(raw[16:20])))
+}
+
 // siginfoStatus reads si_code and si_status of a SIGCHLD siginfo (the
 // union starts with si_pid, si_uid, si_status after the 16-byte header).
 func siginfoStatus(info *unix.Siginfo) string {
@@ -213,15 +220,10 @@ func sigchldDisposition() string {
 	return "unknown"
 }
 
-// ownChildren lists this process's children, zombies included; nil if
-// the list cannot be read.
-func ownChildren() []int {
-	kids, err := childrenOf(os.Getpid())
-	if err != nil {
-		return nil
-	}
-	return kids
-}
+// ownChildren lists this process's children, zombies included. A list
+// that cannot be read is an error, never an empty list (Review 077
+// B1-R1-S).
+func ownChildren() ([]int, error) { return childrenOf(os.Getpid()) }
 
 // newChildren describes the children of this process that were not there
 // at the start (base): a scenario must not leave any, alive or a zombie
@@ -240,7 +242,11 @@ func newChildren(base []int) string {
 		if before[k] {
 			continue
 		}
-		st, _ := procInfo(k)
+		st, pr := procInfo(k)
+		if pr != present {
+			out = append(out, fmt.Sprintf("%d state unreadable", k))
+			continue
+		}
 		out = append(out, fmt.Sprintf("%d zombie=%v", k, st.zombie))
 	}
 	return strings.Join(out, ", ")

@@ -5,20 +5,21 @@ package wp25
 // fault injected through WP25_INJECT, and checks the verdict and the exit
 // status the real diagnostic gives. A gate check passes when the real
 // diagnostic rejects the broken run (invalid, non-zero exit), or, for a
-// control, accepts the healthy one. A passing gate check is not a
-// mechanism confirmed: it is reported on its own WP25GATE line and counted
-// apart from the scenarios.
+// control, accepts the healthy one. The outer check also judges its own
+// evidence (witness_test.go): a case that injects a fault of the witness
+// passes only when the outer check rejects that evidence for the named
+// reason. A passing gate check is not a mechanism confirmed: it is
+// reported on its own WP25GATE line and counted apart from the scenarios.
 
 import (
 	"bufio"
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"os/exec"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -62,11 +63,16 @@ type gateResult struct {
 	Work      int64    `json:"work"`
 	Hits      int      `json:"inject_hits"`
 	Reject    string   `json:"reject,omitempty"`
-	NoReceipt int      `json:"no_receipt"` // created, ended before their own record
-	Launched  int      `json:"launched"`   // helpers the witness file saw start
-	Unowned   int      `json:"unowned"`    // of those, not in the inner run's owned list
-	Missing   int      `json:"missing"`    // processes the inner run declared unaccounted
-	Left      []int    `json:"left"`       // still alive after the inner run, stopped by the gate check
+	Created   int      `json:"created"`    // creation records: processes the inner run started
+	Receipts  int      `json:"receipts"`   // helpers' own records
+	NoReceipt int      `json:"no_receipt"` // created, ended without a record of their own
+	Unowned   []string `json:"unowned"`    // created, not registered by the inner run: "pid:state"
+	Shortfall int      `json:"shortfall"`  // expected registrations the inner run declared missing
+	Left      []int    `json:"left"`       // alive when the inner run was over, before any remediation
+	Unrecord  []int    `json:"unrecorded"` // of those, without a creation record
+	Still     []int    `json:"still_alive"`
+	Total     int      `json:"job_total"` // Windows: processes the Job saw created (inner included); -1 elsewhere
+	Raised    bool     `json:"raised"`
 	Problems  []string `json:"problems,omitempty"`
 	Pass      bool     `json:"pass"`
 	Millis    int64    `json:"ms"`
@@ -146,6 +152,9 @@ var gateCases = []gateCase{
 	{id: "witness.duplicate", test: "TestPipeSilentHolderReal", scenario: "T1.pipe.silent-holder", inject: "witness-duplicate", hit: true, reject: "witness-malformed"},
 	{id: "witness.unknown-kind", test: "TestPipeSilentHolderReal", scenario: "T1.pipe.silent-holder", inject: "witness-unknown-kind", hit: true, reject: "witness-malformed"},
 	{id: "witness.deleted", test: "TestPipeSilentHolderReal", scenario: "T1.pipe.silent-holder", inject: "witness-deleted", hit: true, reject: "witness-unreadable"},
+	// The inner test process's own creation record cannot be written: its
+	// seal reports the failure, and the scenario stops as invalid.
+	{id: "witness.root-write-fail", test: "TestPipeSilentHolderReal", scenario: "T1.pipe.silent-holder", inject: "witness-root-write-fail", want: invalid, hit: true, reject: "witness-seal"},
 	// A process the inner run leaves alive without its own record, or
 	// without any record; one that ends before any record (Windows: only
 	// the Job's count of created processes can show it).
@@ -200,7 +209,12 @@ func TestInnerForeignPID(t *testing.T) {
 // TestInnerLeak runs only as an inner run of the witness regressions: it
 // leaves one of its own helpers behind on purpose, as a broken scenario
 // would, and does not own it, so only the outer gate check can find it.
-// The helper has a short limit of its own (8 s).
+// The helper has a short limit of its own (8 s). With leak-unreceipted it
+// is started as every process is (start), and leaves no record of its
+// own; otherwise it is started past start, the way a start point missing
+// from TestStartPoints would: no record at all. With unrecorded-ended it
+// ends at once and is waited for here, so it is gone, unrecorded, before
+// the outer check looks.
 func TestInnerLeak(t *testing.T) {
 	if os.Getenv(innerEnv) == "" {
 		t.Skip("runs only as a gate regression")
@@ -209,11 +223,20 @@ func TestInnerLeak(t *testing.T) {
 	defer s.done()
 	cmd := helper("linger", []string{limitEnv + "=8000"})
 	injectHit("TestInnerLeak", os.Getpid())
-	if err := cmd.Start(); err != nil {
+	var err error
+	if injected("leak-unreceipted") {
+		err = start(cmd)
+	} else {
+		err = cmd.Start() // bypass: allowed in TestStartPoints for this line only
+	}
+	if err != nil {
 		s.invalidf("helper did not start: %v", err)
 	}
 	s.launched(1)
 	s.worked(1)
+	if injected("unrecorded-ended") {
+		s.expect("ended before any record", true, childOf(cmd).reap(10*time.Second))
+	}
 	s.flag("the scenario leaves its helper %d behind on purpose", cmd.Process.Pid)
 	s.expect("left behind", true, true)
 }
@@ -222,24 +245,29 @@ type innerRun struct {
 	exit    int
 	results map[string]result
 	hits    int
+	seals   []string // the JSON of the WP25WITNESS lines
+	proc    *innerProc
 	err     error
 }
 
 // runInner runs one test function in a new process of this binary, with
 // the fault injected, under a hard limit of its own and one of the
-// parent's. The helpers it starts write to the witness file.
-func runInner(test, inject, witnessFile, injectLog string) innerRun {
+// parent's. env carries the witness file, the inject log and the raise.
+func runInner(test, inject string, env []string) innerRun {
 	self, err := os.Executable()
 	if err != nil {
 		return innerRun{err: err}
 	}
 	cmd := exec.Command(self, "-test.run", "^"+test+"$", "-test.count=1", "-test.v", "-test.timeout=150s")
-	cmd.Env = append(os.Environ(), innerEnv+"=1", injectEnv+"="+inject, witnessEnv+"="+witnessFile, injectLogEnv+"="+injectLog)
+	cmd.Env = append(append(os.Environ(), innerEnv+"=1", injectEnv+"="+inject), env...)
+	cmd.WaitDelay = 5 * time.Second
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
-	if err := cmd.Start(); err != nil {
+	p, err := launchInner(cmd, env[0])
+	if err != nil {
 		return innerRun{err: err}
 	}
+	r := innerRun{proc: p, results: map[string]result{}}
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
 	select {
@@ -247,15 +275,18 @@ func runInner(test, inject, witnessFile, injectLog string) innerRun {
 	case <-time.After(180 * time.Second):
 		_ = cmd.Process.Kill()
 		<-done
-		return innerRun{err: fmt.Errorf("inner run did not end within 180 s")}
+		r.err = fmt.Errorf("inner run did not end within 180 s")
 	}
-	r := innerRun{exit: cmd.ProcessState.ExitCode(), results: map[string]result{}}
+	r.exit = cmd.ProcessState.ExitCode()
 	sc := bufio.NewScanner(bytes.NewReader(out.Bytes()))
 	sc.Buffer(make([]byte, 1<<20), 1<<20)
 	for sc.Scan() {
 		line := sc.Text()
 		if strings.Contains(line, "WP25INJECT ") {
 			r.hits++
+		}
+		if i := strings.Index(line, "WP25WITNESS "); i >= 0 {
+			r.seals = append(r.seals, line[i+len("WP25WITNESS "):])
 		}
 		i := strings.Index(line, "WP25RESULT ")
 		if i < 0 {
@@ -293,21 +324,32 @@ func judged(c gateCase, g gateResult) bool {
 	return false
 }
 
+func emptyFile(t *testing.T, dir, pattern string) string {
+	f, err := os.CreateTemp(dir, pattern)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = f.Close()
+	return f.Name()
+}
+
+// checkGate runs one gate regression and judges it in this order: the
+// inner run's verdict; the state it left, read before anything is ended
+// (the census, then each recorded process by its identity); only then the
+// remediation of this round's own survivors, which never makes the check
+// pass; then the witness itself and the inner run's registrations.
 func checkGate(t *testing.T, c gateCase) {
 	begin := time.Now()
 	dir := t.TempDir()
-	wf, err := os.CreateTemp(dir, "witness-*")
+	wf := emptyFile(t, dir, "witness-*")
+	il := emptyFile(t, dir, "inject-*")
+	rw, err := newRaiseWatch()
 	if err != nil {
 		t.Fatal(err)
 	}
-	_ = wf.Close()
-	il, err := os.CreateTemp(dir, "inject-*")
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = il.Close()
-	r := runInner(c.test, c.inject, wf.Name(), il.Name())
-	g := gateResult{ID: c.id, Test: c.test, Inject: c.inject, Want: c.want, Reject: c.reject, InnerExit: r.exit, Hits: r.hits}
+	defer rw.close()
+	r := runInner(c.test, c.inject, []string{witnessEnv + "=" + wf, injectLogEnv + "=" + il, rw.env()})
+	g := gateResult{ID: c.id, Test: c.test, Inject: c.inject, Want: c.want, Reject: c.reject, InnerExit: r.exit, Hits: r.hits, Total: -1}
 	got, ok := r.results[c.scenario]
 	verdictOK := false
 	switch {
@@ -321,57 +363,137 @@ func checkGate(t *testing.T, c gateCase) {
 		// rejected as invalid and make the diagnostic fail.
 		verdictOK = c.want == "" || got.Verdict == c.want && (r.exit == 0) == (c.want == confirmed)
 	}
-	// The helpers' hits, from their own log (not the witness file).
-	if b, err := os.ReadFile(il.Name()); err == nil {
+	if r.proc == nil {
+		g.Problems = append(g.Problems, "inner: the inner run could not be started: "+fmt.Sprint(r.err))
+		finishGate(t, c, g, verdictOK, begin)
+		return
+	}
+	defer r.proc.close()
+
+	// The state the inner run left: first the census, independent of the
+	// records; then every recorded process by its identity.
+	survivors, total, cerr := r.proc.census()
+	g.Total = total
+	if cerr != nil {
+		g.Problems = append(g.Problems, "census: "+cerr.Error())
+	}
+	file, rerr := os.ReadFile(wf)
+	recs, _ := parseWitness(file)
+	if rerr != nil {
+		recs = nil
+	}
+	inCensus := map[string]bool{}
+	for _, v := range survivors {
+		inCensus[v.key()] = true
+	}
+	created := map[string]witnessRec{}
+	receipts := map[string]bool{}
+	for _, w := range recs {
+		switch w.kind {
+		case "created":
+			created[w.key()] = w
+		case "launched":
+			receipts[w.key()] = true
+			g.Receipts++
+		}
+	}
+	g.Created = len(created)
+	state := map[string]string{}
+	left := map[int]bool{}
+	for k, w := range created {
+		a, err := recordAlive(w)
+		switch {
+		case err != nil:
+			state[k] = "unknown"
+			g.Problems = append(g.Problems, fmt.Sprintf("state-unknown: process %s: %v", k, err))
+		case a:
+			state[k] = "alive"
+			left[w.pid] = true
+			if !inCensus[k] {
+				g.Problems = append(g.Problems, fmt.Sprintf("census: process %s alive by its record, not found by the census", k))
+			}
+		default:
+			state[k] = "ended"
+			if !receipts[k] {
+				g.NoReceipt++
+			}
+		}
+	}
+	for _, v := range survivors {
+		left[v.pid] = true
+		if _, ok := created[v.key()]; !ok {
+			g.Unrecord = append(g.Unrecord, v.pid)
+		}
+	}
+	for pid := range left {
+		g.Left = append(g.Left, pid)
+	}
+	sort.Ints(g.Left)
+	if len(g.Left) > 0 {
+		g.Problems = append(g.Problems, fmt.Sprintf("left: %d processes of the inner run alive when it was over: %v", len(g.Left), g.Left))
+	}
+	if len(g.Unrecord) > 0 {
+		g.Problems = append(g.Problems, fmt.Sprintf("unrecorded: %d of them without a creation record: %v", len(g.Unrecord), g.Unrecord))
+	}
+
+	// Remediation, after the state was recorded: this round's own
+	// survivors only (the Job's members; on Unix, still carrying this
+	// check's tag, with the same identity). It never makes the check pass.
+	if len(g.Left) > 0 {
+		todo := append([]survivor(nil), survivors...)
+		for k, w := range created {
+			if state[k] == "alive" && !inCensus[k] {
+				todo = append(todo, survivor{w.pid, w.start})
+			}
+		}
+		still, err := r.proc.remediate(todo)
+		if err != nil {
+			g.Problems = append(g.Problems, "still-alive: the remediation could not confirm its end: "+err.Error())
+		}
+		for _, v := range still {
+			g.Still = append(g.Still, v.pid)
+		}
+		if len(g.Still) > 0 {
+			g.Problems = append(g.Problems, fmt.Sprintf("still-alive: %d processes still alive after the remediation: %v", len(g.Still), g.Still))
+		}
+	}
+
+	// The witness itself; a raise is read last, so a late one counts.
+	g.Raised = rw.raised()
+	_, wprobs := judgeWitness(evidence{file: file, readErr: rerr, seals: r.seals, inner: r.proc.pid, start: r.proc.start, raised: g.Raised, total: total})
+	g.Problems = append(g.Problems, wprobs...)
+
+	// The hits, from the inner test process's output and the helpers' own
+	// log (not the witness file).
+	if b, err := os.ReadFile(il); err == nil {
 		g.Hits += strings.Count(string(b), "\n")
 	}
 	if c.hit && g.Hits == 0 {
 		g.Problems = append(g.Problems, "hit: the fault never reached its site")
 	}
-	// What the witness file saw, independently of the inner run's account.
-	ws, err := readWitness(wf.Name())
-	if err != nil {
-		var pe *fs.PathError
-		if errors.As(err, &pe) {
-			g.Problems = append(g.Problems, "witness-unreadable: "+pe.Op+": "+pe.Err.Error())
-		} else {
-			g.Problems = append(g.Problems, "witness-malformed: "+err.Error())
+
+	// Registration: each created process is registered by the inner run
+	// (by PID and identity), or within the shortfall it declared. This is
+	// a count, not a match of objects: the shortfall also counts expected
+	// processes that were never created.
+	owned := map[string]bool{}
+	for _, k := range got.Owned {
+		owned[k] = true
+	}
+	for k, w := range created {
+		if !owned[k] {
+			g.Unowned = append(g.Unowned, fmt.Sprintf("%d:%s", w.pid, state[k]))
 		}
 	}
-	// Every helper the inner run started must have ended once it is over.
-	alive, err := witnessEnded(ws, 10*time.Second)
-	if err != nil {
-		g.Problems = append(g.Problems, "state-unknown: witness state: "+err.Error())
+	sort.Strings(g.Unowned)
+	g.Shortfall = got.Shortfall
+	if len(g.Unowned) > g.Shortfall {
+		g.Problems = append(g.Problems, fmt.Sprintf("unaccounted: %d created processes not registered by the inner run, %d declared short", len(g.Unowned), g.Shortfall))
 	}
-	for _, w := range alive {
-		g.Left = append(g.Left, w.pid)
-		witnessStop(w) // this round's own helper, by its witnessed identity
-	}
-	if len(g.Left) > 0 {
-		g.Problems = append(g.Problems, fmt.Sprintf("left: %d helpers left alive by the inner run", len(g.Left)))
-		if still, _ := witnessEnded(alive, 10*time.Second); len(still) > 0 {
-			g.Problems = append(g.Problems, fmt.Sprintf("still-alive: %d of them still alive after the gate check stopped them", len(still)))
-		}
-	}
-	// Every helper started must be in the inner run's owned list, or be
-	// declared unaccounted by it: a rejection must not skip objects.
-	owned := map[int]bool{}
-	for _, pid := range got.Owned {
-		owned[pid] = true
-	}
-	for _, w := range ws {
-		if w.kind != "launched" {
-			continue
-		}
-		g.Launched++
-		if !owned[w.pid] {
-			g.Unowned++
-		}
-	}
-	g.Missing = got.Missing
-	if g.Unowned > g.Missing {
-		g.Problems = append(g.Problems, fmt.Sprintf("unaccounted: %d started helpers neither owned nor declared unaccounted", g.Unowned-g.Missing))
-	}
+	finishGate(t, c, g, verdictOK, begin)
+}
+
+func finishGate(t *testing.T, c gateCase, g gateResult, verdictOK bool, begin time.Time) {
 	g.Pass = verdictOK && judged(c, g)
 	g.Millis = time.Since(begin).Milliseconds()
 	b, _ := json.Marshal(g)
@@ -380,7 +502,7 @@ func checkGate(t *testing.T, c gateCase) {
 	gateResults = append(gateResults, g)
 	gateMu.Unlock()
 	if !g.Pass {
-		t.Errorf("%s: want %s (exit %s), got %s (exit %d): %s; %v", c.id, c.want,
-			map[bool]string{true: "0", false: "non-zero"}[c.want == confirmed], g.Got, g.InnerExit, g.Reason, g.Problems)
+		t.Errorf("%s: want %s (exit %s), reject %q, got %s (exit %d): %s; %v", c.id, c.want,
+			map[bool]string{true: "0", false: "non-zero"}[c.want == confirmed], c.reject, g.Got, g.InnerExit, g.Reason, g.Problems)
 	}
 }

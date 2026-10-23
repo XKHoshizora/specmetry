@@ -63,7 +63,7 @@ func runAdapter(t *testing.T, a adapter) {
 		c := a.cmd(p)
 		var out strings.Builder
 		c.Stdout = &out
-		if err := c.Start(); err != nil {
+		if err := start(c); err != nil {
 			return "", err
 		}
 		s.launched(1)
@@ -96,9 +96,10 @@ func runAdapter(t *testing.T, a adapter) {
 // output runs a command for a version string; errors give "".
 func output(name string, args ...string) string {
 	c := exec.Command(name, args...)
-	b, err := c.Output()
-	if err != nil {
+	var out strings.Builder
+	c.Stdout = &out
+	if start(c) != nil || c.Wait() != nil {
 		return ""
 	}
-	return strings.TrimSpace(strings.SplitN(string(b), "\n", 2)[0])
+	return strings.TrimSpace(strings.SplitN(out.String(), "\n", 2)[0])
 }

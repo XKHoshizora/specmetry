@@ -90,6 +90,7 @@ func (c *childProc) pidOf() int {
 	}
 	return c.cmd.Process.Pid
 }
+func (c *childProc) identity() string { return idKey(c.pidOf(), identityOf(c.cmd)) }
 
 // stop kills the child: its PID cannot have been reused, it is not reaped.
 func (c *childProc) stop() {
@@ -135,6 +136,9 @@ func ownDescendant(s *scen, anchor *unixTree, pid int) owned {
 			break
 		}
 		next, pr := procInfo(cur.ppid)
+		if pr == unknown {
+			s.invalidf("ownership not established: the state of %d, a parent of %d, cannot be read", cur.ppid, pid)
+		}
 		if pr != present {
 			break
 		}
@@ -183,19 +187,32 @@ func (p *pidProc) ended() bool {
 		var ws syscall.WaitStatus
 		wpid, err := syscall.Wait4(p.pid, &ws, syscall.WNOHANG, nil)
 		p.err = err
+		p.failed(err) // a reap that fails is not an end, and not a "not yet"
 		return err == nil && wpid == p.pid
 	}
 	return false
 }
 
+// failed keeps the first observation that failed.
+func (p *pidProc) failed(err error) {
+	if err != nil && p.obsErr == nil {
+		p.obsErr = err
+	}
+}
+
 func (p *pidProc) stop() {
-	if st, pr := procInfo(p.pid); pr == present && st.start == p.id && !st.zombie {
+	st, pr := procInfo(p.pid)
+	if pr == unknown {
+		p.failed(errUnknownState) // not signalled: its identity cannot be checked
+	}
+	if pr == present && st.start == p.id && !st.zombie {
 		_ = syscall.Kill(p.pid, syscall.SIGKILL)
 	}
 }
 
 func (p *pidProc) release()          {}
 func (p *pidProc) pidOf() int        { return p.pid }
+func (p *pidProc) identity() string  { return idKey(p.pid, p.id) }
 func (p *pidProc) observeErr() error { return p.obsErr }
 
 type pinfo struct {

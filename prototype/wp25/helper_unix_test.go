@@ -29,7 +29,7 @@ func runHelperPlatform(mode string, args []string) (int, bool) {
 		// One more member in the same group, then exit: the leader is
 		// gone while the group still has a member.
 		c := helper("sleep", nil)
-		if err := c.Start(); err != nil {
+		if err := start(c); err != nil {
 			return exitStart, true
 		}
 		if _, err := awaitRecords(rep, "pid", 1, 5*time.Second); err != nil {
@@ -41,7 +41,7 @@ func runHelperPlatform(mode string, args []string) (int, bool) {
 		// A descendant that leaves the group (setsid), then exit.
 		c := helper("sleep", nil)
 		c.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-		if err := c.Start(); err != nil {
+		if err := start(c); err != nil {
 			return exitStart, true
 		}
 		if _, err := awaitRecords(rep, "pid", 1, 5*time.Second); err != nil {
@@ -60,7 +60,7 @@ func runHelperPlatform(mode string, args []string) (int, bool) {
 		}
 		c := helper("chain", nil, strconv.Itoa(depth))
 		c.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-		if err := c.Start(); err != nil {
+		if err := start(c); err != nil {
 			return exitStart, true
 		}
 		if _, err := awaitRecords(rep, "pid", arg(0), 10*time.Second); err != nil {
@@ -74,7 +74,7 @@ func runHelperPlatform(mode string, args []string) (int, bool) {
 		}
 		if d := arg(0); d > 1 {
 			c := helper("chain", nil, strconv.Itoa(d-1))
-			if err := c.Start(); err != nil {
+			if err := start(c); err != nil {
 				return exitStart, true
 			}
 		}
@@ -87,7 +87,7 @@ func runHelperPlatform(mode string, args []string) (int, bool) {
 		}
 		ign := signal.Ignored(syscall.SIGCHLD)
 		c := helper("exit-after", nil, "100", "0")
-		if err := c.Start(); err != nil {
+		if err := start(c); err != nil {
 			return exitStart, true
 		}
 		time.Sleep(600 * time.Millisecond)

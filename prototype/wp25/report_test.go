@@ -49,10 +49,10 @@ type reportLine struct {
 type reportSpec map[string]int
 
 type reportFile struct {
-	path    string
-	spec    reportSpec
-	owned   map[int]bool // PIDs of its "pid" records the scenario verified and owns
-	missing int          // expected processes it could not account for
+	path      string
+	spec      reportSpec
+	owned     map[int]bool // PIDs of its "pid" records the scenario verified and owns
+	shortfall int          // expected registrations not made: never reported, or not readable
 }
 
 func clip(s string) string {
@@ -186,8 +186,8 @@ func (s *scen) reportFile(path string) *reportFile {
 // as soon as its record arrives (own, the tree's ownership check), so that
 // a rejection on the way, a deadline or a corrupt report, leaves every
 // process seen so far owned and cleaned up (Review 076 B1-R2). What it
-// could not own is counted as unaccounted; the PIDs in a report are never
-// acted on without the ownership check.
+// could not own is counted as short (rf.shortfall); the PIDs in a report
+// are never acted on without the ownership check.
 func (s *scen) awaitOwned(path string, n int, d time.Duration, own func(pid int)) []int {
 	rf := s.reportFile(path)
 	if rf == nil {
@@ -196,7 +196,7 @@ func (s *scen) awaitOwned(path string, n int, d time.Duration, own func(pid int)
 	var got []int
 	deadline := time.Now().Add(d)
 	for {
-		rf.missing = n - len(got) // until owned, an expected process is unaccounted
+		rf.shortfall = n - len(got) // until owned, an expected process is short
 		lines, err := parseReport(path, false)
 		if err == nil {
 			var by map[string][]int
@@ -207,7 +207,7 @@ func (s *scen) awaitOwned(path string, n int, d time.Duration, own func(pid int)
 			if err == nil {
 				for _, pid := range by["pid"] {
 					if !rf.owned[pid] {
-						rf.missing = n - len(got)
+						rf.shortfall = n - len(got)
 						own(pid)
 						rf.owned[pid] = true
 						got = append(got, pid)
@@ -215,7 +215,7 @@ func (s *scen) awaitOwned(path string, n int, d time.Duration, own func(pid int)
 				}
 			}
 		}
-		rf.missing = n - len(got)
+		rf.shortfall = n - len(got)
 		switch {
 		case err != nil:
 			s.invalidf("load not established: report: %v", err)

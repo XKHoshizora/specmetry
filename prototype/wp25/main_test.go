@@ -13,8 +13,9 @@
 // is not available here, and "invalid" when the run cannot count either
 // way: a helper that did not start, crashed, reached its hard limit or was
 // not cleaned up, a report that is missing, corrupt or not what the
-// scenario needs, a load that was not built, or no work done. The gate
-// itself is tested in gate_test.go.
+// scenario needs, a load that was not built, an observation that failed
+// (any one, whatever followed), or no work done. The gate itself is tested
+// in gate_test.go.
 package wp25
 
 import (
@@ -57,9 +58,14 @@ func TestMain(m *testing.M) {
 	}
 	b, _ := json.Marshal(meta)
 	fmt.Println("WP25META " + string(b))
+	inner := os.Getenv(innerEnv) != "" && witnessOn()
+	if inner {
+		witnessRoot()
+	}
 	code := m.Run()
-	if os.Getenv(innerEnv) != "" {
+	if inner {
 		tamperWitness() // a gate regression's fault of the witness file, if any
+		printSeal()
 	}
 	os.Exit(summarize(code))
 }
@@ -102,8 +108,11 @@ type result struct {
 	Cleanup  string  `json:"cleanup"`
 	Reason   string  `json:"reason,omitempty"`
 	Millis   int64   `json:"ms"`
-	Owned    []int   `json:"owned,omitempty"`   // PIDs of the processes the scenario owned
-	Missing  int     `json:"missing,omitempty"` // expected processes it could not account for
+	// The processes the scenario owned, as "pid@identity" (the identity is
+	// known under a gate check), and the expected registrations it could
+	// not make: a count, which includes expected processes never created.
+	Owned     []string `json:"owned,omitempty"`
+	Shortfall int      `json:"shortfall,omitempty"`
 }
 
 var (
@@ -128,6 +137,8 @@ type owned interface {
 	release()
 	// pidOf is its PID, 0 if it never started.
 	pidOf() int
+	// identity is "pid@identity", the identity empty where it is not known.
+	identity() string
 	// observeErr is the first observation of it that failed, if any. It is
 	// kept: a later observation that succeeds does not undo it.
 	observeErr() error
@@ -146,6 +157,7 @@ type scen struct {
 	procs      []owned
 	reports    []*reportFile
 	baseKids   []int // this process's children when the scenario began (Linux)
+	baseErr    error // the list of them could not be read
 	after      []func()
 	goid       uint64     // the test goroutine
 	mu         sync.Mutex // the scenario may be used from several goroutines
@@ -154,15 +166,18 @@ type scen struct {
 // begin starts a scenario; the caller defers done. needLaunch and
 // needWork say whether a run without launches or without work is invalid.
 func begin(t *testing.T, gate, id string, k kind, needLaunch, needWork bool) *scen {
-	return &scen{
+	s := &scen{
 		t:          t,
 		r:          result{ID: id, Gate: gate, Kind: k, Platform: runtime.GOOS + "/" + runtime.GOARCH},
 		begin:      time.Now(),
 		needLaunch: needLaunch,
 		needWork:   needWork,
 		goid:       goid(),
-		baseKids:   ownChildren(),
 	}
+	// A list that cannot be read is not an empty one (Review 077 B1-R1-S):
+	// the leftover check at the end would have nothing to compare with.
+	s.baseKids, s.baseErr = ownChildren()
+	return s
 }
 
 // flag makes the run invalid without stopping it: for what is found
@@ -264,24 +279,29 @@ func (s *scen) done() {
 		if err := checkFinal(*rf); err != nil {
 			s.invalid = append(s.invalid, "report: "+err.Error())
 		}
-		s.r.Missing += rf.missing
+		s.r.Shortfall += rf.shortfall
 	}
-	// Processes a rejection left unaccounted: never reported, or reported
-	// in a report that could not be read, so neither owned nor signalled.
-	if s.r.Missing > 0 {
-		s.invalid = append(s.invalid, fmt.Sprintf("cleanup not verified: %d expected processes were never accounted for", s.r.Missing))
-		s.r.Cleanup = fmt.Sprintf("NOT verified: %d expected processes never accounted for; %s", s.r.Missing, s.r.Cleanup)
+	// Expected registrations a rejection could not make: processes never
+	// reported (some never created), or reported in a report that could
+	// not be read, so neither owned nor signalled by their PID.
+	if s.r.Shortfall > 0 {
+		s.invalid = append(s.invalid, fmt.Sprintf("cleanup not verified: %d expected processes were never registered", s.r.Shortfall))
+		s.r.Cleanup = fmt.Sprintf("NOT verified: %d expected processes never registered; %s", s.r.Shortfall, s.r.Cleanup)
 	}
 	// Children of this process that the scenario left (Linux): not reaped,
-	// or never owned.
-	if left := newChildren(s.baseKids); left != "" {
+	// or never owned. Without the list from the start, nothing can be
+	// compared.
+	if s.baseErr != nil {
+		s.invalid = append(s.invalid, "observation failed: the children of this process at the start could not be read: "+s.baseErr.Error())
+		s.r.Cleanup = "NOT verified: no list of children from the start; " + s.r.Cleanup
+	} else if left := newChildren(s.baseKids); left != "" {
 		s.invalid = append(s.invalid, "cleanup: children of this process left: "+left)
 		s.r.Cleanup = "NOT verified: children left (" + left + "); " + s.r.Cleanup
 	}
 	for _, p := range s.procs {
 		p.release()
-		if pid := p.pidOf(); pid > 0 {
-			s.r.Owned = append(s.r.Owned, pid)
+		if p.pidOf() > 0 {
+			s.r.Owned = append(s.r.Owned, p.identity())
 		}
 	}
 	switch {
