@@ -227,15 +227,13 @@ func (p *innerProc) remediate(ss []survivor) ([]survivor, error) {
 func (p *innerProc) close() { _ = windows.CloseHandle(p.job) }
 
 // insure is the experiment's own last cleanup, after the tested path was
-// judged and apart from it: the Job's members are this round's processes,
-// so whatever is still active in it is terminated, and the Job is then
+// judged and apart from it: the Job's members are this round's processes
+// (known is not needed here), so whatever is still active in it is
+// terminated, even if its list cannot be read, and the Job is then
 // confirmed empty. Its result never makes a check pass.
-func (p *innerProc) insure() string {
+func (p *innerProc) insure(_ []survivor) string {
 	ss, _, err := p.census()
-	if err != nil {
-		return "FAILED: " + err.Error()
-	}
-	if len(ss) == 0 {
+	if err == nil && len(ss) == 0 {
 		return "nothing left"
 	}
 	var pids []int

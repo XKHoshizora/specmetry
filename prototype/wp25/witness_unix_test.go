@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"sort"
 	"strconv"
 	"sync"
 	"syscall"
@@ -144,34 +145,60 @@ func (p *innerProc) remediate(ss []survivor) ([]survivor, error) {
 func (p *innerProc) close() {}
 
 // insure is the experiment's own last cleanup, after the tested path was
-// judged and apart from it: a fresh census, every process of this round
-// still alive ended while its identity and tag hold, then the end
-// confirmed by another census. Its result never makes a check pass.
-func (p *innerProc) insure() string {
-	ss, err := censusTag(p.tag, p.start)
-	if err != nil {
-		return "FAILED: " + err.Error()
-	}
-	if len(ss) == 0 {
-		return "nothing left"
-	}
-	var pids []int
-	for _, v := range ss {
-		pids = append(pids, v.pid)
-		if st, pr := procInfo(v.pid); pr == present && st.start == v.start && !st.zombie && tagged(v.pid, p.tag) {
-			_ = syscall.Kill(v.pid, syscall.SIGKILL)
+// judged and apart from it. It ends first the processes the tested path
+// already identified (known: PID and start time, from its census or its
+// records), each while its start time still holds, so it does not depend
+// on reading their environment again; then whatever a fresh census of this
+// round's tag finds. It reports only what was still alive, and confirms
+// the end by identity and by a last census. Its result never makes a
+// check pass.
+func (p *innerProc) insure(known []survivor) string {
+	alive := map[string]survivor{}
+	for _, v := range known {
+		if st, pr := procInfo(v.pid); pr == present && st.start == v.start && !st.zombie {
+			alive[v.key()] = v
 		}
+	}
+	add := func() error {
+		ss, err := censusTag(p.tag, p.start)
+		for _, v := range ss {
+			alive[v.key()] = v
+		}
+		return err
+	}
+	cerr := add()
+	if len(alive) == 0 {
+		if cerr != nil {
+			return "FAILED: " + cerr.Error()
+		}
+		return "nothing left"
 	}
 	deadline := time.Now().Add(10 * time.Second)
 	for {
-		left, err := censusTag(p.tag, p.start)
+		var pids []int
+		for _, v := range alive {
+			pids = append(pids, v.pid)
+			if st, pr := procInfo(v.pid); pr == present && st.start == v.start && !st.zombie {
+				_ = syscall.Kill(v.pid, syscall.SIGKILL)
+			}
+		}
+		sort.Ints(pids)
+		still, rerr := 0, error(nil)
+		for _, v := range alive {
+			a, err := recordAlive(witnessRec{pid: v.pid, start: v.start})
+			if err != nil {
+				rerr = err
+			} else if a {
+				still++
+			}
+		}
+		n := len(alive)
+		cerr = add()
 		switch {
-		case err != nil:
-			return "FAILED: " + err.Error()
-		case len(left) == 0:
-			return fmt.Sprintf("ended %d: %v", len(pids), pids)
+		case still == 0 && rerr == nil && cerr == nil && len(alive) == n:
+			return fmt.Sprintf("ended %d: %v", n, pids)
 		case time.Now().After(deadline):
-			return fmt.Sprintf("FAILED: %d still alive", len(left))
+			return fmt.Sprintf("FAILED: %d of %v still alive (read: %v; census: %v)", still, pids, rerr, cerr)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}

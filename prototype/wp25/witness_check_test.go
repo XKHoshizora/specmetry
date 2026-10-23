@@ -141,6 +141,49 @@ func hasClass(probs []string, class string) bool {
 	return false
 }
 
+// TestGateJudge: the gate check's verdict from its dimensions, on fixed
+// rows (Review 078 B1-R2-W-R). The real paths are in TestGateCombos; these
+// rows also hold states the real paths do not reach easily (a remediation
+// that was not run, an insurance contradiction).
+func TestGateJudge(t *testing.T) {
+	if os.Getenv(innerEnv) != "" {
+		t.Skip("inner run")
+	}
+	leak := gateCase{id: "leak", reject: "left", also: []string{"unaccounted"}}
+	clean := gateCase{id: "clean"}
+	rows := []struct {
+		name     string
+		c        gateCase
+		problems []string
+		remedy   string
+		final    string
+		want     bool
+	}{
+		{"expected, remedied, ended", leak, []string{"left: 1", "unaccounted: 1"}, "succeeded", "ended", true},
+		{"expected, remediation failed", leak, []string{"left: 1", "still-alive: 1"}, "failed", "alive", false},
+		{"expected, remediation not run", leak, []string{"left: 1"}, "not-run", "alive", false},
+		{"expected, end unknown", leak, []string{"left: 1", "still-alive: unconfirmed"}, "failed", "unknown", false},
+		{"expected, census failed", leak, []string{"left: 1", "census: x"}, "succeeded", "unknown", false},
+		{"expected, injection not seen", leak, []string{"left: 1", "hit: never"}, "succeeded", "ended", false},
+		{"expected, insurance contradicts", leak, []string{"left: 1", "insurance: found 1"}, "succeeded", "ended", false},
+		{"expected, another class", leak, []string{"left: 1", "witness-malformed: x"}, "succeeded", "ended", false},
+		{"expected missing", leak, []string{"unaccounted: 1"}, "not-needed", "ended", false},
+		{"expected, but the final state alone unknown", leak, []string{"left: 1"}, "succeeded", "unknown", false},
+		{"clean", clean, nil, "not-needed", "ended", true},
+		{"clean with a tool error", clean, []string{"state-unknown: x"}, "not-needed", "unknown", false},
+		{"clean with an evidence problem", clean, []string{"left: 1"}, "succeeded", "ended", false},
+	}
+	for _, r := range rows {
+		t.Run(r.name, func(t *testing.T) {
+			g := gateResult{Problems: r.problems, Remedy: r.remedy, Final: r.final}
+			judge(r.c, &g, true)
+			if g.Pass != r.want {
+				t.Errorf("pass %v, want %v (expected %v, unexpected %v, tool %v)", g.Pass, r.want, g.Expected, g.Unexpected, g.ToolErrors)
+			}
+		})
+	}
+}
+
 // TestRecordAlive: a recorded identity that is this process's own says it
 // runs; another identity of the same PID says it ended, which is reliable
 // only because parseWitness admits identities of the platform's form

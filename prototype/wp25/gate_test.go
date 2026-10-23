@@ -79,8 +79,18 @@ type gateResult struct {
 	Raised    bool     `json:"raised"`
 	Insurance string   `json:"insurance"` // the experiment's own last cleanup, after the judgment
 	Problems  []string `json:"problems,omitempty"`
-	Pass      bool     `json:"pass"`
-	Millis    int64    `json:"ms"`
+	// The judgment's dimensions, kept apart (Review 078 B1-R2-W-R): the
+	// expected rejection, other problems of the evidence, the outer
+	// check's own failures, the remediation and the final state of this
+	// round's processes, from the tested path (before the insurance).
+	Expected   bool     `json:"expected_found"`
+	Unexpected []string `json:"unexpected,omitempty"`
+	ToolErrors []string `json:"tool_errors,omitempty"`
+	Remedy     string   `json:"remedy"` // not-needed, succeeded, failed, not-run
+	RemedyErr  string   `json:"remedy_error,omitempty"`
+	Final      string   `json:"final"` // ended, alive, unknown
+	Pass       bool     `json:"pass"`
+	Millis     int64    `json:"ms"`
 }
 
 var (
@@ -342,23 +352,44 @@ func (p *innerProc) testedRemediate(ss []survivor) ([]survivor, error) {
 	return still, err
 }
 
-// judged says whether the outer check came to what the case requires: no
-// problem at all, or a problem of the class the case names (a fault of the
-// witness must be found, not just any rejection); and, where the case
-// says so, a created process seen ending before its own record.
-func judged(c gateCase, g gateResult) bool {
-	if c.noReceipt && g.NoReceipt == 0 {
-		return false
-	}
-	if c.reject == "" {
-		return len(g.Problems) == 0
-	}
+// toolClasses are failures of the outer check itself: the inner run it
+// starts, its census and reads, the injection it needs, the remediation
+// and the end it confirms, the insurance cleanup's contradiction. No
+// expected rejection excuses them (Review 078 B1-R2-W-R).
+var toolClasses = map[string]bool{"inner": true, "census": true, "state-unknown": true, "hit": true, "still-alive": true, "insurance": true}
+
+// judge decides a gate check on dimensions kept apart:
+//
+//   - the expected rejection: a problem of the class the case names (a
+//     fault of the witness must be found, not just any rejection); with
+//     no class named, no problem of the evidence at all;
+//   - other problems of the evidence, of a class the case does not allow;
+//   - the outer check's own failures (toolClasses);
+//   - the remediation (not needed or succeeded; failed or not run) and
+//     the final state of this round's processes (ended; alive or unknown).
+//
+// The check passes only when all of them hold, with the inner verdict and,
+// where the case says so, a created process seen ending before its own
+// record. Finding the expected rejection settles the first one only.
+func judge(c gateCase, g *gateResult, verdictOK bool) {
+	g.Expected, g.Unexpected, g.ToolErrors = false, nil, nil
 	for _, p := range g.Problems {
-		if strings.HasPrefix(p, c.reject+":") {
-			return true
+		class, _, _ := strings.Cut(p, ":")
+		switch {
+		case toolClasses[class]:
+			g.ToolErrors = append(g.ToolErrors, p)
+		case c.reject != "" && class == c.reject:
+			g.Expected = true
+		case contains(c.also, class):
+			// brought along by the case's own fault
+		default:
+			g.Unexpected = append(g.Unexpected, p)
 		}
 	}
-	return false
+	expected := c.reject == "" || g.Expected
+	remedied := g.Remedy == "not-needed" || g.Remedy == "succeeded"
+	g.Pass = verdictOK && expected && len(g.Unexpected) == 0 && len(g.ToolErrors) == 0 &&
+		remedied && g.Final == "ended" && (!c.noReceipt || g.NoReceipt > 0)
 }
 
 func emptyFile(t *testing.T, dir, pattern string) string {
@@ -419,6 +450,7 @@ func runGate(t *testing.T, c gateCase, fault string) gateResult {
 	}
 	if r.proc == nil {
 		g.Problems = append(g.Problems, "inner: the inner run could not be started: "+fmt.Sprint(r.err))
+		g.Remedy, g.Final = "not-run", "unknown"
 		return finishGate(c, g, verdictOK, begin)
 	}
 	defer r.proc.close()
@@ -492,24 +524,55 @@ func runGate(t *testing.T, c gateCase, fault string) gateResult {
 
 	// Remediation, after the state was recorded: this round's own
 	// survivors only (the Job's members; on Unix, still carrying this
-	// check's tag, with the same identity). It never makes the check pass.
+	// check's tag, with the same identity). It never makes the check pass;
+	// whether it was needed, run, and succeeded is kept as it is.
+	known := append([]survivor(nil), survivors...)
+	for k, w := range created {
+		if state[k] == "alive" && !inCensus[k] {
+			known = append(known, survivor{w.pid, w.start})
+		}
+	}
+	g.Remedy = "not-needed"
+	var remedyErr error
 	if len(g.Left) > 0 {
-		todo := append([]survivor(nil), survivors...)
-		for k, w := range created {
-			if state[k] == "alive" && !inCensus[k] {
-				todo = append(todo, survivor{w.pid, w.start})
-			}
-		}
-		still, err := r.proc.testedRemediate(todo)
-		if err != nil {
-			g.Problems = append(g.Problems, "still-alive: the remediation could not confirm its end: "+err.Error())
-		}
+		g.Remedy = "not-run"
+		still, err := r.proc.testedRemediate(known)
+		remedyErr = err
 		for _, v := range still {
 			g.Still = append(g.Still, v.pid)
+		}
+		switch {
+		case err != nil:
+			g.Remedy, g.RemedyErr = "failed", err.Error()
+		case len(g.Still) > 0:
+			g.Remedy = "failed"
+		default:
+			g.Remedy = "succeeded"
+		}
+		if err != nil {
+			g.Problems = append(g.Problems, "still-alive: the remediation could not confirm its end: "+err.Error())
 		}
 		if len(g.Still) > 0 {
 			g.Problems = append(g.Problems, fmt.Sprintf("still-alive: %d processes still alive after the remediation: %v", len(g.Still), g.Still))
 		}
+	}
+	// The final state of this round's processes, from the tested path's
+	// own facts: alive if any is known alive, unknown if a read, the
+	// census or the remediation's confirmation failed, ended only if none
+	// of that happened. An unknown state is never an end.
+	unknown := 0
+	for _, st := range state {
+		if st == "unknown" {
+			unknown++
+		}
+	}
+	switch {
+	case len(g.Still) > 0:
+		g.Final = "alive"
+	case cerr != nil || unknown > 0 || remedyErr != nil:
+		g.Final = "unknown"
+	default:
+		g.Final = "ended"
 	}
 
 	// The witness itself; a raise is read last, so a late one counts.
@@ -547,12 +610,18 @@ func runGate(t *testing.T, c gateCase, fault string) gateResult {
 	g = finishGate(c, g, verdictOK, begin)
 	// The experiment's own insurance cleanup, after the judgment and apart
 	// from the tested path: whatever of this round is still alive is ended.
-	g.Insurance = r.proc.insure()
+	// It never makes a check pass. If it finds anything where the tested
+	// path found the round ended, the tested path's account was wrong.
+	g.Insurance = r.proc.insure(known)
+	if g.Final == "ended" && g.Insurance != "nothing left" {
+		g.Problems = append(g.Problems, "insurance: the tested path found the round ended, the insurance cleanup did not: "+g.Insurance)
+		judge(c, &g, verdictOK)
+	}
 	return g
 }
 
 func finishGate(c gateCase, g gateResult, verdictOK bool, begin time.Time) gateResult {
-	g.Pass = verdictOK && judged(c, g)
+	judge(c, &g, verdictOK)
 	g.Millis = time.Since(begin).Milliseconds()
 	return g
 }

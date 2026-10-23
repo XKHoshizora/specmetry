@@ -29,6 +29,14 @@ type comboCase struct {
 	noInject bool   // the gate regression's inner fault is not injected
 	strict   bool   // no other class of problem is allowed alongside the expected one
 	wantPass bool   // the self-check's own verdict
+	// The self-check's dimensions this combination must show: the expected
+	// rejection found or not, a tool error of a class ("" none), other
+	// problems of the evidence, the remediation and the final state.
+	expected   bool
+	tool       string
+	unexpected bool
+	remedy     string
+	final      string
 }
 
 type comboResult struct {
@@ -50,28 +58,38 @@ var (
 
 var comboCases = []comboCase{
 	// The expected rejection found, the remediation and its end confirmed.
-	{id: "combo.reject-remedy-ok", gate: "witness.leak-unreceipted", wantPass: true},
+	{id: "combo.reject-remedy-ok", gate: "witness.leak-unreceipted", wantPass: true,
+		expected: true, remedy: "succeeded", final: "ended"},
 	// The expected rejection found, the remediation fails: the left
 	// process stays alive (the review's counterexample), with or without a
 	// record of it.
-	{id: "combo.reject-remedy-error", gate: "witness.leak-unreceipted", fault: "remedy-error"},
-	{id: "combo.reject-unrecorded-remedy-error", gate: "witness.leak-unrecorded", fault: "remedy-error"},
+	{id: "combo.reject-remedy-error", gate: "witness.leak-unreceipted", fault: "remedy-error",
+		expected: true, tool: "still-alive", remedy: "failed", final: "alive"},
+	{id: "combo.reject-unrecorded-remedy-error", gate: "witness.leak-unrecorded", fault: "remedy-error",
+		expected: true, tool: "still-alive", remedy: "failed", final: "alive"},
 	// The expected rejection found, the remediation acts but its end cannot
 	// be confirmed.
-	{id: "combo.reject-end-unconfirmed", gate: "witness.leak-unreceipted", fault: "remedy-unconfirmed"},
+	{id: "combo.reject-end-unconfirmed", gate: "witness.leak-unreceipted", fault: "remedy-unconfirmed",
+		expected: true, tool: "still-alive", remedy: "failed", final: "unknown"},
 	// The expected rejection found, the outer check's census or a read of
 	// a recorded process fails.
-	{id: "combo.reject-census-error", gate: "witness.deleted", fault: "census-error"},
-	{id: "combo.reject-state-unknown", gate: "witness.write-fail", fault: "record-unknown"},
+	{id: "combo.reject-census-error", gate: "witness.deleted", fault: "census-error",
+		expected: true, tool: "census", remedy: "not-needed", final: "unknown"},
+	{id: "combo.reject-state-unknown", gate: "witness.write-fail", fault: "record-unknown",
+		expected: true, tool: "state-unknown", remedy: "not-needed", final: "unknown"},
 	// The expected rejection found, with a problem of another class the
 	// case does not allow.
-	{id: "combo.reject-with-unexpected", gate: "witness.leak-unrecorded", strict: true},
+	{id: "combo.reject-with-unexpected", gate: "witness.leak-unrecorded", strict: true,
+		expected: true, unexpected: true, remedy: "succeeded", final: "ended"},
 	// The expected rejection missing, everything else normal.
-	{id: "combo.expected-missing", gate: "witness.truncated", noInject: true},
+	{id: "combo.expected-missing", gate: "witness.truncated", noInject: true,
+		remedy: "not-needed", final: "ended"},
 	// A healthy run that needs no remediation; the same with a read of a
 	// recorded process failing.
-	{id: "combo.healthy", gate: "control.silent-holder", wantPass: true},
-	{id: "combo.healthy-state-unknown", gate: "control.silent-holder", fault: "record-unknown"},
+	{id: "combo.healthy", gate: "control.silent-holder", wantPass: true,
+		remedy: "not-needed", final: "ended"},
+	{id: "combo.healthy-state-unknown", gate: "control.silent-holder", fault: "record-unknown",
+		tool: "state-unknown", remedy: "not-needed", final: "unknown"},
 }
 
 func TestGateCombos(t *testing.T) {
@@ -107,6 +125,19 @@ func checkCombo(t *testing.T, cc comboCase, c gateCase) {
 	var why []string
 	if self.Pass != cc.wantPass {
 		why = append(why, fmt.Sprintf("the self-check gave pass=%v, want %v", self.Pass, cc.wantPass))
+	}
+	// Each dimension as the combination makes it, not only the verdict.
+	if self.Expected != cc.expected {
+		why = append(why, fmt.Sprintf("expected rejection found %v, want %v", self.Expected, cc.expected))
+	}
+	if cc.tool == "" && len(self.ToolErrors) > 0 || cc.tool != "" && !hasClass(self.ToolErrors, cc.tool) {
+		why = append(why, fmt.Sprintf("tool errors %v, want class %q", self.ToolErrors, cc.tool))
+	}
+	if (len(self.Unexpected) > 0) != cc.unexpected {
+		why = append(why, fmt.Sprintf("other problems %v, want some: %v", self.Unexpected, cc.unexpected))
+	}
+	if self.Remedy != cc.remedy || self.Final != cc.final {
+		why = append(why, fmt.Sprintf("remediation %s and final state %s, want %s and %s", self.Remedy, self.Final, cc.remedy, cc.final))
 	}
 	// Whatever the tested path did, the experiment's own cleanup must
 	// leave nothing of this round behind.
