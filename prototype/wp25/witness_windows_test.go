@@ -103,10 +103,12 @@ func (w raiseWatch) close() { _ = windows.CloseHandle(w.ev) }
 // away. The Job's accounting counts every process the run created, and
 // lists the ones still active, independently of the records.
 type innerProc struct {
-	cmd   *exec.Cmd
-	pid   int
-	start string
-	job   windows.Handle
+	cmd     *exec.Cmd
+	pid     int
+	start   string
+	job     windows.Handle
+	fault   string // an outer-side fault of the tested path (TestGateCombos)
+	faulted bool
 }
 
 func launchInner(cmd *exec.Cmd, _ string) (*innerProc, error) {
@@ -223,6 +225,38 @@ func (p *innerProc) remediate(ss []survivor) ([]survivor, error) {
 }
 
 func (p *innerProc) close() { _ = windows.CloseHandle(p.job) }
+
+// insure is the experiment's own last cleanup, after the tested path was
+// judged and apart from it: the Job's members are this round's processes,
+// so whatever is still active in it is terminated, and the Job is then
+// confirmed empty. Its result never makes a check pass.
+func (p *innerProc) insure() string {
+	ss, _, err := p.census()
+	if err != nil {
+		return "FAILED: " + err.Error()
+	}
+	if len(ss) == 0 {
+		return "nothing left"
+	}
+	var pids []int
+	for _, v := range ss {
+		pids = append(pids, v.pid)
+	}
+	_ = windows.TerminateJobObject(p.job, 1)
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		left, _, err := p.census()
+		switch {
+		case err != nil:
+			return "FAILED: " + err.Error()
+		case len(left) == 0:
+			return fmt.Sprintf("ended %d: %v", len(pids), pids)
+		case time.Now().After(deadline):
+			return fmt.Sprintf("FAILED: %d still active", len(left))
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
 
 // openRecorded opens the process a record names and checks that it is the
 // one recorded (same creation time). The identity has the platform's form

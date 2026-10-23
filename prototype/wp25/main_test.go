@@ -399,10 +399,20 @@ func summarize(code int) int {
 	}
 	gates := len(gateResults)
 	gateMu.Unlock()
+	comboMu.Lock()
+	comboPass := 0
+	for _, c := range comboResults {
+		if c.Pass {
+			comboPass++
+		}
+	}
+	combos := len(comboResults)
+	comboMu.Unlock()
 	b, _ := json.Marshal(map[string]any{
 		"scenarios": len(results), "confirmed": count[confirmed], "refuted": count[refuted],
 		"unsupported": count[unsupported], "invalid": count[invalid],
 		"gate_checks": gates, "gate_passed": gatePass, "gate_failed": gates - gatePass,
+		"combo_checks": combos, "combo_passed": comboPass, "combo_failed": combos - comboPass,
 	})
 	fmt.Println("WP25SUMMARY " + string(b))
 	if len(results) == 0 {

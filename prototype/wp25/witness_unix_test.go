@@ -82,10 +82,12 @@ func (raiseWatch) close() {}
 
 // innerProc is the inner test process as the outer check started it.
 type innerProc struct {
-	cmd   *exec.Cmd
-	pid   int
-	start string
-	tag   string // WP25_WITNESS=<this check's file>, in the environment of every process of the run
+	cmd     *exec.Cmd
+	pid     int
+	start   string
+	tag     string // WP25_WITNESS=<this check's file>, in the environment of every process of the run
+	fault   string // an outer-side fault of the tested path (TestGateCombos)
+	faulted bool
 }
 
 func launchInner(cmd *exec.Cmd, tag string) (*innerProc, error) {
@@ -140,6 +142,40 @@ func (p *innerProc) remediate(ss []survivor) ([]survivor, error) {
 }
 
 func (p *innerProc) close() {}
+
+// insure is the experiment's own last cleanup, after the tested path was
+// judged and apart from it: a fresh census, every process of this round
+// still alive ended while its identity and tag hold, then the end
+// confirmed by another census. Its result never makes a check pass.
+func (p *innerProc) insure() string {
+	ss, err := censusTag(p.tag, p.start)
+	if err != nil {
+		return "FAILED: " + err.Error()
+	}
+	if len(ss) == 0 {
+		return "nothing left"
+	}
+	var pids []int
+	for _, v := range ss {
+		pids = append(pids, v.pid)
+		if st, pr := procInfo(v.pid); pr == present && st.start == v.start && !st.zombie && tagged(v.pid, p.tag) {
+			_ = syscall.Kill(v.pid, syscall.SIGKILL)
+		}
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		left, err := censusTag(p.tag, p.start)
+		switch {
+		case err != nil:
+			return "FAILED: " + err.Error()
+		case len(left) == 0:
+			return fmt.Sprintf("ended %d: %v", len(pids), pids)
+		case time.Now().After(deadline):
+			return fmt.Sprintf("FAILED: %d still alive", len(left))
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
 
 // recordAlive reports whether the process a record names still runs: the
 // same PID with the same start time, not a zombie. The identity has the

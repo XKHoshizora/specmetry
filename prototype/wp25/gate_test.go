@@ -15,6 +15,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -46,6 +47,9 @@ type gateCase struct {
 	// B1-R2-W): the gate check passes only if the evidence is rejected for
 	// that reason. "": the evidence must be accepted, with no problem.
 	reject string
+	// also: the other classes of problem the case's fault may bring along
+	// (a deliberate leak is also unregistered, and on Windows uncounted).
+	also []string
 	// noReceipt: the outer check must see a process created without its
 	// own record (one that ended before it ran), and confirm its end.
 	noReceipt bool
@@ -73,6 +77,7 @@ type gateResult struct {
 	Still     []int    `json:"still_alive"`
 	Total     int      `json:"job_total"` // Windows: processes the Job saw created (inner included); -1 elsewhere
 	Raised    bool     `json:"raised"`
+	Insurance string   `json:"insurance"` // the experiment's own last cleanup, after the judgment
 	Problems  []string `json:"problems,omitempty"`
 	Pass      bool     `json:"pass"`
 	Millis    int64    `json:"ms"`
@@ -154,12 +159,12 @@ var gateCases = []gateCase{
 	{id: "witness.deleted", test: "TestPipeSilentHolderReal", scenario: "T1.pipe.silent-holder", inject: "witness-deleted", hit: true, reject: "witness-unreadable"},
 	// The inner test process's own creation record cannot be written: its
 	// seal reports the failure, and the scenario stops as invalid.
-	{id: "witness.root-write-fail", test: "TestPipeSilentHolderReal", scenario: "T1.pipe.silent-holder", inject: "witness-root-write-fail", want: invalid, hit: true, reject: "witness-seal"},
+	{id: "witness.root-write-fail", test: "TestPipeSilentHolderReal", scenario: "T1.pipe.silent-holder", inject: "witness-root-write-fail", want: invalid, hit: true, reject: "witness-seal", also: []string{"witness-raised", "witness-count"}},
 	// A process the inner run leaves alive without its own record, or
 	// without any record; one that ends before any record (Windows: only
 	// the Job's count of created processes can show it).
-	{id: "witness.leak-unreceipted", test: "TestInnerLeak", scenario: "gate.leak", inject: "leak-unreceipted", want: invalid, hit: true, reject: "left"},
-	{id: "witness.leak-unrecorded", test: "TestInnerLeak", scenario: "gate.leak", inject: "leak-unrecorded", want: invalid, hit: true, reject: "left"},
+	{id: "witness.leak-unreceipted", test: "TestInnerLeak", scenario: "gate.leak", inject: "leak-unreceipted", want: invalid, hit: true, reject: "left", also: []string{"unaccounted"}},
+	{id: "witness.leak-unrecorded", test: "TestInnerLeak", scenario: "gate.leak", inject: "leak-unrecorded", want: invalid, hit: true, reject: "left", also: []string{"unrecorded", "witness-count"}},
 	{id: "witness.unrecorded-ended", test: "TestInnerLeak", scenario: "gate.leak", inject: "unrecorded-ended", want: invalid, goos: []string{"windows"}, hit: true, reject: "witness-count"},
 	// A positive case: a helper that ends before it leaves its own record
 	// is not an omission, once its creation and its end are confirmed.
@@ -305,6 +310,38 @@ func runInner(test, inject string, env []string) innerRun {
 	return r
 }
 
+// The tested path's own steps, where a combination check (TestGateCombos)
+// can inject an outer-side fault: the census, one read of a recorded
+// process, the remediation. In TestGate the fault is "" and they are the
+// plain calls.
+func (p *innerProc) testedCensus() ([]survivor, int, error) {
+	ss, total, err := p.census()
+	if p.fault == "census-error" && err == nil {
+		return nil, total, fmt.Errorf("%w: injected: the census could not be read", errCensus)
+	}
+	return ss, total, err
+}
+
+func (p *innerProc) testedAlive(w witnessRec) (bool, error) {
+	a, err := recordAlive(w)
+	if p.fault == "record-unknown" && !p.faulted {
+		p.faulted = true
+		return false, errors.New("injected: the state could not be read") // the real read was made; its answer is replaced
+	}
+	return a, err
+}
+
+func (p *innerProc) testedRemediate(ss []survivor) ([]survivor, error) {
+	if p.fault == "remedy-error" && len(ss) > 0 {
+		return ss, errors.New("injected: the remediation could not confirm its end") // nothing done
+	}
+	still, err := p.remediate(ss)
+	if p.fault == "remedy-unconfirmed" && err == nil {
+		return nil, errors.New("injected: the remediation's end could not be confirmed") // after the real one
+	}
+	return still, err
+}
+
 // judged says whether the outer check came to what the case requires: no
 // problem at all, or a problem of the class the case names (a fault of the
 // witness must be found, not just any rejection); and, where the case
@@ -333,12 +370,29 @@ func emptyFile(t *testing.T, dir, pattern string) string {
 	return f.Name()
 }
 
-// checkGate runs one gate regression and judges it in this order: the
+// checkGate runs one gate regression and records it.
+func checkGate(t *testing.T, c gateCase) {
+	g := runGate(t, c, "")
+	b, _ := json.Marshal(g)
+	fmt.Println("WP25GATE " + string(b))
+	gateMu.Lock()
+	gateResults = append(gateResults, g)
+	gateMu.Unlock()
+	if !g.Pass {
+		t.Errorf("%s: want %s (exit %s), reject %q, got %s (exit %d): %s; %v", c.id, c.want,
+			map[bool]string{true: "0", false: "non-zero"}[c.want == confirmed], c.reject, g.Got, g.InnerExit, g.Reason, g.Problems)
+	}
+}
+
+// runGate runs one gate regression and judges it in this order: the
 // inner run's verdict; the state it left, read before anything is ended
 // (the census, then each recorded process by its identity); only then the
 // remediation of this round's own survivors, which never makes the check
-// pass; then the witness itself and the inner run's registrations.
-func checkGate(t *testing.T, c gateCase) {
+// pass; then the witness itself and the inner run's registrations. fault
+// is an outer-side fault of the tested path (TestGateCombos), "" in
+// TestGate. After the judgment, the experiment's own insurance cleanup
+// ends what the tested path left, and is recorded apart.
+func runGate(t *testing.T, c gateCase, fault string) gateResult {
 	begin := time.Now()
 	dir := t.TempDir()
 	wf := emptyFile(t, dir, "witness-*")
@@ -365,14 +419,14 @@ func checkGate(t *testing.T, c gateCase) {
 	}
 	if r.proc == nil {
 		g.Problems = append(g.Problems, "inner: the inner run could not be started: "+fmt.Sprint(r.err))
-		finishGate(t, c, g, verdictOK, begin)
-		return
+		return finishGate(c, g, verdictOK, begin)
 	}
 	defer r.proc.close()
+	r.proc.fault = fault
 
 	// The state the inner run left: first the census, independent of the
 	// records; then every recorded process by its identity.
-	survivors, total, cerr := r.proc.census()
+	survivors, total, cerr := r.proc.testedCensus()
 	g.Total = total
 	if cerr != nil {
 		g.Problems = append(g.Problems, "census: "+cerr.Error())
@@ -401,7 +455,7 @@ func checkGate(t *testing.T, c gateCase) {
 	state := map[string]string{}
 	left := map[int]bool{}
 	for k, w := range created {
-		a, err := recordAlive(w)
+		a, err := r.proc.testedAlive(w)
 		switch {
 		case err != nil:
 			state[k] = "unknown"
@@ -446,7 +500,7 @@ func checkGate(t *testing.T, c gateCase) {
 				todo = append(todo, survivor{w.pid, w.start})
 			}
 		}
-		still, err := r.proc.remediate(todo)
+		still, err := r.proc.testedRemediate(todo)
 		if err != nil {
 			g.Problems = append(g.Problems, "still-alive: the remediation could not confirm its end: "+err.Error())
 		}
@@ -490,19 +544,15 @@ func checkGate(t *testing.T, c gateCase) {
 	if len(g.Unowned) > g.Shortfall {
 		g.Problems = append(g.Problems, fmt.Sprintf("unaccounted: %d created processes not registered by the inner run, %d declared short", len(g.Unowned), g.Shortfall))
 	}
-	finishGate(t, c, g, verdictOK, begin)
+	g = finishGate(c, g, verdictOK, begin)
+	// The experiment's own insurance cleanup, after the judgment and apart
+	// from the tested path: whatever of this round is still alive is ended.
+	g.Insurance = r.proc.insure()
+	return g
 }
 
-func finishGate(t *testing.T, c gateCase, g gateResult, verdictOK bool, begin time.Time) {
+func finishGate(c gateCase, g gateResult, verdictOK bool, begin time.Time) gateResult {
 	g.Pass = verdictOK && judged(c, g)
 	g.Millis = time.Since(begin).Milliseconds()
-	b, _ := json.Marshal(g)
-	fmt.Println("WP25GATE " + string(b))
-	gateMu.Lock()
-	gateResults = append(gateResults, g)
-	gateMu.Unlock()
-	if !g.Pass {
-		t.Errorf("%s: want %s (exit %s), reject %q, got %s (exit %d): %s; %v", c.id, c.want,
-			map[bool]string{true: "0", false: "non-zero"}[c.want == confirmed], c.reject, g.Got, g.InnerExit, g.Reason, g.Problems)
-	}
+	return g
 }
