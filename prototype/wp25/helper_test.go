@@ -86,18 +86,23 @@ func runHelper(mode string, args []string) int {
 		select {}
 	case "holder":
 		// A descendant that holds the output and keeps writing; it reports
-		// the first write error (the read end was closed) and exits.
+		// the first write error (the read end was closed) and exits 3. A
+		// record it cannot write is its own failure (Review 076 N4): it
+		// exits exitReport, and its scenario finds it ended without the
+		// record.
 		ignoreSIGPIPE()
 		if report("pid") != nil {
 			return exitReport
 		}
 		for i := 0; ; i++ {
-			if _, err := fmt.Fprintf(os.Stdout, "late-out %d\n", i); err != nil {
-				_ = report("epipe")
-				return 3
+			_, err := fmt.Fprintf(os.Stdout, "late-out %d\n", i)
+			if err == nil {
+				_, err = fmt.Fprintf(os.Stderr, "late-err %d\n", i)
 			}
-			if _, err := fmt.Fprintf(os.Stderr, "late-err %d\n", i); err != nil {
-				_ = report("epipe")
+			if err != nil {
+				if report("epipe") != nil {
+					return exitReport
+				}
 				return 3
 			}
 			time.Sleep(20 * time.Millisecond)

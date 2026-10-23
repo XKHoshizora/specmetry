@@ -154,7 +154,8 @@ func TestPipeF1SkipDrain(t *testing.T) {
 	release := gated(s, cmd)
 	tr := startTree(s, cmd)
 	closeWriteEnd(cmd)
-	s.awaitOwned(rep, 1, 5*time.Second, func(pid int) { tr.ownReported(pid) })
+	var holder owned
+	s.awaitOwned(rep, 1, 5*time.Second, func(pid int) { holder = tr.ownReported(pid) })
 	release()
 	exited, status, _ := tr.waitExit(10 * time.Second)
 	s.needLoad(exited && status == "exit 3", "the holder verified as the check's; its parent exited 3 (%v, %s)", exited, status)
@@ -178,6 +179,23 @@ func TestPipeF1SkipDrain(t *testing.T) {
 	epipe, err := awaitRecords(rep, "epipe", 1, 3*time.Second)
 	if err != nil && !errors.Is(err, errNotYet) {
 		s.invalidf("%v", err)
+	}
+	if len(epipe) == 0 {
+		// No record (Review 076 N4). While the holder still runs, its
+		// writes have not failed: a finding. A holder that has ended
+		// without its record could not report what it saw: the observation
+		// failed. Its end is read first, then the report once more, so a
+		// record written just before the end still counts.
+		if holder.ended() {
+			if epipe, err = awaitRecords(rep, "epipe", 1, 0); err != nil && !errors.Is(err, errNotYet) {
+				s.invalidf("%v", err)
+			}
+			if len(epipe) == 0 {
+				s.invalidf("observation failed: the holder %d ended without its epipe record, so it could not report what it saw", holder.pidOf())
+			}
+		} else {
+			s.note("no epipe record; the holder %d still runs", holder.pidOf())
+		}
 	}
 	buf, log := d.snapshot()
 	s.worked(int64(len(buf)))
