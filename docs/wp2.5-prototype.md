@@ -1,9 +1,10 @@
 # WP2.5 冻结之前的机制原型（test-only）
 
-> 状态：**原型，PR #33，不合并**（[review-resolution.md §89 ~ §91](review-resolution.md)）。依据 [§88](review-resolution.md) 的授权：PR #32 合并核验与 master push CI 全部成功之后，从已核验的 master 另开 PR，把 [WP2.5 规范草案](wp2.5-check-runner.md) §17.2 中 T1 ~ T6 冻结之前的关键可行性问题转成可审查的证据。
+> 状态：**原型，PR #33，不合并**（[review-resolution.md §89 ~ §92](review-resolution.md)）。依据 [§88](review-resolution.md) 的授权：PR #32 合并核验与 master push CI 全部成功之后，从已核验的 master 另开 PR，把 [WP2.5 规范草案](wp2.5-check-runner.md) §17.2 中 T1 ~ T6 冻结之前的关键可行性问题转成可审查的证据。
 >
 > - [Review 075](reviews/codex-review-075.md) 对 `932b4a8` 为**技术 NO-GO**：B1，实验的有效性门禁没有兑现它声明的拒绝规则（畸形或缺失的报告、缺失的目标负载仍可得到 confirmed）。第一轮修复见 §2.7。
-> - [Review 076](reviews/codex-review-076.md) 对 `3ddd14f` 仍为**技术 NO-GO**：原来的两个反例已修复，但 B1 有两项残余——B1-R1，一次观察失败被之后的成功覆盖，仍得 confirmed；B1-R2，Linux 短链的提前拒绝没有收尾已经启动、脱离原组的链节点。本版已按它修复（§2.8），**待独立复审**；不宣布 B1 关闭或 GO。Review 075 N1 ~ N3 保持审查的结论；Review 076 N4 登记在 §13，本轮没有修复。
+> - [Review 076](reviews/codex-review-076.md) 对 `3ddd14f` 仍为**技术 NO-GO**：原来的两个反例已修复，但 B1 有两项残余——B1-R1，一次观察失败被之后的成功覆盖，仍得 confirmed；B1-R2，Linux 短链的提前拒绝没有收尾已经启动、脱离原组的链节点。第二轮修复见 §2.8。
+> - [Review 077](reviews/codex-review-077.md) 对 `acf699b` 仍为**技术 NO-GO**：两个精确反例已有实质修复，但还有两项阻塞——B1-R1-S，共享的观察错误仍可能丢失（Linux 清扫在 pidfd 绑定之后的读取、场景起点的子进程枚举）；B1-R2-W，新的外层见证不是 fail-closed（写入失败留下空见证仍通过，无效身份被当作已结束）。本版已按它修复（§2.9），**待独立复审**；不宣布 B1 关闭或 GO。Review 075 N1 ~ N3 保持审查的结论；Review 076 N4 登记在 §13，仍没有修复；Review 077 N5（术语）已在本轮收口。
 > - 这**不是**规范冻结：草案仍是第 4 版，14 项产品选择（草案 §17.3）都没有批准。T1 ~ T6 按 Review 075 的裁定只得到**局部支持**（§11）。
 > - 原型成功**不是**生产验收：生产 Check Runner、迁移 0009、CLI 接线都没有授权，WP2.5 没有实现或验收，M2 没有整体验收。
 > - 本文中的“候选规格”都待审查；其中涉及可见行为的（例如 C-4、C-7、C-10）依赖对应的产品选择（§9、§10）。本文不新增接受风险，也不批准任何保证调整。
@@ -16,8 +17,24 @@
   - **B1-R2**：Linux 上进程链在排他区间内因负载不完整被拒绝时，已经启动、脱离原组的链节点既没有登记也没有被清扫，只剩辅助进程自己的 60 s 定时器。
 - **回归先行**（`1df33df`）：外层门禁检查增加了独立于内层的核验——见证文件记下每个已启动的辅助进程与它自己的启动时间，内层结束之后外层核对它们都已结束、并且都已登记或被申报为未入账；新增 `observe.fail-once` 与 `load.chain-corrupt`。在旧门禁上，三平台诊断 run 39886679862 为 failure：`observe.fail-once` 在三平台都是 confirmed、exit 0；Ubuntu 上短链留下 3 个、损坏的链留下 2 个存活节点；各平台的报告损坏拒绝都有已启动而未入账的进程。
 - **修复**（`8fea6c6`）：观察失败不可撤销，与清理的完成分开记录；报告的进程在记录到达时即核验登记，拒绝时未能登记的申报为未入账；在排他区间内被拒绝的检查先结束进程组、清扫区间内被收养的全部进程再离开区间；Linux 上留下本进程的子进程即为 invalid（§2.2、§2.4、§2.8）。隔离变异中，撤回每一项修复，对应的回归都会失败。
-- **修复后的证据**（原型代码固定为 `8fea6c607b8e760ddd3428d7d674739e2d6b8197`）：三平台诊断 run 39887528435 为 success；Ubuntu（带 `-race`）38/38、macOS 27/27、Windows 29/29 个场景 confirmed，门禁回归 21/21、16/16、19/19 通过；没有 refuted、invalid 或 unsupported。作者本机 Windows 29/29 与 19/19，WSL 37 个 confirmed、1 个 unsupported（没有 pwsh）与 21/21（§3）。
-- **旧的运行**（run 39815658463、39816938304、39835302375 与此前的常规 CI）保留为历史观测（§3.4）。
+- **第二轮修复后的证据**：原型代码 `8fea6c6`，三平台诊断 run 39887528435 为 success，现为历史观测（§3.4）。
+- **Review 077 的两项残余**（第三轮，§2.9）：
+  - **B1-R1-S**：清扫在绑定之后读不到状态时记为“身份不符”，下一轮成功就回收；场景起点的子进程列表读不到时当作空列表。同源的还有 subreaper、子进程计数、清扫的 `poll` / `waitid`、Windows 的 Job 成员与句柄等待、Unix 清理的回收、macOS 早退出的状态。
+  - **B1-R2-W**：见证由辅助进程自己写，写入、关闭错误与短写都被忽略；空见证、未知 kind、重复、截断的尾行与 `unknown` 身份都被接受；身份不同就当作已结束；进入辅助进程代码之前被结束的进程没有记录。
+- **回归先行**（`8f42e58`）：一次性的观察故障注入在其余共享入口；见证本身的写入、短写、身份、截断、重复、未知 kind、删除、故意的遗留与早退。旧门禁上，三平台诊断 run 39951830770 为 failure：Ubuntu 35 项中 12 项、macOS 26 项中 8 项、Windows 31 项中 10 项失败，都是新增的回归。
+- **修复**（`e77af94`）：
+  - 对应表 A（§2.9）中每一个共享入口的失败都进入统一终判；
+  - 见证改为创建者记录、辅助进程回执，每次写入都核对，失败带外通报；
+  - 内层有 `root` 记录与封条；外层严格解析并核对身份；
+  - 外层在任何补救之前，按标记或 Job 普查存活进程，Windows 上另核对 Job 的已创建进程数；
+  - 登记按 PID 与身份匹配，`missing` 改称 `shortfall`。
+  - 隔离变异中，撤回每一项修复，对应的回归都会失败。
+- **修复后的证据**（原型代码固定为 `e77af946291862191759d3af6e94e372221748a2`）：三平台诊断 run 39954957954 为 success。
+  - 场景：Ubuntu（带 `-race`）38/38、macOS 27/27、Windows 29/29 confirmed，没有 refuted、invalid 或 unsupported。
+  - 门禁回归：36/36、27/27、32/32 通过。
+  - 直接检查：见证判定 24 例、身份、启动点，三平台都通过。
+  - 作者本机见 §3.1。
+- **旧的运行**（run 39815658463、39816938304、39835302375、39887528435 与此前的常规 CI）保留为历史观测（§3.4）。
 - **按门槛**：在原型的范围内，T1 / T6 的管道收尾与受控目的端、T2 的 Linux 排他区间候选、T3 的 macOS 退出观察与组身份、T4 的 Windows 启动链部分失败处理、T5 的所测适配器，都有修复后的证据；都只是**局部支持**，冻结之前仍缺的规格与原型见 §11。
 - 14 项产品选择仍待负责人决定（§10）；C-4 与 D20 的关系见 §9。
 
@@ -25,7 +42,7 @@
 
 **包含**：
 
-- `prototype/wp25/`：一个独立的 Go 模块，只有 `_test.go` 文件，依赖只有 `golang.org/x/sys` v0.49.0（与 Specmetry 相同的版本）。`gate_test.go` 是有效性门禁本身的回归，`report_test.go` 是报告协议，`witness_*_test.go` 是外层门禁检查的独立核验（§2.8）。
+- `prototype/wp25/`：一个独立的 Go 模块，只有 `_test.go` 文件，依赖只有 `golang.org/x/sys` v0.49.0（与 Specmetry 相同的版本）。`gate_test.go` 是有效性门禁本身的回归，`report_test.go` 是报告协议，`witness_*_test.go` 与 `census_*_test.go` 是外层门禁检查自己的证据（见证、带外通报、普查，§2.8、§2.9），`witness_check_test.go` 是外层规则的直接检查。
 - `.github/workflows/wp25-prototype.yml`：专用的三平台诊断 workflow（§2.5）。
 - 本文，以及 review-resolution、AGENTS.md、实施计划与草案头部的状态记录。
 
@@ -46,8 +63,8 @@
   - 每个辅助进程有自己的 60 s 定时器，到时写一行 `limit` 并以 97 退出，这一场景即为无效。它**只在辅助进程运行 Go 代码之后才生效**，挂起创建（Windows `CREATE_SUSPENDED`）的区间里不起作用。
   - 场景自己的每一次等待都有界（父端的终止与确认、有时限的句柄等待、报告等待），不依赖辅助进程的定时器兜底。go test 的 15 分钟与 Job 的 20 分钟只是诊断的总上限：超时终止测试进程时，不保证 defer 与清理已经运行。
 - 父辅助进程（持有者、成员、链）报告子进程之后，**等待 stdin 被关闭**才继续：场景在它们仍然活着时核验报告的后代（§2.2），再关闭 stdin 放行。
-- 辅助进程自己的失败各有退出码：子进程起不来 90、记录写不出 91、等不到子进程的记录 92、输出写不出 93。场景核对辅助进程的退出状态，不一致即为负载没有建立。
-- 测试输出只有每个场景一行的 `WP25RESULT`（结论、预测、观察、启动数、工作量、清理）、每项门禁回归一行的 `WP25GATE`，以及开头的 `WP25META`、结尾的 `WP25SUMMARY`。不保存任何输出内容：进入受控目的端的字节只在内存中用于比较，被丢弃的字节只计数。
+- 辅助进程自己的失败各有退出码：子进程起不来 90、记录写不出 91、等不到子进程的记录 92、输出写不出 93、门禁检查之下见证记录做不成 94（§2.9）。场景核对辅助进程的退出状态，不一致即为负载没有建立。
+- 测试输出只有每个场景一行的 `WP25RESULT`（结论、预测、观察、启动数、工作量、清理）、每项门禁回归一行的 `WP25GATE`，以及开头的 `WP25META`、结尾的 `WP25SUMMARY`。门禁回归的内层运行另外打印注入命中的 `WP25INJECT` 与见证的封条 `WP25WITNESS`。不保存任何输出内容：进入受控目的端的字节只在内存中用于比较，被丢弃的字节只计数。
 
 ### 2.2 进程的归属与清理
 
@@ -56,11 +73,24 @@
   - Windows：该进程在本次检查的 Job 中（`IsProcessInJob`）。
 
   核验不了即为 invalid（“ownership not established”），不扩大清扫范围补救。
-- **报告的进程在记录到达时即核验并登记**（`awaitOwned`，Review 076 B1-R2）：不等全部记录到齐。所以拒绝（负载不完整、报告损坏、归属核验不了）发生时，已经看到的每一个进程都已登记、会被清理；没能登记的（没有报告，或报告读不懂）申报为**未入账**，清理因此不称“已核验”，场景为 invalid。报告中的 PID 仍然只有经归属核验之后才可操作。
+- **报告的进程在记录到达时即核验并登记**（`awaitOwned`，Review 076 B1-R2）：不等全部记录到齐。所以拒绝（负载不完整、报告损坏、归属核验不了）发生时，已经看到的每一个进程都已登记、会被清理；没能做成的预期登记（没有报告，或报告读不懂）计为**缺额**（`shortfall`，第二轮中称“未入账”，Review 077 N5），清理因此不称“已核验”，场景为 invalid。缺额是数量：它也计入从未创建的预期进程，不是已启动对象的名单（那由外层的见证与普查给出，§2.9）。报告中的 PID 仍然只有经归属核验之后才可操作。
 - **身份**：核验时记下身份（Linux 的 `/proc` 启动时间，macOS 的 `sysctl` 启动时间，Windows 打开并持有句柄）；每次操作之前再次核对，不一致就不再操作。
 - **状态的三种读数**：可靠地不存在（Linux 的 ENOENT / ESRCH，macOS 的空回答）、存在、**未知**（其他读取失败、解析失败、回答长度不对）。未知从不当作“已结束”“不存在”或“空组”：清理不算核验，观察为 invalid，排他区间的基线或清扫停止。
-- **观察失败不可撤销**（Review 076 B1-R1）：一个进程的第一次观察失败被保存，之后的成功观察不清除它；清理仍然结束并回收这个进程，但这次运行为 invalid。等待主进程退出、组长的状态、场景结束时组或 Job 不能确认为空、清扫中读不到的列表或状态，同样记入统一终判，之后的任何结果都不能恢复。“清理已经完成”与“这次运行有效”分开记录。
-- **正常的“尚未”**：进程仍在运行、报告的记录尚未到齐、最后一行仍在写入，都是有期限的等待（期限见各场景，报告等待 5 s 或 20 s，清理 5 s，进程树确认 `T_kill`），不是失败；到期仍未满足才按负载没有建立或清理没有确认处理。读取错误从不当作“尚未”。
+- **观察失败不可撤销**（Review 076 B1-R1，Review 077 B1-R1-S）：
+  - 一个进程的第一次观察失败被保存，之后的成功观察不清除它；清理仍然结束并回收这个进程，但这次运行为 invalid。
+  - 同样记入统一终判、之后的任何结果都不能恢复的，见 §2.9 的对应表 A：
+    - 等待主进程退出、组长的状态；
+    - 场景结束时组或 Job 不能确认为空；
+    - 清扫的列表、绑定前后的两次状态读取、`poll` 与 `waitid`；
+    - 场景起点的子进程列表、subreaper 与子进程计数的读取；
+    - Windows 的 Job 成员读取与句柄等待；
+    - Unix 清理中的回收与 `stop` 的读取；
+    - macOS 早退出的状态。
+  - “清理已经完成”与“这次运行有效”分开记录。
+- **正常的“尚未”**：
+  - 以下都是有期限的等待，不是失败：进程仍在运行、报告的记录尚未到齐、最后一行仍在写入、`waitid` 的回答里还没有进程、门禁之下辅助进程等待自己的创建记录。期限见各场景：报告等待 5 s 或 20 s，清理 5 s，进程树确认与清扫 `T_kill`，创建记录 10 s。
+  - 唯一允许重复的是被 EINTR 打断的 `poll` 与 `kevent`，也只到期限为止。
+  - 到期仍未满足，才按负载没有建立或清理没有确认处理。读取错误从不当作“尚未”。
 - **清理**：每个场景结束时终止仍存活的、身份仍成立的进程，再确认全部结束；本进程的僵尸子进程只按它自己的 PID 回收，并且只有确实回收之后才算结束。提前停止的场景，在组长仍被持有时先结束自己的进程组并确认为空；Windows 的检查在关闭 Job 句柄之前先终止并确认 Job 为空。在排他区间内被拒绝的检查（Linux），在离开区间之前先结束它的进程组，再清扫区间内被收养的全部进程：按区间的规则它们都属于这次检查，不论是否报告过（`abort`）。Linux 上，场景结束时本进程留下新的子进程（存活或未回收的僵尸）即为 invalid。确认不了 → 该场景无效。
 - **句柄**（Review 075 N2）：Windows 的观察句柄在清理确认之后显式关闭；Runner 自己的 Job 与进程句柄以 `CloseHandle` 的结果核对，不再对已关闭的句柄调用任何 API（这种调用的行为没有定义）。
 - 从不向不属于场景的 PID 或进程组发信号。`wait(-1)` 只出现一次：`T2.other-reaper` 有意扮演“其他回收者”，在排他区间内（本进程此时只有这一个子进程）调用它。
@@ -90,12 +120,13 @@
 | `confirmed` | 负载已经建立，观察与候选方案的预测一致 |
 | `refuted` | 负载已经建立，观察不同：这是一项发现，不是通过；对应的候选方案按反例处理 |
 | `unsupported` | 这里没有这一机制（例如 runner 上没有某个解释器）；不是通过，也不是失败 |
-| `invalid` | 这次运行不能作为任何证据：辅助进程没有启动或崩溃、报告缺失或损坏或不符合规格、**场景声明的负载没有建立**（`needLoad`）、归属核验不了、观察读不到（**任何一次**，之后的成功不恢复）、拒绝时有已启动而未入账的进程、Linux 上留下本进程的子进程、到达硬时限、清理没有确认、或在预测检查之前失败 |
+| `invalid` | 这次运行不能作为任何证据：<ul><li>辅助进程没有启动或崩溃；</li><li>报告缺失、损坏或不符合规格；</li><li>**场景声明的负载没有建立**（`needLoad`）；</li><li>归属核验不了；</li><li>观察读不到（**任何一次**，任何共享入口，之后的成功不恢复，§2.9 表 A）；</li><li>拒绝时有预期的登记没有做成（缺额）；</li><li>Linux 上留下本进程的子进程，或起点的子进程列表读不到；</li><li>到达硬时限、清理没有确认，或在预测检查之前失败</li></ul> |
 
 - **负载与结果分开**：场景先核对它需要的角色、数量与阶段（辅助进程的成功退出码、报告的每个后代、停止时阻塞的复制任务、Windows fanout 的 30 个后代与 31 个活动进程等），记为 `load:`；负载没有建立是 invalid，完整负载下的不同结果才是 refuted。“启动过一个进程”“有过一次工作”不能代替场景所需的负载；清理成功也不说明负载曾经完整执行。
 - 场景分为**正常路径**、**反例**、**故障注入**与**拒绝路径**四类（结果中的 `kind`）。反例的“confirmed”表示反例被复现，即对应的朴素做法确实不成立。
 - `refuted` 与 `invalid` 都使测试失败（workflow 显示为失败）；`unsupported` 单列，不计为通过。没有任何场景运行时，整次运行无效。
 - **门禁回归**（§2.7）的通过另行计数（`WP25GATE`、`gate_passed`），不是任何机制的 confirmed。
+- **外层证据的有效性**（§2.9）：外层门禁检查也判断它自己的证据，即见证、封条、带外通报与普查。证据无效时，这项门禁回归不通过，整次诊断失败；只看内层的 confirmed、exit 0 不够。只有专门注入见证故障的自检，以“正确地判定证据无效”为通过。
 
 ### 2.5 诊断 workflow
 
@@ -279,22 +310,236 @@
 
 **计数分开**：门禁回归的通过（`WP25GATE`）、内层场景的 invalid（被注入故障的真实诊断，内层退出码 1）与机制的 confirmed（`WP25RESULT`）分别统计；预期的拒绝通过门禁回归，不计为任何机制的证据。
 
+### 2.9 Review 077：共享观察错误与见证的有效性
+
+**审查结论**（第一、三、四节）：Review 076 的两个精确反例已有实质修复，但还有两项阻塞：
+
+- **B1-R1-S**：Linux 清扫在 pidfd 绑定之后的那次状态读取，以及新增的场景起点子进程枚举，仍会丢失观察错误。
+- **B1-R2-W**：外层见证不是 fail-closed。写入失败留下空见证，外层仍 PASS；无效的启动身份被当作原进程已结束。
+
+N5（`missing` 的术语）为 NON-BLOCKER；Review 076 N4 保持。
+
+**根因**：
+
+- **B1-R1-S**：共享的观察入口在若干调用点，把“读不到”变成了另一种读数。
+  - 清扫在绑定之后读不到状态时记为身份不符（`mismatched`），下一轮成功就回收，终判不知道这次失败。
+  - 场景起点的子进程列表读不到时返回空列表，结束时的“留下的子进程”检查便与空集合比较。
+  - 同源的写法：
+    - subreaper 的读取失败返回 0；
+    - 子进程计数读不到时记为“不同”（refuted 而不是 invalid）；
+    - 清扫中 `poll` 与 `waitid` 的错误被丢弃（`waitid` 失败一次，下一轮成功回收）；
+    - `waitid` 的成功不核对 `si_pid`；
+    - Windows 失败链中 `IsProcessInJob` 与句柄等待的错误被丢弃；
+    - Unix 清理中回收（`Wait4`）的失败、以及 `stop` 读不到状态，没有保存；
+    - macOS 早退出时 `waitid` 的失败被写成一个状态字符串。
+- **B1-R2-W**：
+  - 见证由辅助进程运行到 `runHelper` 时自己写入。打开、写入、关闭的错误与短写都被忽略；自己的身份读不到时写下 `unknown`。
+  - 读取端接受空文件、未知的 kind、重复、没有换行的尾行与 `unknown` 身份。
+  - 外层只遍历读到的记录，空集合即通过；身份不同就当作原进程已结束，`unknown` 也走这一分支。
+  - 创建之后、进入辅助进程代码之前就被结束的进程，没有任何记录。
+  - 外层给内层结束之后 10 s 的宽限，遗留进程可以在宽限内按自己的定时器结束，而不算遗留。
+
+**两条共享链的对应表**（审查要求的交付内容）：
+
+A. 观察入口 → 返回状态／错误 → 调用者 → 场景失败的累积 → 最终结论
+
+| 共享入口 | 返回 | 调用者与失败的传播 | 允许的等待或重试（条件、期限） | 最终由谁拒绝 |
+|---|---|---|---|---|
+| `procInfo`（Linux `/proc/<pid>/stat`；macOS `sysctl kern.proc.pid`） | 存在、可靠不存在（Linux 的 ENOENT / ESRCH，macOS 的空回答）、未知（其他错误、解析失败、回答长度不对） | <ul><li>`pidProc.ended`、`pidProc.stop`：首次失败存入 `obsErr`，不清除；</li><li>`ownDescendant`（含父进程链的每一级）、`startTree`：`invalidf`；</li><li>组长的检查（`leaderHeld` 等）：`flag`；</li><li>清扫的两次读取：`sweepResult.obsErr`；</li><li>外层的普查：普查错误</li></ul> | 进程仍在运行是“尚未”：清理 5 s，确认 `T_kill`；“未知”从不重试成“已结束”或“另一个进程” | 场景 `done()`：清理中的 `obsErr`、`flag` 的记录、`runCheck` / `abort` 对清扫 `obsErr` 的 `flag`，结论为 invalid、exit 1 |
+| `allPIDs` / `processes` / `childrenOf` / `groupLive`（Linux） | 列表或错误；读不到不是空列表 | <ul><li>进程树确认 `confirm`：`invalidf`；</li><li>提前收尾、`abort`：`flag`；</li><li>清扫：`obsErr`；</li><li>场景起点的子进程列表：`baseErr`；</li><li>`childCount`：`flag`；</li><li>排他闸门的基线：拒绝区间（被测机制自己的保守响应）</li></ul> | 无重试 | 同上 |
+| `exitObserver.wait`（Linux pidfd `poll` + `waitid WNOWAIT`；macOS `kevent`，早退出时 `waitid`） | （已退出，状态，错误） | `waitExit`：`flag`；macOS 早退出的 `waitid` 失败返回错误，不再写成状态 | EINTR 在期限内重复；期限到仍未退出是“尚未” | 同上 |
+| 清扫的 `pidfd_open`、`pidfd_send_signal`、`poll`、`waitid` | 错误；`waitid` 的 `si_pid` | <ul><li>`pidfd_open`、发信号失败：被测机制停止（`err`，F1，不回退到按 PID 的信号）；</li><li>`poll`（EINTR 之外）、`waitid` 失败：观察失败（`obsErr`）；</li><li>`si_pid` 为 0：没有可回收的，“尚未”</li></ul> | `poll` 的 EINTR 在期限内重复；没有回收的僵尸在下一轮再试，到 `T_kill` 为止，但此前的失败已保存 | 同上 |
+| `prctl(PR_GET_CHILD_SUBREAPER)` | 值或错误 | `subreaper(s)`：`flag`，不再返回 0 | 无 | 同上 |
+| Windows `WaitForSingleObject`、`GetExitCodeProcess`、`QueryInformationJobObject`、`IsProcessInJob` | 结果或错误 | <ul><li>`pidProc.ended`：`obsErr`；</li><li>`waitExit`、`endJob`、`waitHandle`、失败链的 Job 成员读取、`active` 的读取：`flag`；</li><li>`confirm`：`invalidf`（注入的查询故障除外：那是被测机制的 F1，属于预测）</li></ul> | 等待有期限；`ActiveProcesses` > 0 是“尚未” | 同上 |
+
+区分两类：
+
+- **被测机制预期的故障**，例如注入的 Job 查询失败、`pidfd_open` 不可用、绑定之后的身份不符：场景预测了机制对它的响应（F1、不发信号、不回退），证据完整时 confirmed。
+- **实验工具没能取得必要的观察**：上表中的读取、等待、回收、枚举失败。这次运行 invalid，不能计为机制的预测成立，也不能计为机制被推翻。
+
+B. 辅助进程的启动 → 见证写入 → 外层读取 → 身份验证 → 结束核验 → 外层判定
+
+| 环节 | 责任方 | 失败时 | 允许的等待 | 最终由谁拒绝 |
+|---|---|---|---|---|
+| 内层测试进程的启动 | 外层（`launchInner`）：读内层的身份；Windows 上挂起创建、加入外层自己的 Job 并确认、再恢复 | 读不到身份或加入不了 Job：结束内层，这项检查失败 | 无 | 外层 |
+| `root` 记录 | 内层测试进程，第一件事 | 身份或写入失败：带外通报，封条计数 | 无 | 外层：`witness-raised`、`witness-seal`、`witness-root` |
+| 每一个进程的启动 | 创建者，经 `start`：`cmd.Start` 之后读子进程的身份（本进程未回收的子进程 / Go 持有句柄的进程），写 `created` 记录 | 读不到或写不成：结束并回收这个子进程，带外通报，返回错误；场景 `invalidf`，辅助进程以 90 退出 | 无 | 外层 `witness-raised`；内层 invalid |
+| 辅助进程的回执 | 辅助进程，在做任何事之前：读自己的身份，等待自己的 `created` 记录，写 `launched` 记录 | 任何一步失败：带外通报，以 94 退出，不做任何工作、不启动子进程 | 等待创建记录最多 10 s，到期即失败 | 外层 `witness-raised` |
+| 每一次写入 | 写者 | 打开、写入、短写、关闭失败都是失败，带外通报（Unix 是对外层的信号，Windows 是外层的命名事件），不只记在已经失败的文件里 | 无 | 外层 |
+| 封条 | 内层测试进程，结束时打印在标准输出（`WP25WITNESS`） | 写成的记录数与遇到的失败数 | 无 | 外层 `witness-seal` |
+| 外层的读取与解析 | 外层（`parseWitness`） | 读不到：`witness-unreadable`；任何格式问题（尾行截断、未知 kind、重复、PID 非规范、身份不是本平台的形式、字段不对）：`witness-malformed`，不跳过任何一行 | 无 | 外层 |
+| 身份的核对 | 外层（`judgeWitness`） | <ul><li>`root` 不是外层启动的那个进程：`witness-root`；</li><li>`launched` 没有身份相同的 `created`：`witness-receipt`；</li><li>创建者没有自己的记录：`witness-creator`；</li><li>Windows 上 Job 计数的已创建进程数与 `created` 数不同：`witness-count`</li></ul> | 无 | 外层 |
+| 结束的核验 | 外层，内层结束之后、任何补救之前：先普查，再按每条 `created` 记录的身份读取 | <ul><li>存活：`left`；</li><li>存活而没有创建记录：`unrecorded`；</li><li>状态读不到：`state-unknown`；</li><li>普查读不到，或记录存活而普查没有它：`census`</li></ul> | 不等待：不给遗留进程按自己的定时器结束的机会 | 外层 |
+| 补救 | 外层：Windows 终止外层的 Job（成员就是本轮的进程）；Unix 只结束仍带本次检查的标记、身份仍成立的进程 | 补救之后仍存活：`still-alive`。补救永远不使这项检查通过 | 10 s | 外层 |
+| 登记 | 外层：每个已创建的进程按 PID 与身份在内层的 `owned` 中，否则计为未登记（附结束状态） | 未登记数多于内层申报的缺额：`unaccounted` | 无 | 外层 |
+
+**普查**（census）不依赖任何记录：
+
+- Linux 与 macOS：外层读本用户、启动不早于内层的全部进程的环境（`/proc/<pid>/environ`，`sysctl kern.procargs2`），找出带本次检查唯一标记的存活进程。标记即 `WP25_WITNESS=<本项检查的文件>`，本轮的每个进程都从内层继承它。读不到即普查失败，不当作不存在。
+- Windows：外层 Job 的活动进程列表，以及它的累计创建数 `TotalProcesses`；进程无法脱离这个 Job。
+
+所以见证写入全部失败，也不能让存活的遗留进程看起来不存在；Windows 上连已经结束、没有任何记录的进程也能从计数中发现。
+
+**新增回归**（回归先行 `8f42e58f43a31b433c540c8146fc3873dec3aa2c`，门禁的判定未改）：
+
+- **B1-R1-S**：每个注入只作用一次，之后的调用照常；注入点打印 `WP25INJECT`。
+  - `observe.sweep-recheck-once`：`TestExclusiveGate` 中，绑定之后的那次状态读取。
+  - `observe.sweep-wait-once`：同一场景中，一次 `waitid` 失败而不回收，下一轮回收。
+  - `observe.baseline-once`：`TestPipeNormalDrain` 起点的子进程列表。
+  - `observe.prctl-fails`：`TestExclusiveBaselineLive` 的 subreaper 读取。
+  - `observe.injob-once`（Windows）：`TestJobFailResume` 中，进程是否在 Job 中的读取。
+  - 前四项为 Linux。
+- **B1-R2-W**：在真实的辅助进程与真实的外层上注入见证本身的故障。外层必须以指定的理由拒绝这份证据，这项门禁自检才通过；内层的结论只记录、不作为条件。
+  - `witness.write-fail`：辅助进程的写入真实失败，文件在写之前被关闭，即审查的反例一。
+  - `witness.short-write`：只写出半条记录。
+  - `witness.identity-unknown`：辅助进程读不到自己的身份，即审查的反例二。
+  - `witness.truncated`、`witness.duplicate`、`witness.unknown-kind`、`witness.deleted`：内层结束时，真实地截断、重复、追加未知 kind 的记录，或删除见证文件。
+  - `witness.leak-unreceipted`：内层故意留下一个不写自己记录的辅助进程（`TestInnerLeak`，只在门禁的内层运行，自身期限 8 s）。
+  - `witness.leak-unrecorded`：故意留下一个绕过 `start`、没有任何记录的辅助进程。
+  - `witness.unrecorded-ended`（Windows）：同样没有任何记录，但在外层查看之前已经结束。
+  - `witness.early-exit`（正例）：辅助进程在留下自己的记录之前就结束了。外层必须看到它的创建记录、确认它已结束，并且接受这份证据。
+  - 修复中新增 `witness.root-write-fail`：内层测试进程自己的创建记录写不成。它在旧代码中没有对应的写入点，回归先行中没有这一项。
+
+**旧门禁上的结果**（`8f42e58`，旧的见证与判定）：
+
+| 环境 | 失败 / 总数 | 主要失败 |
+|---|---|---|
+| 本机 Windows 11 | 10 / 31 | <ul><li>`observe.injob-once` 内层 confirmed、exit 0；</li><li>`witness.write-fail`（命中 6 次，见证为空）、`identity-unknown`（6 条 `unknown` 身份）、`truncated`、`duplicate`、`unknown-kind`、`leak-unreceipted`、`leak-unrecorded`、`unrecorded-ended`：外层没有任何问题，即证据被接受；</li><li>`early-exit`：外层看不到那个进程</li></ul> |
+| 本机 WSL2 | 12 / 35 | <ul><li>四项 `observe.*` 内层 confirmed、exit 0；</li><li>见证类同上；</li><li>`leak-unrecorded`：遗留进程在 10 s 宽限内按自己的 8 s 定时器结束，外层只报告“未登记”，没有报告遗留</li></ul> |
+| [run 39951830770](https://github.com/XKHoshizora/specmetry/actions/runs/39951830770) Ubuntu | 12 / 35 | 同本机 WSL |
+| run 39951830770 macOS | 8 / 26 | 见证类 8 项 |
+| run 39951830770 Windows | 10 / 31 | 同本机 Windows |
+
+- run 39951830770：push，attempt 1，completed/failure（预期），每个 Job 检出 `8f42e58` 本身。
+- 普通场景：Ubuntu 38、macOS 27 confirmed；Windows 28 confirmed、1 refuted。refuted 的是 `T1.pipe.escaped-holder`，阶段 D 计得 999.82 ms，小于 `T_drain` 1 s。这是一项与本轮无关的计时问题，见 §13；作者本机在同一提交上也出现一次（999.92 ms）。
+- 在旧门禁上就通过的：`witness.short-write`（半条记录与下一条连成畸形行，旧解析恰好拒绝）、`witness.deleted`（打开失败）。
+
+**修复**（`e77af946291862191759d3af6e94e372221748a2`）：
+
+- **B1-R1-S**（对应表 A 的每一行）：
+  - 清扫绑定之后读不到状态，记为观察失败、不发信号，不再是身份不符；
+  - `poll`、`waitid` 的失败保存；`waitid` 只在 `si_pid` 指名这个进程时才算回收；
+  - 发信号失败为机制停止；
+  - 起点的子进程列表读不到即 invalid；
+  - subreaper 与子进程计数的读取失败记入终判；
+  - Windows 失败链的 Job 成员读取与句柄等待的错误记入终判；
+  - Unix 清理中回收的失败与 `stop` 读不到状态保存到 `obsErr`；
+  - macOS 早退出的 `waitid` 失败返回错误。
+- **B1-R2-W**（对应表 B）：
+  - 只有 `start` 可以启动进程（`TestStartPoints` 扫描源码，例外只有 `start` 本身、外层启动内层、`TestInnerLeak` 中故意的绕过）；
+  - 创建者写 `created`，辅助进程等到它才写 `launched` 并做事；
+  - 每次写入都核对；任何失败都带外通报，写者停止；
+  - 内层有 `root` 记录与封条；
+  - 外层严格解析并核对 `root`、封条、回执与创建者，Windows 上还核对 Job 计数；
+  - 内层结束之后立即普查，再按身份逐条读取，最后才补救；
+  - 登记按 PID 与身份匹配；`missing` 改为它实际的含义 `shortfall`（N5）。
+
+**修复后的门禁回归**（[run 39954957954](https://github.com/XKHoshizora/specmetry/actions/runs/39954957954) 与作者本机，同一份原型代码）：
+
+| 门禁回归 | 应得 | Ubuntu | macOS | Windows | 本机 Win11 | 本机 WSL |
+|---|---|---|---|---|---|---|
+| `observe.sweep-recheck-once` | 内层 invalid | ✓ invalid/1 |  |  |  | ✓ invalid/1 |
+| `observe.sweep-wait-once` | 内层 invalid | ✓ invalid/1 |  |  |  | ✓ invalid/1 |
+| `observe.baseline-once` | 内层 invalid | ✓ invalid/1 |  |  |  | ✓ invalid/1 |
+| `observe.prctl-fails` | 内层 invalid | ✓ invalid/1 |  |  |  | ✓ invalid/1 |
+| `observe.injob-once` | 内层 invalid |  |  | ✓ invalid/1 | ✓ invalid/1 |  |
+| `witness.write-fail` | 外层 `witness-raised` | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `witness.short-write` | 外层 `witness-malformed` | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `witness.identity-unknown` | 外层 `witness-raised` | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `witness.truncated` | 外层 `witness-malformed` | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `witness.duplicate` | 外层 `witness-malformed` | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `witness.unknown-kind` | 外层 `witness-malformed` | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `witness.deleted` | 外层 `witness-unreadable` | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `witness.root-write-fail` | 外层 `witness-seal`；内层 invalid | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `witness.leak-unreceipted` | 外层 `left`；内层 invalid | ✓ 存活 1 | ✓ 存活 1 | ✓ 存活 1 | ✓ 存活 1 | ✓ 存活 1 |
+| `witness.leak-unrecorded` | 外层 `left`；内层 invalid | ✓ 存活 1，无记录 | ✓ 存活 1，无记录 | ✓ 存活 1，无记录 | ✓ 存活 1，无记录 | ✓ 存活 1，无记录 |
+| `witness.unrecorded-ended` | 外层 `witness-count`；内层 invalid |  |  | ✓ | ✓ |  |
+| `witness.early-exit` | 外层接受；内层 invalid；看到无回执的已结束进程 | ✓ | ✓ | ✓ | ✓ | ✓ |
+
+- Review 075、076 的全部门禁回归与正对照在修复后仍然通过，见 §2.8 的表。各平台合计：Ubuntu 36/36、macOS 27/27、Windows 32/32；本机 Windows 32/32、WSL 36/36。
+- 每一项都另外核对了：
+  - 注入确实命中：命中来自内层测试进程的输出与辅助进程自己的日志，不来自见证文件；
+  - 后续调用照常：每项注入只作用一次，场景之后的读取与清理照常完成；
+  - 正对照与合法的反例、注入、拒绝场景仍为 confirmed、exit 0，见证完整、没有遗留。
+
+**拒绝之后的清理**（外层在补救之前记下的状态，run 39954957954 与作者本机）：
+
+- 除了故意遗留的两项，所有门禁回归在内层结束时：
+  - 普查没有存活进程，逐条记录也都已结束，没有状态读不到的对象，补救没有执行；
+  - Linux 的内层自己也核对了没有留下子进程（存活或未回收的僵尸），否则内层的结论会带上这一理由。
+- **已创建而未登记的进程**（外层列出，附结束状态）：
+  - 报告损坏的 7 项各 1 个睡眠进程，已结束，缺额 1；
+  - `load.chain-corrupt` 4 个链节点，已结束，缺额 4；
+  - 未登记数都不多于缺额。这是数量上的容纳，不是逐个对象的对应：缺额也计入从未创建的预期进程，例如 `load.chain-short` 的缺额 1 是没有启动的那一层，`load.fanout-partial` 的缺额 20 是没有启动的 20 个后代。
+- **故意遗留的两项**：
+  - 补救之前，`left` 中各有 1 个存活进程。`leak-unrecorded` 的那一个没有任何记录（`unrecorded`），只有普查能看到它。
+  - Linux 的内层自己的“留下的子进程”检查也报告了它。
+  - 外层随后按本轮的标记与身份（Windows 按 Job）结束了它，补救之后没有存活进程。
+  - 这两项因正确发现遗留而通过：补救成功没有使任何一项检查通过，也没有依赖辅助进程自己的 8 s 定时器补证。
+
+**隔离变异**（作者本机，仓库外的原型副本，每次只撤回一项修复，只运行它针对的回归与健康正对照）：
+
+| 变异 | 撤回的修复 | Windows | WSL |
+|---|---|---|---|
+| M13 | 绑定之后读不到状态，又记为身份不符 | — | `observe.sweep-recheck-once` 回到 confirmed、exit 0 |
+| M14 | 清扫中 `waitid` 的失败不保存 | — | `observe.sweep-wait-once` 回到 confirmed、exit 0 |
+| M15 | 起点的子进程列表读不到，又当作空列表 | — | `observe.baseline-once` 回到 confirmed、exit 0 |
+| M16 | subreaper 读取失败，又返回 0 | — | `observe.prctl-fails` 回到 confirmed、exit 0 |
+| M17 | Job 成员读取失败，又走“不在 Job 中”的分支 | `observe.injob-once` 回到 confirmed、exit 0 | — |
+| M18 | 不带外通报 | `witness.write-fail`、`witness.identity-unknown` 的证据被接受（外层没有任何问题） | 同左 |
+| M19 | 宽松解析（接受截断的尾行，跳过未知 kind，接受重复） | `witness.truncated`、`duplicate`、`unknown-kind` 的证据被接受 | 同左 |
+| M20 | 不普查 | `witness.leak-unrecorded` 看不到遗留，只剩 `witness-count`；`leak-unreceipted` 仍被逐条记录发现（互为后备） | `witness.leak-unrecorded` 外层没有任何问题；`leak-unreceipted` 同左 |
+| M21 | 不核对 Job 计数 | `witness.unrecorded-ended` 的证据被接受 | — |
+| M22 | 不核对封条 | `witness.root-write-fail` 缺少 `witness-seal`（证据仍因带外通报与 Job 计数被拒绝） | 缺少 `witness-seal`（仍因带外通报被拒绝） |
+| M23 | 身份读不到时写 `unknown` 并接受 | `witness.identity-unknown` 内层回到 confirmed、exit 0，外层只靠创建者的记录（`witness-receipt`）发现身份不符 | 同左 |
+| M24 | 普查之前等待 9 s（旧的宽限） | `leak-unreceipted`、`leak-unrecorded` 的遗留按自己的定时器结束，外层不再报告遗留 | 同左 |
+
+- 健康正对照在每一个变异中都通过：`control.silent-holder`，以及 Windows 的 `control.normal-drain` 或 Linux 的 `control.adoption-chain`。
+- 变异只在作者本机运行，没有进入 CI；macOS 没有变异。
+
+**直接检查**（不是门禁回归，也不是机制证据，三平台 CI 与本机都通过；WSL 上的 `TestStartPoints` 因测试二进制旁没有源码而 SKIP）：
+
+- `TestWitnessJudge`：24 个构造的见证与封条，期望写死在表中，不由被检查的代码计算。包括：空文件（不论封条）、读取失败、截断、未知 kind、重复、`unknown` 身份、非规范 PID、旧的四字段记录、没有创建记录的回执、身份与创建记录不同、没有记录的创建者、别的进程的 `root`、封条报告失败、封条计数不符、没有封条、两个封条、带外通报、Job 计数不符，以及 3 个健康的正例。
+- `TestRecordAlive`：自己的真实身份为存活，同一 PID 的另一身份为已结束，`unknown` 身份不被接受。
+- `TestStartPoints`：源码中除列出的例外，没有绕过 `start` 的启动。
+
+**计数分开**，三个层次互不替代，也不互相引用同一结果：
+
+| 计数 | 来源 | 含义 |
+|---|---|---|
+| 门禁自检的通过 | `WP25GATE` | 这项自检得到了它要求的结果，可以是“正确地拒绝” |
+| 内层机制的结论 | 内层的 `WP25RESULT` | 被注入故障的那次运行的结论 |
+| 外层证据是否有效 | `WP25GATE` 中的 `problems` | 外层对它自己证据的判断 |
+
+- 整次诊断的退出状态，只在三者都符合要求时为成功。见证故障类的自检通过，表示外层**正确地判定那份证据无效**，不是任何机制的 confirmed。
+- 没有注入时，见证出现任何问题，都会使对应的门禁回归失败、整次诊断失败。
+- 直接检查的期望不来自门禁回归，门禁回归的命中也不来自见证文件。
+
 ## 3. 运行与环境
 
 ### 3.1 运行
 
 | 运行 | 对象 | 触发 | 结果 |
 |---|---|---|---|
-| [run 39887528435](https://github.com/XKHoshizora/specmetry/actions/runs/39887528435) | `8fea6c607b8e760ddd3428d7d674739e2d6b8197`（第二轮修复） | push，attempt 1 | **completed/success**；场景 Ubuntu 38/38、macOS 27/27、Windows 29/29 confirmed；门禁回归 21/21、16/16、19/19 |
-| [run 39886679862](https://github.com/XKHoshizora/specmetry/actions/runs/39886679862) | `1df33dff77ea252c4cae2535f82dd197ffd58697`（第二轮回归先行） | push，attempt 1 | **completed/failure**（预期）：门禁回归 Ubuntu 10/21、macOS 8/16、Windows 9/19 失败；场景 38、27、29 全部 confirmed |
-| 本机 Windows 11 | 与 `8fea6c6` 相同的原型代码 | 作者手动 | 场景 29/29 confirmed；门禁回归 19/19 |
-| 本机 WSL2 | 与 `8fea6c6` 相同的原型代码（交叉编译） | 作者手动 | 场景 37 confirmed、1 unsupported（没有 pwsh）；门禁回归 21/21 |
+| [run 39954957954](https://github.com/XKHoshizora/specmetry/actions/runs/39954957954) | `e77af946291862191759d3af6e94e372221748a2`（第三轮修复） | push，attempt 1 | **completed/success**。<ul><li>场景：Ubuntu 38/38、macOS 27/27、Windows 29/29 confirmed；</li><li>门禁回归：36/36、27/27、32/32；</li><li>直接检查都通过</li></ul> |
+| [run 39951830770](https://github.com/XKHoshizora/specmetry/actions/runs/39951830770) | `8f42e58f43a31b433c540c8146fc3873dec3aa2c`（第三轮回归先行） | push，attempt 1 | **completed/failure**（预期）。<ul><li>门禁回归失败：Ubuntu 12/35、macOS 8/26、Windows 10/31；</li><li>场景：Ubuntu 38、macOS 27 confirmed；Windows 28 confirmed、1 refuted（`T1.pipe.escaped-holder` 的计时，§13）</li></ul> |
+| 本机 Windows 11 | `e77af94` 的工作树 | 作者手动 | 场景 29/29 confirmed；门禁回归 32/32；直接检查都通过 |
+| 本机 WSL2 | `e77af94` 的工作树（交叉编译） | 作者手动 | 场景 37 confirmed、1 unsupported（没有 pwsh）；门禁回归 36/36；`TestStartPoints` SKIP（二进制旁没有源码），其余直接检查通过 |
+| 本机 Windows 11 | `8f42e58`（回归先行） | 作者手动 | 门禁回归 10/31 失败；另一次只跑场景（不含门禁）的运行中，`T1.pipe.escaped-holder` refuted（阶段 D 999.92 ms），其余 28 个 confirmed |
+| 本机 WSL2 | `8f42e58`（回归先行） | 作者手动 | 门禁回归 12/35 失败 |
+| run 39887528435 | `8fea6c6`（第二轮修复） | push | 历史观测（§3.4） |
+| run 39886679862 | `1df33df`（第二轮回归先行） | push | completed/failure（预期，§2.8） |
 | run 39835302375 | `a793ced`（第一轮修复） | push | 历史观测（§3.4） |
 | run 39830995366 | `5140588`（第一轮回归先行） | push | completed/failure（预期，§2.7） |
 | run 39815658463、39816938304 | `bcf080f`、`4754142` | push | 历史观测（§3.4） |
 
-- 第二轮修复后的运行：每个 Job 检出 `8fea6c6` 本身；没有重跑；唯一的 SKIP 是只供门禁回归内层运行的 `TestInnerForeignPID`；Ubuntu 的原型步骤带 `-race`，没有数据竞争的报告。各平台的场景 ID 集合与 run 39835302375 相同，并集为 53；38 + 27 + 29 是 94 次平台观察，不是 94 个独立场景。
-- 不同运行的统计不混合：本节以下与 §4 ~ §8 的数值都来自 run 39887528435 或与它同一份代码的本机运行。
+- **第三轮修复后的运行**：
+  - 每个 Job 检出 `e77af94` 本身；没有重跑。
+  - SKIP 只有两个只供门禁回归内层运行的测试：`TestInnerForeignPID` 与 `TestInnerLeak`。
+  - Ubuntu 的原型步骤带 `-race`，没有数据竞争的报告。
+  - 各平台的场景 ID 集合与 run 39887528435 相同，并集为 53。38 + 27 + 29 是 94 次平台观察，不是 94 个独立场景；结果行在 Results 步骤中重印，按 ID 去重计数。
+- **本机的两次修复后运行**都在提交 `e77af94` 之后、对同一棵树进行。此前同一份代码在两处注释重排之前的运行，结果相同。
+- **不同运行的统计不混合**：本节以下与 §4 ~ §8 的数值，都来自 run 39954957954 或与它同一份代码的本机运行。
 
 ### 3.2 环境
 
@@ -308,9 +553,9 @@
 
 runner 的镜像在各轮之间变化：Ubuntu 在 run 39816938304 为内核 7.0.0-1017-azure，此后各轮为 6.17.0-1022-azure；Windows runner 上的 Windows PowerShell 与 pwsh 在 run 39887528435 为 5.1.26100.33648 与 7.6.7（此前为 33438 与 7.6.6）。
 
-### 3.3 逐场景的结论（第二轮修复后）
+### 3.3 逐场景的结论（第三轮修复后）
 
-✓ 为 `confirmed`，— 为 `unsupported`，空白为该平台没有这一场景（平台专属）。没有任何 `refuted` 或 `invalid`。CI 列是 run 39887528435。
+✓ 为 `confirmed`，— 为 `unsupported`，空白为该平台没有这一场景（平台专属）。没有任何 `refuted` 或 `invalid`。CI 列是 run 39954957954，本机列是 `e77af94` 的工作树；与第二轮修复后（run 39887528435）的表逐格相同。
 
 | 场景 | 门槛 | 类别 | Ubuntu | macOS | Windows | 本机 Win11 | 本机 WSL |
 |---|---|---|---|---|---|---|---|
@@ -382,6 +627,15 @@ runner 的镜像在各轮之间变化：Ubuntu 在 run 39816938304 为内核 7.0
   - 经 `pidProc` 观察进程结束的场景（报告了后代的全部场景），当时一次被覆盖的观察失败不会使运行无效；没有证据表明当时发生过这样的失败；
   - 经 `runCheck` 的 T2 场景与报告损坏的拒绝路径，当时的拒绝可能留下或不申报已启动的进程（Linux 的短链会留下节点，见 §2.8）；正常运行的完整链没有这一问题；
   - 修复后这些场景在三平台都 confirmed（§3.3），当前证据以 run 39887528435 为准。
+- **Review 077 之后**：run 39887528435（`8fea6c6`）与其常规 CI 同样保留为历史观测。它的门禁回归在当时的范围内成立（Review 077 第三、四节确认精确反例的修复），但有两点没有证明。
+  - **没有证明其余共享入口的一次失败必使运行无效**：
+    - 影响经 Linux 清扫的 T2 场景：绑定之后读不到状态时记为身份不符，只有 `T2.adoption.chain` 核对了不符数为 0；
+    - 影响 Linux 全部场景的留下子进程检查：起点的列表读不到当作空列表；
+    - 影响核对 subreaper 的 T2 场景；
+    - 影响 Windows 的 `T4.start.fail-resume`：Job 成员读不到时走另一分支，而预测不看这一分支。
+    - 没有证据表明当时发生过这些失败。
+  - **没有证明外层的独立核验在见证本身失败时仍拒绝通过**：当时的“已启动的辅助进程都已结束、都已登记”只在见证完整、身份有效时成立；当时的门禁回归中，见证写入是否全部成功没有被核对。
+  - 修复后这些场景与全部门禁回归在三平台都通过（§3.3、§2.9），当前证据以 run 39954957954 为准。
 
 ## 4. T1 / T6：管道路径的收尾与受控目的端
 
@@ -517,8 +771,8 @@ E-main 与组身份的场景同时属于 T1（Linux）与 T3（macOS），这里
 | C-16 | **Windows 启动链的失败处理**（只限已测试的分支）：创建失败 → 没有进程，只关闭 Job 句柄；加入 Job 或确认失败 → 绝不恢复，`TerminateProcess` 后对进程句柄做有时限的等待；恢复失败（已在 Job 中）→ `TerminateJobObject` 后确认 `ActiveProcesses = 0`。之后关闭 Runner 的 Job 与进程句柄并核对关闭的结果，`Wait` 释放 Go 的进程句柄 | `T4.start.*`、`T4.chain.normal` | 未测的原生失败点见 §7；父端独立于用户代码的期限、提前异常与所有权移交须在 T4 的规格中写明；没有标记文件不单独证明所有恢复失败的路径都没有运行用户代码 |
 | C-17 | **Windows 的终止请求不等于结束**：只有 `ActiveProcesses = 0` 才确认结束；`TerminateJobObject` 失败或查询失败 → F1，即使进程事实上已经结束。关闭 Job 句柄（`KILL_ON_JOB_CLOSE`）是再次请求，不是确认 | `T4.teardown.*` | 没有观察到真实的异步窗口；不据此要求无目标的重负载压力 |
 | C-18 | **命令传递的适配器**（草案 §5.5，按 runner 上的版本确认）：Unix 的 `sh` / `bash` / `dash` / `pwsh` 用 argv；Windows 的 Git for Windows `sh` / `bash`（含 `bin\sh.exe` 包装程序）用 MSYS 引号规则，`powershell` / `pwsh` 用 MSVCRT 规则，`cmd` 原样放在 `/d /s /c "…"` 中 | `T5.adapter.*` | 只是所测版本上这些脚本文本的往返；查找、PATH、worktree 排除、安装布局仍需规格；D1 ~ D3 仍待决定 |
-| C-19 | **观察失败不可撤销**：一次检查中任何一次状态读取、等待或枚举失败，都使这次检查的结论保守（原型中为 invalid，生产中按 F1 或环境错误）；之后的成功读数不能恢复它。结束与回收仍照常进行，但“已确认结束”与“观察曾失败”分开报告 | 门禁回归 `observe.fail-once`；变异 M8 | 生产中的分类（F1 / 退出码 6）依赖 D19、D20 与错误约定；只证明了所测的观察点 |
-| C-20 | **拒绝路径的收尾**：在排他区间内因负载、报告或归属被拒绝的检查，在离开区间之前先结束它的进程组，再清扫区间内被收养的全部进程（按区间的规则它们属于这次检查，不论是否报告过），然后才清除 subreaper、释放闸门；已知的进程在拒绝之前就登记 | 门禁回归 `load.chain-short`、`load.chain-corrupt`；变异 M9、M10 | 只在 Linux 的排他区间内成立；区间外（macOS、Linux 的 `group.escape-boundary`）报告读不懂的脱组后代无法找到，只能如实申报为未入账；生产 Runner 的拒绝路径尚未实现 |
+| C-19 | **观察失败不可撤销**：一次检查中任何一次状态读取、等待、回收或枚举失败，都使这次检查的结论保守（原型中为 invalid，生产中按 F1 或环境错误）；之后的成功读数不能恢复它；“读不到”不能变成“不存在”“空列表”“另一个进程”或“0”。结束与回收仍照常进行，但“已确认结束”与“观察曾失败”分开报告。被测机制预期的故障（身份不符、pidfd 不可用、注入的 Job 查询失败）不在此列 | 门禁回归 `observe.fail-once`、`observe.sweep-recheck-once`、`observe.sweep-wait-once`、`observe.baseline-once`、`observe.prctl-fails`、`observe.injob-once`；变异 M8、M13 ~ M17 | 生产中的分类（F1 / 退出码 6）依赖 D19、D20 与错误约定。“一次失败、之后成功”的注入只在所列的 6 个观察点上做了；其余共享入口（Windows 的等待与 Job 确认、macOS 的退出观察、Unix 清理的回收）只有持续失败的注入或源码层面的覆盖（§2.9 表 A），不能概括为全部已动态验证 |
+| C-20 | **拒绝路径的收尾**：在排他区间内因负载、报告或归属被拒绝的检查，在离开区间之前先结束它的进程组，再清扫区间内被收养的全部进程（按区间的规则它们属于这次检查，不论是否报告过），然后才清除 subreaper、释放闸门；已知的进程在拒绝之前就登记 | 门禁回归 `load.chain-short`、`load.chain-corrupt`；变异 M9、M10 | 只在 Linux 的排他区间内成立；区间外（macOS、Linux 的 `group.escape-boundary`）报告读不懂的脱组后代无法找到，只能如实申报为缺额；生产 Runner 的拒绝路径尚未实现。原型中拒绝之后的状态由外层的普查独立核验（§2.9），那是测试基座的手段，不是生产 Runner 的候选 |
 
 ## 10. 产品决定单（全部未批准）
 
@@ -545,7 +799,7 @@ E-main 与组身份的场景同时属于 T1（Linux）与 T3（macOS），这里
 
 按 Review 075 第十节第 1 点。T1 ~ T6 只得到局部支持，不因门禁修好而宣布完成：
 
-1. **B1 的独立复审**：两轮的修复、回归与修复后的证据（§2.7、§2.8、§3）待独立复审；复审之前不宣布 B1 关闭。
+1. **B1 的独立复审**：三轮的修复、回归与修复后的证据（§2.7 ~ §2.9、§3）待独立复审；复审之前不宣布 B1 关闭。
 2. **候选的前提与措辞**（§9 的“前提与限制”）：特别是 O3 之后的后续调用（C-4 与 D20）、父端独立于用户代码的期限、Windows 未测的原生失败点、macOS 的原始 ABI 与枚举的错误和预算、Linux F1 之后的宿主状态。
 3. **C-9 的规则设计**：覆盖实际的启动、回收与信号前提能力（不只是 `os/exec` 的导入）；完整的生产 lint 在授权之后兑现，不能先声称它已存在。
 4. **闸门的生产拓扑**（C-8）：全局实例的所有者、上下文采集的 git 与排他区间的先后、取消与等待、F1 之后的资源策略、避免同一闸门内的自锁。
@@ -574,7 +828,22 @@ E-main 与组身份的场景同时属于 T1（Linux）与 T3（macOS），这里
 - **其他版本与布局**：只有所列的 macOS 26.6.2（arm64）、Windows Server 2025（26100）与 Windows 11（26300）、Ubuntu runner（内核 6.17 与 7.0）与 WSL2（内核 6.18）、Git for Windows 2.56.0；其他 Git for Windows 版本与安装方式、Cygwin、独立 MSYS2、旧内核（没有 pidfd）没有测试。
 - **静态规则（C-9）的实现**：本文只给出候选与反例，没有实现 lint。
 - **闸门覆盖的完整性**：原型中的共享租约是辅助进程与 `git --version`，没有改动 `gitx`。
-- **门禁本身**：门禁回归与变异覆盖了所列的故障；不是对一切可能的损坏的证明。变异只在作者本机运行（Windows 与 WSL），macOS 没有变异。Linux 上读 `/proc` 失败只由注入模拟；在 `hidepid` 等配置下，读不到的进程会使观察为 invalid（保守），没有测试。一次观察失败只在 `pidProc.ended` 一个观察点上做了“一次失败、之后成功”的注入；其他观察点（等待、组长、组与 Job 的确认、清扫）的失败直接记入终判，只有持续失败或源码层面的覆盖。
-- **外层核验的范围**：见证只覆盖测试二进制自己的辅助进程（它们写见证）；内层直接启动的 `git`、解释器等不写见证，由内层自己的清理覆盖。外层核验辅助进程是否结束，不核验它们由谁回收；内层结束之后，它的僵尸子进程由 init 回收。区间外脱组的后代在报告读不懂时无法登记，只能申报为未入账（`group.escape-boundary` 的损坏报告没有回归）。
-- **Review 076 N4**（NON-BLOCKER，本轮没有修复）：持有者写 `epipe` 记录失败时，F1 场景把“没有观察到预测的事件”记为 refuted，而不是把“观察工具失败”记为 invalid；没有形成假通过。建议把持有者的报告失败作为独立的工具故障状态传给场景，并增加分类回归。
+- **门禁本身**：
+  - 门禁回归与变异覆盖了所列的故障，不是对一切可能的损坏的证明。变异只在作者本机运行（Windows 与 WSL），macOS 没有变异。
+  - Linux 上读 `/proc` 失败只由注入模拟；在 `hidepid` 等配置下，读不到的进程会使观察为 invalid（保守），没有测试。
+  - “一次失败、之后成功”的注入只在 6 个观察点上做了（`pidProc.ended`、清扫绑定之后的读取、清扫的 `waitid`、起点的子进程列表、subreaper、Windows 的 Job 成员读取）。其余共享入口的失败按 §2.9 表 A 记入终判，只有持续失败的注入或源码层面的覆盖。
+- **外层核验的范围**（§2.9）：
+  - **见证**：覆盖内层启动的每一个进程，包括 `git`、解释器（它们只有创建记录，没有回执）；回执只来自测试二进制自己的辅助进程。`TestStartPoints` 是对本包源码的文本扫描，不覆盖依赖库内部启动的进程（本原型没有这样的依赖）。
+  - **带外通报**：Unix 是对外层进程的 `SIGUSR1`，Windows 是外层的命名事件。通报本身失败（发信号或打开事件失败）不能再被检出；在 Unix 上，这时只剩写者自己的退出码。Windows 上 Job 的已创建进程数另外兜住缺少创建记录的进程，Unix 没有对应的计数。
+  - **Unix 上计数不到的情形**：一个绕过 `start` 的启动点，如果它启动的进程在外层查看之前已经结束，Unix 上发现不了，只能靠 `TestStartPoints`。仍存活的，普查能发现。
+  - **普查的前提**：本轮的进程从内层继承唯一的标记，并且可读其环境（同一用户、可 dump）。启动不早于内层、属于同一用户、却读不到环境的其他进程，会使普查失败（保守，这项检查不通过）。一个故意清除自己环境的进程，普查看不到；本原型的辅助进程没有这样做。
+  - **测试条件的变化**：Windows 的内层运行在外层自己的 Job 中，内层每次检查的 Job 嵌套在它下面；门禁之下，辅助进程先等待自己的创建记录再做事。正常的诊断运行（不在门禁之下）不受影响。
+  - **补救**只针对普查找到的本轮进程（Windows 按 Job 成员；Unix 按标记与身份），从不使用无效见证中的 PID；补救之后的状态另行记录。区间外脱组的后代在报告读不懂时无法登记，只能申报为缺额（`group.escape-boundary` 的损坏报告没有回归）。
+- **Review 076 N4**（NON-BLOCKER，本轮仍没有修复）：持有者写 `epipe` 记录失败时，F1 场景把“没有观察到预测的事件”记为 refuted，而不是把“观察工具失败”记为 invalid；没有形成假通过。建议把持有者的报告失败作为独立的工具故障状态传给场景，并增加分类回归。
+- **Review 077 N5**（NON-BLOCKER，本轮收口）：`missing` 改称 `shortfall`（预期登记的缺额），外层另列出已创建而未登记的进程及其结束状态（`unowned`）；“未登记数不多于缺额”只是数量上的容纳，不是逐个对象的对应，也不是结束的证明（结束由普查与逐条记录证明）。
+- **新登记：Windows 上阶段 D 的计时**（本轮发现，不在本轮的授权范围内，没有修复）：
+  - **现象**：`T1.pipe.escaped-holder` 预测“阶段 D 用满 `T_drain`”（计得的时长 ≥ 1 s）。截止时刻由 Go 的 `time.Now()` 算出，它在 Windows 上随时钟中断更新；计时用的是性能计数器（`stopwatch`）。两次读数分处一个时钟中断的两侧时，计得的时长可以比 1 s 短一点。
+  - **观察**：回归先行的诊断 run 39951830770 的 Windows Job（999.82 ms），与作者本机同一提交的一次运行（999.92 ms），都因此判为 refuted。此前各轮与修复后的 run 39954957954（1.00045 s）都 ≥ 1 s。
+  - **性质**：它是测量工具的不一致，不是机制的发现；不形成假通过，但会使诊断失败。
+  - **建议**：在之后的轮次中，截止与计时用同一个时钟，或者按时钟粒度放宽这一预测，并增加回归。没有为取得绿色而重跑。
 - **`-race` 只在 Linux**；macOS 与 Windows 的原型没有开启竞态检测。
