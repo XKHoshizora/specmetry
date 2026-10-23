@@ -198,7 +198,11 @@ type phaseClock interface {
 }
 
 // goClock is Go's clock: time.Now's monotonic reading and the runtime's
-// timers.
+// timers, the clock T_drain and T_join are defined on. On Windows it
+// advances with the clock interrupt; a finer reading of the same phase
+// (the stopwatch's performance counter) can be shorter by up to one of its
+// ticks, and the tick can change while a run goes on. So a phase is bounded
+// and judged on this clock, never on the stopwatch.
 type goClock struct{}
 
 func (goClock) now() time.Time { return time.Now() }
@@ -211,29 +215,32 @@ func (goClock) wake(d time.Duration) (<-chan time.Time, func() bool) {
 // wait waits until the copier returns or the deadline passes.
 func (c *copier) wait(deadline time.Time) bool { return c.waitOn(goClock{}, deadline) }
 
-// waitOn is wait on the given clock.
+// waitOn waits until the copier returns, or until clk reads at least the
+// deadline (Review 078 N6): a wake-up is only a cue to read the clock
+// again, so a phase never ends before its own clock says so.
 func (c *copier) waitOn(clk phaseClock, deadline time.Time) bool {
-	if c.res != nil {
-		return true
-	}
-	select {
-	case r := <-c.done:
-		c.res = &r
-		return true
-	default:
-	}
-	left := deadline.Sub(clk.now())
-	if left <= 0 {
-		return false
-	}
-	ch, stop := clk.wake(left)
-	defer stop()
-	select {
-	case r := <-c.done:
-		c.res = &r
-		return true
-	case <-ch:
-		return false
+	for {
+		if c.res != nil {
+			return true
+		}
+		select {
+		case r := <-c.done:
+			c.res = &r
+			return true
+		default:
+		}
+		left := deadline.Sub(clk.now())
+		if left <= 0 {
+			return false
+		}
+		ch, stop := clk.wake(left)
+		select {
+		case r := <-c.done:
+			stop()
+			c.res = &r
+			return true
+		case <-ch:
+		}
 	}
 }
 
@@ -257,18 +264,23 @@ type s6Result struct {
 	out     map[string]outcome
 	stopped bool          // the read was stopped
 	pending int           // copiers not returned when the read was stopped
-	drain   time.Duration // time spent in phase D
-	join    time.Duration // time spent in phase J
+	drain   time.Duration // time spent in phase D, on the clock that bounds it
+	join    time.Duration // time spent in phase J, on the same clock
+	// The stopwatch's readings of the same phases, kept to compare with
+	// the earlier runs' readings; nothing is judged on them (Review 078 N6).
+	drainFine, joinFine time.Duration
 }
 
 // runS6 is the output step: phase D (skipped when the tree is not
 // confirmed), stopping the read, phase J, then sealing every copy port of
-// the run, whatever came before.
+// the run, whatever came before. Its phases are bounded and measured on
+// Go's clock.
 func runS6(d *dest, ss []*stream, tDrain, tJoin time.Duration, skipDrain bool) s6Result {
 	return runS6On(goClock{}, d, ss, tDrain, tJoin, skipDrain)
 }
 
-// runS6On is runS6 with its phases bounded on clk.
+// runS6On is runS6 on clk: each phase ends on its deadline only once clk
+// reads at least its start plus its length, and its length is read on clk.
 func runS6On(clk phaseClock, d *dest, ss []*stream, tDrain, tJoin time.Duration, skipDrain bool) s6Result {
 	res := s6Result{out: map[string]outcome{}}
 	all := func(deadline time.Time) bool {
@@ -282,9 +294,9 @@ func runS6On(clk phaseClock, d *dest, ss []*stream, tDrain, tJoin time.Duration,
 	}
 	ended := false
 	if !skipDrain {
-		since := stopwatch()
-		ended = all(clk.now().Add(tDrain))
-		res.drain = since()
+		start, fine := clk.now(), stopwatch()
+		ended = all(start.Add(tDrain))
+		res.drain, res.drainFine = clk.now().Sub(start), fine()
 	}
 	if !ended {
 		res.stopped = true
@@ -296,9 +308,9 @@ func runS6On(clk phaseClock, d *dest, ss []*stream, tDrain, tJoin time.Duration,
 		for _, s := range ss {
 			_ = s.r.Close()
 		}
-		since := stopwatch()
-		all(clk.now().Add(tJoin))
-		res.join = since()
+		start, fine := clk.now(), stopwatch()
+		all(start.Add(tJoin))
+		res.join, res.joinFine = clk.now().Sub(start), fine()
 	}
 	ps := make([]*port, 0, len(ss))
 	for _, s := range ss {

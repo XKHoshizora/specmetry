@@ -134,7 +134,7 @@ func TestPipeEscapedHolder(t *testing.T) {
 	s.expect("stderr", o1, r.out["err"])
 	s.expect("read stopped", true, r.stopped)
 	s.expect("copiers blocked at the stop", 1, r.pending)
-	s.expectTrue("phase D used T_drain", r.drain >= tDrain, r.drain.String())
+	s.expectTrue("phase D used T_drain", r.drain >= tDrain, fmt.Sprintf("%v on its own clock (stopwatch %v)", r.drain, r.drainFine))
 	s.expectTrue("phase J within T_join", r.join < tJoin, r.join.String())
 	s.expectTrue("holder's writes fail after the stop", holderErr != nil, fmt.Sprint(holderErr))
 	s.expectTrue("document last and whole", lastIsWhole(buf, log, doc), "")
