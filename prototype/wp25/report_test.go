@@ -11,6 +11,8 @@ package wp25
 //	fanout  all children of a fanout helper have reported
 //	limit   the helper reached its hard limit
 //
+// A holder's epipe and ok records exclude each other: both, in either
+// order, are a broken protocol, and neither counts (Review 084 B-N4).
 // Nothing else is valid: no other kind, no extra field, a positive PID in
 // canonical decimal form, no line over maxLine bytes. While the helpers
 // may still write, an unterminated last line is a write in progress and

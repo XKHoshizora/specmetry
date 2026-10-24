@@ -232,6 +232,11 @@ var gateCases = []gateCase{
 	// hard limit.
 	{id: "report.epipe-limit", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "epipe-limit", want: invalid, hit: true},
 	{id: "report.ok-limit", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "ok-limit", want: invalid, hit: true},
+	// The same in the scenario's own tools (added with the fix; the old code
+	// has no final read): the final read of the report fails beside a record
+	// of a failed write, the read of a kept read end beside a final answer.
+	{id: "report.epipe-read-fails", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "f1-final-read-fails", want: invalid, hit: true},
+	{id: "report.ok-drain-fails", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "f1-drain-fails", want: invalid, hit: true},
 
 	// Review 082 B1-Ra: a stop's result, whenever it comes. Its error must
 	// make the run invalid even when it comes after the run returned; a

@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -170,7 +172,7 @@ func TestPipeF1SkipDrain(t *testing.T) {
 		keep = ss[:1]
 	}
 	if mixed || injectedAny("read-end-kept", "f1-one-kept", "ok-report-fail", "fail-after-ok", "ok-open-output", "output-close-fails",
-		"ok-epipe-reported", "epipe-then-ok", "ok-foreign", "ok-dup", "ok-truncated", "ok-malformed", "ok-limit") {
+		"ok-epipe-reported", "epipe-then-ok", "ok-foreign", "ok-dup", "ok-truncated", "ok-malformed", "ok-limit", "f1-drain-fails") {
 		// A gate regression's healthy counter-case (Review 076 N4): the
 		// scenario keeps a second handle on both read ends, so the stop
 		// leaves the pipes open and the holder's writes do not fail. Its
@@ -195,33 +197,91 @@ func TestPipeF1SkipDrain(t *testing.T) {
 		}
 	}
 	_, _ = d.ownerPort().Write(doc)
-	epipe, err := awaitRecords(rep, "epipe", 1, 3*time.Second)
-	if err != nil && !errors.Is(err, errNotYet) {
-		s.invalidf("%v", err)
+	// Review 084 B-N4: the evidence is collected in full first, the report
+	// read once more after the holder's end, and only then is the whole of
+	// it classified; no record, and no answer, decides on its own.
+	ev := observeF1(s, rep, holder, keptEnds, atStop, len(ss))
+	buf, log := d.snapshot()
+	s.worked(int64(len(buf)))
+	_ = tr.kill()
+	conf := tr.confirm(tKill)
+	if conf {
+		tr.reap(tKill)
 	}
+	ev.finalRead(rep, conf)
+	found, why := classifyF1(ev)
+	if len(why) > 0 {
+		s.invalidf("observation failed: %s", strings.Join(why, "; "))
+	}
+	if found == f1Wrote {
+		s.note("no epipe record; the holder's final answer came after its output closed, and late bytes reached every stream's kept read end from the stop to the end: %v", ev.late)
+	}
+	s.expect("stdout", o2, r.out["out"])
+	s.expect("stderr", o2, r.out["err"])
+	s.expect("phase D skipped", time.Duration(0), r.drain)
+	s.expect("copiers blocked at the stop", 2, r.pending)
+	s.expectTrue("phase J within T_join", r.join < tJoin, r.join.String())
+	s.expectTrue("early output copied", bytes.Contains(buf, []byte("early-out")) && bytes.Contains(buf, []byte("early-err")), "")
+	s.expectTrue("holder's late writes fail", found == f1Failed, ev.records.String())
+	s.expectTrue("document last and whole", lastIsWhole(buf, log, doc), "")
+	s.expect("cleanup kill confirmed", true, conf)
+}
+
+// f1Evidence is what the F1 scenario observed of its holder (Review 084
+// B-N4), all of it collected before anything is classified.
+type f1Evidence struct {
+	holder   int       // the verified holder's PID
+	state    string    // what was known of its state when the observation ended
+	asked    bool      // the scenario asked for the holder's final answer
+	kept     int       // streams with a read end the scenario kept
+	streams  int       // the check's streams
+	ended    bool      // after the question, EOF came through every kept read end
+	late     []int     // bytes each kept stream carried from the stop to its end
+	records  f1Records // the epipe and ok records of the final report, in order
+	failures []string  // what failed while collecting: a read, a write, the report
+}
+
+type f1Records []reportLine
+
+func (rs f1Records) String() string {
+	if len(rs) == 0 {
+		return "no epipe or ok record"
+	}
+	var b strings.Builder
+	for i, r := range rs {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		fmt.Fprintf(&b, "%s %d", r.kind, r.pid)
+	}
+	return b.String()
+}
+
+// observeF1 collects the evidence while the holder may still run. Without
+// a record of a failed write (Review 076 N4, Reviews 081 to 083 N4-R) the
+// record may not have arrived, the holder may have failed to write it, or
+// its late writes may not have failed; it is asked for its final answer,
+// which ends the observation: it writes nothing more, closes its output,
+// and answers "ok" only if none of its writes failed. The end is shown by
+// EOF through each kept read end, within one 2 s budget for all of them;
+// the late bytes are what each stream carried from the stop to that end.
+// A failure on the way is recorded and the collection goes on.
+func observeF1(s *scen, rep string, holder owned, keptEnds []*kept, atStop []int, streams int) f1Evidence {
+	ev := f1Evidence{holder: holder.pidOf(), kept: len(keptEnds), streams: streams}
+	failed := func(err error) {
+		if err != nil && !errors.Is(err, errNotYet) {
+			ev.failures = append(ev.failures, err.Error())
+		}
+	}
+	epipe, err := awaitRecords(rep, "epipe", 1, 3*time.Second)
+	failed(err)
 	if len(epipe) == 0 {
-		// No record (Review 076 N4, Reviews 081 and 082 N4-R). It may not
-		// have arrived, the holder may have failed to write it, or the
-		// holder's late writes may not have failed; whether the holder still
-		// runs tells these apart in no way, and late bytes on one stream
-		// show that stream's writes, not the holder's other writes or its
-		// report. The run is a finding only with both:
-		//
-		//   - the holder's own confirmation, asked for now, that none of its
-		//     writes has failed (an "ok" record, written only by a holder
-		//     whose writes all succeeded so far);
-		//   - late bytes after the stop on every stream, each through a read
-		//     end the scenario kept.
-		//
-		// Anything less leaves the observation unconfirmed, whatever part of
-		// it succeeded, and the run does not count.
+		ev.asked = true
 		if err := os.WriteFile(rep+".query", nil, 0o600); err != nil {
-			s.invalidf("asking the holder: %v", err)
+			failed(fmt.Errorf("asking the holder: %w", err))
 		}
 		ok, err := awaitRecords(rep, "ok", 1, 2*time.Second)
-		if err != nil && !errors.Is(err, errNotYet) {
-			s.invalidf("%v", err)
-		}
+		failed(err)
 		if injectedAny("fail-after-ok", "ok-epipe-reported") && len(ok) == 1 {
 			// The reviews' cases: the holder's failure after its answer has
 			// happened before the checks below (the test's own marker).
@@ -231,71 +291,123 @@ func TestPipeF1SkipDrain(t *testing.T) {
 			}
 			s.note("load: the holder's failure after its answer happened: %v", fileThere(rep+".failed"))
 		}
-		// A record of a failure may have come meanwhile; it still counts.
-		if epipe, err = awaitRecords(rep, "epipe", 1, 0); err != nil && !errors.Is(err, errNotYet) {
-			s.invalidf("%v", err)
-		}
-		if len(epipe) == 0 {
-			if len(ok) == 0 {
-				s.invalidf("observation failed: no epipe record, and no final answer from the holder: its record was not written or has not arrived, or its tool failed (the holder %s)", stateOf(holder))
+		ev.ended = true
+		endBy := time.Now().Add(2 * time.Second)
+		for i, k := range keptEnds {
+			n, eof, err := k.drain(endBy)
+			if err == nil && i == 0 && injected("f1-drain-fails") {
+				// A tool failure beside a complete answer: the read of a
+				// kept read end fails.
+				injectHit("f1.drain", os.Getpid())
+				err = errors.New("injected: the read failed")
 			}
-			// The answer is final only if the observation has ended
-			// (Review 083 N4-R-S): every writer of every stream has closed,
-			// shown by EOF through each kept read end, so nothing can belong
-			// to the observation after it. The late bytes are what each
-			// stream carried from the stop to that end.
-			late := make([]int, len(keptEnds))
-			ended := true
-			endBy := time.Now().Add(2 * time.Second)
-			for i, k := range keptEnds {
-				n, eof, err := k.drain(endBy)
-				if err != nil {
-					s.invalidf("observation failed: reading a kept read end to its end: %v", err)
-				}
-				late[i] = n - atStop[i]
-				if !eof {
-					ended = false
-				}
+			if err != nil {
+				failed(fmt.Errorf("reading a kept read end to its end: %w", err))
 			}
-			if !ended {
-				s.invalidf("observation failed: the holder answered, but a stream still had a writer 2 s later: its answer was not the end of the observation (late bytes %v)", late)
-			}
-			// Once every writer is gone nothing more can come: the report is
-			// read one last time, and an answer beside a failure is no answer.
-			if epipe, err = awaitRecords(rep, "epipe", 1, 0); err != nil && !errors.Is(err, errNotYet) {
-				s.invalidf("%v", err)
-			}
-			if len(epipe) != 0 {
-				s.invalidf("observation failed: the holder answered and also reported a failed write")
-			}
-			seen := len(keptEnds) == len(ss)
-			for _, n := range late {
-				if n <= 0 {
-					seen = false
-				}
-			}
-			if !seen {
-				s.invalidf("observation failed: the observation ended, but late bytes did not reach every stream through a kept read end (%d of %d kept, late bytes %v)", len(keptEnds), len(ss), late)
-			}
-			s.note("no epipe record; the holder's final answer came after its output closed, and late bytes reached every stream's kept read end from the stop to the end: %v", late)
+			ev.late = append(ev.late, n-atStop[i])
+			ev.ended = ev.ended && eof
 		}
 	}
-	buf, log := d.snapshot()
-	s.worked(int64(len(buf)))
-	_ = tr.kill()
-	conf := tr.confirm(tKill)
-	if conf {
-		tr.reap(tKill)
+	ev.state = stateOf(holder)
+	return ev
+}
+
+// finalRead reads the report once more, after the holder's end: no writer
+// is left, so it holds all the observation can have, and a record cut
+// short is a truncation. An end not confirmed is no such read.
+func (ev *f1Evidence) finalRead(rep string, ended bool) {
+	if !ended {
+		ev.failures = append(ev.failures, "the holder's end is not confirmed, so its report cannot be read as final")
 	}
-	s.expect("stdout", o2, r.out["out"])
-	s.expect("stderr", o2, r.out["err"])
-	s.expect("phase D skipped", time.Duration(0), r.drain)
-	s.expect("copiers blocked at the stop", 2, r.pending)
-	s.expectTrue("phase J within T_join", r.join < tJoin, r.join.String())
-	s.expectTrue("early output copied", bytes.Contains(buf, []byte("early-out")) && bytes.Contains(buf, []byte("early-err")), "")
-	s.expectTrue("holder's late writes fail", len(epipe) == 1, fmt.Sprintf("%d epipe reports", len(epipe)))
-	s.expectTrue("document last and whole", lastIsWhole(buf, log, doc), "")
-	s.expect("cleanup kill confirmed", true, conf)
+	lines, err := parseReport(rep, ended)
+	if err == nil && injected("f1-final-read-fails") {
+		// A tool failure beside the record of a failed write: the final
+		// read fails.
+		injectHit("f1.final-read", os.Getpid())
+		err = errors.New("injected: the report could not be read")
+	}
+	if err == nil {
+		_, err = tally(lines)
+	}
+	if err != nil {
+		ev.failures = append(ev.failures, "report: "+err.Error())
+		return
+	}
+	for _, l := range lines {
+		if l.kind == "epipe" || l.kind == "ok" {
+			ev.records = append(ev.records, l)
+		}
+	}
+}
+
+type f1Finding int
+
+const (
+	f1Invalid f1Finding = iota // the observation does not count
+	f1Failed                   // the holder's late writes failed: the prediction holds
+	f1Wrote                    // the tools worked, and the late writes did not fail
+)
+
+// classifyF1 decides on the whole of the evidence (Review 084 B-N4). By
+// the protocol (report_test.go), "epipe" says a late write of the holder
+// failed; "ok", given only when asked and only with the holder's output
+// closed, says none did. They exclude each other: both, in either order,
+// break the protocol, so neither counts. Each record must be the
+// holder's. Every rule is checked before anything is decided; a success
+// returns nothing early, and a failure while collecting outweighs both.
+func classifyF1(ev f1Evidence) (f1Finding, []string) {
+	var why []string
+	for _, f := range ev.failures {
+		if !slices.Contains(why, f) {
+			why = append(why, f)
+		}
+	}
+	epipe, ok := 0, 0
+	for _, r := range ev.records {
+		switch r.kind {
+		case "epipe":
+			epipe++
+		case "ok":
+			ok++
+		default:
+			continue
+		}
+		if r.pid != ev.holder {
+			why = append(why, fmt.Sprintf("an %s record of process %d, not of the holder %d", r.kind, r.pid, ev.holder))
+		}
+	}
+	if epipe > 1 || ok > 1 {
+		why = append(why, fmt.Sprintf("%d epipe and %d ok records, where the protocol has at most one", epipe, ok))
+	}
+	switch {
+	case epipe > 0 && ok > 0:
+		why = append(why, fmt.Sprintf("the holder answered that none of its writes failed and reported a failed write (%s): the protocol has one or the other, so neither counts", ev.records))
+	case epipe == 0 && ok == 0:
+		why = append(why, fmt.Sprintf("no epipe record, and no final answer from the holder: its record was not written or has not arrived, or its tool failed (the holder %s)", ev.state))
+	case ok > 0:
+		if !ev.asked {
+			why = append(why, "an answer nobody asked for")
+		}
+		if !ev.ended {
+			why = append(why, fmt.Sprintf("the holder answered, but a stream still had a writer 2 s later: its answer was not the end of the observation (late bytes %v)", ev.late))
+		}
+		seen := ev.kept == ev.streams && len(ev.late) == ev.kept
+		for _, n := range ev.late {
+			if n <= 0 {
+				seen = false
+			}
+		}
+		if !seen {
+			why = append(why, fmt.Sprintf("late bytes did not reach every stream through a kept read end (%d of %d kept, late bytes %v)", ev.kept, ev.streams, ev.late))
+		}
+	}
+	if len(why) > 0 {
+		return f1Invalid, why
+	}
+	if epipe > 0 {
+		return f1Failed, nil
+	}
+	return f1Wrote, nil
 }
 
 // waiting is how many bytes wait in each kept read end; a read that fails
