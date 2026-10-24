@@ -261,6 +261,12 @@ var gateCases = []gateCase{
 	{id: "report.ok-fails-epipe-reported", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "ok-fails-epipe-reported", want: invalid, hit: true},
 	{id: "report.epipe-fails-then-ok", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "epipe-fails-then-ok", want: invalid, hit: true},
 	{id: "report.done-rename-fails", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "done-rename-fails", want: invalid, hit: true},
+	// The other order (added with the fix): the completion is published
+	// first, then the hard limit's real callback enters. It only ends the
+	// holder; nothing of it belongs to the observation, which stays
+	// confirmed. (The old code has no arbitration: its callback reports the
+	// limit after the completion.)
+	{id: "report.limit-after-done", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "limit-after-done", want: confirmed, hit: true},
 	// The same in the scenario's own tools (added with the fix; the old code
 	// has no final read): the final read of the report fails beside a record
 	// of a failed write, the read of a kept read end beside a final answer.

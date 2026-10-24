@@ -25,19 +25,26 @@ const (
 // runHelper runs this binary as one of the scenarios' helper processes.
 // Every helper has a hard limit: it reports "limit" and exits limitExit,
 // which makes the scenario invalid. The limit acts only once the helper
-// runs Go code; the scenarios' own waits are bounded without it.
+// runs Go code; the scenarios' own waits are bounded without it. Its
+// callback first decides under the tool state (tool_test.go): if a
+// holder's completion was published first, the limit only ends the
+// process; otherwise the tool has failed and no completion can follow.
 func runHelper(mode string, args []string) int {
 	limit := helperLimit
 	if ms, err := strconv.Atoi(os.Getenv(limitEnv)); err == nil && ms > 0 {
 		limit = time.Duration(ms) * time.Millisecond
 	}
-	if mode == "holder" && injectedAny("limit-race-epipe", "limit-race-ok") {
+	if mode == "holder" && injectedAny("limit-race-epipe", "limit-race-ok", "limit-after-done") {
 		// Review 086 B-N4-R/T: the holder's real timer, early.
 		limit = 100 * time.Millisecond
 	}
 	time.AfterFunc(limit, func() {
-		limitHeld(mode)
-		_ = report("limit")
+		limitBefore(mode)
+		won := tool.limitEntered()
+		limitHeld(mode, won)
+		if won {
+			_ = report("limit")
+		}
 		os.Exit(limitExit)
 	})
 	// Faults of the gate regressions (Review 077 B1-R2-W): a helper that
@@ -139,7 +146,7 @@ func runHelper(mode string, args []string) int {
 					// written.
 					injectHit("holder.after-answer", os.Getpid())
 					_ = report("ok")
-					_ = os.Stderr.Close()
+					tool.failed(os.Stderr.Close())
 				default:
 					oerr, eerr := os.Stdout.Close(), os.Stderr.Close()
 					if injected("output-close-fails") {
@@ -147,6 +154,8 @@ func runHelper(mode string, args []string) int {
 						injectHit("holder.close-fails", os.Getpid())
 						eerr = os.Stderr.Close()
 					}
+					tool.failed(oerr)
+					tool.failed(eerr)
 					if oerr == nil && eerr == nil {
 						if injectedAny("epipe-then-ok", "epipe-fails-then-ok") {
 							// Review 084 B-N4, the other order: a write after
@@ -272,12 +281,14 @@ func runHelper(mode string, args []string) int {
 	return 99
 }
 
-// complete is a holder's last step (Review 085 B-N4-R), taken only once
-// every record it had to write was written and closed and no tool failure
-// came: it commits its completion, "done <pid>", written and closed in a
-// file of its own and then renamed into place, so the scenario sees all
-// of it or nothing. A failure on the way leaves no completion. Nothing the
-// holder does afterwards belongs to the observation.
+// complete is a holder's last step (Reviews 085 and 086 B-N4-R). Through
+// the tool state it publishes the completion, "done <pid>", only if no
+// entry of this helper has failed, whether or not its caller looked at
+// the error, and the hard limit has not entered: written and closed in a
+// file of its own, then renamed into place in the scenario's temporary
+// directory, and read strictly there. A failure on the way leaves no
+// completion. Nothing the holder does afterwards belongs to the
+// observation.
 func complete() error {
 	rep := os.Getenv(reportEnv)
 	if rep == "" {
@@ -288,6 +299,18 @@ func complete() error {
 		// limit's callback has entered (bounded).
 		awaitFile(rep+".limit-entered", 3*time.Second)
 	}
+	err := tool.complete(func() error { return publishDone(rep) })
+	if err == nil && injected("limit-after-done") {
+		// The limit's callback comes after the completion was published,
+		// and decides (bounded) before this holder ends.
+		awaitFile(rep+".limit-decided", 3*time.Second)
+	}
+	return err
+}
+
+// publishDone writes the completion, "done <pid>", in a file of its own,
+// closes it, and renames it into place.
+func publishDone(rep string) error {
 	pid := os.Getpid()
 	if injected("done-foreign") {
 		// A completion that names another process than its writer.
@@ -321,18 +344,32 @@ func complete() error {
 	return os.Rename(rep+".done-part", rep+".done")
 }
 
-// limitHeld is the gate regressions' hold on the hard limit's callback
-// (Review 086 B-N4-R/T; nothing in a normal run): once it has entered, it
-// leaves a marker and waits at a gate, released by its file or after
-// 10 s, so a holder's completion can come while it runs.
-func limitHeld(mode string) {
-	if mode != "holder" || !injectedAny("limit-race-epipe", "limit-race-ok") {
-		return
+// limitBefore and limitHeld are the gate regressions' holds on the hard
+// limit's callback (Review 086 B-N4-R/T; nothing in a normal run). With
+// limit-race-*, once the callback has entered and decided, it leaves a
+// marker and waits at a gate, released by its file or after 10 s, so a
+// holder's completion can come while it runs. With limit-after-done, it
+// waits (bounded) for the completion before it decides, and leaves a
+// marker after.
+func limitBefore(mode string) {
+	if mode == "holder" && injected("limit-after-done") {
+		injectHit("helper.limit-after-done", os.Getpid())
+		awaitFile(os.Getenv(reportEnv)+".done", 10*time.Second)
 	}
+}
+
+func limitHeld(mode string, won bool) {
 	rep := os.Getenv(reportEnv)
-	injectHit("helper.limit-entered", os.Getpid())
-	_ = os.WriteFile(rep+".limit-entered", nil, 0o600)
-	awaitFile(rep+".limit-release", 10*time.Second)
+	switch {
+	case mode != "holder":
+	case injected("limit-after-done"):
+		injectHit("helper.limit-decided", os.Getpid())
+		_ = os.WriteFile(rep+".limit-decided", []byte(fmt.Sprintln(won)), 0o600)
+	case injectedAny("limit-race-epipe", "limit-race-ok"):
+		injectHit("helper.limit-entered", os.Getpid())
+		_ = os.WriteFile(rep+".limit-entered", nil, 0o600)
+		awaitFile(rep+".limit-release", 10*time.Second)
+	}
 }
 
 // awaitFile waits, bounded, for a file to exist.
@@ -353,18 +390,20 @@ func afterRecord(rep string) error {
 	switch {
 	case injectedAny("epipe-limit", "ok-limit", "epipe-limit-unwritable", "ok-limit-unwritable"):
 		injectHit("holder.limit-after-record", os.Getpid())
+		tool.limitEntered()
 		if err := report("limit"); err != nil {
 			return err
 		}
 	case injectedAny("epipe-limit-gated", "ok-limit-gated"):
 		injectHit("holder.limit-gated", os.Getpid())
+		tool.limitEntered()
 		_ = os.WriteFile(rep+".failed", nil, 0o600) // the failure point is reached
 		time.Sleep(10 * time.Second)
 		_ = report("limit")
 	default:
 		return nil
 	}
-	return fmt.Errorf("the holder reached its hard limit")
+	return errLimit
 }
 
 func fileThere(path string) bool {
@@ -391,11 +430,18 @@ func gated(s *scen, cmd *exec.Cmd) func() {
 
 // report appends one record to the scenario's report file in one write
 // (see report_test.go). Without a report file there is nothing to write.
+// It is the one way to the report: its failure is kept in the tool state,
+// whether or not the caller looks at it, and once the completion is
+// published it writes nothing.
 func report(kind string) error {
 	path := os.Getenv(reportEnv)
 	if path == "" {
 		return nil
 	}
+	return tool.report(func() error { return reportOnce(path, kind) })
+}
+
+func reportOnce(path, kind string) error {
 	flag := os.O_WRONLY | os.O_APPEND
 	if (injected("epipe-report-fail") || injected("epipe-report-fail-alive") || injected("f1-mixed-fault") || injected("fail-after-ok")) && kind == "epipe" || injectedAny("ok-report-fail", "ok-fails-epipe-reported") && kind == "ok" ||
 		injected("epipe-fails-then-ok") && kind == "epipe" ||
