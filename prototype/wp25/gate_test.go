@@ -199,6 +199,9 @@ var gateCases = []gateCase{
 	// keeps its output open.
 	{id: "report.fail-after-ok", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "fail-after-ok", want: invalid, hit: true},
 	{id: "report.ok-not-final", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "ok-open-output", want: invalid, hit: true},
+	// At the end itself: the holder cannot close its output, so it gives
+	// no answer (added with the fix; the old code has no such step).
+	{id: "report.close-fails", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "output-close-fails", want: invalid, hit: true},
 
 	// Review 082 B1-Ra: a stop's result, whenever it comes. Its error must
 	// make the run invalid even when it comes after the run returned; a

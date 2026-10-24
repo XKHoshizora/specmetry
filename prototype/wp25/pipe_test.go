@@ -169,7 +169,7 @@ func TestPipeF1SkipDrain(t *testing.T) {
 		// does its report; with f1-one-kept it writes only stdout.
 		keep = ss[:1]
 	}
-	if injected("read-end-kept") || mixed || injected("f1-one-kept") || injected("ok-report-fail") || injected("fail-after-ok") || injected("ok-open-output") {
+	if injected("read-end-kept") || mixed || injected("f1-one-kept") || injected("ok-report-fail") || injected("fail-after-ok") || injected("ok-open-output") || injected("output-close-fails") {
 		// A gate regression's healthy counter-case (Review 076 N4): the
 		// scenario keeps a second handle on both read ends, so the stop
 		// leaves the pipes open and the holder's writes do not fail. Its
@@ -236,20 +236,47 @@ func TestPipeF1SkipDrain(t *testing.T) {
 		}
 		if len(epipe) == 0 {
 			if len(ok) == 0 {
-				s.invalidf("observation failed: no epipe record, and the holder did not confirm that its writes went on: its record was not written or has not arrived, or its tool failed (the holder %s)", stateOf(holder))
+				s.invalidf("observation failed: no epipe record, and no final answer from the holder: its record was not written or has not arrived, or its tool failed (the holder %s)", stateOf(holder))
 			}
-			late := waiting(s, keptEnds)
+			// The answer is final only if the observation has ended
+			// (Review 083 N4-R-S): every writer of every stream has closed,
+			// shown by EOF through each kept read end, so nothing can belong
+			// to the observation after it. The late bytes are what each
+			// stream carried from the stop to that end.
+			late := make([]int, len(keptEnds))
+			ended := true
+			endBy := time.Now().Add(2 * time.Second)
+			for i, k := range keptEnds {
+				n, eof, err := k.drain(endBy)
+				if err != nil {
+					s.invalidf("observation failed: reading a kept read end to its end: %v", err)
+				}
+				late[i] = n - atStop[i]
+				if !eof {
+					ended = false
+				}
+			}
+			if !ended {
+				s.invalidf("observation failed: the holder answered, but a stream still had a writer 2 s later: its answer was not the end of the observation (late bytes %v)", late)
+			}
+			// Once every writer is gone nothing more can come: the report is
+			// read one last time, and an answer beside a failure is no answer.
+			if epipe, err = awaitRecords(rep, "epipe", 1, 0); err != nil && !errors.Is(err, errNotYet) {
+				s.invalidf("%v", err)
+			}
+			if len(epipe) != 0 {
+				s.invalidf("observation failed: the holder answered and also reported a failed write")
+			}
 			seen := len(keptEnds) == len(ss)
-			for i := range late {
-				late[i] -= atStop[i]
-				if late[i] <= 0 {
+			for _, n := range late {
+				if n <= 0 {
 					seen = false
 				}
 			}
 			if !seen {
-				s.invalidf("observation failed: the holder confirmed no failed write, but late bytes did not reach every stream through a kept read end (%d of %d kept, late bytes %v)", len(keptEnds), len(ss), late)
+				s.invalidf("observation failed: the observation ended, but late bytes did not reach every stream through a kept read end (%d of %d kept, late bytes %v)", len(keptEnds), len(ss), late)
 			}
-			s.note("no epipe record; the holder confirmed its writes went on, and late bytes reached every stream's kept read end after the stop: %v", late)
+			s.note("no epipe record; the holder's final answer came after its output closed, and late bytes reached every stream's kept read end from the stop to the end: %v", late)
 		}
 	}
 	buf, log := d.snapshot()

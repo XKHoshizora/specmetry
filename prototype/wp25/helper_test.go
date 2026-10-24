@@ -100,24 +100,40 @@ func runHelper(mode string, args []string) int {
 		mixed := injected("f1-mixed-fault")
 		answered := false
 		for i := 0; ; i++ {
-			// Asked by its scenario (Review 082 N4-R), a holder that is still
-			// here has had none of its writes fail: it says so once. A
-			// record it cannot write leaves the scenario without an answer.
+			// Asked by its scenario (Reviews 082 and 083 N4-R), the holder
+			// ends its observation: it writes nothing more, closes its output
+			// first, so nothing it could do afterwards belongs to the
+			// observation, and only then gives its one final answer, "ok":
+			// none of its writes failed. An output it cannot close, or an
+			// answer it cannot write, leaves the scenario without one. It
+			// then waits to be ended.
 			if !answered && fileThere(rep+".query") {
 				answered = true
-				_ = report("ok")
 				switch {
 				case injected("ok-open-output"):
 					// Review 083 N4-R-S: an answer that is not the end: the
-					// holder stops writing but keeps its output open.
+					// holder answers and stops writing, its output still open.
 					injectHit("holder.answer-not-final", os.Getpid())
+					_ = report("ok")
 					select {}
 				case injected("fail-after-ok"):
-					// Review 083 N4-R-S, the review's case: after a true answer,
-					// the holder's stderr breaks, so its next write to it fails,
-					// and its report of that fails too.
+					// Review 083 N4-R-S, the review's case: an answer in the
+					// middle; then the holder's stderr breaks, its next write
+					// to it fails, and its report of that fails too.
 					injectHit("holder.after-answer", os.Getpid())
+					_ = report("ok")
 					_ = os.Stderr.Close()
+				default:
+					oerr, eerr := os.Stdout.Close(), os.Stderr.Close()
+					if injected("output-close-fails") {
+						// The close of its output fails (a second close).
+						injectHit("holder.close-fails", os.Getpid())
+						eerr = os.Stderr.Close()
+					}
+					if oerr == nil && eerr == nil {
+						_ = report("ok")
+					}
+					select {}
 				}
 			}
 			both := !mixed && !injected("f1-one-kept") || mixed && fileThere(rep+".stopped")

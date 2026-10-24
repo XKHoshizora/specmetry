@@ -6,7 +6,8 @@ package wp25
 //
 //	pid     the helper is running (sleepers, holders, chain levels)
 //	epipe   a holder's first write failed (the read end was closed)
-//	ok      a holder asked by its scenario found none of its writes failed
+//	ok      a holder's final answer when its scenario asked: its output is
+//	        closed and none of its writes failed
 //	fanout  all children of a fanout helper have reported
 //	limit   the helper reached its hard limit
 //
