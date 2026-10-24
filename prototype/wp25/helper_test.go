@@ -106,6 +106,19 @@ func runHelper(mode string, args []string) int {
 			if !answered && fileThere(rep+".query") {
 				answered = true
 				_ = report("ok")
+				switch {
+				case injected("ok-open-output"):
+					// Review 083 N4-R-S: an answer that is not the end: the
+					// holder stops writing but keeps its output open.
+					injectHit("holder.answer-not-final", os.Getpid())
+					select {}
+				case injected("fail-after-ok"):
+					// Review 083 N4-R-S, the review's case: after a true answer,
+					// the holder's stderr breaks, so its next write to it fails,
+					// and its report of that fails too.
+					injectHit("holder.after-answer", os.Getpid())
+					_ = os.Stderr.Close()
+				}
 			}
 			both := !mixed && !injected("f1-one-kept") || mixed && fileThere(rep+".stopped")
 			_, err := fmt.Fprintf(os.Stdout, "late-out %d\n", i)
@@ -120,7 +133,12 @@ func runHelper(mode string, args []string) int {
 					time.Sleep(3500 * time.Millisecond)
 				}
 				if report("epipe") != nil {
-					if injected("epipe-report-fail-alive") || mixed {
+					if injected("fail-after-ok") {
+						// Tells the scenario the failure happened (the test's
+						// own marker, not a report record).
+						_ = os.WriteFile(rep+".failed", nil, 0o600)
+					}
+					if injected("epipe-report-fail-alive") || mixed || injected("fail-after-ok") {
 						// Review 081 N4-R: the record could not be written, and
 						// the holder is still alive for a while (bounded), past
 						// the scenario's decision; the scenario then ends it.
@@ -224,7 +242,7 @@ func report(kind string) error {
 		return nil
 	}
 	flag := os.O_WRONLY | os.O_APPEND
-	if (injected("epipe-report-fail") || injected("epipe-report-fail-alive") || injected("f1-mixed-fault")) && kind == "epipe" || injected("ok-report-fail") && kind == "ok" {
+	if (injected("epipe-report-fail") || injected("epipe-report-fail-alive") || injected("f1-mixed-fault") || injected("fail-after-ok")) && kind == "epipe" || injected("ok-report-fail") && kind == "ok" {
 		// Review 076 N4: a holder's record cannot be written. The report is
 		// opened read-only, so the real write fails.
 		injectHit("report", os.Getpid())

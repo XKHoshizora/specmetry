@@ -16,7 +16,7 @@ import (
 // (sysctl kern.procargs2) carry tag. A process that ends during the scan
 // is left out; one whose environment cannot be read is an error.
 func censusTag(tag, since string) ([]survivor, error) {
-	ks, err := unix.SysctlKinfoProcSlice("kern.proc.all")
+	ks, err := procList()
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", errCensus, err)
 	}
@@ -30,10 +30,10 @@ func censusTag(tag, since string) ([]survivor, error) {
 		if !notBefore(st, since) {
 			continue
 		}
-		b, err := unix.SysctlRaw("kern.procargs2", pid)
+		b, err := procArgs(pid)
 		if err != nil || len(b) < 4 {
 			// Ended meanwhile, or a zombie now: left out; otherwise an error.
-			if s2, pr := procInfo(pid); pr == absent || pr == present && (s2.zombie || s2.start != st) {
+			if s2, pr := censusRecheck(pid); pr == absent || pr == present && (s2.zombie || s2.start != st) {
 				continue
 			}
 			return nil, fmt.Errorf("%w: process %d: the environment cannot be read: %v", errCensus, pid, err)
@@ -50,6 +50,14 @@ func censusTag(tag, since string) ([]survivor, error) {
 	}
 	return out, nil
 }
+
+// The census's reads, which a direct check (census_check_darwin_test.go)
+// replaces; the real ones otherwise.
+var (
+	procList      = func() ([]unix.KinfoProc, error) { return unix.SysctlKinfoProcSlice("kern.proc.all") }
+	procArgs      = func(pid int) ([]byte, error) { return unix.SysctlRaw("kern.procargs2", pid) }
+	censusRecheck = procInfo
+)
 
 // notBefore compares two "sec.usec" times.
 func notBefore(a, b string) bool {

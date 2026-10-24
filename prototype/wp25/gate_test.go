@@ -192,6 +192,13 @@ var gateCases = []gateCase{
 	// A record that arrives late, while the scenario waits for an answer,
 	// is still the observation: the prediction holds.
 	{id: "report.epipe-late", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "epipe-report-late", want: confirmed, hit: true},
+	// Review 083 N4-R-S: an answer is no proof of what comes after it. The
+	// review's case: a true answer, then the holder's stderr breaks, its
+	// write fails, and its report fails, all before the scenario's checks.
+	// And an answer that is not the end: the holder stops writing but
+	// keeps its output open.
+	{id: "report.fail-after-ok", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "fail-after-ok", want: invalid, hit: true},
+	{id: "report.ok-not-final", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "ok-open-output", want: invalid, hit: true},
 
 	// Review 082 B1-Ra: a stop's result, whenever it comes. Its error must
 	// make the run invalid even when it comes after the run returned; a
