@@ -24,6 +24,45 @@ func TestStopAPIErrors(t *testing.T) {
 	if os.Getenv(innerEnv) != "" {
 		t.Skip("inner run")
 	}
+	t.Run("nothing-to-cancel", func(t *testing.T) {
+		// The control: the real CancelIoEx, the read kept in its window until
+		// the stop has met "nothing to cancel" (ERROR_NOT_FOUND) at least
+		// once. That is the race the stop expects, not a failure.
+		var notFound atomic.Int64
+		cancelOwn = func(h windows.Handle, o *windows.Overlapped) error {
+			err := windows.CancelIoEx(h, o)
+			if errors.Is(err, windows.ERROR_NOT_FOUND) {
+				notFound.Add(1)
+			}
+			return err
+		}
+		t.Cleanup(func() { cancelOwn = windows.CancelIoEx })
+		g := newStopRig(t, true)
+		select {
+		case <-g.g.entered:
+		case <-time.After(5 * time.Second):
+			t.Fatal("the copier never took its read reference within 5 s")
+		}
+		g.start()
+		deadline := time.Now().Add(5 * time.Second)
+		for notFound.Load() == 0 && time.Now().Before(deadline) {
+			time.Sleep(time.Millisecond)
+		}
+		if notFound.Load() == 0 {
+			t.Fatal("the stop never met nothing to cancel within 5 s")
+		}
+		g.g.open()
+		r, ok := g.result(5 * time.Second)
+		if !ok {
+			t.Fatal("runS6On did not return within 5 s after the read left its window")
+		}
+		if r.stop["out"] != "done" || r.out["out"] != o2 {
+			t.Errorf("stop %q, outcome %s; want done, O2", r.stop["out"], r.out["out"])
+		}
+		if err := r.stopErr["out"]; err != nil {
+			t.Errorf("the stop failed after meeting nothing to cancel %d times: %v", notFound.Load(), err)
+		}
+	})
 	t.Run("cancel-fails", func(t *testing.T) {
 		var hits atomic.Int64
 		cancelOwn = func(windows.Handle, *windows.Overlapped) error {

@@ -113,6 +113,12 @@ func runHelper(mode string, args []string) int {
 				_, err = fmt.Fprintf(os.Stderr, "late-err %d\n", i)
 			}
 			if err != nil {
+				if injected("epipe-report-late") {
+					// The record comes only after the scenario's first wait for
+					// it, while it waits for an answer (bounded).
+					injectHit("holder.before-late-report", os.Getpid())
+					time.Sleep(3500 * time.Millisecond)
+				}
 				if report("epipe") != nil {
 					if injected("epipe-report-fail-alive") || mixed {
 						// Review 081 N4-R: the record could not be written, and

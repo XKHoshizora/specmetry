@@ -189,6 +189,9 @@ var gateCases = []gateCase{
 	// the holder confirms, but only stdout was kept and written.
 	{id: "report.ok-unwritable", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "ok-report-fail", want: invalid, hit: true},
 	{id: "report.one-stream-seen", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "f1-one-kept", want: invalid, hit: true},
+	// A record that arrives late, while the scenario waits for an answer,
+	// is still the observation: the prediction holds.
+	{id: "report.epipe-late", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "epipe-report-late", want: confirmed, hit: true},
 
 	// Review 082 B1-Ra: a stop's result, whenever it comes. Its error must
 	// make the run invalid even when it comes after the run returned; a
