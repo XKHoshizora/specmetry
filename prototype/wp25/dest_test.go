@@ -273,9 +273,71 @@ type s6Result struct {
 	// closing its read end has returned, "pending" if it had not when the
 	// run returned. A stream that ended in phase D is not stopped.
 	stop map[string]string
+	// stopErr is the error of a stop that is done, if any.
+	stopErr map[string]error
 	// What the run still owned when it returned: copiers not confirmed to
 	// have returned, stops not done. Its caller keeps them until they end.
 	left []leftover
+}
+
+// stopTask is the stop of one stream's read (Review 081 B1): closing its
+// read end, in a task of its own started with phase J, so that a Close
+// that waits for a read holding the file keeps neither phase J nor the
+// seal waiting. The run that starts it owns it; if it is not done when the
+// run returns, the run hands it on in s6Result.left. It ends when the
+// close returns, and keeps the close's error.
+type stopTask struct {
+	done chan struct{}
+	err  error // valid once done is closed
+}
+
+func startStop(s *stream) *stopTask {
+	t := &stopTask{done: make(chan struct{})}
+	go func() {
+		defer close(t.done)
+		t.err = closeRead(s.r)
+	}()
+	return t
+}
+
+// until waits until the stop is done or the deadline passes.
+func (t *stopTask) until(deadline time.Time) bool {
+	select {
+	case <-t.done:
+		return true
+	default:
+	}
+	timer := time.NewTimer(time.Until(deadline))
+	defer timer.Stop()
+	select {
+	case <-t.done:
+		return true
+	case <-timer.C:
+		return false
+	}
+}
+
+// awaitOn waits until ch is closed, or until clk reads at least the
+// deadline.
+func awaitOn(clk phaseClock, ch <-chan struct{}, deadline time.Time) bool {
+	for {
+		select {
+		case <-ch:
+			return true
+		default:
+		}
+		left := deadline.Sub(clk.now())
+		if left <= 0 {
+			return false
+		}
+		w, stop := clk.wake(left)
+		select {
+		case <-ch:
+			stop()
+			return true
+		case <-w:
+		}
+	}
 }
 
 // leftover is one thing a run still owns after runS6 returned.
@@ -296,8 +358,22 @@ func runS6(d *dest, ss []*stream, tDrain, tJoin time.Duration, skipDrain bool) s
 
 // runS6On is runS6 on clk: each phase ends on its deadline only once clk
 // reads at least its start plus its length, and its length is read on clk.
+//
+// Phase J starts with the stop of the reads (Review 081 B1): T_join covers
+// closing the read ends as well as the copiers' return, and the seal comes
+// at its end whatever is still running. When the run returns, for each
+// stopped stream:
+//
+//   - the stop was requested (always);
+//   - the stop is done or pending (res.stop);
+//   - the copier has returned, or not, which is O3 (res.out);
+//   - the copy port is sealed (always): nothing more reaches the
+//     destination from this run;
+//   - what is still running is handed to the caller (res.left), who holds
+//     it until it ends; whether a later run may start meanwhile is the
+//     caller's policy (lingering, C-4 / D20).
 func runS6On(clk phaseClock, d *dest, ss []*stream, tDrain, tJoin time.Duration, skipDrain bool) s6Result {
-	res := s6Result{out: map[string]outcome{}, stop: map[string]string{}}
+	res := s6Result{out: map[string]outcome{}, stop: map[string]string{}, stopErr: map[string]error{}}
 	all := func(deadline time.Time) bool {
 		ok := true
 		for _, s := range ss {
@@ -313,6 +389,7 @@ func runS6On(clk phaseClock, d *dest, ss []*stream, tDrain, tJoin time.Duration,
 		ended = all(start.Add(tDrain))
 		res.drain, res.drainFine = clk.now().Sub(start), fine()
 	}
+	stops := map[string]*stopTask{}
 	if !ended {
 		res.stopped = true
 		for _, s := range ss {
@@ -320,12 +397,15 @@ func runS6On(clk phaseClock, d *dest, ss []*stream, tDrain, tJoin time.Duration,
 				res.pending++
 			}
 		}
-		for _, s := range ss {
-			_ = s.r.Close()
-			res.stop[s.name] = "done"
-		}
 		start, fine := clk.now(), stopwatch()
-		all(start.Add(tJoin))
+		deadline := start.Add(tJoin)
+		for _, s := range ss {
+			stops[s.name] = startStop(s)
+		}
+		all(deadline)
+		for _, s := range ss {
+			awaitOn(clk, stops[s.name].done, deadline)
+		}
 		res.join, res.joinFine = clk.now().Sub(start), fine()
 	}
 	ps := make([]*port, 0, len(ss))
@@ -337,13 +417,26 @@ func runS6On(clk phaseClock, d *dest, ss []*stream, tDrain, tJoin time.Duration,
 		switch {
 		case s.c.res == nil:
 			res.out[s.name] = o3
+			res.left = append(res.left, leftover{what: "the copier of " + s.name, until: s.c.wait})
 		case s.c.res.end == endEOF:
 			res.out[s.name] = o1
 		default:
 			res.out[s.name] = o2
 		}
-		if s.c.res != nil {
+		t := stops[s.name]
+		switch {
+		case t == nil:
+			// It ended in phase D: no read holds the file, so the close
+			// returns at once.
 			_ = s.r.Close()
+		case t.until(time.Now()):
+			res.stop[s.name] = "done"
+			if t.err != nil {
+				res.stopErr[s.name] = t.err
+			}
+		default:
+			res.stop[s.name] = "pending"
+			res.left = append(res.left, leftover{what: "the stop of " + s.name, until: t.until})
 		}
 	}
 	return res

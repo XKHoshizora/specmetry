@@ -55,7 +55,7 @@ func TestPipeNormalDrain(t *testing.T) {
 	if conf {
 		tr.reap(tKill)
 	}
-	r := runS6(d, ss, tDrain, tJoin, !conf)
+	r := s.adopt(runS6(d, ss, tDrain, tJoin, !conf))
 	_, _ = d.ownerPort().Write(doc)
 	buf, log := d.snapshot()
 	out, errb := streamOf(buf, log, "out"), streamOf(buf, log, "err")
@@ -120,7 +120,7 @@ func TestPipeEscapedHolder(t *testing.T) {
 	if conf {
 		tr.reap(tKill)
 	}
-	r := runS6(d, ss, tDrain, tJoin, !conf)
+	r := s.adopt(runS6(d, ss, tDrain, tJoin, !conf))
 	s.needLoad(holderWrites.Load() > 0, "the holder wrote before the stop (%d writes)", holderWrites.Load())
 	_, _ = d.ownerPort().Write(doc)
 	time.Sleep(200 * time.Millisecond)
@@ -174,7 +174,7 @@ func TestPipeF1SkipDrain(t *testing.T) {
 		}
 		injectHit("TestPipeF1SkipDrain", os.Getpid())
 	}
-	r := runS6(d, ss, tDrain, tJoin, true)
+	r := s.adopt(runS6(d, ss, tDrain, tJoin, true))
 	_, _ = d.ownerPort().Write(doc)
 	epipe, err := awaitRecords(rep, "epipe", 1, 3*time.Second)
 	if err != nil && !errors.Is(err, errNotYet) {
@@ -231,7 +231,7 @@ func TestPipeCapacityStop(t *testing.T) {
 	if conf {
 		tr.reap(tKill)
 	}
-	r := runS6(d, ss, tDrain, tJoin, !conf)
+	r := s.adopt(runS6(d, ss, tDrain, tJoin, !conf))
 	_, _ = d.ownerPort().Write(doc)
 	buf, log := d.snapshot()
 	out := streamOf(buf, log, "out")
@@ -259,7 +259,7 @@ func TestPipeCapacityDiscard(t *testing.T) {
 	if conf {
 		tr.reap(tKill)
 	}
-	r := runS6(d, ss, tDrain, tJoin, !conf)
+	r := s.adopt(runS6(d, ss, tDrain, tJoin, !conf))
 	_, _ = d.ownerPort().Write(doc)
 	buf, log := d.snapshot()
 	out := streamOf(buf, log, "out")
@@ -314,7 +314,7 @@ func TestPipeAliasConcurrent(t *testing.T) {
 	if conf {
 		tr.reap(tKill)
 	}
-	r := runS6(d, ss, tDrain, tJoin, !conf)
+	r := s.adopt(runS6(d, ss, tDrain, tJoin, !conf))
 	wg.Wait()
 	_, _ = owner.Write(doc)
 	buf, log := d.snapshot()
@@ -387,7 +387,7 @@ func TestPipeSilentHolderReal(t *testing.T) {
 		exited, status, _ := tr.waitExit(10 * time.Second)
 		s.needLoad(exited && status == "exit 0", "run %d: the holder verified as the check's; its parent exited 0 (%v, %s)", i+1, exited, status)
 		since := stopwatch()
-		r := runS6(d, ss, tDrain, tJoin, true)
+		r := s.adopt(runS6(d, ss, tDrain, tJoin, true))
 		s.needLoad(r.pending == 2, "run %d: both copiers blocked at the stop (%d)", i+1, r.pending)
 		if r.out["out"] == o2 && r.out["err"] == o2 {
 			ok++

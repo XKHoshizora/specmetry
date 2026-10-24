@@ -272,7 +272,7 @@ func TestStopRead(t *testing.T) {
 		// Whether a later run may start meanwhile is C-4 / D20; both
 		// policies see what is left.
 		reg := &lingering{}
-		reg.add(g.ss, r)
+		reg.add(r)
 		reg.refuse = true
 		if !errors.Is(reg.admit(), errLingering) {
 			t.Error("policy refuse: a later run was admitted while the stop was pending")

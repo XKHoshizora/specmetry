@@ -155,6 +155,7 @@ type scen struct {
 	invalid    []string
 	unsup      string
 	procs      []owned
+	left       []leftover // what the scenario's output steps handed on
 	reports    []*reportFile
 	baseKids   []int // this process's children when the scenario began (Linux)
 	baseErr    error // the list of them could not be read
@@ -203,6 +204,18 @@ func (s *scen) locked(f func()) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	f()
+}
+
+// adopt makes the scenario the owner of what a run of the output step
+// handed on (Review 081 B1): a stop not done, a copier not returned. done
+// waits for them once the scenario's processes are gone. A stop that
+// failed is a failed observation of the run.
+func (s *scen) adopt(r s6Result) s6Result {
+	s.locked(func() { s.left = append(s.left, r.left...) })
+	for name, err := range r.stopErr {
+		s.flag("observation failed: stopping the read of %s: %v", name, err)
+	}
+	return r
 }
 
 func (s *scen) launched(n int)  { s.locked(func() { s.r.Launches += n }) }
@@ -273,6 +286,19 @@ func (s *scen) done() {
 		s.after[i]()
 	}
 	s.r.Cleanup = s.cleanup()
+	// What the output steps handed on ends once its reads return, at the
+	// latest when the processes holding the write ends are gone, which the
+	// cleanup has just confirmed (Review 081 B1).
+	var unended []string
+	for _, l := range s.left {
+		if !l.until(time.Now().Add(5 * time.Second)) {
+			unended = append(unended, l.what)
+		}
+	}
+	if len(unended) > 0 {
+		s.invalid = append(s.invalid, "cleanup not verified: still running: "+strings.Join(unended, ", "))
+		s.r.Cleanup = "NOT verified: " + strings.Join(unended, ", ") + " still running; " + s.r.Cleanup
+	}
 	// The writers have ended (or the cleanup says they have not): every
 	// report must now hold exactly what its scenario declared.
 	for _, rf := range s.reports {
