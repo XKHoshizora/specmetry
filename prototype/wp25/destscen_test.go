@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"os"
 	"runtime"
 	"strings"
 	"sync"
@@ -92,7 +93,13 @@ func TestDestO3GateLingering(t *testing.T) {
 	g0 := runtime.NumGoroutine()
 	d := &dest{}
 	g := newGate()
-	s.defer_(g.release)
+	// o3-unreleased, a gate regression (Review 081 B1): the scenario never
+	// releases its gate, so its O3 copier still runs when it ends; only the
+	// wait for what its runs handed on can find that.
+	unreleased := injected("o3-unreleased")
+	if !unreleased {
+		s.defer_(g.release)
+	}
 	p1 := d.copyPort("run1")
 	ss := []*stream{{name: "out", r: g, c: startCopy(g, p1, false), p: p1}}
 	r := s.adopt(runS6(d, ss, 100*time.Millisecond, 100*time.Millisecond, false))
@@ -115,7 +122,11 @@ func TestDestO3GateLingering(t *testing.T) {
 	pendingBefore := reg.pending()
 	goroutinesBefore := runtime.NumGoroutine()
 
-	g.release()
+	if unreleased {
+		injectHit("TestDestO3GateLingering", os.Getpid())
+	} else {
+		g.release()
+	}
 	ended := ss[0].c.wait(time.Now().Add(time.Second))
 	afterRelease, _ := d.snapshot()
 	s.worked(int64(len(beforeRelease)))

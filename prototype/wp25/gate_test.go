@@ -146,6 +146,9 @@ var gateCases = []gateCase{
 	// Cleanup and observation: an end that cannot be confirmed, a process
 	// state that cannot be read, a process list that cannot be read.
 	{id: "cleanup.unconfirmed", test: "TestPipeSilentHolderReal", scenario: "T1.pipe.silent-holder", inject: "cleanup-unconfirmed", want: invalid},
+	// Review 081 B1: what an output step handed on (an O3 copier here) is
+	// still running when the scenario ends: its cleanup is not verified.
+	{id: "cleanup.leftover-running", test: "TestDestO3GateLingering", scenario: "T1.O3.gate-lingering", inject: "o3-unreleased", want: invalid, hit: true},
 	// Review 076 B1-R1: one observation fails, the ones after it succeed.
 	// The failure must still make the run invalid.
 	{id: "observe.fail-once", test: "TestPipeSilentHolderReal", scenario: "T1.pipe.silent-holder", inject: "observe-fail-once", want: invalid, hit: true},
