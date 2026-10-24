@@ -172,7 +172,8 @@ func TestPipeF1SkipDrain(t *testing.T) {
 		keep = ss[:1]
 	}
 	if mixed || injectedAny("read-end-kept", "f1-one-kept", "ok-report-fail", "fail-after-ok", "ok-open-output", "output-close-fails",
-		"ok-epipe-reported", "epipe-then-ok", "ok-foreign", "ok-dup", "ok-truncated", "ok-malformed", "ok-limit", "f1-drain-fails") {
+		"ok-epipe-reported", "epipe-then-ok", "ok-foreign", "ok-dup", "ok-truncated", "ok-malformed", "ok-limit", "f1-drain-fails",
+		"ok-close-fails", "ok-limit-gated", "ok-limit-unwritable") {
 		// A gate regression's healthy counter-case (Review 076 N4): the
 		// scenario keeps a second handle on both read ends, so the stop
 		// leaves the pipes open and the holder's writes do not fail. Its
@@ -275,6 +276,11 @@ func observeF1(s *scen, rep string, holder owned, keptEnds []*kept, atStop []int
 	}
 	epipe, err := awaitRecords(rep, "epipe", 1, 3*time.Second)
 	failed(err)
+	if len(epipe) == 1 && injectedAny("epipe-close-fails", "epipe-limit-gated", "epipe-limit-unwritable") {
+		// Review 085's cases: the holder's failure after its record has
+		// happened before the checks below (the test's own marker).
+		awaitMarker(s, rep)
+	}
 	if len(epipe) == 0 {
 		ev.asked = true
 		if err := os.WriteFile(rep+".query", nil, 0o600); err != nil {
@@ -282,14 +288,10 @@ func observeF1(s *scen, rep string, holder owned, keptEnds []*kept, atStop []int
 		}
 		ok, err := awaitRecords(rep, "ok", 1, 2*time.Second)
 		failed(err)
-		if injectedAny("fail-after-ok", "ok-epipe-reported") && len(ok) == 1 {
+		if injectedAny("fail-after-ok", "ok-epipe-reported", "ok-close-fails", "ok-limit-gated", "ok-limit-unwritable") && len(ok) == 1 {
 			// The reviews' cases: the holder's failure after its answer has
 			// happened before the checks below (the test's own marker).
-			deadline := time.Now().Add(3 * time.Second)
-			for !fileThere(rep+".failed") && time.Now().Before(deadline) {
-				time.Sleep(10 * time.Millisecond)
-			}
-			s.note("load: the holder's failure after its answer happened: %v", fileThere(rep+".failed"))
+			awaitMarker(s, rep)
 		}
 		ev.ended = true
 		endBy := time.Now().Add(2 * time.Second)
@@ -310,6 +312,16 @@ func observeF1(s *scen, rep string, holder owned, keptEnds []*kept, atStop []int
 	}
 	ev.state = stateOf(holder)
 	return ev
+}
+
+// awaitMarker waits (bounded) for the test's own marker that a holder's
+// failure happened; it only orders a gate regression, and decides nothing.
+func awaitMarker(s *scen, rep string) {
+	deadline := time.Now().Add(3 * time.Second)
+	for !fileThere(rep+".failed") && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	s.note("load: the holder's failure after its record happened: %v", fileThere(rep+".failed"))
 }
 
 // finalRead reads the report once more, after the holder's end: no writer

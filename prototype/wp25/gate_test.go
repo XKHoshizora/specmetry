@@ -232,6 +232,18 @@ var gateCases = []gateCase{
 	// hard limit.
 	{id: "report.epipe-limit", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "epipe-limit", want: invalid, hit: true},
 	{id: "report.ok-limit", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "ok-limit", want: invalid, hit: true},
+	// Review 085 B-N4-R: a whole record is no proof that the holder's tool
+	// completed. Beside a whole epipe or ok record: the close of the report
+	// fails; a tool failure is reached and its report is cut off by the
+	// scenario's end of the holder; that report is written and fails. And a
+	// record itself cut off by that end.
+	{id: "report.epipe-close-fails", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "epipe-close-fails", want: invalid, hit: true},
+	{id: "report.epipe-limit-cut", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "epipe-limit-gated", want: invalid, hit: true},
+	{id: "report.epipe-limit-unwritable", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "epipe-limit-unwritable", want: invalid, hit: true},
+	{id: "report.ok-close-fails", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "ok-close-fails", want: invalid, hit: true},
+	{id: "report.ok-limit-cut", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "ok-limit-gated", want: invalid, hit: true},
+	{id: "report.ok-limit-unwritable", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "ok-limit-unwritable", want: invalid, hit: true},
+	{id: "report.epipe-cut", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "epipe-cut", want: invalid, hit: true},
 	// The same in the scenario's own tools (added with the fix; the old code
 	// has no final read): the final read of the report fails beside a record
 	// of a failed write, the read of a kept read end beside a final answer.

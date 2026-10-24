@@ -150,12 +150,13 @@ func runHelper(mode string, args []string) int {
 								_ = report("epipe")
 							}
 						}
-						_ = report("ok")
-						if injected("ok-limit") {
-							// A tool failure beside the answer: the holder
-							// reports reaching its hard limit.
-							injectHit("holder.limit-after-answer", os.Getpid())
-							_ = report("limit")
+						if err := report("ok"); err == nil {
+							_ = afterRecord(rep)
+						}
+						if injectedAny("ok-close-fails", "ok-limit-unwritable") {
+							// Tells the scenario the failure happened (the
+							// test's own marker, not a report record).
+							_ = os.WriteFile(rep+".failed", nil, 0o600)
 						}
 					}
 					select {}
@@ -174,16 +175,13 @@ func runHelper(mode string, args []string) int {
 					time.Sleep(3500 * time.Millisecond)
 				}
 				rerr := report("epipe")
-				if injected("fail-after-ok") || injected("ok-epipe-reported") {
+				if rerr == nil {
+					rerr = afterRecord(rep)
+				}
+				if injectedAny("fail-after-ok", "ok-epipe-reported", "epipe-close-fails", "epipe-limit-unwritable") {
 					// Tells the scenario the failure happened, and its report
 					// was tried (the test's own marker, not a report record).
 					_ = os.WriteFile(rep+".failed", nil, 0o600)
-				}
-				if rerr == nil && injected("epipe-limit") {
-					// A tool failure beside the record: the holder reports
-					// reaching its hard limit.
-					injectHit("holder.limit-after-epipe", os.Getpid())
-					_ = report("limit")
 				}
 				if rerr != nil {
 					if injected("epipe-report-fail-alive") || mixed || injected("fail-after-ok") {
@@ -260,6 +258,30 @@ func runHelper(mode string, args []string) int {
 	return 99
 }
 
+// afterRecord is what a holder does after its record under the gate
+// regressions' faults (none in a normal run): a tool failure there is an
+// error. The holder reaches its hard limit beside its record and reports
+// it; with ...-unwritable that report fails (Review 085 B-N4-R); with
+// ...-gated it comes only after 10 s (bounded), once the scenario has
+// ended the holder, so the failure has happened but its report is cut off.
+func afterRecord(rep string) error {
+	switch {
+	case injectedAny("epipe-limit", "ok-limit", "epipe-limit-unwritable", "ok-limit-unwritable"):
+		injectHit("holder.limit-after-record", os.Getpid())
+		if err := report("limit"); err != nil {
+			return err
+		}
+	case injectedAny("epipe-limit-gated", "ok-limit-gated"):
+		injectHit("holder.limit-gated", os.Getpid())
+		_ = os.WriteFile(rep+".failed", nil, 0o600) // the failure point is reached
+		time.Sleep(10 * time.Second)
+		_ = report("limit")
+	default:
+		return nil
+	}
+	return fmt.Errorf("the holder reached its hard limit")
+}
+
 func fileThere(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
@@ -290,7 +312,8 @@ func report(kind string) error {
 		return nil
 	}
 	flag := os.O_WRONLY | os.O_APPEND
-	if (injected("epipe-report-fail") || injected("epipe-report-fail-alive") || injected("f1-mixed-fault") || injected("fail-after-ok")) && kind == "epipe" || injected("ok-report-fail") && kind == "ok" {
+	if (injected("epipe-report-fail") || injected("epipe-report-fail-alive") || injected("f1-mixed-fault") || injected("fail-after-ok")) && kind == "epipe" || injected("ok-report-fail") && kind == "ok" ||
+		injectedAny("epipe-limit-unwritable", "ok-limit-unwritable") && kind == "limit" {
 		// Review 076 N4: a holder's record cannot be written. The report is
 		// opened read-only, so the real write fails.
 		injectHit("report", os.Getpid())
@@ -338,8 +361,23 @@ func report(kind string) error {
 	case injected("report-overlong"):
 		payload = strings.Repeat("x", 70000) + "\n" + line + "\n"
 	}
+	if injected("epipe-cut") && kind == "epipe" {
+		// Review 085 B-N4-R: the holder is in the middle of its record when
+		// the scenario ends it: the record's first part, then (bounded) the
+		// rest.
+		injectHit("report.cut", os.Getpid())
+		_, _ = f.WriteString(line)
+		time.Sleep(10 * time.Second)
+		payload = "\n"
+	}
 	_, werr := f.WriteString(payload)
 	cerr := f.Close()
+	if injected("epipe-close-fails") && kind == "epipe" || injected("ok-close-fails") && kind == "ok" {
+		// Review 085 B-N4-R: the record is written whole, then the close of
+		// the report fails (a second close).
+		injectHit("report.close-fails", os.Getpid())
+		cerr = f.Close()
+	}
 	if injected("report-delete") && kind == "pid" {
 		_ = os.Remove(path)
 	}
