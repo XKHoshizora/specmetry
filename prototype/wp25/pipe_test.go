@@ -169,7 +169,8 @@ func TestPipeF1SkipDrain(t *testing.T) {
 		// does its report; with f1-one-kept it writes only stdout.
 		keep = ss[:1]
 	}
-	if injected("read-end-kept") || mixed || injected("f1-one-kept") || injected("ok-report-fail") || injected("fail-after-ok") || injected("ok-open-output") || injected("output-close-fails") {
+	if mixed || injectedAny("read-end-kept", "f1-one-kept", "ok-report-fail", "fail-after-ok", "ok-open-output", "output-close-fails",
+		"ok-epipe-reported", "epipe-then-ok", "ok-foreign", "ok-dup", "ok-truncated", "ok-malformed", "ok-limit") {
 		// A gate regression's healthy counter-case (Review 076 N4): the
 		// scenario keeps a second handle on both read ends, so the stop
 		// leaves the pipes open and the holder's writes do not fail. Its
@@ -221,8 +222,8 @@ func TestPipeF1SkipDrain(t *testing.T) {
 		if err != nil && !errors.Is(err, errNotYet) {
 			s.invalidf("%v", err)
 		}
-		if injected("fail-after-ok") && len(ok) == 1 {
-			// The review's case: the holder's failure after its answer has
+		if injectedAny("fail-after-ok", "ok-epipe-reported") && len(ok) == 1 {
+			// The reviews' cases: the holder's failure after its answer has
 			// happened before the checks below (the test's own marker).
 			deadline := time.Now().Add(3 * time.Second)
 			for !fileThere(rep+".failed") && time.Now().Before(deadline) {

@@ -36,6 +36,16 @@ const (
 // injected reports whether this process runs with the named fault.
 func injected(name string) bool { return os.Getenv(injectEnv) == name }
 
+// injectedAny says whether one of the faults is set.
+func injectedAny(names ...string) bool {
+	for _, n := range names {
+		if injected(n) {
+			return true
+		}
+	}
+	return false
+}
+
 type gateCase struct {
 	id       string
 	test     string   // the real scenario's test function
@@ -202,6 +212,26 @@ var gateCases = []gateCase{
 	// At the end itself: the holder cannot close its output, so it gives
 	// no answer (added with the fix; the old code has no such step).
 	{id: "report.close-fails", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "output-close-fails", want: invalid, hit: true},
+	// Review 084 B-N4: an answer and a failure record together break the
+	// protocol, in either order, and neither may count. The review's case:
+	// a true answer, then a write fails and its report is written. The
+	// other order: a write after the end fails and is reported, and the
+	// holder answers all the same. And an answer nobody asked for, beside
+	// the failure record the first read finds.
+	{id: "report.ok-epipe-reported", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "ok-epipe-reported", want: invalid, hit: true},
+	{id: "report.epipe-then-ok", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "epipe-then-ok", want: invalid, hit: true},
+	{id: "report.ok-unasked", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "ok-unasked", want: invalid, hit: true},
+	// Records the protocol does not allow: one that names another process
+	// than the holder, a duplicate, a truncated or a malformed one.
+	{id: "report.epipe-foreign", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "epipe-foreign", want: invalid, hit: true},
+	{id: "report.ok-foreign", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "ok-foreign", want: invalid, hit: true},
+	{id: "report.ok-duplicate", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "ok-dup", want: invalid, hit: true},
+	{id: "report.ok-truncated", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "ok-truncated", want: invalid, hit: true},
+	{id: "report.ok-malformed", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "ok-malformed", want: invalid, hit: true},
+	// A tool failure beside either record: the holder reports reaching its
+	// hard limit.
+	{id: "report.epipe-limit", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "epipe-limit", want: invalid, hit: true},
+	{id: "report.ok-limit", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "ok-limit", want: invalid, hit: true},
 
 	// Review 082 B1-Ra: a stop's result, whenever it comes. Its error must
 	// make the run invalid even when it comes after the run returned; a

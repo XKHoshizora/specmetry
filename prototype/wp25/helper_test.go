@@ -94,6 +94,14 @@ func runHelper(mode string, args []string) int {
 		if report("pid") != nil {
 			return exitReport
 		}
+		if injected("ok-unasked") {
+			// Review 084 B-N4: an answer nobody asked for, before any write;
+			// the holder's writes then fail and it reports that too.
+			injectHit("holder.unasked", os.Getpid())
+			if report("ok") != nil {
+				return exitReport
+			}
+		}
 		// f1-mixed-fault (Review 082 N4-R): stderr is written only once the
 		// scenario has counted what waits at the stop; the round that does
 		// writes stdout after that count.
@@ -116,10 +124,12 @@ func runHelper(mode string, args []string) int {
 					injectHit("holder.answer-not-final", os.Getpid())
 					_ = report("ok")
 					select {}
-				case injected("fail-after-ok"):
+				case injected("fail-after-ok") || injected("ok-epipe-reported"):
 					// Review 083 N4-R-S, the review's case: an answer in the
 					// middle; then the holder's stderr breaks, its next write
-					// to it fails, and its report of that fails too.
+					// to it fails, and its report of that fails too. Review
+					// 084 B-N4: the same, but the report of that failure is
+					// written.
 					injectHit("holder.after-answer", os.Getpid())
 					_ = report("ok")
 					_ = os.Stderr.Close()
@@ -131,7 +141,22 @@ func runHelper(mode string, args []string) int {
 						eerr = os.Stderr.Close()
 					}
 					if oerr == nil && eerr == nil {
+						if injected("epipe-then-ok") {
+							// Review 084 B-N4, the other order: a write after
+							// the end fails and is reported, and the holder
+							// answers all the same.
+							injectHit("holder.write-after-end", os.Getpid())
+							if _, err := fmt.Fprintln(os.Stdout, "after the end"); err != nil {
+								_ = report("epipe")
+							}
+						}
 						_ = report("ok")
+						if injected("ok-limit") {
+							// A tool failure beside the answer: the holder
+							// reports reaching its hard limit.
+							injectHit("holder.limit-after-answer", os.Getpid())
+							_ = report("limit")
+						}
 					}
 					select {}
 				}
@@ -148,12 +173,19 @@ func runHelper(mode string, args []string) int {
 					injectHit("holder.before-late-report", os.Getpid())
 					time.Sleep(3500 * time.Millisecond)
 				}
-				if report("epipe") != nil {
-					if injected("fail-after-ok") {
-						// Tells the scenario the failure happened (the test's
-						// own marker, not a report record).
-						_ = os.WriteFile(rep+".failed", nil, 0o600)
-					}
+				rerr := report("epipe")
+				if injected("fail-after-ok") || injected("ok-epipe-reported") {
+					// Tells the scenario the failure happened, and its report
+					// was tried (the test's own marker, not a report record).
+					_ = os.WriteFile(rep+".failed", nil, 0o600)
+				}
+				if rerr == nil && injected("epipe-limit") {
+					// A tool failure beside the record: the holder reports
+					// reaching its hard limit.
+					injectHit("holder.limit-after-epipe", os.Getpid())
+					_ = report("limit")
+				}
+				if rerr != nil {
 					if injected("epipe-report-fail-alive") || mixed || injected("fail-after-ok") {
 						// Review 081 N4-R: the record could not be written, and
 						// the holder is still alive for a while (bounded), past
@@ -268,11 +300,29 @@ func report(kind string) error {
 	if err != nil {
 		return err
 	}
-	line := kind + " " + strconv.Itoa(os.Getpid())
+	pid := os.Getpid()
+	if injected("epipe-foreign") && kind == "epipe" || injected("ok-foreign") && kind == "ok" {
+		// Review 084: a record that names another process than its writer.
+		injectHit("report.foreign", pid)
+		if pid = os.Getppid(); pid <= 0 {
+			pid = 1
+		}
+	}
+	line := kind + " " + strconv.Itoa(pid)
 	// Faults of the gate regressions (gate_test.go); none is set in a
 	// normal run.
 	payload := line + "\n"
+	okFault := kind == "ok" && (injected("ok-dup") || injected("ok-truncated") || injected("ok-malformed"))
+	if okFault {
+		injectHit("report.ok-fault", os.Getpid())
+	}
 	switch {
+	case okFault && injected("ok-dup"):
+		payload = line + "\n" + line + "\n"
+	case okFault && injected("ok-truncated"):
+		payload = line
+	case okFault && injected("ok-malformed"):
+		payload = "ok not-a-pid\n"
 	case injected("report-skip") && kind == "pid":
 		payload = ""
 	case injected("report-malformed"):
