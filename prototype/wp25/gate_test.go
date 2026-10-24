@@ -184,6 +184,11 @@ var gateCases = []gateCase{
 	// holder's write to the other stream fails and its report fails too.
 	// The bytes prove that one write, not that the tool worked.
 	{id: "report.epipe-mixed-fault", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "f1-mixed-fault", want: invalid, hit: true},
+	// Each part of the decision on its own: both read ends kept and every
+	// write succeeding, but the holder's confirmation cannot be written;
+	// the holder confirms, but only stdout was kept and written.
+	{id: "report.ok-unwritable", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "ok-report-fail", want: invalid, hit: true},
+	{id: "report.one-stream-seen", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "f1-one-kept", want: invalid, hit: true},
 
 	// Review 082 B1-Ra: a stop's result, whenever it comes. Its error must
 	// make the run invalid even when it comes after the run returned; a

@@ -163,12 +163,13 @@ func TestPipeF1SkipDrain(t *testing.T) {
 	var keptEnds []*kept
 	keep := ss
 	mixed := injected("f1-mixed-fault")
-	if mixed {
-		// Review 082 N4-R: only stdout's read end is kept; the holder's
-		// later write to stderr fails, and so does its report.
+	if mixed || injected("f1-one-kept") {
+		// Review 082 N4-R: only stdout's read end is kept. With
+		// f1-mixed-fault the holder's later write to stderr fails, and so
+		// does its report; with f1-one-kept it writes only stdout.
 		keep = ss[:1]
 	}
-	if injected("read-end-kept") || mixed {
+	if injected("read-end-kept") || mixed || injected("f1-one-kept") || injected("ok-report-fail") {
 		// A gate regression's healthy counter-case (Review 076 N4): the
 		// scenario keeps a second handle on both read ends, so the stop
 		// leaves the pipes open and the holder's writes do not fail. Its
