@@ -41,7 +41,23 @@ func sysRead(fd uintptr, p []byte) (n int, err error, again bool) {
 // have freed; it is closed once Close has returned. A read that never
 // reaches its system call (one that holds the file and waits elsewhere)
 // keeps Close waiting: the stop is then pending, and its run hands it on.
-func closeRead(r io.Closer) error {
+//
+// The calls' results (Review 082 B1-Rb):
+//
+//   - CancelIoEx fails with ERROR_NOT_FOUND when no request of the pipe is
+//     outstanding: the race the loop expects, before the read reaches its
+//     system call or after it was cancelled. It succeeds when it asked a
+//     request to cancel, which is not yet its end: Close's return is.
+//   - Any other failure of CancelIoEx means the stop cannot cancel through
+//     its handle. It goes to fail at once, so a holder of the pending stop
+//     sees it; the loop goes on, since Close may still return, and later
+//     failures are counted, not repeated. It is never cleared.
+//   - CloseHandle on the stop's own handle failing leaves its release
+//     unconfirmed: an error of the stop, even if Close succeeded. The
+//     handle is not closed again, as it may already be another's.
+//
+// Errors name the call and Windows' error, never a handle's value.
+func closeRead(r io.Closer, fail func(error)) error {
 	f, ok := r.(*os.File)
 	if !ok {
 		return r.Close()
@@ -56,13 +72,24 @@ func closeRead(r io.Closer) error {
 	go func() { closed <- f.Close() }()
 	tick := time.NewTicker(time.Millisecond)
 	defer tick.Stop()
+	failed := 0
 	for {
 		select {
 		case err := <-closed:
-			_ = closeOwn(own)
+			if failed > 1 {
+				err = errors.Join(err, fmt.Errorf("%d cancellations through the stop's own handle failed in all", failed))
+			}
+			if cerr := closeOwn(own); cerr != nil {
+				err = errors.Join(err, fmt.Errorf("closing the stop's own handle: %w", cerr))
+			}
 			return err
 		case <-tick.C:
-			_ = cancelOwn(own, nil)
+			if err := cancelOwn(own, nil); err != nil && !errors.Is(err, windows.ERROR_NOT_FOUND) {
+				failed++
+				if failed == 1 {
+					fail(fmt.Errorf("cancelling through the stop's own handle: %w", err))
+				}
+			}
 		}
 	}
 }

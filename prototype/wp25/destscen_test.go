@@ -17,15 +17,18 @@ import (
 	"time"
 )
 
-var errLingering = errors.New("a copier or a stop of an earlier run is not confirmed to have ended")
+var errLingering = errors.New("a copier or a stop of an earlier run is not confirmed to have ended cleanly")
 
 // lingering is the candidate owner of what a run left (s6Result.left): O3
 // copiers, each keeping its reader and its sealed port until it returns,
 // and stops not done (Review 081 B1), each keeping its read end until its
 // close returns. admit is the policy for a later run in the same process.
+// What ended with an error stays on record (Review 082 B1-Ra): its end is
+// not a clean one.
 type lingering struct {
 	mu     sync.Mutex
 	tasks  []leftover
+	failed []string
 	refuse bool
 }
 
@@ -35,22 +38,45 @@ func (l *lingering) add(r s6Result) {
 	l.tasks = append(l.tasks, r.left...)
 }
 
-// pending drops what has ended and counts the rest.
+// pending drops what has ended, keeping the errors of what ended with one,
+// and counts the rest.
 func (l *lingering) pending() int {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	kept := l.tasks[:0]
 	for _, t := range l.tasks {
-		if !t.until(time.Now()) {
+		ended, err := t.until(time.Now())
+		switch {
+		case !ended:
 			kept = append(kept, t)
+		case err != nil:
+			l.failed = append(l.failed, fmt.Sprintf("%s: %v", t.what, err))
 		}
 	}
 	l.tasks = kept
 	return len(kept)
 }
 
+// failures are the errors of what ended with one, and of what is still
+// running and has met one already.
+func (l *lingering) failures() []string {
+	l.pending()
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	out := append([]string(nil), l.failed...)
+	for _, t := range l.tasks {
+		if _, err := t.until(time.Now()); err != nil {
+			out = append(out, fmt.Sprintf("%s (still running): %v", t.what, err))
+		}
+	}
+	return out
+}
+
+// admit under refuse turns a later run away while anything of an earlier
+// one runs, or ended with an error; under allow it admits it, and the
+// failures stay on record.
 func (l *lingering) admit() error {
-	if l.refuse && l.pending() > 0 {
+	if l.refuse && (l.pending() > 0 || len(l.failures()) > 0) {
 		return errLingering
 	}
 	return nil

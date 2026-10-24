@@ -273,47 +273,81 @@ type s6Result struct {
 	// closing its read end has returned, "pending" if it had not when the
 	// run returned. A stream that ended in phase D is not stopped.
 	stop map[string]string
-	// stopErr is the error of a stop that is done, if any.
+	// stopErr is the error of a stop that was done when the run returned.
+	// A stop still pending reports its errors through its leftover.
 	stopErr map[string]error
 	// What the run still owned when it returned: copiers not confirmed to
-	// have returned, stops not done. Its caller keeps them until they end.
+	// have returned, stops not done. Its caller keeps them until they end,
+	// and reads their results.
 	left []leftover
+}
+
+// leftover is one thing a run still owns after runS6 returned.
+type leftover struct {
+	what string
+	// until waits until it has ended or the deadline passes. It says
+	// whether it has ended, and the errors it has had so far, which a
+	// later success does not clear (Review 082 B1-Ra): a stop's error
+	// may come long after the run returned, or while it is still pending.
+	until func(deadline time.Time) (bool, error)
 }
 
 // stopTask is the stop of one stream's read (Review 081 B1): closing its
 // read end, in a task of its own started with phase J, so that a Close
 // that waits for a read holding the file keeps neither phase J nor the
 // seal waiting. The run that starts it owns it; if it is not done when the
-// run returns, the run hands it on in s6Result.left. It ends when the
-// close returns, and keeps the close's error.
+// run returns, the run hands it on in s6Result.left, the task itself, so
+// its result is read when it comes, not copied when it is handed on.
+//
+// done means the close has returned, not that it succeeded: the task keeps
+// every error it met, from the close and from what the stop did to make
+// the close return (Review 082 B1-Ra, B1-Rb), as they come.
 type stopTask struct {
 	done chan struct{}
-	err  error // valid once done is closed
+	mu   sync.Mutex
+	errs []error
 }
 
 func startStop(s *stream) *stopTask {
 	t := &stopTask{done: make(chan struct{})}
 	go func() {
 		defer close(t.done)
-		t.err = closeRead(s.r)
+		t.fail(closeRead(s.r, t.fail))
 	}()
 	return t
 }
 
-// until waits until the stop is done or the deadline passes.
-func (t *stopTask) until(deadline time.Time) bool {
+// fail keeps an error of the stop; nil is no error.
+func (t *stopTask) fail(err error) {
+	if err == nil {
+		return
+	}
+	t.mu.Lock()
+	t.errs = append(t.errs, err)
+	t.mu.Unlock()
+}
+
+func (t *stopTask) result() error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return errors.Join(t.errs...)
+}
+
+// until waits until the stop is done or the deadline passes, and gives
+// its errors so far.
+func (t *stopTask) until(deadline time.Time) (bool, error) {
 	select {
 	case <-t.done:
-		return true
+		return true, t.result()
 	default:
 	}
 	timer := time.NewTimer(time.Until(deadline))
 	defer timer.Stop()
 	select {
 	case <-t.done:
-		return true
+		return true, t.result()
 	case <-timer.C:
-		return false
+		return false, t.result()
 	}
 }
 
@@ -338,14 +372,6 @@ func awaitOn(clk phaseClock, ch <-chan struct{}, deadline time.Time) bool {
 		case <-w:
 		}
 	}
-}
-
-// leftover is one thing a run still owns after runS6 returned.
-type leftover struct {
-	what string
-	// until waits until it has ended or the deadline passes, and says
-	// whether it has ended.
-	until func(deadline time.Time) bool
 }
 
 // runS6 is the output step: phase D (skipped when the tree is not
@@ -417,24 +443,32 @@ func runS6On(clk phaseClock, d *dest, ss []*stream, tDrain, tJoin time.Duration,
 		switch {
 		case s.c.res == nil:
 			res.out[s.name] = o3
-			res.left = append(res.left, leftover{what: "the copier of " + s.name, until: s.c.wait})
+			// A copier's own end is no error of the run: after the stop its
+			// read or its write is expected to fail.
+			c := s.c
+			res.left = append(res.left, leftover{what: "the copier of " + s.name, until: func(d time.Time) (bool, error) { return c.wait(d), nil }})
 		case s.c.res.end == endEOF:
 			res.out[s.name] = o1
 		default:
 			res.out[s.name] = o2
 		}
 		t := stops[s.name]
-		switch {
-		case t == nil:
+		if t == nil {
 			// It ended in phase D: no read holds the file, so the close
-			// returns at once.
-			_ = s.r.Close()
-		case t.until(time.Now()):
-			res.stop[s.name] = "done"
-			if t.err != nil {
-				res.stopErr[s.name] = t.err
+			// returns at once; its error is the run's like a stop's.
+			if err := s.r.Close(); err != nil {
+				res.stopErr[s.name] = err
 			}
-		default:
+			continue
+		}
+		if ended, err := t.until(time.Now()); ended {
+			res.stop[s.name] = "done"
+			if err != nil {
+				res.stopErr[s.name] = err
+			}
+		} else {
+			// Its errors so far, and any to come, are read from the task
+			// by whoever holds it.
 			res.stop[s.name] = "pending"
 			res.left = append(res.left, leftover{what: "the stop of " + s.name, until: t.until})
 		}

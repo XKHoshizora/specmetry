@@ -28,7 +28,7 @@ func sysRead(fd uintptr, p []byte) (n int, err error, again bool) {
 // poller: Close marks the file closing and wakes a read parked in the
 // poller, and a read that has not reached it yet finds the mark there, so
 // the close waits only for a read to leave its system call.
-func closeRead(r io.Closer) error { return r.Close() }
+func closeRead(r io.Closer, _ func(error)) error { return r.Close() }
 
 // inSystemRead marks a goroutine blocked in its pipe's read: on Unix it is
 // parked in Go's poller.

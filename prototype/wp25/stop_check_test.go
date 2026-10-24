@@ -293,8 +293,12 @@ func TestStopRead(t *testing.T) {
 		// written: what was left must end by itself.
 		g.g.open()
 		for _, l := range r.left {
-			if !l.until(time.Now().Add(5 * time.Second)) {
+			ended, err := l.until(time.Now().Add(5 * time.Second))
+			if !ended {
 				t.Errorf("%s did not end within 5 s after the read left its window", l.what)
+			}
+			if err != nil {
+				t.Errorf("%s ended with an error: %v", l.what, err)
 			}
 		}
 		if n := reg.pending(); n != 0 {
@@ -368,6 +372,23 @@ func TestLingeringFailedStop(t *testing.T) {
 	reg.refuse = true
 	if !errors.Is(reg.admit(), errLingering) {
 		t.Error("policy refuse: a later run was admitted after a stop of an earlier run ended with an error")
+	}
+	// The stop's own result carries the error it ended with, read from the
+	// task after the run returned; the register keeps it once it ended.
+	for _, l := range r.left {
+		if l.what != "the stop of out" {
+			continue
+		}
+		if ended, err := l.until(time.Now()); !ended || !errors.Is(err, errStopFault) {
+			t.Errorf("the stop's result after it ended: ended %v, error %v; want ended with the injected error", ended, err)
+		}
+	}
+	if f := reg.failures(); len(f) != 1 {
+		t.Errorf("the register keeps %d failures (%q), want the stop's one", len(f), f)
+	}
+	reg.refuse = false
+	if reg.admit() != nil {
+		t.Error("policy allow: a later run was refused")
 	}
 }
 

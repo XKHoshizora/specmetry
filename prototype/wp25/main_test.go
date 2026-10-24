@@ -208,8 +208,10 @@ func (s *scen) locked(f func()) {
 
 // adopt makes the scenario the owner of what a run of the output step
 // handed on (Review 081 B1): a stop not done, a copier not returned. done
-// waits for them once the scenario's processes are gone. A stop that
-// failed is a failed observation of the run.
+// waits for them once the scenario's processes are gone and reads their
+// results. A stop or a close that failed is a failed observation of the
+// run, whether its error came before the run returned (here) or after
+// (in done).
 func (s *scen) adopt(r s6Result) s6Result {
 	s.locked(func() { s.left = append(s.left, r.left...) })
 	for name, err := range r.stopErr {
@@ -289,9 +291,17 @@ func (s *scen) done() {
 	// What the output steps handed on ends once its reads return, at the
 	// latest when the processes holding the write ends are gone, which the
 	// cleanup has just confirmed (Review 081 B1).
+	// Each is waited for, and its result read: an error it met, after the
+	// run returned or while still running, fails the observation, and
+	// nothing after it clears that (Review 082 B1-Ra).
 	var unended []string
+	deadline := time.Now().Add(5 * time.Second)
 	for _, l := range s.left {
-		if !l.until(time.Now().Add(5 * time.Second)) {
+		ended, err := l.until(deadline)
+		if err != nil {
+			s.invalid = append(s.invalid, fmt.Sprintf("observation failed: %s: %v", l.what, err))
+		}
+		if !ended {
 			unended = append(unended, l.what)
 		}
 	}
