@@ -160,42 +160,43 @@ func TestPipeF1SkipDrain(t *testing.T) {
 	exited, status, _ := tr.waitExit(10 * time.Second)
 	s.needLoad(exited && status == "exit 3", "the holder verified as the check's; its parent exited 3 (%v, %s)", exited, status)
 	time.Sleep(100 * time.Millisecond) // the holder writes a few lines
+	var keptEnds []*kept
 	if injected("read-end-kept") {
 		// A gate regression's healthy counter-case (Review 076 N4): the
 		// scenario keeps a second handle on both read ends, so the stop
-		// leaves the pipes open and the holder's writes do not fail. The
-		// tool still works: the prediction is wrong, which is refuted.
+		// leaves the pipes open and the holder's writes do not fail. Its
+		// late bytes then wait in the pipes, where the scenario sees them:
+		// the evidence that the prediction is wrong while the tool works.
 		for _, st := range ss {
-			closeKept, err := keepOpen(st.r.(*os.File))
+			k, err := keepOpen(st.r.(*os.File))
 			if err != nil {
 				s.invalidf("a second handle on the read end: %v", err)
 			}
-			s.defer_(closeKept)
+			s.defer_(k.close)
+			keptEnds = append(keptEnds, k)
 		}
 		injectHit("TestPipeF1SkipDrain", os.Getpid())
 	}
 	r := s.adopt(runS6(d, ss, tDrain, tJoin, true))
+	atStop := waiting(s, keptEnds)
 	_, _ = d.ownerPort().Write(doc)
 	epipe, err := awaitRecords(rep, "epipe", 1, 3*time.Second)
 	if err != nil && !errors.Is(err, errNotYet) {
 		s.invalidf("%v", err)
 	}
 	if len(epipe) == 0 {
-		// No record (Review 076 N4). While the holder still runs, its
-		// writes have not failed: a finding. A holder that has ended
-		// without its record could not report what it saw: the observation
-		// failed. Its end is read first, then the report once more, so a
-		// record written just before the end still counts.
-		if holder.ended() {
-			if epipe, err = awaitRecords(rep, "epipe", 1, 0); err != nil && !errors.Is(err, errNotYet) {
-				s.invalidf("%v", err)
-			}
-			if len(epipe) == 0 {
-				s.invalidf("observation failed: the holder %d ended without its epipe record, so it could not report what it saw", holder.pidOf())
-			}
-		} else {
-			s.note("no epipe record; the holder %d still runs", holder.pidOf())
+		// No record (Review 076 N4, Review 081 N4-R). It may not have
+		// arrived, the holder may have failed to write it, or the holder's
+		// late writes may not have failed; whether the holder still runs
+		// tells these apart in no way. The run is a finding only with
+		// evidence that the late writes succeeded: bytes that reached a
+		// read end the scenario kept, after the stop. Without it the
+		// observation is missing, and the run does not count.
+		late := waiting(s, keptEnds) - atStop
+		if late <= 0 {
+			s.invalidf("observation failed: no epipe record, and nothing shows the holder's late writes succeeding: its record was not written or has not arrived (the holder %s)", stateOf(holder))
 		}
+		s.note("no epipe record; %d late bytes reached the kept read ends after the stop", late)
 	}
 	buf, log := d.snapshot()
 	s.worked(int64(len(buf)))
@@ -213,6 +214,31 @@ func TestPipeF1SkipDrain(t *testing.T) {
 	s.expectTrue("holder's late writes fail", len(epipe) == 1, fmt.Sprintf("%d epipe reports", len(epipe)))
 	s.expectTrue("document last and whole", lastIsWhole(buf, log, doc), "")
 	s.expect("cleanup kill confirmed", true, conf)
+}
+
+// waiting is how many bytes wait in the kept read ends; a read that fails
+// stops the scenario as invalid.
+func waiting(s *scen, ks []*kept) int {
+	n := 0
+	for _, k := range ks {
+		m, err := k.available()
+		if err != nil {
+			s.invalidf("observation failed: the bytes waiting in a kept read end could not be read: %v", err)
+		}
+		n += m
+	}
+	return n
+}
+
+// stateOf says, for a reason, what is known of a process's state.
+func stateOf(p owned) string {
+	switch {
+	case p.ended():
+		return fmt.Sprintf("%d has ended", p.pidOf())
+	case p.observeErr() != nil:
+		return fmt.Sprintf("%d, whose state could not be read", p.pidOf())
+	}
+	return fmt.Sprintf("%d still runs", p.pidOf())
 }
 
 func TestPipeCapacityStop(t *testing.T) {

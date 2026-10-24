@@ -8,9 +8,11 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// keepOpen holds a second descriptor of f's open file, close-on-exec, until
-// the returned function closes it: closing f then leaves the file open.
-func keepOpen(f *os.File) (func(), error) {
+// kept is a second descriptor of a pipe's read end, close-on-exec, held by
+// a scenario: while it is open, closing the first one leaves the pipe open.
+type kept struct{ fd int }
+
+func keepOpen(f *os.File) (*kept, error) {
 	rc, err := f.SyscallConn()
 	if err != nil {
 		return nil, err
@@ -22,5 +24,11 @@ func keepOpen(f *os.File) (func(), error) {
 	if derr != nil {
 		return nil, derr
 	}
-	return func() { _ = unix.Close(fd) }, nil
+	return &kept{fd: fd}, nil
 }
+
+func (k *kept) close() { _ = unix.Close(k.fd) }
+
+// available is how many bytes wait in the pipe, read without consuming
+// them.
+func (k *kept) available() (int, error) { return unix.IoctlGetInt(k.fd, fionread) }
