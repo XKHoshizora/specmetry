@@ -5,7 +5,8 @@ package wp25
 // fault injected through WP25_INJECT, and checks the verdict and the exit
 // status the real diagnostic gives. A gate check passes when the real
 // diagnostic rejects the broken run (invalid, non-zero exit), or, for a
-// control, accepts the healthy one. The outer check also judges its own
+// control, accepts the healthy one or, with a working tool and a wrong
+// prediction, refutes it (non-zero exit). The outer check also judges its own
 // evidence (witness_test.go): a case that injects a fault of the witness
 // passes only when the outer check rejects that evidence for the named
 // reason. A passing gate check is not a mechanism confirmed: it is
@@ -34,6 +35,16 @@ const (
 
 // injected reports whether this process runs with the named fault.
 func injected(name string) bool { return os.Getenv(injectEnv) == name }
+
+// injectedAny says whether one of the faults is set.
+func injectedAny(names ...string) bool {
+	for _, n := range names {
+		if injected(n) {
+			return true
+		}
+	}
+	return false
+}
 
 type gateCase struct {
 	id       string
@@ -145,6 +156,9 @@ var gateCases = []gateCase{
 	// Cleanup and observation: an end that cannot be confirmed, a process
 	// state that cannot be read, a process list that cannot be read.
 	{id: "cleanup.unconfirmed", test: "TestPipeSilentHolderReal", scenario: "T1.pipe.silent-holder", inject: "cleanup-unconfirmed", want: invalid},
+	// Review 081 B1: what an output step handed on (an O3 copier here) is
+	// still running when the scenario ends: its cleanup is not verified.
+	{id: "cleanup.leftover-running", test: "TestDestO3GateLingering", scenario: "T1.O3.gate-lingering", inject: "o3-unreleased", want: invalid, hit: true},
 	// Review 076 B1-R1: one observation fails, the ones after it succeed.
 	// The failure must still make the run invalid.
 	{id: "observe.fail-once", test: "TestPipeSilentHolderReal", scenario: "T1.pipe.silent-holder", inject: "observe-fail-once", want: invalid, hit: true},
@@ -163,6 +177,112 @@ var gateCases = []gateCase{
 	{id: "observe.prctl-fails", test: "TestExclusiveBaselineLive", scenario: "T2.baseline.live-child", inject: "prctl-get-fail", want: invalid, goos: []string{"linux"}, hit: true},
 	// Whether the process is in the Job cannot be read.
 	{id: "observe.injob-once", test: "TestJobFailResume", scenario: "T4.start.fail-resume", inject: "injob-fail-once", want: invalid, goos: []string{"windows"}, hit: true},
+
+	// Review 076 N4: the F1 scenario's holder sees its writes fail but
+	// cannot write its record: the observation failed, so the run is
+	// invalid, not a finding. The controls: the healthy run is confirmed; a
+	// second handle on the read ends keeps the writes from failing, a wrong
+	// prediction with a working tool, which stays refuted.
+	{id: "control.f1-skip-drain", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", want: confirmed},
+	{id: "control.f1-read-kept", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "read-end-kept", want: refuted, hit: true},
+	{id: "report.epipe-unwritable", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "epipe-report-fail", want: invalid, hit: true},
+	// Review 081 N4-R: the same, but the holder stays alive for a while
+	// after its report failed. Alive is no evidence that its writes
+	// succeeded, nor that its tool worked.
+	{id: "report.epipe-unwritable-alive", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "epipe-report-fail-alive", want: invalid, hit: true},
+	// Review 082 N4-R: late bytes on the one kept read end, while the
+	// holder's write to the other stream fails and its report fails too.
+	// The bytes prove that one write, not that the tool worked.
+	{id: "report.epipe-mixed-fault", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "f1-mixed-fault", want: invalid, hit: true},
+	// Each part of the decision on its own: both read ends kept and every
+	// write succeeding, but the holder's confirmation cannot be written;
+	// the holder confirms, but only stdout was kept and written.
+	{id: "report.ok-unwritable", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "ok-report-fail", want: invalid, hit: true},
+	{id: "report.one-stream-seen", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "f1-one-kept", want: invalid, hit: true},
+	// A record that arrives late, while the scenario waits for an answer,
+	// is still the observation: the prediction holds.
+	{id: "report.epipe-late", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "epipe-report-late", want: confirmed, hit: true},
+	// Review 083 N4-R-S: an answer is no proof of what comes after it. The
+	// review's case: a true answer, then the holder's stderr breaks, its
+	// write fails, and its report fails, all before the scenario's checks.
+	// And an answer that is not the end: the holder stops writing but
+	// keeps its output open.
+	{id: "report.fail-after-ok", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "fail-after-ok", want: invalid, hit: true},
+	{id: "report.ok-not-final", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "ok-open-output", want: invalid, hit: true},
+	// At the end itself: the holder cannot close its output, so it gives
+	// no answer (added with the fix; the old code has no such step).
+	{id: "report.close-fails", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "output-close-fails", want: invalid, hit: true},
+	// Review 084 B-N4: an answer and a failure record together break the
+	// protocol, in either order, and neither may count. The review's case:
+	// a true answer, then a write fails and its report is written. The
+	// other order: a write after the end fails and is reported, and the
+	// holder answers all the same. And an answer nobody asked for, beside
+	// the failure record the first read finds.
+	{id: "report.ok-epipe-reported", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "ok-epipe-reported", want: invalid, hit: true},
+	{id: "report.epipe-then-ok", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "epipe-then-ok", want: invalid, hit: true},
+	{id: "report.ok-unasked", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "ok-unasked", want: invalid, hit: true},
+	// Records the protocol does not allow: one that names another process
+	// than the holder, a duplicate, a truncated or a malformed one.
+	{id: "report.epipe-foreign", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "epipe-foreign", want: invalid, hit: true},
+	{id: "report.ok-foreign", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "ok-foreign", want: invalid, hit: true},
+	{id: "report.ok-duplicate", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "ok-dup", want: invalid, hit: true},
+	{id: "report.ok-truncated", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "ok-truncated", want: invalid, hit: true},
+	{id: "report.ok-malformed", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "ok-malformed", want: invalid, hit: true},
+	// A tool failure beside either record: the holder reports reaching its
+	// hard limit.
+	{id: "report.epipe-limit", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "epipe-limit", want: invalid, hit: true},
+	{id: "report.ok-limit", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "ok-limit", want: invalid, hit: true},
+	// Review 085 B-N4-R: a whole record is no proof that the holder's tool
+	// completed. Beside a whole epipe or ok record: the close of the report
+	// fails; a tool failure is reached and its report is cut off by the
+	// scenario's end of the holder; that report is written and fails. And a
+	// record itself cut off by that end.
+	{id: "report.epipe-close-fails", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "epipe-close-fails", want: invalid, hit: true},
+	{id: "report.epipe-limit-cut", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "epipe-limit-gated", want: invalid, hit: true},
+	{id: "report.epipe-limit-unwritable", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "epipe-limit-unwritable", want: invalid, hit: true},
+	{id: "report.ok-close-fails", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "ok-close-fails", want: invalid, hit: true},
+	{id: "report.ok-limit-cut", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "ok-limit-gated", want: invalid, hit: true},
+	{id: "report.ok-limit-unwritable", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "ok-limit-unwritable", want: invalid, hit: true},
+	{id: "report.epipe-cut", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "epipe-cut", want: invalid, hit: true},
+	// The completion itself (added with the fix; the old code has none): its
+	// close fails beside a record of a failed write; it names another
+	// process than the holder beside a final answer.
+	{id: "report.done-close-fails", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "done-close-fails", want: invalid, hit: true},
+	{id: "report.done-foreign", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "done-foreign", want: invalid, hit: true},
+	// Review 086 B-N4-R: a completion is published although another entry
+	// of the same holder has failed. The hard limit's real callback has
+	// entered and its report is still running when the holder completes,
+	// on the epipe path and on the answer path (B-N4-R/T). A report fails
+	// for real, its caller ignores that, and a later record succeeds and is
+	// completed, on either path (B-N4-R/I). And the rename of the
+	// completion fails.
+	{id: "report.limit-race-epipe", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "limit-race-epipe", want: invalid, hit: true},
+	{id: "report.limit-race-ok", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "limit-race-ok", want: invalid, hit: true},
+	{id: "report.ok-fails-epipe-reported", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "ok-fails-epipe-reported", want: invalid, hit: true},
+	{id: "report.epipe-fails-then-ok", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "epipe-fails-then-ok", want: invalid, hit: true},
+	{id: "report.done-rename-fails", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "done-rename-fails", want: invalid, hit: true},
+	// The other order (added with the fix): the completion is published
+	// first, then the hard limit's real callback enters. It only ends the
+	// holder; nothing of it belongs to the observation, which stays
+	// confirmed. (The old code has no arbitration: its callback reports the
+	// limit after the completion.)
+	{id: "report.limit-after-done", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "limit-after-done", want: confirmed, hit: true},
+	// The same in the scenario's own tools (added with the fix; the old code
+	// has no final read): the final read of the report fails beside a record
+	// of a failed write, the read of a kept read end beside a final answer.
+	{id: "report.epipe-read-fails", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "f1-final-read-fails", want: invalid, hit: true},
+	{id: "report.ok-drain-fails", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "f1-drain-fails", want: invalid, hit: true},
+
+	// Review 082 B1-Ra: a stop's result, whenever it comes. Its error must
+	// make the run invalid even when it comes after the run returned; a
+	// stop that ends cleanly, early or late, must not.
+	{id: "stop.healthy", test: "TestInnerStopError", scenario: "gate.stop-error", want: confirmed},
+	{id: "stop.ok-after-run", test: "TestInnerStopError", scenario: "gate.stop-error", inject: "stop-ok-late", want: confirmed, hit: true},
+	{id: "stop.error-in-run", test: "TestInnerStopError", scenario: "gate.stop-error", inject: "stop-error-early", want: invalid, hit: true},
+	{id: "stop.error-after-run", test: "TestInnerStopError", scenario: "gate.stop-error", inject: "stop-error-late", want: invalid, hit: true},
+	{id: "stop.never-done", test: "TestInnerStopError", scenario: "gate.stop-error", inject: "stop-never-done", want: invalid, hit: true},
+	{id: "stop.error-after-copier", test: "TestInnerStopError", scenario: "gate.stop-error", inject: "stop-error-after-copier", want: invalid, hit: true},
+	{id: "stop.error-one-of-two", test: "TestInnerStopError", scenario: "gate.stop-error", inject: "stop-error-one-of-two", want: invalid, hit: true},
 
 	// Review 077 B1-R2-W: the witness itself fails. The outer check must
 	// reject the evidence, whatever the inner run gives.

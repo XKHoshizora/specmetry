@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"os"
 	"runtime"
 	"strings"
 	"sync"
@@ -16,43 +17,66 @@ import (
 	"time"
 )
 
-var errLingering = errors.New("a copier of an earlier run is not confirmed to have ended")
+var errLingering = errors.New("a copier or a stop of an earlier run is not confirmed to have ended cleanly")
 
-// lingering is the candidate owner of O3 copiers: each keeps its reader
-// and its sealed port until it returns. admit is the policy for a later
-// run in the same process.
+// lingering is the candidate owner of what a run left (s6Result.left): O3
+// copiers, each keeping its reader and its sealed port until it returns,
+// and stops not done (Review 081 B1), each keeping its read end until its
+// close returns. admit is the policy for a later run in the same process.
+// What ended with an error stays on record (Review 082 B1-Ra): its end is
+// not a clean one.
 type lingering struct {
 	mu     sync.Mutex
-	tasks  []*copier
+	tasks  []leftover
+	failed []string
 	refuse bool
 }
 
-func (l *lingering) add(ss []*stream, r s6Result) {
+func (l *lingering) add(r s6Result) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	for _, s := range ss {
-		if r.out[s.name] == o3 {
-			l.tasks = append(l.tasks, s.c)
-		}
-	}
+	l.tasks = append(l.tasks, r.left...)
 }
 
-// pending drops the copiers that have returned and counts the rest.
+// pending drops what has ended, keeping the errors of what ended with one,
+// and counts the rest.
 func (l *lingering) pending() int {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	kept := l.tasks[:0]
-	for _, c := range l.tasks {
-		if !c.wait(time.Now()) {
-			kept = append(kept, c)
+	for _, t := range l.tasks {
+		ended, err := t.until(time.Now())
+		switch {
+		case !ended:
+			kept = append(kept, t)
+		case err != nil:
+			l.failed = append(l.failed, fmt.Sprintf("%s: %v", t.what, err))
 		}
 	}
 	l.tasks = kept
 	return len(kept)
 }
 
+// failures are the errors of what ended with one, and of what is still
+// running and has met one already.
+func (l *lingering) failures() []string {
+	l.pending()
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	out := append([]string(nil), l.failed...)
+	for _, t := range l.tasks {
+		if _, err := t.until(time.Now()); err != nil {
+			out = append(out, fmt.Sprintf("%s (still running): %v", t.what, err))
+		}
+	}
+	return out
+}
+
+// admit under refuse turns a later run away while anything of an earlier
+// one runs, or ended with an error; under allow it admits it, and the
+// failures stay on record.
 func (l *lingering) admit() error {
-	if l.refuse && l.pending() > 0 {
+	if l.refuse && (l.pending() > 0 || len(l.failures()) > 0) {
 		return errLingering
 	}
 	return nil
@@ -69,7 +93,7 @@ func TestDestSealEndless(t *testing.T) {
 	e := &endless{stop: make(chan struct{})}
 	p := d.copyPort("out")
 	ss := []*stream{{name: "out", r: e, c: startCopy(e, p, false), p: p}}
-	r := runS6(d, ss, 200*time.Millisecond, 100*time.Millisecond, false)
+	r := s.adopt(runS6(d, ss, 200*time.Millisecond, 100*time.Millisecond, false))
 	atSeal, _ := d.snapshot()
 	_, _ = d.ownerPort().Write(doc)
 	time.Sleep(50 * time.Millisecond)
@@ -95,13 +119,19 @@ func TestDestO3GateLingering(t *testing.T) {
 	g0 := runtime.NumGoroutine()
 	d := &dest{}
 	g := newGate()
-	s.defer_(g.release)
+	// o3-unreleased, a gate regression (Review 081 B1): the scenario never
+	// releases its gate, so its O3 copier still runs when it ends; only the
+	// wait for what its runs handed on can find that.
+	unreleased := injected("o3-unreleased")
+	if !unreleased {
+		s.defer_(g.release)
+	}
 	p1 := d.copyPort("run1")
 	ss := []*stream{{name: "out", r: g, c: startCopy(g, p1, false), p: p1}}
-	r := runS6(d, ss, 100*time.Millisecond, 100*time.Millisecond, false)
+	r := s.adopt(runS6(d, ss, 100*time.Millisecond, 100*time.Millisecond, false))
 	_, _ = d.ownerPort().Write(doc)
 	reg := &lingering{}
-	reg.add(ss, r)
+	reg.add(r)
 
 	reg.refuse = true
 	refused := errors.Is(reg.admit(), errLingering)
@@ -111,14 +141,18 @@ func TestDestO3GateLingering(t *testing.T) {
 	p2 := d.copyPort("run2")
 	src := strings.NewReader("second run\n")
 	ss2 := []*stream{{name: "out", r: nopCloser{src}, c: startCopy(src, p2, false), p: p2}}
-	r2 := runS6(d, ss2, time.Second, 100*time.Millisecond, false)
+	r2 := s.adopt(runS6(d, ss2, time.Second, 100*time.Millisecond, false))
 	doc2 := []byte(`{"run":2}` + "\n")
 	_, _ = d.ownerPort().Write(doc2)
 	beforeRelease, log := d.snapshot()
 	pendingBefore := reg.pending()
 	goroutinesBefore := runtime.NumGoroutine()
 
-	g.release()
+	if unreleased {
+		injectHit("TestDestO3GateLingering", os.Getpid())
+	} else {
+		g.release()
+	}
 	ended := ss[0].c.wait(time.Now().Add(time.Second))
 	afterRelease, _ := d.snapshot()
 	s.worked(int64(len(beforeRelease)))

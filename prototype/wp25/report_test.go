@@ -6,9 +6,17 @@ package wp25
 //
 //	pid     the helper is running (sleepers, holders, chain levels)
 //	epipe   a holder's first write failed (the read end was closed)
+//	ok      a holder's final answer when its scenario asked: its output is
+//	        closed and none of its writes failed
 //	fanout  all children of a fanout helper have reported
 //	limit   the helper reached its hard limit
 //
+// A holder's epipe and ok records exclude each other: both, in either
+// order, are a broken protocol, and neither counts (Review 084 B-N4).
+// Neither counts either without the holder's completion, which is not a
+// record (Review 085 B-N4-R): once every record it had to write was
+// written and closed and no tool failure came, it renames a file holding
+// "done <pid>" into place beside the report, its last step.
 // Nothing else is valid: no other kind, no extra field, a positive PID in
 // canonical decimal form, no line over maxLine bytes. While the helpers
 // may still write, an unterminated last line is a write in progress and
@@ -25,7 +33,7 @@ import (
 	"time"
 )
 
-var reportKinds = map[string]bool{"pid": true, "epipe": true, "fanout": true, "limit": true}
+var reportKinds = map[string]bool{"pid": true, "epipe": true, "ok": true, "fanout": true, "limit": true}
 
 // errNotYet is a wait that ended before the records arrived; any other
 // error of awaitRecords means the report is not valid.

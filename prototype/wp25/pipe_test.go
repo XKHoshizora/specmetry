@@ -11,6 +11,9 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"slices"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -55,7 +58,7 @@ func TestPipeNormalDrain(t *testing.T) {
 	if conf {
 		tr.reap(tKill)
 	}
-	r := runS6(d, ss, tDrain, tJoin, !conf)
+	r := s.adopt(runS6(d, ss, tDrain, tJoin, !conf))
 	_, _ = d.ownerPort().Write(doc)
 	buf, log := d.snapshot()
 	out, errb := streamOf(buf, log, "out"), streamOf(buf, log, "err")
@@ -120,7 +123,7 @@ func TestPipeEscapedHolder(t *testing.T) {
 	if conf {
 		tr.reap(tKill)
 	}
-	r := runS6(d, ss, tDrain, tJoin, !conf)
+	r := s.adopt(runS6(d, ss, tDrain, tJoin, !conf))
 	s.needLoad(holderWrites.Load() > 0, "the holder wrote before the stop (%d writes)", holderWrites.Load())
 	_, _ = d.ownerPort().Write(doc)
 	time.Sleep(200 * time.Millisecond)
@@ -134,7 +137,7 @@ func TestPipeEscapedHolder(t *testing.T) {
 	s.expect("stderr", o1, r.out["err"])
 	s.expect("read stopped", true, r.stopped)
 	s.expect("copiers blocked at the stop", 1, r.pending)
-	s.expectTrue("phase D used T_drain", r.drain >= tDrain, r.drain.String())
+	s.expectTrue("phase D used T_drain", r.drain >= tDrain, fmt.Sprintf("%v on its own clock (stopwatch %v)", r.drain, r.drainFine))
 	s.expectTrue("phase J within T_join", r.join < tJoin, r.join.String())
 	s.expectTrue("holder's writes fail after the stop", holderErr != nil, fmt.Sprint(holderErr))
 	s.expectTrue("document last and whole", lastIsWhole(buf, log, doc), "")
@@ -147,24 +150,59 @@ func TestPipeF1SkipDrain(t *testing.T) {
 	// reach the destination, and its writes fail.
 	s := begin(t, "T1", "T1.pipe.F1-skip-drain", fault, true, true)
 	defer s.done()
-	rep := s.newReport(reportSpec{"pid": 1, "epipe": -1})
+	rep := s.newReport(reportSpec{"pid": 1, "epipe": -1, "ok": -1})
 	d := &dest{}
 	cmd := helper("holder-parent", []string{reportEnv + "=" + rep})
 	_, ss := piped(s, cmd, d, false)
 	release := gated(s, cmd)
 	tr := startTree(s, cmd)
 	closeWriteEnd(cmd)
-	s.awaitOwned(rep, 1, 5*time.Second, func(pid int) { tr.ownReported(pid) })
+	var holder owned
+	s.awaitOwned(rep, 1, 5*time.Second, func(pid int) { holder = tr.ownReported(pid) })
 	release()
 	exited, status, _ := tr.waitExit(10 * time.Second)
 	s.needLoad(exited && status == "exit 3", "the holder verified as the check's; its parent exited 3 (%v, %s)", exited, status)
 	time.Sleep(100 * time.Millisecond) // the holder writes a few lines
-	r := runS6(d, ss, tDrain, tJoin, true)
-	_, _ = d.ownerPort().Write(doc)
-	epipe, err := awaitRecords(rep, "epipe", 1, 3*time.Second)
-	if err != nil && !errors.Is(err, errNotYet) {
-		s.invalidf("%v", err)
+	var keptEnds []*kept
+	keep := ss
+	mixed := injected("f1-mixed-fault")
+	if mixed || injected("f1-one-kept") {
+		// Review 082 N4-R: only stdout's read end is kept. With
+		// f1-mixed-fault the holder's later write to stderr fails, and so
+		// does its report; with f1-one-kept it writes only stdout.
+		keep = ss[:1]
 	}
+	if mixed || injectedAny("read-end-kept", "f1-one-kept", "ok-report-fail", "fail-after-ok", "ok-open-output", "output-close-fails",
+		"ok-epipe-reported", "epipe-then-ok", "ok-foreign", "ok-dup", "ok-truncated", "ok-malformed", "ok-limit", "f1-drain-fails",
+		"ok-close-fails", "ok-limit-gated", "ok-limit-unwritable", "done-foreign", "limit-race-ok", "epipe-fails-then-ok", "ok-fails-epipe-reported") {
+		// A gate regression's healthy counter-case (Review 076 N4): the
+		// scenario keeps a second handle on both read ends, so the stop
+		// leaves the pipes open and the holder's writes do not fail. Its
+		// late bytes then wait in the pipes, where the scenario sees them:
+		// the evidence that the prediction is wrong while the tool works.
+		for _, st := range keep {
+			k, err := keepOpen(st.r.(*os.File))
+			if err != nil {
+				s.invalidf("a second handle on the read end: %v", err)
+			}
+			s.defer_(k.close)
+			keptEnds = append(keptEnds, k)
+		}
+		injectHit("TestPipeF1SkipDrain", os.Getpid())
+	}
+	r := s.adopt(runS6(d, ss, tDrain, tJoin, true))
+	atStop := waiting(s, keptEnds)
+	if mixed {
+		// The holder's round that writes stderr comes only now.
+		if err := os.WriteFile(rep+".stopped", nil, 0o600); err != nil {
+			s.invalidf("the stop marker: %v", err)
+		}
+	}
+	_, _ = d.ownerPort().Write(doc)
+	// Review 084 B-N4: the evidence is collected in full first, the report
+	// read once more after the holder's end, and only then is the whole of
+	// it classified; no record, and no answer, decides on its own.
+	ev := observeF1(s, rep, holder, keptEnds, atStop, len(ss))
 	buf, log := d.snapshot()
 	s.worked(int64(len(buf)))
 	_ = tr.kill()
@@ -172,15 +210,291 @@ func TestPipeF1SkipDrain(t *testing.T) {
 	if conf {
 		tr.reap(tKill)
 	}
+	ev.finalRead(rep, conf)
+	found, why := classifyF1(ev)
+	if len(why) > 0 {
+		s.invalidf("observation failed: %s", strings.Join(why, "; "))
+	}
+	if found == f1Wrote {
+		s.note("no epipe record; the holder's final answer came after its output closed, and late bytes reached every stream's kept read end from the stop to the end: %v", ev.late)
+	}
 	s.expect("stdout", o2, r.out["out"])
 	s.expect("stderr", o2, r.out["err"])
 	s.expect("phase D skipped", time.Duration(0), r.drain)
 	s.expect("copiers blocked at the stop", 2, r.pending)
 	s.expectTrue("phase J within T_join", r.join < tJoin, r.join.String())
 	s.expectTrue("early output copied", bytes.Contains(buf, []byte("early-out")) && bytes.Contains(buf, []byte("early-err")), "")
-	s.expectTrue("holder's late writes fail", len(epipe) == 1, fmt.Sprintf("%d epipe reports", len(epipe)))
+	s.expectTrue("holder's late writes fail", found == f1Failed, ev.records.String())
 	s.expectTrue("document last and whole", lastIsWhole(buf, log, doc), "")
 	s.expect("cleanup kill confirmed", true, conf)
+}
+
+// f1Evidence is what the F1 scenario observed of its holder (Review 084
+// B-N4), all of it collected before anything is classified.
+type f1Evidence struct {
+	holder   int       // the verified holder's PID
+	state    string    // what was known of its state when the observation ended
+	asked    bool      // the scenario asked for the holder's final answer
+	kept     int       // streams with a read end the scenario kept
+	streams  int       // the check's streams
+	ended    bool      // after the question, EOF came through every kept read end
+	late     []int     // bytes each kept stream carried from the stop to its end
+	done     int       // the PID in the holder's completion; 0: none came
+	records  f1Records // the epipe and ok records of the final report, in order
+	failures []string  // what failed while collecting: a read, a write, the report
+}
+
+type f1Records []reportLine
+
+func (rs f1Records) String() string {
+	if len(rs) == 0 {
+		return "no epipe or ok record"
+	}
+	var b strings.Builder
+	for i, r := range rs {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		fmt.Fprintf(&b, "%s %d", r.kind, r.pid)
+	}
+	return b.String()
+}
+
+// observeF1 collects the evidence while the holder may still run. Without
+// a record of a failed write (Review 076 N4, Reviews 081 to 083 N4-R) the
+// record may not have arrived, the holder may have failed to write it, or
+// its late writes may not have failed; it is asked for its final answer,
+// which ends the observation: it writes nothing more, closes its output,
+// and answers "ok" only if none of its writes failed. The end is shown by
+// EOF through each kept read end, within one 2 s budget for all of them;
+// the late bytes are what each stream carried from the stop to that end.
+// On either path the holder then commits its completion (Review 085
+// B-N4-R), only once every record it had to write was written and closed
+// and no tool failure came; it is waited for within 3 s. A failure on the
+// way is recorded and the collection goes on.
+func observeF1(s *scen, rep string, holder owned, keptEnds []*kept, atStop []int, streams int) f1Evidence {
+	ev := f1Evidence{holder: holder.pidOf(), kept: len(keptEnds), streams: streams}
+	failed := func(err error) {
+		if err != nil && !errors.Is(err, errNotYet) {
+			ev.failures = append(ev.failures, err.Error())
+		}
+	}
+	epipe, err := awaitRecords(rep, "epipe", 1, 3*time.Second)
+	failed(err)
+	if len(epipe) == 1 && injectedAny("epipe-close-fails", "epipe-limit-gated", "epipe-limit-unwritable") {
+		// Review 085's cases: the holder's failure after its record has
+		// happened before the checks below (the test's own marker).
+		awaitMarker(s, rep)
+	}
+	if len(epipe) == 0 {
+		ev.asked = true
+		if err := os.WriteFile(rep+".query", nil, 0o600); err != nil {
+			failed(fmt.Errorf("asking the holder: %w", err))
+		}
+		ok, err := awaitRecords(rep, "ok", 1, 2*time.Second)
+		failed(err)
+		if injectedAny("fail-after-ok", "ok-epipe-reported", "ok-close-fails", "ok-limit-gated", "ok-limit-unwritable") && len(ok) == 1 {
+			// The reviews' cases: the holder's failure after its answer has
+			// happened before the checks below (the test's own marker).
+			awaitMarker(s, rep)
+		}
+		ev.ended = true
+		endBy := time.Now().Add(2 * time.Second)
+		for i, k := range keptEnds {
+			n, eof, err := k.drain(endBy)
+			if err == nil && i == 0 && injected("f1-drain-fails") {
+				// A tool failure beside a complete answer: the read of a
+				// kept read end fails.
+				injectHit("f1.drain", os.Getpid())
+				err = errors.New("injected: the read failed")
+			}
+			if err != nil {
+				failed(fmt.Errorf("reading a kept read end to its end: %w", err))
+			}
+			ev.late = append(ev.late, n-atStop[i])
+			ev.ended = ev.ended && eof
+		}
+	}
+	ev.done, err = awaitDone(rep, 3*time.Second)
+	failed(err)
+	if injected("limit-after-done") {
+		// Review 086's order: the hard limit's callback decides after the
+		// completion and before the holder is ended (the test's own marker,
+		// bounded); a callback that did not decide leaves the load unbuilt.
+		awaitFile(rep+".limit-decided", 3*time.Second)
+		s.needLoad(fileThere(rep+".limit-decided"), "the hard limit's callback decided after the completion")
+	}
+	ev.state = stateOf(holder)
+	return ev
+}
+
+// awaitDone waits for a holder's completion and reads it strictly: the
+// PID it names, 0 if none came in time.
+func awaitDone(rep string, d time.Duration) (int, error) {
+	deadline := time.Now().Add(d)
+	for !fileThere(rep+".done") && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	b, err := os.ReadFile(rep + ".done")
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		return 0, nil
+	case err != nil:
+		return 0, fmt.Errorf("the holder's completion: %w", err)
+	}
+	f := strings.Fields(string(b))
+	pid := 0
+	if len(f) == 2 && f[0] == "done" && string(b) == f[0]+" "+f[1]+"\n" {
+		pid, err = strconv.Atoi(f[1])
+	}
+	if pid <= 0 || err != nil || strconv.Itoa(pid) != f[1] {
+		return 0, fmt.Errorf("the holder's completion is malformed: %q", clip(string(b)))
+	}
+	return pid, nil
+}
+
+// awaitMarker waits (bounded) for the test's own marker that a holder's
+// failure happened; it only orders a gate regression, and decides nothing.
+func awaitMarker(s *scen, rep string) {
+	deadline := time.Now().Add(3 * time.Second)
+	for !fileThere(rep+".failed") && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	s.note("load: the holder's failure after its record happened: %v", fileThere(rep+".failed"))
+}
+
+// finalRead reads the report once more, after the holder's end: nothing
+// more can be appended, and a record cut short is a truncation. That the
+// records are the whole observation, the end of the holder does not show
+// (Review 085 B-N4-R): only its completion does. An end not confirmed is
+// no such read.
+func (ev *f1Evidence) finalRead(rep string, ended bool) {
+	if !ended {
+		ev.failures = append(ev.failures, "the holder's end is not confirmed, so its report cannot be read as final")
+	}
+	lines, err := parseReport(rep, ended)
+	if err == nil && injected("f1-final-read-fails") {
+		// A tool failure beside the record of a failed write: the final
+		// read fails.
+		injectHit("f1.final-read", os.Getpid())
+		err = errors.New("injected: the report could not be read")
+	}
+	if err == nil {
+		_, err = tally(lines)
+	}
+	if err != nil {
+		ev.failures = append(ev.failures, "report: "+err.Error())
+		return
+	}
+	for _, l := range lines {
+		if l.kind == "epipe" || l.kind == "ok" {
+			ev.records = append(ev.records, l)
+		}
+	}
+}
+
+type f1Finding int
+
+const (
+	f1Invalid f1Finding = iota // the observation does not count
+	f1Failed                   // the holder's late writes failed: the prediction holds
+	f1Wrote                    // the tools worked, and the late writes did not fail
+)
+
+// classifyF1 decides on the whole of the evidence (Review 084 B-N4). By
+// the protocol (report_test.go), "epipe" says a late write of the holder
+// failed; "ok", given only when asked and only with the holder's output
+// closed, says none did. They exclude each other: both, in either order,
+// break the protocol, so neither counts. Each record must be the
+// holder's. Every rule is checked before anything is decided; a success
+// returns nothing early, and a failure while collecting outweighs both.
+func classifyF1(ev f1Evidence) (f1Finding, []string) {
+	var why []string
+	for _, f := range ev.failures {
+		if !slices.Contains(why, f) {
+			why = append(why, f)
+		}
+	}
+	epipe, ok := 0, 0
+	for _, r := range ev.records {
+		switch r.kind {
+		case "epipe":
+			epipe++
+		case "ok":
+			ok++
+		default:
+			continue
+		}
+		if r.pid != ev.holder {
+			why = append(why, fmt.Sprintf("an %s record of process %d, not of the holder %d", r.kind, r.pid, ev.holder))
+		}
+	}
+	// Either finding needs the holder's completion (Review 085 B-N4-R): a
+	// whole record is no proof that the report it went in completed, nor
+	// that no failure came beside it, and the end of the holder adds none.
+	switch {
+	case ev.done == 0:
+		why = append(why, "no completion from the holder: a report it had to write may have failed, or been cut off by its end, so its records are not known to be the whole observation")
+	case ev.done != ev.holder:
+		why = append(why, fmt.Sprintf("a completion of process %d, not of the holder %d", ev.done, ev.holder))
+	}
+	if epipe > 1 || ok > 1 {
+		why = append(why, fmt.Sprintf("%d epipe and %d ok records, where the protocol has at most one", epipe, ok))
+	}
+	switch {
+	case epipe > 0 && ok > 0:
+		why = append(why, fmt.Sprintf("the holder answered that none of its writes failed and reported a failed write (%s): the protocol has one or the other, so neither counts", ev.records))
+	case epipe == 0 && ok == 0:
+		why = append(why, fmt.Sprintf("no epipe record, and no final answer from the holder: its record was not written or has not arrived, or its tool failed (the holder %s)", ev.state))
+	case ok > 0:
+		if !ev.asked {
+			why = append(why, "an answer nobody asked for")
+		}
+		if !ev.ended {
+			why = append(why, fmt.Sprintf("the holder answered, but a stream still had a writer 2 s later: its answer was not the end of the observation (late bytes %v)", ev.late))
+		}
+		seen := ev.kept == ev.streams && len(ev.late) == ev.kept
+		for _, n := range ev.late {
+			if n <= 0 {
+				seen = false
+			}
+		}
+		if !seen {
+			why = append(why, fmt.Sprintf("late bytes did not reach every stream through a kept read end (%d of %d kept, late bytes %v)", ev.kept, ev.streams, ev.late))
+		}
+	}
+	if len(why) > 0 {
+		return f1Invalid, why
+	}
+	if epipe > 0 {
+		return f1Failed, nil
+	}
+	return f1Wrote, nil
+}
+
+// waiting is how many bytes wait in each kept read end; a read that fails
+// stops the scenario as invalid.
+func waiting(s *scen, ks []*kept) []int {
+	n := make([]int, len(ks))
+	for i, k := range ks {
+		m, err := k.available()
+		if err != nil {
+			s.invalidf("observation failed: the bytes waiting in a kept read end could not be read: %v", err)
+		}
+		n[i] = m
+	}
+	return n
+}
+
+// stateOf says, for a reason, what is known of a process's state.
+func stateOf(p owned) string {
+	switch {
+	case p.ended():
+		return fmt.Sprintf("%d has ended", p.pidOf())
+	case p.observeErr() != nil:
+		return fmt.Sprintf("%d, whose state could not be read", p.pidOf())
+	}
+	return fmt.Sprintf("%d still runs", p.pidOf())
 }
 
 func TestPipeCapacityStop(t *testing.T) {
@@ -199,7 +513,7 @@ func TestPipeCapacityStop(t *testing.T) {
 	if conf {
 		tr.reap(tKill)
 	}
-	r := runS6(d, ss, tDrain, tJoin, !conf)
+	r := s.adopt(runS6(d, ss, tDrain, tJoin, !conf))
 	_, _ = d.ownerPort().Write(doc)
 	buf, log := d.snapshot()
 	out := streamOf(buf, log, "out")
@@ -227,7 +541,7 @@ func TestPipeCapacityDiscard(t *testing.T) {
 	if conf {
 		tr.reap(tKill)
 	}
-	r := runS6(d, ss, tDrain, tJoin, !conf)
+	r := s.adopt(runS6(d, ss, tDrain, tJoin, !conf))
 	_, _ = d.ownerPort().Write(doc)
 	buf, log := d.snapshot()
 	out := streamOf(buf, log, "out")
@@ -282,7 +596,7 @@ func TestPipeAliasConcurrent(t *testing.T) {
 	if conf {
 		tr.reap(tKill)
 	}
-	r := runS6(d, ss, tDrain, tJoin, !conf)
+	r := s.adopt(runS6(d, ss, tDrain, tJoin, !conf))
 	wg.Wait()
 	_, _ = owner.Write(doc)
 	buf, log := d.snapshot()
@@ -355,7 +669,7 @@ func TestPipeSilentHolderReal(t *testing.T) {
 		exited, status, _ := tr.waitExit(10 * time.Second)
 		s.needLoad(exited && status == "exit 0", "run %d: the holder verified as the check's; its parent exited 0 (%v, %s)", i+1, exited, status)
 		since := stopwatch()
-		r := runS6(d, ss, tDrain, tJoin, true)
+		r := s.adopt(runS6(d, ss, tDrain, tJoin, true))
 		s.needLoad(r.pending == 2, "run %d: both copiers blocked at the stop (%d)", i+1, r.pending)
 		if r.out["out"] == o2 && r.out["err"] == o2 {
 			ok++

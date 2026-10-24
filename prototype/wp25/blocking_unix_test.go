@@ -41,7 +41,7 @@ func TestPipeBlockingReadEnd(t *testing.T) {
 		s.invalidf("copier returned before the stop")
 	}
 	ss := []*stream{{name: "out", r: r, c: c, p: port}}
-	res := runS6(d, ss, 100*time.Millisecond, 300*time.Millisecond, false)
+	res := s.adopt(runS6(d, ss, 100*time.Millisecond, 300*time.Millisecond, false))
 	_, _ = d.ownerPort().Write(doc)
 	openAfterClose := fdOpen(rfd)
 	// A holder still writes: the bytes reach the copier's next Read, its

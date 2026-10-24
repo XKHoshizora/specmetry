@@ -5,6 +5,7 @@ package wp25
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -16,7 +17,7 @@ import (
 // (sysctl kern.procargs2) carry tag. A process that ends during the scan
 // is left out; one whose environment cannot be read is an error.
 func censusTag(tag, since string) ([]survivor, error) {
-	ks, err := unix.SysctlKinfoProcSlice("kern.proc.all")
+	ks, err := procList()
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", errCensus, err)
 	}
@@ -30,13 +31,18 @@ func censusTag(tag, since string) ([]survivor, error) {
 		if !notBefore(st, since) {
 			continue
 		}
-		b, err := unix.SysctlRaw("kern.procargs2", pid)
+		b, err := procArgs(pid)
 		if err != nil || len(b) < 4 {
-			// Ended meanwhile, or a zombie now: left out; otherwise an error.
-			if s2, pr := procInfo(pid); pr == absent || pr == present && (s2.zombie || s2.start != st) {
+			// Ended meanwhile, or a zombie now: left out; otherwise an error,
+			// which says what is known of the process (Review 083 N-MAC).
+			s2, pr := censusRecheck(pid)
+			if pr == absent || pr == present && (s2.zombie || s2.start != st) {
 				continue
 			}
-			return nil, fmt.Errorf("%w: process %d: the environment cannot be read: %v", errCensus, pid, err)
+			if err == nil {
+				err = fmt.Errorf("%d bytes", len(b))
+			}
+			return nil, fmt.Errorf("%w: process %d: the environment cannot be read: %w (%s)", errCensus, pid, err, unreadableDetail(k, st, s2, pr))
 		}
 		if s2, pr := procInfo(pid); pr != present || s2.start != st || s2.zombie {
 			if pr == unknown {
@@ -50,6 +56,50 @@ func censusTag(tag, since string) ([]survivor, error) {
 	}
 	return out, nil
 }
+
+// unreadableDetail says what is known of a process whose environment the
+// census could not read (Review 083 N-MAC): from the list entry the census
+// read, its identity, state, whether it is exiting, its parent and group,
+// and whether its short command name is a prefix of this test binary's
+// name (a heuristic, Review 084 N1: another program can share it); and
+// the state read after the failure. Never its arguments, environment or name. It is evidence for a
+// reader, not of ownership: the census fails all the same.
+func unreadableDetail(k unix.KinfoProc, st string, s2 pinfo, pr presence) string {
+	const pWexit = 0x2000 // P_WEXIT in <sys/proc.h>: working on exiting
+	after := "unreadable"
+	switch pr {
+	case absent:
+		after = "gone"
+	case present:
+		after = fmt.Sprintf("present, start %s, zombie %v", s2.start, s2.zombie)
+	}
+	return fmt.Sprintf("start %s, state %d, exiting %v, parent %d, group %d, short command name a prefix of this test's (heuristic, not identity): %s; state after the failure: %s",
+		st, k.Proc.P_stat, k.Proc.P_flag&pWexit != 0, k.Eproc.Ppid, k.Eproc.Pgid, commPrefix(k), after)
+}
+
+// commPrefix says whether a process's short command name (at most
+// MAXCOMLEN bytes) is a prefix of this test binary's name; only the answer
+// is kept. A match is no proof of the program: any other with that name
+// gives it too.
+func commPrefix(k unix.KinfoProc) string {
+	self, err := os.Executable()
+	comm := unix.ByteSliceToString(k.Proc.P_comm[:])
+	switch {
+	case err != nil || comm == "":
+		return "unknown"
+	case strings.HasPrefix(filepath.Base(self), comm):
+		return "yes"
+	}
+	return "no"
+}
+
+// The census's reads, which a direct check (census_check_darwin_test.go)
+// replaces; the real ones otherwise.
+var (
+	procList      = func() ([]unix.KinfoProc, error) { return unix.SysctlKinfoProcSlice("kern.proc.all") }
+	procArgs      = func(pid int) ([]byte, error) { return unix.SysctlRaw("kern.procargs2", pid) }
+	censusRecheck = procInfo
+)
 
 // notBefore compares two "sec.usec" times.
 func notBefore(a, b string) bool {
