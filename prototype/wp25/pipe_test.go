@@ -174,7 +174,7 @@ func TestPipeF1SkipDrain(t *testing.T) {
 	}
 	if mixed || injectedAny("read-end-kept", "f1-one-kept", "ok-report-fail", "fail-after-ok", "ok-open-output", "output-close-fails",
 		"ok-epipe-reported", "epipe-then-ok", "ok-foreign", "ok-dup", "ok-truncated", "ok-malformed", "ok-limit", "f1-drain-fails",
-		"ok-close-fails", "ok-limit-gated", "ok-limit-unwritable", "done-foreign") {
+		"ok-close-fails", "ok-limit-gated", "ok-limit-unwritable", "done-foreign", "limit-race-ok", "epipe-fails-then-ok", "ok-fails-epipe-reported") {
 		// A gate regression's healthy counter-case (Review 076 N4): the
 		// scenario keeps a second handle on both read ends, so the stop
 		// leaves the pipes open and the holder's writes do not fail. Its

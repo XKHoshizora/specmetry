@@ -249,6 +249,18 @@ var gateCases = []gateCase{
 	// process than the holder beside a final answer.
 	{id: "report.done-close-fails", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "done-close-fails", want: invalid, hit: true},
 	{id: "report.done-foreign", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "done-foreign", want: invalid, hit: true},
+	// Review 086 B-N4-R: a completion is published although another entry
+	// of the same holder has failed. The hard limit's real callback has
+	// entered and its report is still running when the holder completes,
+	// on the epipe path and on the answer path (B-N4-R/T). A report fails
+	// for real, its caller ignores that, and a later record succeeds and is
+	// completed, on either path (B-N4-R/I). And the rename of the
+	// completion fails.
+	{id: "report.limit-race-epipe", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "limit-race-epipe", want: invalid, hit: true},
+	{id: "report.limit-race-ok", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "limit-race-ok", want: invalid, hit: true},
+	{id: "report.ok-fails-epipe-reported", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "ok-fails-epipe-reported", want: invalid, hit: true},
+	{id: "report.epipe-fails-then-ok", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "epipe-fails-then-ok", want: invalid, hit: true},
+	{id: "report.done-rename-fails", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "done-rename-fails", want: invalid, hit: true},
 	// The same in the scenario's own tools (added with the fix; the old code
 	// has no final read): the final read of the report fails beside a record
 	// of a failed write, the read of a kept read end beside a final answer.

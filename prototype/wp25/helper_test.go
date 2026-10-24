@@ -31,7 +31,12 @@ func runHelper(mode string, args []string) int {
 	if ms, err := strconv.Atoi(os.Getenv(limitEnv)); err == nil && ms > 0 {
 		limit = time.Duration(ms) * time.Millisecond
 	}
+	if mode == "holder" && injectedAny("limit-race-epipe", "limit-race-ok") {
+		// Review 086 B-N4-R/T: the holder's real timer, early.
+		limit = 100 * time.Millisecond
+	}
 	time.AfterFunc(limit, func() {
+		limitHeld(mode)
 		_ = report("limit")
 		os.Exit(limitExit)
 	})
@@ -126,7 +131,7 @@ func runHelper(mode string, args []string) int {
 						_ = complete()
 					}
 					select {}
-				case injected("fail-after-ok") || injected("ok-epipe-reported"):
+				case injectedAny("fail-after-ok", "ok-epipe-reported", "ok-fails-epipe-reported"):
 					// Review 083 N4-R-S, the review's case: an answer in the
 					// middle; then the holder's stderr breaks, its next write
 					// to it fails, and its report of that fails too. Review
@@ -143,7 +148,7 @@ func runHelper(mode string, args []string) int {
 						eerr = os.Stderr.Close()
 					}
 					if oerr == nil && eerr == nil {
-						if injected("epipe-then-ok") {
+						if injectedAny("epipe-then-ok", "epipe-fails-then-ok") {
 							// Review 084 B-N4, the other order: a write after
 							// the end fails and is reported, and the holder
 							// answers all the same.
@@ -278,6 +283,11 @@ func complete() error {
 	if rep == "" {
 		return nil
 	}
+	if injectedAny("limit-race-epipe", "limit-race-ok") {
+		// Review 086 B-N4-R/T: the completion comes only once the hard
+		// limit's callback has entered (bounded).
+		awaitFile(rep+".limit-entered", 3*time.Second)
+	}
 	pid := os.Getpid()
 	if injected("done-foreign") {
 		// A completion that names another process than its writer.
@@ -303,7 +313,34 @@ func complete() error {
 	if cerr != nil {
 		return cerr
 	}
+	if injected("done-rename-fails") {
+		// The rename fails: its target is a directory.
+		injectHit("holder.done-rename-fails", os.Getpid())
+		_ = os.Mkdir(rep+".done", 0o700)
+	}
 	return os.Rename(rep+".done-part", rep+".done")
+}
+
+// limitHeld is the gate regressions' hold on the hard limit's callback
+// (Review 086 B-N4-R/T; nothing in a normal run): once it has entered, it
+// leaves a marker and waits at a gate, released by its file or after
+// 10 s, so a holder's completion can come while it runs.
+func limitHeld(mode string) {
+	if mode != "holder" || !injectedAny("limit-race-epipe", "limit-race-ok") {
+		return
+	}
+	rep := os.Getenv(reportEnv)
+	injectHit("helper.limit-entered", os.Getpid())
+	_ = os.WriteFile(rep+".limit-entered", nil, 0o600)
+	awaitFile(rep+".limit-release", 10*time.Second)
+}
+
+// awaitFile waits, bounded, for a file to exist.
+func awaitFile(path string, d time.Duration) {
+	deadline := time.Now().Add(d)
+	for !fileThere(path) && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 // afterRecord is what a holder does after its record under the gate
@@ -360,7 +397,8 @@ func report(kind string) error {
 		return nil
 	}
 	flag := os.O_WRONLY | os.O_APPEND
-	if (injected("epipe-report-fail") || injected("epipe-report-fail-alive") || injected("f1-mixed-fault") || injected("fail-after-ok")) && kind == "epipe" || injected("ok-report-fail") && kind == "ok" ||
+	if (injected("epipe-report-fail") || injected("epipe-report-fail-alive") || injected("f1-mixed-fault") || injected("fail-after-ok")) && kind == "epipe" || injectedAny("ok-report-fail", "ok-fails-epipe-reported") && kind == "ok" ||
+		injected("epipe-fails-then-ok") && kind == "epipe" ||
 		injectedAny("epipe-limit-unwritable", "ok-limit-unwritable") && kind == "limit" {
 		// Review 076 N4: a holder's record cannot be written. The report is
 		// opened read-only, so the real write fails.
