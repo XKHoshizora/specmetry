@@ -122,7 +122,9 @@ func runHelper(mode string, args []string) int {
 					// Review 083 N4-R-S: an answer that is not the end: the
 					// holder answers and stops writing, its output still open.
 					injectHit("holder.answer-not-final", os.Getpid())
-					_ = report("ok")
+					if report("ok") == nil {
+						_ = complete()
+					}
 					select {}
 				case injected("fail-after-ok") || injected("ok-epipe-reported"):
 					// Review 083 N4-R-S, the review's case: an answer in the
@@ -150,8 +152,12 @@ func runHelper(mode string, args []string) int {
 								_ = report("epipe")
 							}
 						}
-						if err := report("ok"); err == nil {
-							_ = afterRecord(rep)
+						err := report("ok")
+						if err == nil {
+							err = afterRecord(rep)
+						}
+						if err == nil {
+							_ = complete()
 						}
 						if injectedAny("ok-close-fails", "ok-limit-unwritable") {
 							// Tells the scenario the failure happened (the
@@ -177,6 +183,9 @@ func runHelper(mode string, args []string) int {
 				rerr := report("epipe")
 				if rerr == nil {
 					rerr = afterRecord(rep)
+				}
+				if rerr == nil {
+					rerr = complete()
 				}
 				if injectedAny("fail-after-ok", "ok-epipe-reported", "epipe-close-fails", "epipe-limit-unwritable") {
 					// Tells the scenario the failure happened, and its report
@@ -256,6 +265,45 @@ func runHelper(mode string, args []string) int {
 	}
 	fmt.Fprintln(os.Stderr, "unknown helper mode")
 	return 99
+}
+
+// complete is a holder's last step (Review 085 B-N4-R), taken only once
+// every record it had to write was written and closed and no tool failure
+// came: it commits its completion, "done <pid>", written and closed in a
+// file of its own and then renamed into place, so the scenario sees all
+// of it or nothing. A failure on the way leaves no completion. Nothing the
+// holder does afterwards belongs to the observation.
+func complete() error {
+	rep := os.Getenv(reportEnv)
+	if rep == "" {
+		return nil
+	}
+	pid := os.Getpid()
+	if injected("done-foreign") {
+		// A completion that names another process than its writer.
+		injectHit("holder.done-foreign", pid)
+		if pid = os.Getppid(); pid <= 0 {
+			pid = 1
+		}
+	}
+	f, err := os.OpenFile(rep+".done-part", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	_, werr := f.WriteString("done " + strconv.Itoa(pid) + "\n")
+	cerr := f.Close()
+	if injected("done-close-fails") {
+		// The close of the completion fails (a second close).
+		injectHit("holder.done-close-fails", os.Getpid())
+		cerr = f.Close()
+	}
+	if werr != nil {
+		return werr
+	}
+	if cerr != nil {
+		return cerr
+	}
+	return os.Rename(rep+".done-part", rep+".done")
 }
 
 // afterRecord is what a holder does after its record under the gate

@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -173,7 +174,7 @@ func TestPipeF1SkipDrain(t *testing.T) {
 	}
 	if mixed || injectedAny("read-end-kept", "f1-one-kept", "ok-report-fail", "fail-after-ok", "ok-open-output", "output-close-fails",
 		"ok-epipe-reported", "epipe-then-ok", "ok-foreign", "ok-dup", "ok-truncated", "ok-malformed", "ok-limit", "f1-drain-fails",
-		"ok-close-fails", "ok-limit-gated", "ok-limit-unwritable") {
+		"ok-close-fails", "ok-limit-gated", "ok-limit-unwritable", "done-foreign") {
 		// A gate regression's healthy counter-case (Review 076 N4): the
 		// scenario keeps a second handle on both read ends, so the stop
 		// leaves the pipes open and the holder's writes do not fail. Its
@@ -238,6 +239,7 @@ type f1Evidence struct {
 	streams  int       // the check's streams
 	ended    bool      // after the question, EOF came through every kept read end
 	late     []int     // bytes each kept stream carried from the stop to its end
+	done     int       // the PID in the holder's completion; 0: none came
 	records  f1Records // the epipe and ok records of the final report, in order
 	failures []string  // what failed while collecting: a read, a write, the report
 }
@@ -266,7 +268,10 @@ func (rs f1Records) String() string {
 // and answers "ok" only if none of its writes failed. The end is shown by
 // EOF through each kept read end, within one 2 s budget for all of them;
 // the late bytes are what each stream carried from the stop to that end.
-// A failure on the way is recorded and the collection goes on.
+// On either path the holder then commits its completion (Review 085
+// B-N4-R), only once every record it had to write was written and closed
+// and no tool failure came; it is waited for within 3 s. A failure on the
+// way is recorded and the collection goes on.
 func observeF1(s *scen, rep string, holder owned, keptEnds []*kept, atStop []int, streams int) f1Evidence {
 	ev := f1Evidence{holder: holder.pidOf(), kept: len(keptEnds), streams: streams}
 	failed := func(err error) {
@@ -310,8 +315,35 @@ func observeF1(s *scen, rep string, holder owned, keptEnds []*kept, atStop []int
 			ev.ended = ev.ended && eof
 		}
 	}
+	ev.done, err = awaitDone(rep, 3*time.Second)
+	failed(err)
 	ev.state = stateOf(holder)
 	return ev
+}
+
+// awaitDone waits for a holder's completion and reads it strictly: the
+// PID it names, 0 if none came in time.
+func awaitDone(rep string, d time.Duration) (int, error) {
+	deadline := time.Now().Add(d)
+	for !fileThere(rep+".done") && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	b, err := os.ReadFile(rep + ".done")
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		return 0, nil
+	case err != nil:
+		return 0, fmt.Errorf("the holder's completion: %w", err)
+	}
+	f := strings.Fields(string(b))
+	pid := 0
+	if len(f) == 2 && f[0] == "done" && string(b) == f[0]+" "+f[1]+"\n" {
+		pid, err = strconv.Atoi(f[1])
+	}
+	if pid <= 0 || err != nil || strconv.Itoa(pid) != f[1] {
+		return 0, fmt.Errorf("the holder's completion is malformed: %q", clip(string(b)))
+	}
+	return pid, nil
 }
 
 // awaitMarker waits (bounded) for the test's own marker that a holder's
@@ -324,9 +356,11 @@ func awaitMarker(s *scen, rep string) {
 	s.note("load: the holder's failure after its record happened: %v", fileThere(rep+".failed"))
 }
 
-// finalRead reads the report once more, after the holder's end: no writer
-// is left, so it holds all the observation can have, and a record cut
-// short is a truncation. An end not confirmed is no such read.
+// finalRead reads the report once more, after the holder's end: nothing
+// more can be appended, and a record cut short is a truncation. That the
+// records are the whole observation, the end of the holder does not show
+// (Review 085 B-N4-R): only its completion does. An end not confirmed is
+// no such read.
 func (ev *f1Evidence) finalRead(rep string, ended bool) {
 	if !ended {
 		ev.failures = append(ev.failures, "the holder's end is not confirmed, so its report cannot be read as final")
@@ -387,6 +421,15 @@ func classifyF1(ev f1Evidence) (f1Finding, []string) {
 		if r.pid != ev.holder {
 			why = append(why, fmt.Sprintf("an %s record of process %d, not of the holder %d", r.kind, r.pid, ev.holder))
 		}
+	}
+	// Either finding needs the holder's completion (Review 085 B-N4-R): a
+	// whole record is no proof that the report it went in completed, nor
+	// that no failure came beside it, and the end of the holder adds none.
+	switch {
+	case ev.done == 0:
+		why = append(why, "no completion from the holder: a report it had to write may have failed, or been cut off by its end, so its records are not known to be the whole observation")
+	case ev.done != ev.holder:
+		why = append(why, fmt.Sprintf("a completion of process %d, not of the holder %d", ev.done, ev.holder))
 	}
 	if epipe > 1 || ok > 1 {
 		why = append(why, fmt.Sprintf("%d epipe and %d ok records, where the protocol has at most one", epipe, ok))

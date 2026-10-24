@@ -9,6 +9,7 @@ import (
 // TestF1Classify: the F1 scenario's classification (Review 084 B-N4) on
 // fixed evidence. The real holder's paths are the gate regressions
 // (control.f1-*, report.*); these rows add mixes and orders on their own.
+// Either finding needs the holder's completion (Review 085 B-N4-R).
 // Every row is also classified with its records in the reverse order,
 // which must not change the finding.
 func TestF1Classify(t *testing.T) {
@@ -18,7 +19,14 @@ func TestF1Classify(t *testing.T) {
 	const h = 100 // the holder
 	ep, ok := reportLine{"epipe", h}, reportLine{"ok", h}
 	answered := func(rs ...reportLine) f1Evidence {
-		return f1Evidence{holder: h, asked: true, kept: 2, streams: 2, ended: true, late: []int{5, 7}, records: rs}
+		return f1Evidence{holder: h, asked: true, kept: 2, streams: 2, ended: true, late: []int{5, 7}, done: h, records: rs}
+	}
+	reported := func(rs ...reportLine) f1Evidence {
+		return f1Evidence{holder: h, done: h, records: rs}
+	}
+	completedBy := func(pid int, ev f1Evidence) f1Evidence {
+		ev.done = pid
+		return ev
 	}
 	failedTo := func(ev f1Evidence) f1Evidence {
 		ev.failures = []string{"report: injected"}
@@ -29,25 +37,29 @@ func TestF1Classify(t *testing.T) {
 		ev   f1Evidence
 		want f1Finding
 	}{
-		{"epipe", f1Evidence{holder: h, records: f1Records{ep}}, f1Failed},
-		{"epipe while waiting for an answer", f1Evidence{holder: h, asked: true, records: f1Records{ep}}, f1Failed},
+		{"epipe", reported(ep), f1Failed},
+		{"epipe while waiting for an answer", func() f1Evidence { ev := reported(ep); ev.asked = true; return ev }(), f1Failed},
 		{"final answer, ended, late bytes on both streams", answered(ok), f1Wrote},
 		{"answer, then epipe", answered(ok, ep), f1Invalid},
 		{"epipe, then answer", answered(ep, ok), f1Invalid},
-		{"epipe and an answer nobody asked for", f1Evidence{holder: h, records: f1Records{ok, ep}}, f1Invalid},
-		{"epipe with a failure", failedTo(f1Evidence{holder: h, records: f1Records{ep}}), f1Invalid},
+		{"epipe and an answer nobody asked for", reported(ok, ep), f1Invalid},
+		{"epipe with a failure", failedTo(reported(ep)), f1Invalid},
 		{"final answer with a failure", failedTo(answered(ok)), f1Invalid},
 		{"both with a failure", failedTo(answered(ok, ep)), f1Invalid},
 		{"a failure alone", failedTo(answered()), f1Invalid},
 		{"neither record", answered(), f1Invalid},
-		{"epipe of another process", f1Evidence{holder: h, records: f1Records{{"epipe", 7}}}, f1Invalid},
+		{"epipe of another process", reported(reportLine{"epipe", 7}), f1Invalid},
 		{"answer of another process", answered(reportLine{"ok", 7}), f1Invalid},
-		{"two epipe records", f1Evidence{holder: h, records: f1Records{ep, ep}}, f1Invalid},
+		{"two epipe records", reported(ep, ep), f1Invalid},
 		{"two answers", answered(ok, ok), f1Invalid},
 		{"answer, the observation not ended", func() f1Evidence { ev := answered(ok); ev.ended = false; return ev }(), f1Invalid},
 		{"answer, one stream kept", func() f1Evidence { ev := answered(ok); ev.kept, ev.late = 1, []int{5}; return ev }(), f1Invalid},
 		{"answer, no late bytes on one stream", func() f1Evidence { ev := answered(ok); ev.late = []int{5, 0}; return ev }(), f1Invalid},
 		{"answer nobody asked for, else complete", func() f1Evidence { ev := answered(ok); ev.asked = false; return ev }(), f1Invalid},
+		{"epipe, no completion", completedBy(0, reported(ep)), f1Invalid},
+		{"final answer, no completion", completedBy(0, answered(ok)), f1Invalid},
+		{"epipe, a completion of another process", completedBy(7, reported(ep)), f1Invalid},
+		{"final answer, a completion of another process", completedBy(7, answered(ok)), f1Invalid},
 	}
 	for _, r := range rows {
 		t.Run(r.name, func(t *testing.T) {

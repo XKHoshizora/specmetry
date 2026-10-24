@@ -13,6 +13,10 @@ package wp25
 //
 // A holder's epipe and ok records exclude each other: both, in either
 // order, are a broken protocol, and neither counts (Review 084 B-N4).
+// Neither counts either without the holder's completion, which is not a
+// record (Review 085 B-N4-R): once every record it had to write was
+// written and closed and no tool failure came, it renames a file holding
+// "done <pid>" into place beside the report, its last step.
 // Nothing else is valid: no other kind, no extra field, a positive PID in
 // canonical decimal form, no line over maxLine bytes. While the helpers
 // may still write, an unterminated last line is a write in progress and

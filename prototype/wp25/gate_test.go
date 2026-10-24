@@ -244,6 +244,11 @@ var gateCases = []gateCase{
 	{id: "report.ok-limit-cut", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "ok-limit-gated", want: invalid, hit: true},
 	{id: "report.ok-limit-unwritable", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "ok-limit-unwritable", want: invalid, hit: true},
 	{id: "report.epipe-cut", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "epipe-cut", want: invalid, hit: true},
+	// The completion itself (added with the fix; the old code has none): its
+	// close fails beside a record of a failed write; it names another
+	// process than the holder beside a final answer.
+	{id: "report.done-close-fails", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "done-close-fails", want: invalid, hit: true},
+	{id: "report.done-foreign", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "done-foreign", want: invalid, hit: true},
 	// The same in the scenario's own tools (added with the fix; the old code
 	// has no final read): the final read of the report fails beside a record
 	// of a failed write, the read of a kept read end beside a final answer.
