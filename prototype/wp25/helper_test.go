@@ -98,7 +98,15 @@ func runHelper(mode string, args []string) int {
 		// scenario has counted what waits at the stop; the round that does
 		// writes stdout after that count.
 		mixed := injected("f1-mixed-fault")
+		answered := false
 		for i := 0; ; i++ {
+			// Asked by its scenario (Review 082 N4-R), a holder that is still
+			// here has had none of its writes fail: it says so once. A
+			// record it cannot write leaves the scenario without an answer.
+			if !answered && fileThere(rep+".query") {
+				answered = true
+				_ = report("ok")
+			}
 			both := !mixed || fileThere(rep+".stopped")
 			_, err := fmt.Fprintf(os.Stdout, "late-out %d\n", i)
 			if err == nil && both {
@@ -108,9 +116,10 @@ func runHelper(mode string, args []string) int {
 				if report("epipe") != nil {
 					if injected("epipe-report-fail-alive") || mixed {
 						// Review 081 N4-R: the record could not be written, and
-						// the holder is still alive for a while (bounded).
+						// the holder is still alive for a while (bounded), past
+						// the scenario's decision; the scenario then ends it.
 						injectHit("holder.after-report-failure", os.Getpid())
-						time.Sleep(5 * time.Second)
+						time.Sleep(10 * time.Second)
 					}
 					return exitReport
 				}

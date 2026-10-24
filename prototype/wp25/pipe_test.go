@@ -147,7 +147,7 @@ func TestPipeF1SkipDrain(t *testing.T) {
 	// reach the destination, and its writes fail.
 	s := begin(t, "T1", "T1.pipe.F1-skip-drain", fault, true, true)
 	defer s.done()
-	rep := s.newReport(reportSpec{"pid": 1, "epipe": -1})
+	rep := s.newReport(reportSpec{"pid": 1, "epipe": -1, "ok": -1})
 	d := &dest{}
 	cmd := helper("holder-parent", []string{reportEnv + "=" + rep})
 	_, ss := piped(s, cmd, d, false)
@@ -198,18 +198,49 @@ func TestPipeF1SkipDrain(t *testing.T) {
 		s.invalidf("%v", err)
 	}
 	if len(epipe) == 0 {
-		// No record (Review 076 N4, Review 081 N4-R). It may not have
-		// arrived, the holder may have failed to write it, or the holder's
-		// late writes may not have failed; whether the holder still runs
-		// tells these apart in no way. The run is a finding only with
-		// evidence that the late writes succeeded: bytes that reached a
-		// read end the scenario kept, after the stop. Without it the
-		// observation is missing, and the run does not count.
-		late := waiting(s, keptEnds) - atStop
-		if late <= 0 {
-			s.invalidf("observation failed: no epipe record, and nothing shows the holder's late writes succeeding: its record was not written or has not arrived (the holder %s)", stateOf(holder))
+		// No record (Review 076 N4, Reviews 081 and 082 N4-R). It may not
+		// have arrived, the holder may have failed to write it, or the
+		// holder's late writes may not have failed; whether the holder still
+		// runs tells these apart in no way, and late bytes on one stream
+		// show that stream's writes, not the holder's other writes or its
+		// report. The run is a finding only with both:
+		//
+		//   - the holder's own confirmation, asked for now, that none of its
+		//     writes has failed (an "ok" record, written only by a holder
+		//     whose writes all succeeded so far);
+		//   - late bytes after the stop on every stream, each through a read
+		//     end the scenario kept.
+		//
+		// Anything less leaves the observation unconfirmed, whatever part of
+		// it succeeded, and the run does not count.
+		if err := os.WriteFile(rep+".query", nil, 0o600); err != nil {
+			s.invalidf("asking the holder: %v", err)
 		}
-		s.note("no epipe record; %d late bytes reached the kept read ends after the stop", late)
+		ok, err := awaitRecords(rep, "ok", 1, 2*time.Second)
+		if err != nil && !errors.Is(err, errNotYet) {
+			s.invalidf("%v", err)
+		}
+		// A record of a failure may have come meanwhile; it still counts.
+		if epipe, err = awaitRecords(rep, "epipe", 1, 0); err != nil && !errors.Is(err, errNotYet) {
+			s.invalidf("%v", err)
+		}
+		if len(epipe) == 0 {
+			if len(ok) == 0 {
+				s.invalidf("observation failed: no epipe record, and the holder did not confirm that its writes went on: its record was not written or has not arrived, or its tool failed (the holder %s)", stateOf(holder))
+			}
+			late := waiting(s, keptEnds)
+			seen := len(keptEnds) == len(ss)
+			for i := range late {
+				late[i] -= atStop[i]
+				if late[i] <= 0 {
+					seen = false
+				}
+			}
+			if !seen {
+				s.invalidf("observation failed: the holder confirmed no failed write, but late bytes did not reach every stream through a kept read end (%d of %d kept, late bytes %v)", len(keptEnds), len(ss), late)
+			}
+			s.note("no epipe record; the holder confirmed its writes went on, and late bytes reached every stream's kept read end after the stop: %v", late)
+		}
 	}
 	buf, log := d.snapshot()
 	s.worked(int64(len(buf)))
@@ -229,16 +260,16 @@ func TestPipeF1SkipDrain(t *testing.T) {
 	s.expect("cleanup kill confirmed", true, conf)
 }
 
-// waiting is how many bytes wait in the kept read ends; a read that fails
+// waiting is how many bytes wait in each kept read end; a read that fails
 // stops the scenario as invalid.
-func waiting(s *scen, ks []*kept) int {
-	n := 0
-	for _, k := range ks {
+func waiting(s *scen, ks []*kept) []int {
+	n := make([]int, len(ks))
+	for i, k := range ks {
 		m, err := k.available()
 		if err != nil {
 			s.invalidf("observation failed: the bytes waiting in a kept read end could not be read: %v", err)
 		}
-		n += m
+		n[i] = m
 	}
 	return n
 }

@@ -6,6 +6,7 @@ package wp25
 //
 //	pid     the helper is running (sleepers, holders, chain levels)
 //	epipe   a holder's first write failed (the read end was closed)
+//	ok      a holder asked by its scenario found none of its writes failed
 //	fanout  all children of a fanout helper have reported
 //	limit   the helper reached its hard limit
 //
@@ -25,7 +26,7 @@ import (
 	"time"
 )
 
-var reportKinds = map[string]bool{"pid": true, "epipe": true, "fanout": true, "limit": true}
+var reportKinds = map[string]bool{"pid": true, "epipe": true, "ok": true, "fanout": true, "limit": true}
 
 // errNotYet is a wait that ended before the records arrived; any other
 // error of awaitRecords means the report is not valid.
