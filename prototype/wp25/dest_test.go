@@ -269,6 +269,21 @@ type s6Result struct {
 	// The stopwatch's readings of the same phases, kept to compare with
 	// the earlier runs' readings; nothing is judged on them (Review 078 N6).
 	drainFine, joinFine time.Duration
+	// The stop of each stopped stream's read (Review 081 B1): "done" once
+	// closing its read end has returned, "pending" if it had not when the
+	// run returned. A stream that ended in phase D is not stopped.
+	stop map[string]string
+	// What the run still owned when it returned: copiers not confirmed to
+	// have returned, stops not done. Its caller keeps them until they end.
+	left []leftover
+}
+
+// leftover is one thing a run still owns after runS6 returned.
+type leftover struct {
+	what string
+	// until waits until it has ended or the deadline passes, and says
+	// whether it has ended.
+	until func(deadline time.Time) bool
 }
 
 // runS6 is the output step: phase D (skipped when the tree is not
@@ -282,7 +297,7 @@ func runS6(d *dest, ss []*stream, tDrain, tJoin time.Duration, skipDrain bool) s
 // runS6On is runS6 on clk: each phase ends on its deadline only once clk
 // reads at least its start plus its length, and its length is read on clk.
 func runS6On(clk phaseClock, d *dest, ss []*stream, tDrain, tJoin time.Duration, skipDrain bool) s6Result {
-	res := s6Result{out: map[string]outcome{}}
+	res := s6Result{out: map[string]outcome{}, stop: map[string]string{}}
 	all := func(deadline time.Time) bool {
 		ok := true
 		for _, s := range ss {
@@ -307,6 +322,7 @@ func runS6On(clk phaseClock, d *dest, ss []*stream, tDrain, tJoin time.Duration,
 		}
 		for _, s := range ss {
 			_ = s.r.Close()
+			res.stop[s.name] = "done"
 		}
 		start, fine := clk.now(), stopwatch()
 		all(start.Add(tJoin))

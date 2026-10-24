@@ -173,6 +173,10 @@ var gateCases = []gateCase{
 	{id: "control.f1-skip-drain", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", want: confirmed},
 	{id: "control.f1-read-kept", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "read-end-kept", want: refuted, hit: true},
 	{id: "report.epipe-unwritable", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "epipe-report-fail", want: invalid, hit: true},
+	// Review 081 N4-R: the same, but the holder stays alive for a while
+	// after its report failed. Alive is no evidence that its writes
+	// succeeded, nor that its tool worked.
+	{id: "report.epipe-unwritable-alive", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "epipe-report-fail-alive", want: invalid, hit: true},
 
 	// Review 077 B1-R2-W: the witness itself fails. The outer check must
 	// reject the evidence, whatever the inner run gives.

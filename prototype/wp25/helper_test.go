@@ -101,6 +101,12 @@ func runHelper(mode string, args []string) int {
 			}
 			if err != nil {
 				if report("epipe") != nil {
+					if injected("epipe-report-fail-alive") {
+						// Review 081 N4-R: the record could not be written, and
+						// the holder is still alive for a while (bounded).
+						injectHit("holder.after-report-failure", os.Getpid())
+						time.Sleep(5 * time.Second)
+					}
 					return exitReport
 				}
 				return 3
@@ -193,7 +199,7 @@ func report(kind string) error {
 		return nil
 	}
 	flag := os.O_WRONLY | os.O_APPEND
-	if injected("epipe-report-fail") && kind == "epipe" {
+	if (injected("epipe-report-fail") || injected("epipe-report-fail-alive")) && kind == "epipe" {
 		// Review 076 N4: a holder's record cannot be written. The report is
 		// opened read-only, so the real write fails.
 		injectHit("report", os.Getpid())
