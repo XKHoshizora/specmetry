@@ -74,7 +74,7 @@ func TestCensusUnreadable(t *testing.T) {
 			t.Errorf("the failure %q is not a census error carrying EINVAL", err)
 		}
 		msg := err.Error()
-		for _, want := range []string{"process " + strconv.Itoa(pid), "start ", "state ", "exiting ", "parent ", "group ", "same program as this test: yes"} {
+		for _, want := range []string{"process " + strconv.Itoa(pid), "start ", "state ", "exiting ", "parent ", "group ", "short command name a prefix of this test's (heuristic, not identity): yes"} {
 			if !strings.Contains(msg, want) {
 				t.Errorf("the failure does not say %q: %s", want, msg)
 			}

@@ -60,8 +60,9 @@ func censusTag(tag, since string) ([]survivor, error) {
 // unreadableDetail says what is known of a process whose environment the
 // census could not read (Review 083 N-MAC): from the list entry the census
 // read, its identity, state, whether it is exiting, its parent and group,
-// and whether it runs this test's program; and the state read after the
-// failure. Never its arguments, environment or name. It is evidence for a
+// and whether its short command name is a prefix of this test binary's
+// name (a heuristic, Review 084 N1: another program can share it); and
+// the state read after the failure. Never its arguments, environment or name. It is evidence for a
 // reader, not of ownership: the census fails all the same.
 func unreadableDetail(k unix.KinfoProc, st string, s2 pinfo, pr presence) string {
 	const pWexit = 0x2000 // P_WEXIT in <sys/proc.h>: working on exiting
@@ -72,13 +73,15 @@ func unreadableDetail(k unix.KinfoProc, st string, s2 pinfo, pr presence) string
 	case present:
 		after = fmt.Sprintf("present, start %s, zombie %v", s2.start, s2.zombie)
 	}
-	return fmt.Sprintf("start %s, state %d, exiting %v, parent %d, group %d, same program as this test: %s; state after the failure: %s",
-		st, k.Proc.P_stat, k.Proc.P_flag&pWexit != 0, k.Eproc.Ppid, k.Eproc.Pgid, sameProgram(k), after)
+	return fmt.Sprintf("start %s, state %d, exiting %v, parent %d, group %d, short command name a prefix of this test's (heuristic, not identity): %s; state after the failure: %s",
+		st, k.Proc.P_stat, k.Proc.P_flag&pWexit != 0, k.Eproc.Ppid, k.Eproc.Pgid, commPrefix(k), after)
 }
 
-// sameProgram compares a process's short command name (at most
-// MAXCOMLEN bytes) with this test binary's; only the answer is kept.
-func sameProgram(k unix.KinfoProc) string {
+// commPrefix says whether a process's short command name (at most
+// MAXCOMLEN bytes) is a prefix of this test binary's name; only the answer
+// is kept. A match is no proof of the program: any other with that name
+// gives it too.
+func commPrefix(k unix.KinfoProc) string {
 	self, err := os.Executable()
 	comm := unix.ByteSliceToString(k.Proc.P_comm[:])
 	switch {
