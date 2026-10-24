@@ -161,13 +161,20 @@ func TestPipeF1SkipDrain(t *testing.T) {
 	s.needLoad(exited && status == "exit 3", "the holder verified as the check's; its parent exited 3 (%v, %s)", exited, status)
 	time.Sleep(100 * time.Millisecond) // the holder writes a few lines
 	var keptEnds []*kept
-	if injected("read-end-kept") {
+	keep := ss
+	mixed := injected("f1-mixed-fault")
+	if mixed {
+		// Review 082 N4-R: only stdout's read end is kept; the holder's
+		// later write to stderr fails, and so does its report.
+		keep = ss[:1]
+	}
+	if injected("read-end-kept") || mixed {
 		// A gate regression's healthy counter-case (Review 076 N4): the
 		// scenario keeps a second handle on both read ends, so the stop
 		// leaves the pipes open and the holder's writes do not fail. Its
 		// late bytes then wait in the pipes, where the scenario sees them:
 		// the evidence that the prediction is wrong while the tool works.
-		for _, st := range ss {
+		for _, st := range keep {
 			k, err := keepOpen(st.r.(*os.File))
 			if err != nil {
 				s.invalidf("a second handle on the read end: %v", err)
@@ -179,6 +186,12 @@ func TestPipeF1SkipDrain(t *testing.T) {
 	}
 	r := s.adopt(runS6(d, ss, tDrain, tJoin, true))
 	atStop := waiting(s, keptEnds)
+	if mixed {
+		// The holder's round that writes stderr comes only now.
+		if err := os.WriteFile(rep+".stopped", nil, 0o600); err != nil {
+			s.invalidf("the stop marker: %v", err)
+		}
+	}
 	_, _ = d.ownerPort().Write(doc)
 	epipe, err := awaitRecords(rep, "epipe", 1, 3*time.Second)
 	if err != nil && !errors.Is(err, errNotYet) {

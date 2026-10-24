@@ -180,6 +180,21 @@ var gateCases = []gateCase{
 	// after its report failed. Alive is no evidence that its writes
 	// succeeded, nor that its tool worked.
 	{id: "report.epipe-unwritable-alive", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "epipe-report-fail-alive", want: invalid, hit: true},
+	// Review 082 N4-R: late bytes on the one kept read end, while the
+	// holder's write to the other stream fails and its report fails too.
+	// The bytes prove that one write, not that the tool worked.
+	{id: "report.epipe-mixed-fault", test: "TestPipeF1SkipDrain", scenario: "T1.pipe.F1-skip-drain", inject: "f1-mixed-fault", want: invalid, hit: true},
+
+	// Review 082 B1-Ra: a stop's result, whenever it comes. Its error must
+	// make the run invalid even when it comes after the run returned; a
+	// stop that ends cleanly, early or late, must not.
+	{id: "stop.healthy", test: "TestInnerStopError", scenario: "gate.stop-error", want: confirmed},
+	{id: "stop.ok-after-run", test: "TestInnerStopError", scenario: "gate.stop-error", inject: "stop-ok-late", want: confirmed, hit: true},
+	{id: "stop.error-in-run", test: "TestInnerStopError", scenario: "gate.stop-error", inject: "stop-error-early", want: invalid, hit: true},
+	{id: "stop.error-after-run", test: "TestInnerStopError", scenario: "gate.stop-error", inject: "stop-error-late", want: invalid, hit: true},
+	{id: "stop.never-done", test: "TestInnerStopError", scenario: "gate.stop-error", inject: "stop-never-done", want: invalid, hit: true},
+	{id: "stop.error-after-copier", test: "TestInnerStopError", scenario: "gate.stop-error", inject: "stop-error-after-copier", want: invalid, hit: true},
+	{id: "stop.error-one-of-two", test: "TestInnerStopError", scenario: "gate.stop-error", inject: "stop-error-one-of-two", want: invalid, hit: true},
 
 	// Review 077 B1-R2-W: the witness itself fails. The outer check must
 	// reject the evidence, whatever the inner run gives.

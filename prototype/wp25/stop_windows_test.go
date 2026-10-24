@@ -59,13 +59,20 @@ func closeRead(r io.Closer) error {
 	for {
 		select {
 		case err := <-closed:
-			_ = windows.CloseHandle(own)
+			_ = closeOwn(own)
 			return err
 		case <-tick.C:
-			_ = windows.CancelIoEx(own, nil)
+			_ = cancelOwn(own, nil)
 		}
 	}
 }
+
+// The calls the stop makes on its own handle; a direct check
+// (stop_api_windows_test.go) replaces them with faults.
+var (
+	cancelOwn = windows.CancelIoEx
+	closeOwn  = windows.CloseHandle
+)
 
 // ownHandle duplicates f's handle (non-inheritable) for the caller to own.
 func ownHandle(f *os.File) (windows.Handle, error) {

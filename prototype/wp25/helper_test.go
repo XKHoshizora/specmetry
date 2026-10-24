@@ -94,14 +94,19 @@ func runHelper(mode string, args []string) int {
 		if report("pid") != nil {
 			return exitReport
 		}
+		// f1-mixed-fault (Review 082 N4-R): stderr is written only once the
+		// scenario has counted what waits at the stop; the round that does
+		// writes stdout after that count.
+		mixed := injected("f1-mixed-fault")
 		for i := 0; ; i++ {
+			both := !mixed || fileThere(rep+".stopped")
 			_, err := fmt.Fprintf(os.Stdout, "late-out %d\n", i)
-			if err == nil {
+			if err == nil && both {
 				_, err = fmt.Fprintf(os.Stderr, "late-err %d\n", i)
 			}
 			if err != nil {
 				if report("epipe") != nil {
-					if injected("epipe-report-fail-alive") {
+					if injected("epipe-report-fail-alive") || mixed {
 						// Review 081 N4-R: the record could not be written, and
 						// the holder is still alive for a while (bounded).
 						injectHit("holder.after-report-failure", os.Getpid())
@@ -174,6 +179,11 @@ func runHelper(mode string, args []string) int {
 	return 99
 }
 
+func fileThere(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
 // awaitRelease blocks until the scenario closes the helper's stdin: it
 // keeps a parent helper alive while its scenario verifies the descendants
 // it reported, so they are still descendants when they are checked.
@@ -199,7 +209,7 @@ func report(kind string) error {
 		return nil
 	}
 	flag := os.O_WRONLY | os.O_APPEND
-	if (injected("epipe-report-fail") || injected("epipe-report-fail-alive")) && kind == "epipe" {
+	if (injected("epipe-report-fail") || injected("epipe-report-fail-alive") || injected("f1-mixed-fault")) && kind == "epipe" {
 		// Review 076 N4: a holder's record cannot be written. The report is
 		// opened read-only, so the real write fails.
 		injectHit("report", os.Getpid())

@@ -213,6 +213,10 @@ func TestStopRead(t *testing.T) {
 		if r.stop["out"] != "done" || r.out["out"] != o2 || r.join != 0 || len(r.left) != 0 {
 			t.Errorf("stop %q, outcome %s, phase J %v, %d left; want done, O2, 0, none", r.stop["out"], r.out["out"], r.join, len(r.left))
 		}
+		// Nothing left to cancel is a normal race of the stop, not a failure.
+		if err := r.stopErr["out"]; err != nil {
+			t.Errorf("the stop failed: %v", err)
+		}
 		if end := endOf(g.ss[0]); end != endRead {
 			t.Errorf("the copier ended by %s, want a read error", end)
 		}
@@ -241,6 +245,10 @@ func TestStopRead(t *testing.T) {
 		}
 		if r.stop["out"] != "done" || r.out["out"] != o2 || r.join != 0 || len(r.left) != 0 {
 			t.Errorf("stop %q, outcome %s, phase J %v, %d left; want done, O2, 0, none", r.stop["out"], r.out["out"], r.join, len(r.left))
+		}
+		// Nothing left to cancel is a normal race of the stop, not a failure.
+		if err := r.stopErr["out"]; err != nil {
+			t.Errorf("the stop failed: %v", err)
 		}
 		checkSealed(t, g)
 	})
@@ -293,4 +301,129 @@ func TestStopRead(t *testing.T) {
 			t.Errorf("%d still pending in the register", n)
 		}
 	})
+}
+
+// stopCloser is a read end whose Close the scenario controls (Review 082
+// B1-Ra): Close opens the stream's gate (at once if early, else once it
+// may end), waits until it may end, and returns err.
+type stopCloser struct {
+	g     *gateReader
+	early bool
+	end   chan struct{}
+	err   error
+}
+
+func (c *stopCloser) Close() error {
+	if c.early {
+		c.g.release()
+	}
+	<-c.end
+	c.g.release()
+	return c.err
+}
+
+var errStopFault = errors.New("injected: the stop's close failed")
+
+// TestLingeringFailedStop: a stop that ends with an error after its run
+// returned is not a clean end; the O3 register must not forget it once it
+// has ended (Review 082 B1-Ra).
+func TestLingeringFailedStop(t *testing.T) {
+	if os.Getenv(innerEnv) != "" {
+		t.Skip("inner run")
+	}
+	g := newGate()
+	c := &stopCloser{g: g, end: make(chan struct{}), err: errStopFault}
+	var once sync.Once
+	end := func() { once.Do(func() { close(c.end) }) }
+	t.Cleanup(end)
+	d := &dest{}
+	p := d.copyPort("out")
+	ss := []*stream{{name: "out", r: c, c: startCopy(g, p, false), p: p}}
+	clk := newFakeClock()
+	res := make(chan s6Result, 1)
+	go func() { res <- runS6On(clk, d, ss, tDrain, tJoin, true) }()
+	if d, ok := awaitAsked(clk); !ok || d != tJoin {
+		t.Fatalf("phase J did not start (wake %v, asked %v)", d, ok)
+	}
+	clk.advance(tJoin)
+	var r s6Result
+	select {
+	case r = <-res:
+	case <-time.After(5 * time.Second):
+		t.Fatal("runS6On did not return at the end of phase J")
+	}
+	if r.stop["out"] != "pending" || len(r.left) != 2 {
+		t.Fatalf("stop %q with %d left; want pending, the stop and the copier", r.stop["out"], len(r.left))
+	}
+	reg := &lingering{}
+	reg.add(r)
+	end() // the stop ends now, with its error
+	deadline := time.Now().Add(5 * time.Second)
+	for reg.pending() != 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("what the run left did not end within 5 s")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	reg.refuse = true
+	if !errors.Is(reg.admit(), errLingering) {
+		t.Error("policy refuse: a later run was admitted after a stop of an earlier run ended with an error")
+	}
+}
+
+// TestInnerStopError runs only as an inner run of the stop regressions
+// (Review 082 B1-Ra): a run of the output step whose stops end with or
+// without an error, before or after the run returns, or never, on one or
+// two streams. The read ends are the scenario's own stopClosers, the
+// readers gates they open; nothing else is touched.
+func TestInnerStopError(t *testing.T) {
+	if os.Getenv(innerEnv) == "" {
+		t.Skip("runs only as a gate regression")
+	}
+	s := begin(t, "gate", "gate.stop-error", fault, false, true)
+	defer s.done()
+	type plan struct {
+		name  string
+		early bool // the gate opens when the stop starts
+		now   bool // the stop may end at once, within the run
+		never bool // the stop never ends
+		err   error
+	}
+	plans := map[string][]plan{
+		"":                        {{name: "out", now: true}},
+		"stop-error-early":        {{name: "out", now: true, err: errStopFault}},
+		"stop-ok-late":            {{name: "out"}},
+		"stop-error-late":         {{name: "out", err: errStopFault}},
+		"stop-never-done":         {{name: "out", never: true}},
+		"stop-error-after-copier": {{name: "out", early: true, err: errStopFault}},
+		"stop-error-one-of-two":   {{name: "out", now: true}, {name: "err", err: errStopFault}},
+	}
+	inject := os.Getenv(injectEnv)
+	ps, ok := plans[inject]
+	if !ok {
+		s.invalidf("no plan %q", inject)
+	}
+	if inject != "" {
+		injectHit("TestInnerStopError", os.Getpid())
+	}
+	d := &dest{}
+	var ss []*stream
+	for _, p := range ps {
+		g := newGate()
+		c := &stopCloser{g: g, early: p.early, end: make(chan struct{}), err: p.err}
+		switch {
+		case p.now:
+			close(c.end)
+		case p.never:
+		default:
+			// After the run returned, before the scenario waits for what
+			// it handed on.
+			s.defer_(func() { close(c.end) })
+		}
+		port := d.copyPort(p.name)
+		ss = append(ss, &stream{name: p.name, r: c, c: startCopy(g, port, false), p: port})
+	}
+	r := s.adopt(runS6(d, ss, 100*time.Millisecond, 100*time.Millisecond, false))
+	s.worked(1)
+	s.expect("the run returned", true, r.out != nil)
 }
