@@ -317,6 +317,13 @@ func observeF1(s *scen, rep string, holder owned, keptEnds []*kept, atStop []int
 	}
 	ev.done, err = awaitDone(rep, 3*time.Second)
 	failed(err)
+	if injected("limit-after-done") {
+		// Review 086's order: the hard limit's callback decides after the
+		// completion and before the holder is ended (the test's own marker,
+		// bounded); a callback that did not decide leaves the load unbuilt.
+		awaitFile(rep+".limit-decided", 3*time.Second)
+		s.needLoad(fileThere(rep+".limit-decided"), "the hard limit's callback decided after the completion")
+	}
 	ev.state = stateOf(holder)
 	return ev
 }
