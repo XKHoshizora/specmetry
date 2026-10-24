@@ -5,6 +5,7 @@ package wp25
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -32,11 +33,16 @@ func censusTag(tag, since string) ([]survivor, error) {
 		}
 		b, err := procArgs(pid)
 		if err != nil || len(b) < 4 {
-			// Ended meanwhile, or a zombie now: left out; otherwise an error.
-			if s2, pr := censusRecheck(pid); pr == absent || pr == present && (s2.zombie || s2.start != st) {
+			// Ended meanwhile, or a zombie now: left out; otherwise an error,
+			// which says what is known of the process (Review 083 N-MAC).
+			s2, pr := censusRecheck(pid)
+			if pr == absent || pr == present && (s2.zombie || s2.start != st) {
 				continue
 			}
-			return nil, fmt.Errorf("%w: process %d: the environment cannot be read: %v", errCensus, pid, err)
+			if err == nil {
+				err = fmt.Errorf("%d bytes", len(b))
+			}
+			return nil, fmt.Errorf("%w: process %d: the environment cannot be read: %w (%s)", errCensus, pid, err, unreadableDetail(k, st, s2, pr))
 		}
 		if s2, pr := procInfo(pid); pr != present || s2.start != st || s2.zombie {
 			if pr == unknown {
@@ -49,6 +55,39 @@ func censusTag(tag, since string) ([]survivor, error) {
 		}
 	}
 	return out, nil
+}
+
+// unreadableDetail says what is known of a process whose environment the
+// census could not read (Review 083 N-MAC): from the list entry the census
+// read, its identity, state, whether it is exiting, its parent and group,
+// and whether it runs this test's program; and the state read after the
+// failure. Never its arguments, environment or name. It is evidence for a
+// reader, not of ownership: the census fails all the same.
+func unreadableDetail(k unix.KinfoProc, st string, s2 pinfo, pr presence) string {
+	const pWexit = 0x2000 // P_WEXIT in <sys/proc.h>: working on exiting
+	after := "unreadable"
+	switch pr {
+	case absent:
+		after = "gone"
+	case present:
+		after = fmt.Sprintf("present, start %s, zombie %v", s2.start, s2.zombie)
+	}
+	return fmt.Sprintf("start %s, state %d, exiting %v, parent %d, group %d, same program as this test: %s; state after the failure: %s",
+		st, k.Proc.P_stat, k.Proc.P_flag&pWexit != 0, k.Eproc.Ppid, k.Eproc.Pgid, sameProgram(k), after)
+}
+
+// sameProgram compares a process's short command name (at most
+// MAXCOMLEN bytes) with this test binary's; only the answer is kept.
+func sameProgram(k unix.KinfoProc) string {
+	self, err := os.Executable()
+	comm := unix.ByteSliceToString(k.Proc.P_comm[:])
+	switch {
+	case err != nil || comm == "":
+		return "unknown"
+	case strings.HasPrefix(filepath.Base(self), comm):
+		return "yes"
+	}
+	return "no"
 }
 
 // The census's reads, which a direct check (census_check_darwin_test.go)
