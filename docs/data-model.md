@@ -376,7 +376,7 @@ Question 在提案提交时立即创建（编号按 TD-14 分配），只能由�
 | tree_state_start, tree_state_end | 开始和结束时的工作区状态（隔离级执行时，指私有快照目录的状态） |
 | result | `pass` / `fail` / `error` |
 | failure_kind | NULL / `nonzero_exit` / `timeout` / `not_found` / `spawn_error` / `input_missing` / `context_changed`。观测级执行按解释器的最终状态分类，**不产生** `not_found`，新写入的行不含它；这个值保留在枚举中，读取方照常接受（WP2.5 D5，2026-10-25）。`context_changed` 也用于结束上下文读取失败（D6）与进程树没有确认结束（D19），历史记录无法区分这三种原因 |
-| exit_code, duration_ms | `duration_ms` 是主进程的运行时间（不含收尾）；没有启动进程时为 0。D19 时，主进程在时限内仍未退出的，为开始运行到第一次终止请求的时间：实际运行时间的下界，不是实际值 |
+| exit_code, duration_ms | `duration_ms` 是主进程的运行时间（不含收尾）；没有启动进程时为 0。D19（进程树没有在时限内确认结束）时：可靠地取得了主进程的退出信息的，照常为运行时间；没有取得的（主进程可能仍在运行，也可能已经退出而没有被可靠观察），为开始运行到第一次终止请求的区间长度，它只是这一区间的长度，不是实际运行时间，也不是它的上界或下界，`exit_code` 为 NULL。记录本身不能总是区分这两种定义，所以历史展示中 `context_changed` 且 `tree_state_end = unknown` 的记录不把它称为实际运行时间（WP2.5 规范 §10.1，Review 089 B3） |
 | triggered_channel, session_id | |
 | started_at, finished_at | 仅用于展示。D19 时 `finished_at` 是放弃等待、尝试记录的时刻，不是检查实际结束的时刻 |
 
