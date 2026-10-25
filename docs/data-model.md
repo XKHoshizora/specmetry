@@ -375,14 +375,14 @@ Question 在提案提交时立即创建（编号按 TD-14 分配），只能由�
 | head_start, head_end | 开始和结束时的 HEAD。隔离级执行时，两者都是物化的快照提交。 |
 | tree_state_start, tree_state_end | 开始和结束时的工作区状态（隔离级执行时，指私有快照目录的状态） |
 | result | `pass` / `fail` / `error` |
-| failure_kind | NULL / `nonzero_exit` / `timeout` / `not_found` / `spawn_error` / `input_missing` / `context_changed` |
-| exit_code, duration_ms | |
+| failure_kind | NULL / `nonzero_exit` / `timeout` / `not_found` / `spawn_error` / `input_missing` / `context_changed`。观测级执行按解释器的最终状态分类，**不产生** `not_found`，新写入的行不含它；这个值保留在枚举中，读取方照常接受（WP2.5 D5，2026-10-25）。`context_changed` 也用于结束上下文读取失败（D6）与进程树没有确认结束（D19），历史记录无法区分这三种原因 |
+| exit_code, duration_ms | `duration_ms` 是主进程的运行时间（不含收尾）；没有启动进程时为 0。D19 时，主进程在时限内仍未退出的，为开始运行到第一次终止请求的时间：实际运行时间的下界，不是实际值 |
 | triggered_channel, session_id | |
-| started_at, finished_at | 仅用于展示 |
+| started_at, finished_at | 仅用于展示。D19 时 `finished_at` 是放弃等待、尝试记录的时刻，不是检查实际结束的时刻 |
 
 **不保存**命令文本（命令在基准中，可以由 `check_config_hash` 找到）、输出、输出尾部，也不保存输出的哈希。
 
-**`seq` 与记录身份**（F4，§6.13）：每次执行在结束之后单独写入（§7.4 第 5 步），分配一个 `seq`，`check_runs.seq` 在表内唯一；`check run --all` 串行执行，按结束的顺序得到递增的 `seq`。`seq` 表示记录写入的先后，不是开始的时刻；`started_at`、`finished_at` 只用于展示。记录身份为 `id`。依据：`V` 取 `runs(S)` 中 `seq` 最大的一条（§6.1），每次执行一个 `seq` 使它没有并列。
+**`seq` 与记录身份**（F4，§6.13）：每次执行在结束之后单独写入（§7.4 第 5 步；进程树没有确认结束时，是放弃等待之后尝试写入，D19），分配一个 `seq`，`check_runs.seq` 在表内唯一；`check run --all` 串行执行，按结束的顺序得到递增的 `seq`。`seq` 表示记录写入的先后，不是开始的时刻；`started_at`、`finished_at` 只用于展示。记录身份为 `id`。依据：`V` 取 `runs(S)` 中 `seq` 最大的一条（§6.1），每次执行一个 `seq` 使它没有并列。
 
 #### 4.11.1 证据等级
 
@@ -404,6 +404,8 @@ Question 在提案提交时立即创建（编号按 TD-14 分配），只能由�
 - `tree_state_start = tree_state_end = clean`；
 - `failure_kind ≠ context_changed`；
 - 等级为 `snapshot_isolated` 时，上面 1–4 全部通过。
+
+**进程清理的边界**（WP2.5 D7，2026-10-25）：与上表的代码观测边界分开说明。Check Runner 只终止并确认可确认归属的本次进程组 / Job，以及 Linux 上排他区间内被收养的后代（[WP2.5 规范 §8.7](wp2.5-check-runner.md)）；范围之外的进程在结束上下文读取时与之后可能仍在运行。合格执行只表示两个时刻都一致，**不**表示检查的全部进程都已结束。`observed_evidence` 的风险确认（§7.3）只涉及代码观测的边界，不自动批准进程逃逸的风险。
 
 合格执行的结果只对它的 `head` 这个提交有意义。观测级和隔离级的合格执行都参与 `V` 的计算（§6.1），但只有隔离级可以支撑**沿用**（§6.2），也只有隔离级可以让交付判定标为隔离级（§6.8）。
 
@@ -1095,7 +1097,7 @@ stateDiagram-v2
 
 **风险确认（V-D01）**：`acknowledged_risks` 必须**恰好等于**服务端根据该决定推导出的风险集合，多一项、少一项都返回 `invalid_input`。这保证界面确实展示过这些风险。界面必须展示的文字：
 
-- `observed_evidence`："这次检查是观测级证据：Specmetry 只确认检查开始和结束时，worktree 的 HEAD 等于快照，并且工作区干净；无法确认执行期间代码没有被修改或切换（例如并行编辑后恢复、HEAD 切换后恢复）。"
+- `observed_evidence`："这次检查是观测级证据：Specmetry 只确认检查开始和结束时，worktree 的 HEAD 等于快照，并且工作区干净；无法确认执行期间代码没有被修改或切换（例如并行编辑后恢复、HEAD 切换后恢复）。"（这段文字只涉及代码观测的边界；确认它不表示接受进程清理边界之外的进程，WP2.5 D7，§4.11.1。）
 - `inconsistent_results`："该快照上的检查结果不一致，可能是不稳定的测试或环境差异。"
 - `no_automated_evidence`："该快照上没有任何合格的自动化证据。这次验收只适用于当前快照，不会沿用，并会在交付判定中单独列出。"
 
@@ -1105,13 +1107,23 @@ stateDiagram-v2
 
 **观测级执行**（`--isolation off`，MVP 唯一可用的执行方式）：
 
-1. 在执行器所在的 worktree `W`（由调用时的 cwd 决定）中，读取 AC 的 `r`、`ar`、`h` 和检查配置，**固定下来**。
+1. 在执行器所在的 worktree `W`（由调用时的 cwd 决定）中，**在命令开始时一次**读取全部所选 AC 的 `r`、`ar`、`h` 和检查配置，**固定下来**（WP2.5 D13，2026-10-25）。批次进行中 AC 被修订或退役，后面的执行仍按固定的配置执行并记录旧修订，只对旧修订有效；§6 的逐条规则不变。
 2. 记录 `head_start`、`tree_state_start`；如果声明了 `inputs`，记录各路径在 `head_start` 上的输入记录（§4.11.2）。路径不存在时，结果为 `error` / `input_missing`；读取路径所需的对象失败时，返回退出码 6，不执行检查、不写执行记录（PD-26）。
 3. 在 `W/<workdir>` 中执行。检查的输出实时转发给调用者，**不保存**：
    - 不带 `--json` 时，检查的 stdout 和 stderr 原样转发到 stdout 和 stderr；
    - 带 `--json` 时，stdout **只**输出一份 `check-run.v1` JSON，检查的 stdout 和 stderr 都转发到 stderr。
-4. 记录 `head_end`、`tree_state_end`。如果开始时工作区是 `clean`，而结束时不再是 `clean`，或者 HEAD 发生了变化，结果记为 `error` / `context_changed`。中途变化后又恢复的情况，观测级**无法发现**（§4.11.1）。
+   - 主进程退出之后（包括正常退出），终止本次进程组 / Job 中残留的后代并确认结束（D11）；清理保证的范围见 §4.11.1（D7）。
+4. 只在保证范围内的进程确认结束之后，记录 `head_end`、`tree_state_end`。如果开始时工作区是 `clean`，而结束时不再是 `clean`，或者 HEAD 发生了变化，结果记为 `error` / `context_changed`。中途变化后又恢复的情况，观测级**无法发现**（§4.11.1）。
+   - **结束上下文读取失败**（树已确认结束，D6）：同样记为 `error` / `context_changed`，已读到的值保留，读不到的 `head_end` 为 NULL、`tree_state_end` 为 `unknown`，不合格；之后停止。含义是“无法证明稳定”，不是“已证明发生变化”。
+   - **进程树没有在时限内确认结束**（D19）：不读取结束上下文，尝试记录为 `error` / `context_changed`，`head_end` 为 NULL，`tree_state_end` 为 `unknown`，不合格；之后停止。时间字段的含义见 §4.11。
 5. 用第 1、2 步固定下来的值写入 `check_runs`（`evidence_grade = observed`），不会重新读取 AC。如果执行期间 AC 被修订，这条执行仍然只属于旧 revision。
+
+**停止、取消与退出码**（WP2.5 D6、D8、D18 ~ D20，2026-10-25；组合见 [WP2.5 规范 §8.6](wp2.5-check-runner.md)）：
+
+- 取消：写事务开始之前生效时，当前项不记录；写事务已经开始时，按实际的提交或回滚结果，不承诺没有记录。之后的不执行，之前已提交的保留，退出码 6。取消与进程树没有确认结束同时发生时，按 D19。
+- 结束上下文读取失败（D6）、进程树没有确认结束（D19）、输出转发不完整（D20：由其他状态决定当前项是否记录、是否合格，输出不完整本身不使它失败或不合格）、写入失败或提交结果不确定：都停止，退出码 6。
+- 执行开始之后的组合故障按 1 > 6 > 10 > 0 取退出码。退出码 6 不表示可以安全地自动重跑；没有记录或读取不到记录，都不能说明检查没有运行。
+- `--all` 选不到可执行的 AC、而 `W` 尚未登记时（D18）：只做 worktree 的登记，分配这条事实的 `seq`，输出空的 `runs`；登记失败时退出码 6。
 
 **隔离模式**：
 
@@ -1230,7 +1242,7 @@ M0 的 CI 会校验这两者（WP0.4）。凡是需要数据库状态才能判�
 | V-P01 | 严格符合 schema；`origin = human_edit` 只允许来自人工编辑通道（交互式终端中的 `propose --apply`、Dashboard 编辑），Agent 通道使用它会被拒绝（退出码 3） | 拒绝 |
 | V-P02 | `base_version` 等于当前基准版本；每个 `target_revision` 等于目标当前的 revision | 过期 |
 | V-P03 | `ref` 在提案内唯一；`target`、`requirement`、`goal`、`about` 指向 `active` 编号或本提案内的 `ref`；同一 `target` 至多出现一次 | 拒绝 |
-| V-P04 | 自动化 AC 的 `check` 必须有 `rationale`；`workdir` 和 `inputs` 规范化后不得越出仓库根；`timeout_sec` 在 1–3600 之间 | 拒绝 |
+| V-P04 | 自动化 AC 的 `check` 必须有 `rationale`；`workdir` 和 `inputs` 规范化后不得越出仓库根；`timeout_sec` 在 1–3600 之间。**命令中的换行**（WP2.5 D3、D4，2026-10-25 产品决定；**待实施**：在 WP2.5 的实现中加入，此前现有代码不执行）：`shell = cmd` 的 `command` 不得含 CR 或 LF；`sh`、`bash` 或省略 `shell` 的 `command` 不得含 CR（LF 允许）；不规范化。只校验本次写入的 `check`（`add` 的 `check`，或 `update` 中给出的 `check`）；已保存的不符合的配置保持可读、不改写，`check run` 在执行前拒绝（退出码 2）。这一规则不写成共用的 `checkSpec` schema 约束，因为读取模型（`baseline-show.v1`）复用它 | 拒绝 |
 | V-P05 | `check.command` 及所有文本字段都不能命中密钥规则；所有文本字段都不能包含代码围栏；标题只能有一行 | 拒绝 |
 | V-P06 | `sources[].source` 是已登记且未移除的来源；`excerpt` ≤ 500 字符 | 拒绝 |
 | V-P07 | 片段校验结果：`verified` / `not_found` / `source_missing` / `not_checkable` | 标记 |
@@ -1265,4 +1277,4 @@ M0 的 CI 会校验这两者（WP0.4）。凡是需要数据库状态才能判�
 
 ## 10. 相关待决策事项
 
-已确认：PD-02（2026-10-18）、PD-03、PD-04、PD-12、PD-16 ~ PD-22、PD-24、PD-25、PD-26（[prd.md §9](prd.md#9-产品待决策事项)）。技术：TD-01、TD-14、TD-18、TD-20、TD-21、TD-26 已确认；TD-23 的比较语义与错误边界已确认（2026-10-18，§4.11.2），Git 读取机制待定；TD-06、TD-17、TD-24、TD-25 待确认（[architecture.md §16](architecture.md#16-技术待决策事项)）；TD-27 分两部分：当前值输入与重放的语义已冻结（§6.13.1，2026-10-18），是否提供设置的历史待定。M2-Q8 与畸形输入的选项 (a) 已批准（2026-10-18，review-resolution §55）。
+已确认：PD-02（2026-10-18）、PD-03、PD-04、PD-12、PD-16 ~ PD-22、PD-24、PD-25、PD-26（[prd.md §9](prd.md#9-产品待决策事项)）。技术：TD-01、TD-14、TD-18、TD-20、TD-21、TD-26 已确认；TD-23 的比较语义与错误边界已确认（2026-10-18，§4.11.2），Git 读取机制待定；TD-06 已决定（2026-10-25，WP2.5 D1 ~ D4，review-resolution §106）；TD-17、TD-24、TD-25 待确认（[architecture.md §16](architecture.md#16-技术待决策事项)）；TD-27 分两部分：当前值输入与重放的语义已冻结（§6.13.1，2026-10-18），是否提供设置的历史待定。M2-Q8 与畸形输入的选项 (a) 已批准（2026-10-18，review-resolution §55）。
