@@ -170,7 +170,10 @@
           "maxLength": 2000
         },
         "workdir": { "$ref": "#/$defs/relPath", "default": "." },
-        "shell": { "enum": ["sh", "bash", "cmd", "pwsh", "powershell"] },
+        "shell": {
+          "description": "Interpreter for command. When omitted, sh on every platform (on Windows, the sh of the Git for Windows that Specmetry's git belongs to); there is no fallback to cmd. If an interpreter a run needs is unavailable, the whole check run is refused with exit code 6 and nothing is recorded.",
+          "enum": ["sh", "bash", "cmd", "pwsh", "powershell"]
+        },
         "timeout_sec": { "type": "integer", "minimum": 1, "maximum": 3600, "default": 300 },
         "inputs": {
           "description": "Repository-relative paths whose git object IDs are recorded at run time. Changes block carry-forward of acceptances.",

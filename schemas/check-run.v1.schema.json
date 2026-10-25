@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/XKHoshizora/specmetry/schemas/check-run.v1.schema.json",
   "title": "Specmetry check run result v1",
-  "description": "Output of `specmetry check run --json`. With --json, stdout carries exactly one JSON document conforming to this schema and nothing else; the checks' own stdout and stderr are streamed to the caller's stderr. Without --json, check output is passed through to stdout/stderr unchanged. In both modes check output is never persisted. Exit code 10 when any run is not pass; exit code 6 with --isolation required when isolation cannot be established (no run is recorded).",
+  "description": "Output of `specmetry check run --json`. With --json, stdout carries exactly one JSON document conforming to this schema and nothing else; the checks' own stdout and stderr are streamed to the caller's stderr. Without --json, check output is passed through to stdout/stderr unchanged. In both modes check output is never persisted. This document is written only when the batch completes: exit code 10 when any run is not pass, otherwise 0 (also for an empty batch). Exit code 6 with --isolation required when isolation cannot be established (no run is recorded). A batch that stops early (cancellation, a process tree not confirmed ended, an unreadable end context, incomplete output forwarding, a persistence failure) writes error.v1 instead, with exit code 6, or 1 for internal errors (priority 1 > 6 > 10 > 0). Exit code 6 does not mean a rerun is safe: earlier runs, and possibly the current one, may already be recorded.",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema", "worktree_id", "is_target_snapshot", "isolation", "runs"],
@@ -10,7 +10,7 @@
     "schema": { "const": "specmetry.check-run/v1" },
     "worktree_id": { "$ref": "common.v1.schema.json#/$defs/ulid" },
     "is_target_snapshot": {
-      "description": "True when the worktree HEAD equals the delivery target snapshot at start; only then can observed qualifying runs affect delivery status.",
+      "description": "Batch summary only: true when every run's head_start equals the delivery target snapshot; with no runs, true when HEAD at the start of the command equals it; false when there is no target snapshot. It never decides whether a run counts: delivery status is derived from each run's own fields, so a qualifying run on the target snapshot counts even when this is false.",
       "type": "boolean"
     },
     "isolation": {
@@ -43,6 +43,7 @@
           "seq": { "$ref": "common.v1.schema.json#/$defs/seq" },
           "result": { "enum": ["pass", "fail", "error"] },
           "failure_kind": {
+            "description": "nonzero_exit carries the interpreter's final exit status; failures masked inside the command string are not detected. not_found is reserved: the observed runner never produces it, but readers must accept it. context_changed also covers an end context that could not be read and a process tree not confirmed ended; it does not prove that the context changed.",
             "enum": [null, "nonzero_exit", "timeout", "not_found", "spawn_error", "input_missing", "context_changed"]
           },
           "exit_code": { "type": ["integer", "null"] },
