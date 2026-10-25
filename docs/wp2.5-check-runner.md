@@ -1239,16 +1239,16 @@ D7 选择 (a)：保留三平台的 CLI 支持，如实限定清理的保证。**
 
 | ID | 原规则 | 新规则 | 变化 | 受影响的文件 | 验收 / 反例 |
 |---|---|---|---|---|---|
-| D1 | TD-06 的建议默认（未确认）：优先 `sh`，找不到时用 `cmd /C`；architecture §6.4 没有默认解释器 | 所有平台默认 `sh`，不回退；所需解释器不可用 → 整批不执行、不记录、退出码 6 | 行为 | architecture §6.4、§16 TD-06；implementation-plan §2；`common.v1` 的 `checkSpec.shell` 描述；本文 §5 | MVP-EV-19、MVP-EV-20 |
+| D1 | TD-06 的建议默认（未确认）：优先 `sh`，找不到时用 `cmd /C`；architecture §6.4 没有默认解释器 | 所有平台默认 `sh`，不回退；所需解释器不可用 → 整批不执行、不记录、退出码 6 | 行为 | architecture §6.4、§16 TD-06；implementation-plan §3；`common.v1` 的 `checkSpec.shell` 描述；本文 §5 | MVP-EV-19、MVP-EV-20 |
 | D2 | architecture §6.4：继承用户的环境，并注入 `SPECMETRY_CHECK=1` | Windows `sh` / `bash` 只取 `gitx` 的 Git for Windows 的 `usr\bin` 入口；只对这次检查及其后代前置 `<Git>\usr\bin`；其他进程与解释器的环境不变 | 保证调整（环境规则的例外） | architecture §6.4、§16；本文 §5.4、§9.2 | MVP-EV-19 |
-| D3 | V-P04 没有此规则；`cmd` 对多行命令只执行第一行且不报错（X4） | `cmd` 命令中的 CR / LF：`propose`、`review`（含 `accepted_with_edits`）、人工编辑一律拒绝（退出码 2）；已保存的在执行前拒绝（退出码 2，整批不执行），保持可读、不改写 | 行为（收紧 M1 已验收的写入路径；对已保存配置的执行拒绝） | data-model §8.3 V-P04；本文 §4.1、§5.6；acceptance-criteria | MVP-EV-21、CX-29 |
+| D3 | V-P04 没有此规则；`cmd` 对多行命令只执行第一行且不报错（X4） | `cmd` 命令中的 CR / LF：`propose`、`review`（含 `accepted_with_edits`）、人工编辑一律拒绝（退出码 2）；已保存的在执行前拒绝（退出码 2，整批不执行），保持可读、不改写 | 行为（收紧 M1 已验收的写入路径；对已保存配置的执行拒绝） | prd FR-BL-12；data-model §8.3 V-P04；本文 §4.1、§5.6；acceptance-criteria | MVP-EV-21、CX-29 |
 | D4 | 没有此规则；CR 在 dash 中是参数的一部分，在 Git for Windows `sh` 中被忽略（X4） | `sh` / `bash` / 省略 `shell` 的命令中的 CR（含引号之内）同样拒绝；LF 允许；不规范化 | 行为（同上） | 同 D3 | MVP-EV-21 |
 | D5 | MVP-EV-04：检查命令不存在 → `error` / `not_found` | 按解释器的最终状态：最终非零 → `fail` / `nonzero_exit`；最终 0 → 优先规则不命中时 `pass`；观测级 Runner 不产生 `not_found`（新行的迁移约束排除它），读取侧保留这个枚举值 | 语义（验收的改写；写入与读取分开） | acceptance-criteria MVP-EV-04；data-model §4.11；`check-run.v1`、`status.v1` 的 `failure_kind` 描述；本文 §6、§10.1 | MVP-EV-04 |
 | D6 | data-model §7.4 第 4 步只定义上下文变化；读取失败没有定义 | 树已确认结束而结束上下文读取失败 → 尝试记录不合格的 `error` / `context_changed`；停止；退出码 6 | 语义（`context_changed` 的扩展） | data-model §7.4、§4.11；本文 §7.1、§8.6 | MVP-EV-22、MVP-EV-30 |
-| D7 | prd FR-EV-02“超时后终止整个进程树”；MVP-EV-03“之后整个进程树都不存在”；architecture §6.4 同 | 清理保证限定于可确认归属的本次进程组 / Job 与 Linux 上被收养的后代；三平台支持；Linux 的启动前提不成立时不启动；不操作归属未确认的进程；不宣称所有检查活动均已结束 | **保证调整** | prd FR-EV-02；architecture §2 的组件表、§6.4；data-model §4.11.1；acceptance-criteria MVP-EV-03；本文 §8 | MVP-EV-03、CX-30 |
+| D7 | prd FR-EV-02“超时后终止整个进程树”；MVP-EV-03“之后整个进程树都不存在”；architecture §6.4 同 | 清理保证限定于可确认归属的本次进程组 / Job 与 Linux 上被收养的后代；三平台支持；Linux 的启动前提不成立时不启动；不操作归属未确认的进程；不宣称所有检查活动均已结束 | **保证调整** | prd FR-EV-02；architecture §4 的组件表、§6.4；data-model §4.11.1；acceptance-criteria MVP-EV-03；本文 §8 | MVP-EV-03、CX-30 |
 | D8 | 没有定义（第 4 版推荐退出码 3）；architecture §9.1 的退出码表 | 取消：当前项不记录、停止、退出码 6；与 F1 同时时按 D19；写事务开始之后按实际结果；Runner 组合故障的优先级 1 > 6 > 10 > 0；退出码 6 不表示可以安全重跑 | 行为（新的退出语义） | architecture §9.1；data-model §7.4；`check-run.v1` 的描述；本文 §8.4、§8.6 | MVP-EV-23、MVP-EV-30 |
 | D9 | `check-run.v1`：“True when the worktree HEAD equals the delivery target snapshot at start; only then can observed qualifying runs affect delivery status.”（与逐条规则冲突） | 每条执行的 `head_start` 都等于 `S` 才为 true；空批次比较命令开始时的 HEAD；没有 `S` 时为 false；只是汇总 | 澄清（描述的更正与定义） | `check-run.v1` 的描述；`schemas/examples`；本文 §11.2 | MVP-EV-24 |
-| D11 | 只定义了超时后的终止 | 主进程退出之后也终止保证范围内的残留后代，确认之后再读结束上下文 | 行为 | architecture §6.4；data-model §7.4；本文 §8.5 S3 | MVP-EV-25 |
+| D11 | 只定义了超时后的终止 | 主进程退出之后也终止保证范围内的残留后代，确认之后再读结束上下文 | 行为 | prd FR-EV-02；architecture §6.4；data-model §7.4；本文 §8.5 S3 | MVP-EV-25 |
 | D13 | data-model §7.4 第 1 步“读取 AC 的 r、ar、h 和检查配置，固定下来”（字面上是每次执行开始时） | 命令开始时一次固定全部所选 AC；记录绑定实际固定的修订与配置；推导规则不变 | 语义（读取时刻）与行为（批次中途的修订不被后面的执行采用） | data-model §7.4；本文 §3、§4.1 | MVP-EV-26；CX-15 的补充 |
 | D18 | `check-run.v1` 要求 `worktree_id`；空批次而 worktree 未登记时没有定义 | 必要时只做登记的写事务（分配 `seq`），输出空的 `runs`；登记失败按 §8.6 D 表 | 行为（不执行检查的命令写入事实） | data-model §7.4；本文 §3、§4.1、§10.3；`schemas/examples` | MVP-EV-27 |
 | D19 | data-model §4.11：每次执行在结束之后单独写入；`context_changed` 只表示上下文变化 | 没有确认结束 → 尝试记录不合格的 `error` / `context_changed`（`head_end` NULL、`tree_state_end = unknown`）；`finished_at` 是尝试记录的时刻，`duration_ms` 不冒充实际结束；退出码 6、停止 | 语义（`context_changed` 的扩展；“结束之后写入”的适用情形；时间字段的含义） | data-model §4.11、§7.4；architecture §6.4；本文 §8.5、§8.6、§10.1 | MVP-EV-28、MVP-EV-30 |
@@ -1370,10 +1370,10 @@ D7 选择 (a)：保留三平台的 CLI 支持，如实限定清理的保证。**
 
 | 决定 | 已同步（本版） | 实现时（授权之后） |
 |---|---|---|
-| D1 ~ D4 | architecture §6.4、§16（TD-06 已决定）；implementation-plan §2；data-model §8.3（V-P04 的扩展，标明待实施）；`common.v1` 中 `checkSpec.shell` 的描述；acceptance-criteria MVP-EV-19 ~ 21、CX-29 | V-P04 的业务校验（不写成共用 schema 的约束）；`check run` 的静态规则与解释器查找；适配器测试 |
+| D1 ~ D4 | prd FR-BL-12（D3、D4）；architecture §6.4、§16（TD-06 已决定）；implementation-plan §3；data-model §8.3（V-P04 的扩展，标明待实施）；`common.v1` 中 `checkSpec.shell` 的描述；acceptance-criteria MVP-EV-19 ~ 21、CX-29 | V-P04 的业务校验（不写成共用 schema 的约束）；`check run` 的静态规则与解释器查找；适配器测试 |
 | D5 | acceptance-criteria MVP-EV-04；data-model §4.11（`failure_kind` 的说明）；`check-run.v1`、`status.v1` 的 `failure_kind` 描述 | 迁移 0009 的 CHECK 排除 `not_found` |
-| D6、D8、D11、D13、D18、D19、D20 与 C-4 | data-model §7.4、§4.11（D19 的时间字段）；architecture §6.4、§9.1（Runner 的退出码优先级）；`check-run.v1` 的顶层描述；`schemas/examples` 的空批次示例；acceptance-criteria MVP-EV-22、23、25 ~ 30 | Runner 与 CLI；`error.v1` 的使用（D10）；进程级与进程内测试 |
-| D7 | prd FR-EV-02；architecture §2 的组件表、§6.4；data-model §4.11.1 的说明；acceptance-criteria MVP-EV-03、CX-30 | 三平台的收尾实现与测试 |
+| D6、D8、D13、D18、D19、D20 与 C-4 | data-model §7.4、§4.11（D19 的时间字段）；architecture §6.4、§9.1（Runner 的退出码优先级）；`check-run.v1` 的顶层描述；`schemas/examples` 的空批次示例；acceptance-criteria MVP-EV-22、23、26 ~ 30 | Runner 与 CLI；`error.v1` 的使用（D10）；进程级与进程内测试 |
+| D7、D11 | prd FR-EV-02；architecture §4 的组件表、§6.4；data-model §4.11.1 的说明、§7.4（D11）；acceptance-criteria MVP-EV-03、MVP-EV-25、CX-30 | 三平台的收尾实现与测试 |
 | D9 | `check-run.v1` 中 `is_target_snapshot` 的描述；`schemas/examples` 的混合批次示例；acceptance-criteria MVP-EV-24 | 汇总的计算与混合批次的集成测试 |
 | D10、D12、D14 ~ D17、E1 ~ E9、C-1 ~ C-20 | 本文 §17.3、§17.4（采纳建议，待审查） | 冻结时写入本文与 data-model；D14 的 schema 约束与迁移一起加入 |
 | 活跃状态 | AGENTS.md、implementation-plan 的 WP2.5 状态行、原型文档的头部 | — |
