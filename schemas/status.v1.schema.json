@@ -247,6 +247,7 @@
         "result": { "enum": ["pass", "fail", "error"] },
         "evidence_grade": { "$ref": "common.v1.schema.json#/$defs/evidenceGrade" },
         "failure_kind": {
+          "description": "As in check-run.v1: not_found is reserved and never produced by the observed runner, but readers must accept it; context_changed also covers an unreadable end context and a process tree not confirmed ended.",
           "enum": [
             null,
             "nonzero_exit",
