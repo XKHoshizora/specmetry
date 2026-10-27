@@ -3,13 +3,14 @@ name: WP2.5 prototype
 # The test-only prototype of WP2.5's teardown mechanisms
 # (docs/wp2.5-prototype.md) on the three platforms; macOS evidence can only
 # come from here. Not part of CI: ci.yml never runs the prototype's module.
-# It runs on pushes to the prototype branch, or to the branch of its N4/N6
-# fix, that change the prototype or this workflow; a change of the
-# documents does not run it. There is no manual trigger, so no run is
-# repeated blindly, and no run is cancelled.
+# It runs on pushes to the prototype branch, to the branch of its N4/N6
+# fix, or to the branch of the P-1, P-2 and P-4 experiments, that change
+# the prototype or this workflow; a change of the documents does not run
+# it. There is no manual trigger, so no run is repeated blindly, and no
+# run is cancelled.
 on:
   push:
-    branches: [proto/wp2.5-prototype, test/wp2.5-prototype-n4-n6]
+    branches: [proto/wp2.5-prototype, test/wp2.5-prototype-n4-n6, proto/wp2.5-p1-p2-p4]
     paths:
       - prototype/wp25/**
       - .github/workflows/wp25-prototype.yml
