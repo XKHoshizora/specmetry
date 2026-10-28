@@ -2829,7 +2829,7 @@ E-main 与组身份的场景同时属于 T1（Linux）与 T3（macOS），这里
 4. `48ff0cd`（修复，**固定的原型代码点**）：14.15 的修复。
 5. 之后只有文档的提交（14.17）。
 
-**B1-R 用例**（Linux；“旧”为 `be25df5`，“新”为 `48ff0cd`；每个故障都有命中记录）：
+**B1-R 用例**（Linux；“旧”为旧的错误处理，即 `b641e17` 与 `be25df5`，“新”为 `48ff0cd`；每个故障都有命中记录）：
 
 | 用例 | 调用者对结果 | 旧实现的内层结论 / 退出码 | 新实现 |
 |---|---|---|---|
@@ -2892,7 +2892,7 @@ macOS 没有变异：这些路径只在 Linux 上存在。
   - 八个作业都检出合并快照 `c9ea84f`（父提交 `2c5cf23`、`b641e17`）。
   - 失败的是 Windows 的 `internal/store/sqlite` `TestCheckWhileTheDatabaseIsCreated`（round 11、check 9，`Access is denied`）。症状与 M-1（codex-review-035 N2）相同，是 M-1 的又一次观测。
   - 本轮没有改根模块；M-1 未解决，根因仍未确认。没有重跑。
-- 修复之后与最终 HEAD 的常规 CI 写在 review-resolution §116 与 PR 描述中。
+- 修复之后与最终 HEAD 的常规 CI 写在 PR 描述中。
 
 ### 14.17 受影响的证据、两项非阻塞意见与门槛的状态
 
@@ -2925,10 +2925,10 @@ macOS 没有变异：这些路径只在 Linux 上存在。
   - CI 的环境装上了过滤器，没有走到这个分支。
 - **自读的 unknown**：`p2Probe` 把自读 `procInfo` 的 unknown 压成 `/proc=false`，之后可能得到 refuted，而不是保存读取失败。它在当前的正常组与拒绝组中不会成为 confirmed。
 - **概括的收窄**：§14.11 的“计划外的观察失败使运行 invalid”与“过滤器装不上 → unsupported（不变）”，不覆盖这两处：
-  - 前者先得到 invalid；
-  - 后者可能得到 refuted。
+  - unsupported 的分类顺序先得到 invalid；
+  - 自读的 unknown 可能得到 refuted。
 
-  两者都不会得到 confirmed。
+  两处都不会得到 confirmed。
 - **推荐的修正**（待负责人决定是否放进本 PR）：
   - 等登记时同时识别经核验的“不支持、没有启动检查”的实验结果，补不支持的对照；
   - 自读失败记为观察失败。
@@ -2945,4 +2945,4 @@ macOS 没有变异：这些路径只在 Linux 上存在。
 | G12、D14 | 不变 |
 | 其余 | 不变 |
 
-**固定点之后**：之后只有文档的提交，`git diff 48ff0cd HEAD -- prototype .github` 为空（最终核对见 review-resolution §116 与 PR 描述）。
+**固定点之后**：之后只有文档的提交，`git diff 48ff0cd HEAD -- prototype .github` 为空（最终核对见 PR 描述）。
