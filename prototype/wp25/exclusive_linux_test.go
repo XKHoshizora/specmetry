@@ -27,6 +27,10 @@ import (
 
 var errBaseline = errors.New("the process has children: the exclusive interval cannot start")
 
+// errBaselineUnread is the baseline that cannot be read: still a refusal
+// (errBaseline), but not evidence of a child.
+var errBaselineUnread = errors.New("the baseline cannot be read")
+
 type interval struct{ from, to time.Time }
 
 // procGate is the candidate enforcement: every child process goes
@@ -40,6 +44,17 @@ type procGate struct {
 	excl    bool
 	shared  []interval
 	checks  []interval
+	// label names the caller's interval in messages and fault sites:
+	// "p1.inner", "p1.barrier", or "" for T2's own gates.
+	label string
+}
+
+// where names the interval for a message.
+func (g *procGate) where() string {
+	if g.label == "" {
+		return "T2"
+	}
+	return g.label
 }
 
 func newGate2() *procGate {
@@ -80,9 +95,21 @@ func (g *procGate) run(s *scen, cmd *exec.Cmd) error {
 	return err
 }
 
+// errSubreaperClear is a clear of the subreaper at the end of an interval
+// that failed (Review 096 B1-R).
+var errSubreaperClear = errors.New("the subreaper could not be cleared")
+
 // exclusive runs fn as the only source of children: no lease is held, the
 // process has no child at all, and the subreaper is set for fn only.
-func (g *procGate) exclusive(fn func() error) error {
+//
+// Only a baseline read and found not empty is a refusal (errBaseline). A
+// failure of the interval's own steps, a baseline that cannot be read or a
+// set or a clear of the subreaper that fails, is a failed observation of
+// s's run, flagged here (Review 096 B1-R): it then has a consumer however
+// the caller uses the result, and however fn ends, returning or stopping
+// its goroutine through invalidf. It is returned as well; a failed clear
+// joined with fn's error, neither in place of the other.
+func (g *procGate) exclusive(s *scen, fn func() error) (err error) {
 	g.mu.Lock()
 	g.waiting++
 	for g.excl || g.active > 0 {
@@ -99,18 +126,60 @@ func (g *procGate) exclusive(fn func() error) error {
 		g.cond.Broadcast()
 		g.mu.Unlock()
 	}()
-	kids, err := childrenOf(os.Getpid())
-	if err != nil {
-		return fmt.Errorf("%w: the baseline cannot be read: %v", errBaseline, err)
+	kids, kerr := childrenOf(os.Getpid())
+	if g.label == "p1.barrier" && injectOnce("p1-baseline-unread-once", "exclusive.baseline", os.Getpid()) ||
+		g.label == "" && injectOnce("t2-baseline-unread-once", "exclusive.baseline(T2)", os.Getpid()) {
+		kids, kerr = nil, errors.New("injected: the baseline could not be read") // the real read was made
+	}
+	if kerr != nil {
+		s.flag("observation failed: the interval's baseline cannot be read (%s): %v", g.where(), kerr)
+		return fmt.Errorf("%w: %w: %v", errBaseline, errBaselineUnread, kerr)
 	}
 	if len(kids) > 0 {
 		return fmt.Errorf("%w: %s", errBaseline, describe(kids))
 	}
-	if err := unix.Prctl(unix.PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0); err != nil {
-		return err
+	var serr error
+	if g.label == "" && injectOnce("t2-set1-fail-once", "exclusive.set1(T2; the real call was not made)", os.Getpid()) {
+		serr = errors.New("injected: PR_SET_CHILD_SUBREAPER 1 failed")
+	} else {
+		serr = unix.Prctl(unix.PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0)
 	}
-	defer func() { _ = unix.Prctl(unix.PR_SET_CHILD_SUBREAPER, 0, 0, 0, 0) }()
+	if serr != nil {
+		s.flag("observation failed: the subreaper could not be set at the start of the interval (%s): %v", g.where(), serr)
+		return serr
+	}
+	// Runs before the lease's release above, which runs whatever happens
+	// here: the flag takes no lock of the gate's.
+	defer func() {
+		cerr := unix.Prctl(unix.PR_SET_CHILD_SUBREAPER, 0, 0, 0, 0)
+		if g.clearFault(cerr) {
+			cerr = fmt.Errorf("injected: PR_SET_CHILD_SUBREAPER 0 failed (the real clear returned %v)", cerr)
+		}
+		if cerr != nil {
+			s.flag("observation failed: the subreaper could not be cleared at the end of the interval (%s): %v", g.where(), cerr)
+			err = errors.Join(err, fmt.Errorf("%w (%s): %w", errSubreaperClear, g.where(), cerr))
+		}
+	}()
 	return fn()
+}
+
+// clearFault says whether the clear at the end of this interval is to fail
+// once (Review 096 B1-R). The real clear has been made: only its result is
+// replaced, so the setting itself is cleared or not as the real call left
+// it, and the hit records which.
+func (g *procGate) clearFault(got error) bool {
+	site := fmt.Sprintf("exclusive.clear(%s; the real clear returned %v)", g.where(), got)
+	pid := os.Getpid()
+	switch g.label {
+	case "p1.inner":
+		return injectOnce("p1-inner-clear-fail-once", site, pid) ||
+			injectOnceAt("p1-observer-and-clear-fail-once", "p1-observer-and-clear-fail-once/clear", site, pid)
+	case "p1.barrier":
+		return injectOnce("p1-barrier-clear-fail-once", site, pid)
+	case "":
+		return injectOnce("t2-clear-fail-once", site, pid)
+	}
+	return false
 }
 
 // overlaps counts shared leases that overlapped a check's interval.
@@ -465,7 +534,7 @@ func TestExclusiveGate(t *testing.T) {
 	var notes []string
 	for i := 0; i < 3; i++ {
 		var cr *checkRun
-		err := g.exclusive(func() error {
+		err := g.exclusive(s, func() error {
 			cr = runCheck(s, 3, sweepOpts{}, true)
 			return nil
 		})
@@ -521,7 +590,7 @@ func TestExclusiveConcurrentChecks(t *testing.T) {
 			defer wg.Done()
 			for j := 0; j < 2; j++ {
 				var cr *checkRun
-				err := g.exclusive(func() error {
+				err := g.exclusive(s, func() error {
 					cr = runCheck(s, 2, sweepOpts{}, true)
 					return nil
 				})
@@ -568,7 +637,7 @@ func TestExclusiveBypass(t *testing.T) {
 	g := newGate2()
 	var bypass *exec.Cmd
 	var cr *checkRun
-	_ = g.exclusive(func() error {
+	_ = g.exclusive(s, func() error {
 		bypass = helper("sleep", nil)
 		startHelper(s, bypass)
 		cr = runCheck(s, 1, sweepOpts{dryRun: true}, false)
@@ -601,7 +670,7 @@ func TestOtherReaper(t *testing.T) {
 	g := newGate2()
 	var reapedBy int
 	var held, refused bool
-	_ = g.exclusive(func() error {
+	_ = g.exclusive(s, func() error {
 		cmd := helper("exit-after", nil, "50", "0")
 		tr := startTree(s, cmd)
 		if ok, _, _ := tr.waitExit(5 * time.Second); !ok {
@@ -628,7 +697,7 @@ func TestExclusiveBaselineLive(t *testing.T) {
 	pre := helper("sleep", nil)
 	startHelper(s, pre)
 	called := false
-	err := g.exclusive(func() error { called = true; return nil })
+	err := g.exclusive(s, func() error { called = true; return nil })
 	s.worked(1)
 	s.expect("refused", true, errors.Is(err, errBaseline))
 	s.expect("check started", false, called)
@@ -652,7 +721,7 @@ func TestExclusiveBaselineZombie(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	called := false
-	err := g.exclusive(func() error { called = true; return nil })
+	err := g.exclusive(s, func() error { called = true; return nil })
 	s.worked(1)
 	s.expect("refused", true, errors.Is(err, errBaseline))
 	s.expect("check started", false, called)
@@ -667,7 +736,7 @@ func TestAdoptionChain(t *testing.T) {
 	defer s.done()
 	g := newGate2()
 	var cr *checkRun
-	err := g.exclusive(func() error {
+	err := g.exclusive(s, func() error {
 		cr = runCheck(s, 4, sweepOpts{}, true)
 		return nil
 	})
@@ -693,7 +762,7 @@ func TestSweepIdentityMismatch(t *testing.T) {
 	defer s.done()
 	g := newGate2()
 	var cr *checkRun
-	_ = g.exclusive(func() error {
+	_ = g.exclusive(s, func() error {
 		cr = runCheck(s, 1, sweepOpts{perturb: func(st string) string { return st + "x" },
 			deadline: 300 * time.Millisecond}, false)
 		return nil
@@ -720,7 +789,7 @@ func TestSweepPidfdUnsupported(t *testing.T) {
 	defer s.done()
 	g := newGate2()
 	var cr *checkRun
-	_ = g.exclusive(func() error {
+	_ = g.exclusive(s, func() error {
 		cr = runCheck(s, 1, sweepOpts{open: func(int) (int, error) { return -1, unix.ENOSYS }}, false)
 		return nil
 	})
@@ -756,7 +825,7 @@ func TestF1Resources(t *testing.T) {
 	defer s.done()
 	g := newGate2()
 	var cr *checkRun
-	_ = g.exclusive(func() error {
+	_ = g.exclusive(s, func() error {
 		cr = runCheck(s, 2, sweepOpts{limit: true, maxRounds: 0}, false)
 		return nil
 	})
@@ -769,7 +838,7 @@ func TestF1Resources(t *testing.T) {
 	}
 	sort.Ints(kids)
 	called := false
-	err := g.exclusive(func() error { called = true; return nil })
+	err := g.exclusive(s, func() error { called = true; return nil })
 	s.worked(int64(len(kids)))
 	s.expect("converged", false, cr.sw.converged)
 	s.expect("subreaper cleared", 0, subreaper(s))

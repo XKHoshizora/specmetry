@@ -274,6 +274,9 @@ func runHelper(mode string, args []string) int {
 		}
 		select {}
 	}
+	if code, ok := runHelperP(mode, args); ok {
+		return code
+	}
 	if code, ok := runHelperPlatform(mode, args); ok {
 		return code
 	}

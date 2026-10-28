@@ -64,6 +64,13 @@ type gateCase struct {
 	// noReceipt: the outer check must see a process created without its
 	// own record (one that ended before it ran), and confirm its end.
 	noReceipt bool
+	// because, when set, must be part of the inner run's reason (Review 095
+	// B1): the run is rejected for the injected failure itself, not for a
+	// consequence of it, such as a load the failure happened to break.
+	because string
+	// alsoBecause, when set, must be part of the reason too (Review 096
+	// B1-R): a second failure the run met, kept beside the first.
+	alsoBecause string
 }
 
 type gateResult struct {
@@ -77,18 +84,24 @@ type gateResult struct {
 	Launches  int      `json:"launches"`
 	Work      int64    `json:"work"`
 	Hits      int      `json:"inject_hits"`
-	Reject    string   `json:"reject,omitempty"`
-	Created   int      `json:"created"`    // creation records: processes the inner run started
-	Receipts  int      `json:"receipts"`   // helpers' own records
-	NoReceipt int      `json:"no_receipt"` // created, ended without a record of their own
-	Unowned   []string `json:"unowned"`    // created, not registered by the inner run: "pid:state"
-	Shortfall int      `json:"shortfall"`  // expected registrations the inner run declared missing
-	Left      []int    `json:"left"`       // alive when the inner run was over, before any remediation
-	Unrecord  []int    `json:"unrecorded"` // of those, without a creation record
-	Still     []int    `json:"still_alive"`
-	Total     int      `json:"job_total"` // Windows: processes the Job saw created (inner included); -1 elsewhere
-	Raised    bool     `json:"raised"`
-	Insurance string   `json:"insurance"` // the experiment's own last cleanup, after the judgment
+	Sites     []string `json:"inject_sites,omitempty"` // where the inner test process's hits were, as each recorded it
+	// Observed is what the inner run recorded, for a fault case: the state
+	// it read after the fault, kept apart from the fault's own result; and
+	// InnerCleanup, what its own cleanup found.
+	Observed     string   `json:"inner_observed,omitempty"`
+	InnerCleanup string   `json:"inner_cleanup,omitempty"`
+	Reject       string   `json:"reject,omitempty"`
+	Created      int      `json:"created"`    // creation records: processes the inner run started
+	Receipts     int      `json:"receipts"`   // helpers' own records
+	NoReceipt    int      `json:"no_receipt"` // created, ended without a record of their own
+	Unowned      []string `json:"unowned"`    // created, not registered by the inner run: "pid:state"
+	Shortfall    int      `json:"shortfall"`  // expected registrations the inner run declared missing
+	Left         []int    `json:"left"`       // alive when the inner run was over, before any remediation
+	Unrecord     []int    `json:"unrecorded"` // of those, without a creation record
+	Still        []int    `json:"still_alive"`
+	Total        int      `json:"job_total"` // Windows: processes the Job saw created (inner included); -1 elsewhere
+	Raised       bool     `json:"raised"`
+	Insurance    string   `json:"insurance"` // the experiment's own last cleanup, after the judgment
 	// Acted: the identities handed to the entries that act on a process by
 	// its PID (the remediation and the insurance cleanup), each of them
 	// proven this round's. Refused: the ones alive by a record whose
@@ -284,6 +297,52 @@ var gateCases = []gateCase{
 	{id: "stop.error-after-copier", test: "TestInnerStopError", scenario: "gate.stop-error", inject: "stop-error-after-copier", want: invalid, hit: true},
 	{id: "stop.error-one-of-two", test: "TestInnerStopError", scenario: "gate.stop-error", inject: "stop-error-one-of-two", want: invalid, hit: true},
 
+	// Review 095 B1: one read of a new observation entry fails, the reads
+	// after it succeed. The failure must make the run invalid, whatever the
+	// legitimate value it could pass for (a NULL exit code, a refusal by
+	// the baseline, an ended process). The controls: each experiment's own
+	// healthy run and its planned faults stay confirmed.
+	{id: "control.p1-alive", test: "TestP1/alive.1", scenario: "P1.alive.1", want: confirmed},
+	{id: "control.p1-healthy", test: "TestP1/healthy.1", scenario: "P1.healthy.1", want: confirmed},
+	{id: "p1.baseline-unread-once", test: "TestP1/exited.1", scenario: "P1.exited.1", inject: "p1-baseline-unread-once", want: invalid, goos: []string{"linux"}, hit: true, because: "observation failed: the barrier's baseline"},
+	{id: "p1.observe-fail-once", test: "TestP1/healthy.1", scenario: "P1.healthy.1", inject: "p1-observe-fail-once", want: invalid, hit: true, because: "observation failed: the healthy control's"},
+	{id: "p1.item-wait-fail-once", test: "TestP1/exited.1", scenario: "P1.exited.1", inject: "p1-item-wait-fail-once", want: invalid, goos: []string{"windows"}, hit: true, because: "observation failed: the wait on the handed handle"},
+	{id: "control.p2-normal", test: "TestP2/normal.1", scenario: "P2.normal.1", want: confirmed, goos: []string{"linux"}},
+	{id: "control.p2-denied", test: "TestP2/waitid.EPERM", scenario: "P2.waitid.EPERM", want: confirmed, goos: []string{"linux"}},
+	{id: "control.p2-set0", test: "TestP2/prctl.set0", scenario: "P2.prctl.set0", want: confirmed, goos: []string{"linux"}},
+	{id: "p2.check-poll-fail-once", test: "TestP2/normal.1", scenario: "P2.normal.1", inject: "p2-check-poll-fail-once", want: invalid, goos: []string{"linux"}, hit: true, because: "unplanned result of poll(check pidfd"},
+	{id: "p2.close-fail-once", test: "TestP2/waitid.EPERM", scenario: "P2.waitid.EPERM", inject: "p2-close-fail-once", want: invalid, goos: []string{"linux"}, hit: true, because: "unplanned result of close(own pidfd)"},
+	{id: "p2.status-unreadable-once", test: "TestP2/normal.1", scenario: "P2.normal.1", inject: "p2-status-unreadable-once", want: invalid, goos: []string{"linux"}, hit: true, because: "observation failed: the outer's read of the experiment process's status"},
+	{id: "control.p4-resume-gt1", test: "TestP4/resume.gt1.1", scenario: "P4.resume.gt1.1", want: confirmed, goos: []string{"windows"}},
+	{id: "control.p4-pre-unconfirmed", test: "TestP4/pre.unconfirmed.1", scenario: "P4.pre.unconfirmed.1", want: confirmed, goos: []string{"windows"}},
+	{id: "control.p4-anomaly-unconfirmed", test: "TestP4/anomaly.unconfirmed.1", scenario: "P4.anomaly.unconfirmed.1", want: confirmed, goos: []string{"windows"}},
+	{id: "p4.exitcode-fail-once", test: "TestP4/resume.gt1.1", scenario: "P4.resume.gt1.1", inject: "p4-exitcode-fail-once", want: invalid, goos: []string{"windows"}, hit: true, because: "observation failed: the exit code of the main process"},
+	{id: "p4.exitcode-fail-once-healthy", test: "TestP4/healthy.1", scenario: "P4.healthy.1", inject: "p4-exitcode-fail-once", want: invalid, goos: []string{"windows"}, hit: true, because: "observation failed: the exit code of the main process"},
+	{id: "p4.outer-exitcode-fail-once", test: "TestP4/pre.assign.1", scenario: "P4.pre.assign.1", inject: "p4-exitcode-fail-once", want: invalid, goos: []string{"windows"}, hit: true, because: "observation failed: the outer's read of the exit code"},
+	{id: "p4.anomaly-wait-fail-once", test: "TestP4/resume.gt1.1", scenario: "P4.resume.gt1.1", inject: "p4-anomaly-wait-fail-once", want: invalid, goos: []string{"windows"}, hit: true, because: "observation failed: waiting for the main process"},
+	{id: "p4.outer-wait-fail-once", test: "TestP4/pre.assign.1", scenario: "P4.pre.assign.1", inject: "p4-outer-wait-fail-once", want: invalid, goos: []string{"windows"}, hit: true, because: "observation failed: the outer's wait on"},
+	{id: "p4.item-wait-fail-once", test: "TestP4/pre.unconfirmed.1", scenario: "P4.pre.unconfirmed.1", inject: "p4-item-wait-fail-once", want: invalid, goos: []string{"windows"}, hit: true, because: "observation failed: the wait on the handed handle"},
+
+	// Review 096 B1-R: the clear of the subreaper at the end of an exclusive
+	// interval fails once; only its result is replaced, the real clear is
+	// made. The run must be invalid for that failure, whichever caller holds
+	// the interval and whatever it does with the result: P-1's barrier and
+	// its inner call, and T2's callers that count, check or drop it. With
+	// it, the callback ending early through a failure of its own; and the
+	// other steps of the interval, an unread baseline and a failed set. The
+	// controls: the healthy runs, and a baseline read and found not empty.
+	{id: "control.p1-exited", test: "TestP1/exited.1", scenario: "P1.exited.1", want: confirmed},
+	{id: "control.t2-gate", test: "TestExclusiveGate", scenario: "T2.gate.exclusive-interval", want: confirmed, goos: []string{"linux"}},
+	{id: "control.t2-bypass", test: "TestExclusiveBypass", scenario: "T2.gate.bypass", want: confirmed, goos: []string{"linux"}},
+	{id: "p1.barrier-clear-fail-once", test: "TestP1/healthy.1", scenario: "P1.healthy.1", inject: "p1-barrier-clear-fail-once", want: invalid, goos: []string{"linux"}, hit: true, because: "the subreaper could not be cleared at the end of the interval (p1.barrier)", alsoBecause: "observation failed: the barrier's interval"},
+	{id: "p1.inner-clear-fail-once", test: "TestP1/healthy.1", scenario: "P1.healthy.1", inject: "p1-inner-clear-fail-once", want: invalid, goos: []string{"linux"}, hit: true, because: "the subreaper could not be cleared at the end of the interval (p1.inner)", alsoBecause: "the exclusive interval: "},
+	{id: "p1.observer-and-clear-fail-once", test: "TestP1/healthy.1", scenario: "P1.healthy.1", inject: "p1-observer-and-clear-fail-once", want: invalid, goos: []string{"linux"}, hit: true, because: "the subreaper could not be cleared at the end of the interval (p1.inner)", alsoBecause: "exit observer: injected"},
+	{id: "t2.clear-fail-once-counted", test: "TestExclusiveGate", scenario: "T2.gate.exclusive-interval", inject: "t2-clear-fail-once", want: invalid, goos: []string{"linux"}, hit: true, because: "the subreaper could not be cleared at the end of the interval (T2)"},
+	{id: "t2.clear-fail-once-checked", test: "TestAdoptionChain", scenario: "T2.adoption.chain", inject: "t2-clear-fail-once", want: invalid, goos: []string{"linux"}, hit: true, because: "the subreaper could not be cleared at the end of the interval (T2)"},
+	{id: "t2.clear-fail-once-dropped", test: "TestExclusiveBypass", scenario: "T2.gate.bypass", inject: "t2-clear-fail-once", want: invalid, goos: []string{"linux"}, hit: true, because: "the subreaper could not be cleared at the end of the interval (T2)"},
+	{id: "t2.baseline-unread-once", test: "TestExclusiveBaselineLive", scenario: "T2.baseline.live-child", inject: "t2-baseline-unread-once", want: invalid, goos: []string{"linux"}, hit: true, because: "the interval's baseline cannot be read (T2)"},
+	{id: "t2.set1-fail-once", test: "TestExclusiveGate", scenario: "T2.gate.exclusive-interval", inject: "t2-set1-fail-once", want: invalid, goos: []string{"linux"}, hit: true, because: "the subreaper could not be set at the start of the interval (T2)"},
+
 	// Review 077 B1-R2-W: the witness itself fails. The outer check must
 	// reject the evidence, whatever the inner run gives.
 	{id: "witness.write-fail", test: "TestPipeSilentHolderReal", scenario: "T1.pipe.silent-holder", inject: "witness-write-fail", hit: true, reject: "witness-raised"},
@@ -386,6 +445,7 @@ type innerRun struct {
 	exit    int
 	results map[string]result
 	hits    int
+	sites   []string // the site of each hit the inner test process printed
 	seals   []string // the JSON of the WP25WITNESS lines
 	proc    *innerProc
 	err     error
@@ -423,8 +483,14 @@ func runInner(test, inject string, env []string) innerRun {
 	sc.Buffer(make([]byte, 1<<20), 1<<20)
 	for sc.Scan() {
 		line := sc.Text()
-		if strings.Contains(line, "WP25INJECT ") {
+		if i := strings.Index(line, "WP25INJECT "); i >= 0 {
 			r.hits++
+			var h struct {
+				Site string `json:"site"`
+			}
+			if json.Unmarshal([]byte(line[i+len("WP25INJECT "):]), &h) == nil {
+				r.sites = append(r.sites, h.Site)
+			}
 		}
 		if i := strings.Index(line, "WP25WITNESS "); i >= 0 {
 			r.seals = append(r.seals, line[i+len("WP25WITNESS "):])
@@ -595,7 +661,7 @@ func runGate(t *testing.T, c gateCase, f outerFault) gateResult {
 	}
 	defer rw.close()
 	r := runInner(c.test, c.inject, []string{witnessEnv + "=" + wf, injectLogEnv + "=" + il, rw.env()})
-	g := gateResult{ID: c.id, Test: c.test, Inject: c.inject, Want: c.want, Reject: c.reject, InnerExit: r.exit, Hits: r.hits, Total: -1}
+	g := gateResult{ID: c.id, Test: c.test, Inject: c.inject, Want: c.want, Reject: c.reject, InnerExit: r.exit, Hits: r.hits, Sites: r.sites, Total: -1}
 	got, ok := r.results[c.scenario]
 	verdictOK := false
 	switch {
@@ -605,9 +671,19 @@ func runGate(t *testing.T, c gateCase, f outerFault) gateResult {
 		g.Reason = "the inner run gave no result for " + c.scenario
 	default:
 		g.Got, g.Reason, g.Launches, g.Work = got.Verdict, got.Reason, got.Launches, got.Work
+		if c.hit {
+			g.Observed, g.InnerCleanup = got.Observed, got.Cleanup
+		}
 		// A control must be accepted and exit 0; a broken run must be
 		// rejected as invalid and make the diagnostic fail.
 		verdictOK = c.want == "" || got.Verdict == c.want && (r.exit == 0) == (c.want == confirmed)
+		for _, b := range []string{c.because, c.alsoBecause} {
+			if b != "" && !strings.Contains(got.Reason, b) {
+				verdictOK = false
+				g.Reason = fmt.Sprintf("the reason does not name %q: %s", b, got.Reason)
+				break
+			}
+		}
 	}
 	if r.proc == nil {
 		g.Problems = append(g.Problems, "inner: the inner run could not be started: "+fmt.Sprint(r.err))
