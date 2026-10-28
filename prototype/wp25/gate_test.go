@@ -86,20 +86,22 @@ type gateResult struct {
 	Hits      int      `json:"inject_hits"`
 	Sites     []string `json:"inject_sites,omitempty"` // where the inner test process's hits were, as each recorded it
 	// Observed is what the inner run recorded, for a fault case: the state
-	// it read after the fault, kept apart from the fault's own result.
-	Observed  string   `json:"inner_observed,omitempty"`
-	Reject    string   `json:"reject,omitempty"`
-	Created   int      `json:"created"`    // creation records: processes the inner run started
-	Receipts  int      `json:"receipts"`   // helpers' own records
-	NoReceipt int      `json:"no_receipt"` // created, ended without a record of their own
-	Unowned   []string `json:"unowned"`    // created, not registered by the inner run: "pid:state"
-	Shortfall int      `json:"shortfall"`  // expected registrations the inner run declared missing
-	Left      []int    `json:"left"`       // alive when the inner run was over, before any remediation
-	Unrecord  []int    `json:"unrecorded"` // of those, without a creation record
-	Still     []int    `json:"still_alive"`
-	Total     int      `json:"job_total"` // Windows: processes the Job saw created (inner included); -1 elsewhere
-	Raised    bool     `json:"raised"`
-	Insurance string   `json:"insurance"` // the experiment's own last cleanup, after the judgment
+	// it read after the fault, kept apart from the fault's own result; and
+	// InnerCleanup, what its own cleanup found.
+	Observed     string   `json:"inner_observed,omitempty"`
+	InnerCleanup string   `json:"inner_cleanup,omitempty"`
+	Reject       string   `json:"reject,omitempty"`
+	Created      int      `json:"created"`    // creation records: processes the inner run started
+	Receipts     int      `json:"receipts"`   // helpers' own records
+	NoReceipt    int      `json:"no_receipt"` // created, ended without a record of their own
+	Unowned      []string `json:"unowned"`    // created, not registered by the inner run: "pid:state"
+	Shortfall    int      `json:"shortfall"`  // expected registrations the inner run declared missing
+	Left         []int    `json:"left"`       // alive when the inner run was over, before any remediation
+	Unrecord     []int    `json:"unrecorded"` // of those, without a creation record
+	Still        []int    `json:"still_alive"`
+	Total        int      `json:"job_total"` // Windows: processes the Job saw created (inner included); -1 elsewhere
+	Raised       bool     `json:"raised"`
+	Insurance    string   `json:"insurance"` // the experiment's own last cleanup, after the judgment
 	// Acted: the identities handed to the entries that act on a process by
 	// its PID (the remediation and the insurance cleanup), each of them
 	// proven this round's. Refused: the ones alive by a record whose
@@ -670,7 +672,7 @@ func runGate(t *testing.T, c gateCase, f outerFault) gateResult {
 	default:
 		g.Got, g.Reason, g.Launches, g.Work = got.Verdict, got.Reason, got.Launches, got.Work
 		if c.hit {
-			g.Observed = got.Observed
+			g.Observed, g.InnerCleanup = got.Observed, got.Cleanup
 		}
 		// A control must be accepted and exit 0; a broken run must be
 		// rejected as invalid and make the diagnostic fail.
