@@ -20,6 +20,7 @@
 > - **2026-10-25**（§106）：负责人决定了草案 §17.3 的 14 项产品选择与 C-4。规范第 5 版草案对 C-1 ~ C-20 逐项给出采纳建议（草案 §17.4），都待审查。Review 089 之后，草案的 S6 按本文 §2.13、§2.14 的停止结果生命周期改写（先建立阶段 J 的截止，再启动停止任务），C-4 落实为 O3 之后宿主的持续禁用（§107）；Review 090 技术 GO（§108），PR #36 已合并为 `f3fbe83`；第 6 版草案增加 D21 与冻结之前的规格草案（草案 §19，§109），其中 G3、G5、G6、G7 的最小原型只有计划，没有实施。本文 §9 ~ §12 是决定之前的记录，保持原样：§10 标题中的“全部未批准”是当时的状态。
 > - **2026-10-27**（§114）：PR #37 合并为 `2c5cf23` 之后，负责人决定 Q-1、Q-2 (a)，并授权 P-1、P-2、P-4 的隔离原型与 P-3 的整理。计划在写代码之前固定（§14.1 ~ §14.6，`dcdb2b2`），固定代码点 `d45a319` 的诊断 run 40439516254 三平台 success（P-1 18/18、P-2 9/9、P-4 18/18 confirmed，§14.7）；结果与门槛的状态（§14.10）**待独立审查**。
 > - [Review 095](reviews/codex-review-095.md) 对 `1be48c3` 为**技术 NO-GO**（B1：新增观察入口没有完整失败关闭；N1、N2 非阻塞）。已定向修复（§14.11 ~ §14.14）：回归先行 `0a9a01a`（诊断 run 40641559468 为 failure，预期），修复与固定代码点 `85ec2ca`（诊断 run 40643975558 三平台 success）；`d45a319` 的证据降为历史观测。**已修复，待独立复审**；不宣布 B1 关闭。
+> - [Review 096](reviews/codex-review-096.md) 对 `b80982c` 为**技术 NO-GO**：Review 095 点名的路径修复成立，N1、N2 关闭；B1 不能整体关闭（B1-R：Linux 排他区间退出时清除 subreaper 的错误被丢弃）。已定向修复（§14.15 ~ §14.17）：回归先行 `b641e17`（诊断 run 40656037766 为 failure，预期），修复与固定代码点 `48ff0cd`；`85ec2ca` 的 Linux P-1 与 T2 证据降为历史观测。**已修复，待独立复审**；不宣布 B1 关闭。
 > - 这**不是**规范冻结：草案为第 7 版，待独立审查和冻结；14 项产品选择、D21、Q-1 与 Q-2 已决定，技术候选仍待审查。T1 ~ T6 按 Review 075 的裁定只得到**局部支持**（§11；草案 §17.5 的 G1 ~ G15 与 §19）。
 > - 原型成功**不是**生产验收：生产 Check Runner、迁移 0009、CLI 接线都没有授权，WP2.5 没有实现或验收，M2 没有整体验收。
 > - 本文中的“候选规格”都待审查；其中涉及可见行为的（例如 C-4、C-7、C-10）依赖对应的产品选择（§9、§10）。C-4 的产品语义与 C-7（D20 (i)）已于 2026-10-25 决定，其技术部分仍待审查。本文不新增接受风险，也不批准任何保证调整。
@@ -2577,6 +2578,8 @@ E-main 与组身份的场景同时属于 T1（Linux）与 T3（macOS），这里
 
 ### 14.11 Review 095 B1：新增观察入口的错误传播（修复）
 
+> Review 096 之后：本表 P-1 屏障一行的“其他错误 → 观察失败”遗漏了区间退出时清除 subreaper 的错误，那时 `exclusive` 自己丢弃它（B1-R）。“计划外的观察失败使运行 invalid”与“过滤器装不上 → unsupported（不变）”另有两处例外（N-096-2）。见 §14.15、§14.17。本节保留原文。
+
 [Review 095](reviews/codex-review-095.md) 对 `1be48c3` 为**技术 NO-GO**。B1：P-4、P-2、P-1 的新增观察入口没有完整接入 §14.2 的失败关闭规则——P-4 的退出码读取错误被吸收为合法的 NULL，外层的一次读取失败被之后的成功掩盖，仍可 confirmed / 0；P-2 正常组的步骤错误只被打印；P-1 读不到的基线被当作“有子进程而拒绝”。修复限定在这三个原型的观察链与它们的调用者；预测、预算、归属规则与清理要求不变，没有减少断言、扩大允许的错误或增加重试（EINTR 在原有期限之内的重试除外，见 P-2）。
 
 **区分两类失败**（§14.2 的细化，不改变计划）：被测机制按计划返回的拒绝或故障（seccomp 的 errno、恢复异常、计划的 Job 查询失败、被吞掉的终止请求）照常按机制判定；用来观察机制的工具发生计划外的失败（读取、等待、关闭、状态读数），使这次运行 invalid，之后的成功、补救或其他成功的读数都不豁免它。机制把观察失败当作 F1 处理（C-19）这一点不变：在内层，它是被测分支；在实验的有效性上，它是计划外的工具失败。
@@ -2669,7 +2672,11 @@ E-main 与组身份的场景同时属于 T1（Linux）与 T3（macOS），这里
 - 40641559468 的门禁失败：
   - Ubuntu 6 项：`p1.baseline-unread-once`、`control.p2-normal`、`control.p2-set0`、`p2.check-poll-fail-once`、`p2.close-fail-once`、`p2.status-unreadable-once`；
   - Windows 7 项：`p1.item-wait-fail-once` 与上表 6 个 P-4 用例；
-  - macOS 1 项：既有的 `report.epipe-unwritable`。它与 B1 无关：外层普查读不到一个无关进程（PID 2668，父进程为 1，短命令名不是本测试的）的环境，EINVAL。这是 §2.14、§2.15 记录的 macOS 普查问题的又一次观测，没有重跑，原因仍未查明。
+  - macOS 1 项：既有的 `report.epipe-unwritable`（Review 096 N-096-1 收窄了此处原来的写法，见 §14.17）：
+    - 内层为 invalid / 1，预期的报告失败拒绝已出现；
+    - 外层的普查读 PID 2668 的环境得到 EINVAL，列入 `tool_errors`，Final=unknown、Pass=false。
+
+    这**不属于**十二个 B1 目标故障的预期命中，是 §2.14、§2.15 记录的 macOS 普查读取失败的又一次观测。PID 2668 的归属、EINVAL 的根因与该运行对所有对象的完整清理**仍未知**。没有重跑。
 - 40643975558 中，B1 用例在各自的平台上都是 invalid / 非零，理由点名被注入的失败；对照都是 confirmed / 0。P 场景：
   - Windows：P-1 6、P-4 18，都 confirmed；
   - macOS：P-1 6，都 confirmed；
@@ -2723,3 +2730,219 @@ E-main 与组身份的场景同时属于 T1（Linux）与 T3（macOS），这里
 | G7 | P-4 在有效门禁之下 Windows 18/18 confirmed；未构造的失败点见 §14.9；不宣布满足 |
 | G12、D14 | Q-2 (a) 的规格写定；生产记录、事务与迁移待授权 |
 | 其余 | 不变 |
+
+### 14.15 Review 096 B1-R：排他区间自身步骤的错误传播（修复）
+
+[Review 096](reviews/codex-review-096.md) 对 `b80982c` 为**技术 NO-GO**：
+
+- Review 095 点名的 P-4、P-2、P-1 路径修复成立；N1、N2 关闭。
+- B1 不能整体关闭（**B1-R**，源码条件反例）：Linux 排他区间 `exclusive` 退出时清除 subreaper（`PR_SET_CHILD_SUBREAPER 0`）的错误被 `_ =` 丢弃，`exclusive` 只返回回调的结果。P-1 的屏障因此可以把清除失败报告为成功进入，`healthy` 的预测全部一致，得到 confirmed / 0。
+- §14.11 中 P-1 屏障一行的“其他错误 → 观察失败”因此不成立：`exclusive` 自己就不返回这个错误。
+
+修复只改原型的 `exclusive` 与它的直接调用者。规范 §19.6 已写定生产的处理：收尾时 SET 0 失败作为环境错误，批次停止、退出码 6，租约照常释放，之后的探测因读取为 1 而拒绝启动。本轮不改规范，不增加宿主禁用条件、重试或恢复政策；原型也不实现这些生产行为。
+
+**修复**：
+
+- `exclusive` 现在接受场景 `s`。区间自身步骤的失败，都在 `exclusive` 内部记入 `s.flag`，作为持续保存的观察失败：
+  - 读不到的基线；
+  - SET 1 失败；
+  - SET 0 失败。
+- 因此，不论调用者检查、计数还是丢弃返回值，不论回调正常返回、还是经 `invalidf` / `FailNow` 结束本 goroutine，这些错误都有消费者。
+- 错误同时返回：清除失败与回调的错误用 `errors.Join` 合并，互不覆盖。
+- 只有读到而且不为空的基线是拒绝（`errBaseline`），不记入 flag。这是计划内的机制结论，按预测判定。
+- 释放租约的 defer 先注册、后执行：清除与 flag 在前，释放在后，任何结束方式下都执行。flag 只取场景的锁，不取闸门的锁，所以不会遗漏释放，也不增加死锁或等待。
+- **审计直接调用者时一并处理的两项**（与 B1-R 同在 `exclusive` 的结果中）：
+  - T2 的基线场景把读不到的基线也当作拒绝，可以得到 confirmed / 0；
+  - T2 的两个计数调用者把 SET 1 失败当作检查被拒，得到 refuted。
+
+**区间的步骤**：
+
+| 步骤 | 返回 | 保存者 | 何时消费 | 最终判定 |
+|---|---|---|---|---|
+| 基线读取（`childrenOf`） | 列表 / error | `exclusive`：`s.flag`（新），并返回 `errBaseline` + `errBaselineUnread` | flag 立即记入，`done` 汇总 | invalid（新；原来 T2 的基线场景当作拒绝） |
+| 基线不为空 | `errBaseline` | 调用者 | 返回时 | 计划的拒绝，按预测判定（不变） |
+| SET 1 | error | `exclusive`：flag（新），并返回 | 立即 | invalid（新；原来 T2 的计数调用者为 refuted） |
+| 回调 `fn` | error；或经 `invalidf` 结束 goroutine | 调用者；或 `invalidf` 已记入场景 | 返回时；或已记入 | 不变。回调提前结束时，`exclusive` 的两个 defer 照常执行 |
+| SET 0（defer） | error | `exclusive`：flag（新），并 `errors.Join` 进返回值（新） | flag 立即记入，回调经 Goexit 结束、没有人接收返回值时也是；返回时 | invalid（新；原来丢弃） |
+| 释放租约（defer） | 没有错误 | — | 每次都执行 | 不变 |
+
+**直接调用者**（13 处）：
+
+| 调用者 | 对返回值 | 清除失败：修复之前 | 修复之后 |
+|---|---|---|---|
+| P-1 内层 `p1Inner`（经 `p1Exclusive`） | 检查 → `invalidf` | 返回 nil；之后读到 subreaper 为 0 → confirmed / 0 | flag，加 `invalidf` → invalid |
+| P-1 屏障 `p1Barrier` | 分类；`healthy` 要求进入 | 进入、nil → confirmed / 0 | flag，加屏障自己的 flag → invalid。之后读到的设置（新增的读数）单独记录 |
+| `T2.gate.exclusive-interval` | 计数（nil 才算成功） | confirmed / 0 | invalid |
+| `T2.gate.concurrent-checks` | 计数（错误算被拒） | 清除错误不出现 | invalid |
+| `T2.adoption.chain` | 检查 → `invalidf` | confirmed / 0 | invalid |
+| `T2.gate.bypass`、`T2.other-reaper`、`T2.identity.mismatch`、`T2.pidfd.unsupported`、`T2.F1.resources` 的第一次 | 丢弃（`_ =`） | confirmed / 0 | invalid：flag 在 `exclusive` 内部，丢弃返回值也不漏判 |
+| `T2.baseline.live-child`、`T2.baseline.zombie-child`、`T2.F1.resources` 的第二次 | 期望拒绝；回调不运行 | 没有设置，也就没有清除；读不到的基线原来得到 confirmed | 读不到的基线 → invalid |
+
+**不适用的退出路径**（不制造对应的测试）：
+
+- **拒绝之后的清除**：基线不为空、读不到的基线与 SET 1 失败，都在注册清除的 defer 之前返回。这时 subreaper 从未设置，没有可清除的东西。
+- **回调返回错误、同时清除失败**：13 处回调都不返回非 nil 的错误。合并已实现，但没有调用者走到这里。可达的“回调失败”是经 `invalidf` 提前结束，由组合用例覆盖。
+- **回调 panic**：原型的回调不 panic。panic 时 defer 照常执行、flag 照常记入，测试进程随后失败，不可能得到绿色。
+- **macOS、Windows**：macOS 的 `p1Exclusive` 只运行回调，没有 subreaper；Windows 没有 `exclusive`。
+
+**注入与实际状态**：
+
+- **清除的故障**：真实清除照常执行，只替换它的返回值。每次命中都记下真实清除的返回：本轮所有命中都是 `<nil>`，即真实清除成功、属性为 0。之后的读数也都是 0：
+  - `subreaper after the barrier's interval=0`；
+  - `subreaper after the inner call=0`（旧实现上）；
+  - `subreaper after the intervals=0`。
+
+  所以这些运行**没有**验证“清除失败之后属性保持为 1”，也没有验证真实的原生清除失败之后会怎样。
+- **属性可能残留**：证据是 P-2 `prctl.set0` 组在隔离的实验进程中的既有结果（run 40643975558）：SET 0 被 EPERM 拒绝，之后读到 1（SubEnd=1），外层最后结束实验进程。实验进程的退出不是清除成功。本轮没有新增实验。
+- **SET 1 的故障**：不执行真实调用（命中记录写明），没有设置，也就没有可清除的东西。
+- **测试进程中真实的清除失败**：原型不重试、不恢复，属性可能在同一测试进程之后的场景中保持为 1。这次运行已经 invalid；之后读取属性的 T2 场景也会不符。不可能得到绿色。
+- **补救与清理单独记录**：门禁结果现在带有内层自己的清理（`inner_cleanup`）、命中的位置（`inject_sites`）与故障之后的读数（`inner_observed`）。本轮全部用例的结果相同：
+  - 内层的清理已核实（进程都已结束）；
+  - 外层的补救为 not-needed，保险清理为 nothing left，Final=ended；
+  - 运行仍然 invalid。
+
+  清理只作用于场景登记的进程，不对归属未确认的对象动作。
+
+**本节对 §14.11 的更正**：
+
+- P-1 屏障一行的“其他错误 → 观察失败”此前不成立。
+- “subreaper 的读取、补救、清单的释放”一行只覆盖读取，不覆盖区间自身的设置与清除；后者见上表。
+
+### 14.16 回归先行、修复、诊断与定向撤回
+
+**提交的顺序**：
+
+1. `73c8eb3`：原样归档 Review 096。
+2. `b641e17`（回归先行，旧的错误处理没有改动）：
+   - 区间的各个步骤加一次性故障：
+     - P-1 的屏障与内层的清除；
+     - 内层回调经观察者失败而提前结束，同时清除失败（组合用例）；
+     - T2 的清除、读不到的基线与 SET 1。
+   - 增加 8 个 B1-R 门禁用例与 3 个对照（`control.p1-exited`、`control.t2-gate`、`control.t2-bypass`）。下表的最后一行是 Review 095 既有的用例。
+   - 测试工具：
+     - `injectOnceAt`（一个故障在几个位置各作用一次）；
+     - 闸门的 `label`，取代 `p1Probing`，既有基线故障的条件不变；
+     - 门禁用例的 `alsoBecause`；
+     - 门禁结果中的命中位置与内层读数；
+     - P-1 屏障之后对设置的读数（预期 0），作为与区间结果分开的记录。
+3. `be25df5`（测试工具，旧的错误处理仍未改动）：门禁结果也带有内层自己的清理。
+4. `48ff0cd`（修复，**固定的原型代码点**）：14.15 的修复。
+5. 之后只有文档的提交（14.17）。
+
+**B1-R 用例**（Linux；“旧”为 `be25df5`，“新”为 `48ff0cd`；每个故障都有命中记录）：
+
+| 用例 | 调用者对结果 | 旧实现的内层结论 / 退出码 | 新实现 |
+|---|---|---|---|
+| `p1.barrier-clear-fail-once`（审查的原反例） | 屏障分类 | **confirmed / 0** | invalid / 1。理由点名区间的清除失败与屏障自己的 flag |
+| `p1.inner-clear-fail-once` | 检查 → `invalidf` | **confirmed / 0**（之后读到 subreaper 为 0） | invalid / 1。区间的 flag，加 `the exclusive interval: …` |
+| `p1.observer-and-clear-fail-once`（回调失败，加清除失败） | 回调经 `invalidf` 结束 | invalid / 1，但理由只有观察者的失败，清除的失败丢失 | invalid / 1。两项都在理由中（命中 2） |
+| `t2.clear-fail-once-counted`（`TestExclusiveGate`） | 计数 | **confirmed / 0**（之后读到 0） | invalid / 1 |
+| `t2.clear-fail-once-checked`（`TestAdoptionChain`） | 检查 → `invalidf` | **confirmed / 0** | invalid / 1 |
+| `t2.clear-fail-once-dropped`（`TestExclusiveBypass`） | 丢弃 | **confirmed / 0** | invalid / 1 |
+| `t2.baseline-unread-once`（`TestExclusiveBaselineLive`） | 期望拒绝 | **confirmed / 0**（读不到的基线被当作拒绝） | invalid / 1 |
+| `t2.set1-fail-once`（`TestExclusiveGate`） | 计数 | refuted / 1（把工具失败当作检查被拒） | invalid / 1 |
+| `p1.baseline-unread-once`（既有，Review 095） | 屏障分类 | invalid / 1 | invalid / 1。区间的 flag 加在屏障的 flag 之前 |
+
+- 每个用例的理由都须点名被注入的那次失败（`because`）。三个用例还须点名第二项（`alsoBecause`）：
+  - 屏障与内层：调用者收到了返回的错误；
+  - 组合用例：回调自己的失败。
+- 对照在旧、新实现上都是 confirmed / 0：
+  - `control.p1-healthy`、`control.p1-alive`、`control.p1-exited`（可靠的非空基线使屏障拒绝）；
+  - `control.refusal`（T2 的可靠非空基线）；
+  - `control.adoption-chain`、`control.t2-gate`、`control.t2-bypass`。
+- 可靠的非空基线（`control.p1-exited`、`control.refusal`）与读不到的基线（`p1.baseline-unread-once`、`t2.baseline-unread-once`）仍然分开：前者 confirmed，后者 invalid。
+
+**定向撤回**（作者本机 WSL2，每次只撤回一项，与对照一起运行；变异之后已恢复，没有提交）：
+
+| 撤回 | 应检出的用例 | 结果 | 对照 |
+|---|---|---|---|
+| R1 清除失败只返回、不 flag | 6 个清除用例 | 全部检出。`t2.clear-fail-once-dropped` 退回 confirmed / 0，`t2.clear-fail-once-counted` 为 refuted，组合用例丢失清除的失败；屏障、内层、checked 只剩调用者的消息（`because` 检出） | 全部通过 |
+| R2 清除失败只 flag、不返回 | 屏障、内层 | 检出（`alsoBecause`：调用者没有收到错误）。`t2.clear-fail-once-counted` **没有**检出：只靠 flag 它也是 invalid，返回值只多一项计数不符 | 全部通过 |
+| R3 读不到的基线不 flag | `t2.baseline-unread-once` | 检出（confirmed / 0）。`p1.baseline-unread-once` 仍通过：屏障自己的 flag（Review 095）仍在 | 全部通过 |
+| R4 SET 1 失败不 flag | `t2.set1-fail-once` | 检出（refuted） | 全部通过 |
+
+macOS 没有变异：这些路径只在 Linux 上存在。
+
+**作者本机**（作者证据，`48ff0cd` 的树）：
+
+- Windows 11 26300：完整原型套件为场景 53/53 confirmed、门禁回归 92/92、组合 13/13。
+- WSL2 6.18（不带 `-race`）：场景 52 confirmed、1 unsupported（既有的 `T5.adapter.pwsh-argv`，没有 pwsh），门禁回归 103/103，组合 13/13。
+- B1-R 用例与对照在 `be25df5`（旧）与 `48ff0cd`（新）上各运行一次，结论如上表。
+
+**诊断 CI**（`.github/workflows/wp25-prototype.yml`；与常规 CI 分开，都没有重跑或取消）：
+
+| run | 代码点 | 结论 | macOS 26.6.2 arm64 | Ubuntu 6.17（`-race`） | Windows 10.0.26100 |
+|---|---|---|---|---|---|
+| 40656037766 | `b641e17`（回归先行） | **failure**（预期） | success：场景 33/33，门禁回归 77/77，组合 13/13 | failure：场景 53/53，门禁回归 95/103，组合 13/13 | success：场景 53/53，门禁回归 92/92，组合 13/13 |
+| 40658194158 | `48ff0cd`（修复） | **success** | 场景 33/33，门禁回归 77/77，组合 13/13 | 场景 53/53，门禁回归 103/103，组合 13/13 | 场景 53/53，门禁回归 92/92，组合 13/13 |
+
+- 40656037766：
+  - 三个作业都实际检出 `b641e17`，WP25META 声明相同的 SHA。
+  - Ubuntu 失败的门禁用例正是 8 个新增的 B1-R 用例；结论、退出码与命中位置与上表的旧实现相同。
+  - Windows、macOS 上新增的只有对照 `control.p1-exited`，通过。
+- 40658194158：
+  - 三个作业都实际检出 `48ff0cd`，WP25META 声明相同的 SHA；Ubuntu 作业按既有的 `RUNNER_OS` 判断传入 `-race`。
+  - B1-R 用例都为 invalid / 1，理由点名被注入的失败。清除的命中都记下真实清除返回 `<nil>`；SET 1 的命中记下没有执行真实调用。
+  - 对照都为 confirmed / 0，Final=ended，保险清理为 nothing left。
+  - P 场景都为 confirmed：Windows P-1 6、P-4 18；Ubuntu P-1 6、P-2 9（另有 T2 11）；macOS P-1 6。
+
+**常规 CI**（`ci.yml`，不运行原型模块）：
+
+- 回归先行的 `b641e17` 上，run 40656041186（pull_request，attempt 1）为 **failure，7/8**。
+  - 八个作业都检出合并快照 `c9ea84f`（父提交 `2c5cf23`、`b641e17`）。
+  - 失败的是 Windows 的 `internal/store/sqlite` `TestCheckWhileTheDatabaseIsCreated`（round 11、check 9，`Access is denied`）。症状与 M-1（codex-review-035 N2）相同，是 M-1 的又一次观测。
+  - 本轮没有改根模块；M-1 未解决，根因仍未确认。没有重跑。
+- 修复之后与最终 HEAD 的常规 CI 写在 review-resolution §116 与 PR 描述中。
+
+### 14.17 受影响的证据、两项非阻塞意见与门槛的状态
+
+**降为历史观测**（保留原文）：
+
+- 修复之前的各个代码点上，`exclusive` 的清除结果都没有被观察。受影响的是：
+  - `85ec2ca` 的诊断 run 40643975558 中 Ubuntu 的 P-1 与 T2 结论；
+  - §14.12 中 WSL2 的作者本地运行；
+  - 更早的 T2 证据。
+- 这些结论只是“在没有观察清除结果的那次运行中观察到的结果”。
+  - 内层区间之后读到 0，只说明读取的那一刻属性为 0；
+  - P-1 屏障区间之后原来没有读数。
+
+**替代的证据**：固定代码点 `48ff0cd` 的诊断 run 40658194158（14.16）。
+
+**不受这一缺陷影响**（不经 `exclusive`）：P-2、P-4、Windows 与 macOS 的结论。它们也由同一诊断在新代码点上重新运行；§14.14 对它们的登记不变。
+
+**N-096-1**（措辞收窄，已处理）：
+
+- §14.12 中“与 B1 无关”“一个无关进程”的写法已就地收窄。审查原文的线索：
+  - PID 2668 的启动身份 `1793167516.433196`，父进程为 1，进程组 2668，名称前缀的启发式为 no；
+  - 失败之后该身份仍然 present、不是僵尸。
+- 父进程为 1、名称不匹配，既不能证明它与本轮无关，也不能证明它属于本轮。保险清理的“nothing left”不能解释为普查未能判定归属的 PID 2668 已完整清理。
+- 门禁当时已经正确拒绝（Final=unknown、Pass=false），没有绕过 EINVAL。后来的成功不回填这次运行。
+
+**N-096-2**（只登记，本轮不改代码）：
+
+- **unsupported 的分类顺序**：`prctl.set0` 组预期有检查进程（checks=1）。过滤器不支持时，实验进程先发布 unsupported、不创建检查，外层却先等 10 s 的 PID 记录，得到 invalid，走不到 unsupported。
+  - 这是保守的拒绝，不是 confirmed 的错误放行。
+  - CI 的环境装上了过滤器，没有走到这个分支。
+- **自读的 unknown**：`p2Probe` 把自读 `procInfo` 的 unknown 压成 `/proc=false`，之后可能得到 refuted，而不是保存读取失败。它在当前的正常组与拒绝组中不会成为 confirmed。
+- **概括的收窄**：§14.11 的“计划外的观察失败使运行 invalid”与“过滤器装不上 → unsupported（不变）”，不覆盖这两处：
+  - 前者先得到 invalid；
+  - 后者可能得到 refuted。
+
+  两者都不会得到 confirmed。
+- **推荐的修正**（待负责人决定是否放进本 PR）：
+  - 等登记时同时识别经核验的“不支持、没有启动检查”的实验结果，补不支持的对照；
+  - 自读失败记为观察失败。
+
+**门槛的状态**（作者的登记，待独立复审；§14.14 是本轮之前的登记，保留原文）：
+
+| 门槛 | 状态 |
+|---|---|
+| G1 | 不变（§14.14） |
+| G3 | P-1 在新代码点的有效门禁之下：Linux 的屏障与内层区间的清除结果都被观察；三平台 P-1 18/18 confirmed，以 40658194158 为准。Windows `alive` 依赖外层另持 Job 句柄的构造。不宣布整体满足 |
+| G5 | **没有满足**（本轮不补做 P-3） |
+| G6 | 不变：P-2 不经 `exclusive`。N-096-2 的两处分类边界登记待处理；只有 x86_64。不宣布满足 |
+| G7 | 不变（§14.14）；不宣布满足 |
+| G12、D14 | 不变 |
+| 其余 | 不变 |
+
+**固定点之后**：之后只有文档的提交，`git diff 48ff0cd HEAD -- prototype .github` 为空（最终核对见 review-resolution §116 与 PR 描述）。
