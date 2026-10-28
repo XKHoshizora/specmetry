@@ -71,6 +71,10 @@ type gateCase struct {
 	// alsoBecause, when set, must be part of the reason too (Review 096
 	// B1-R): a second failure the run met, kept beside the first.
 	alsoBecause string
+	// exact (P-3, spec §19.12): an invalid run has exactly one reason, its
+	// own cleanup is verified, and the other scenarios of the inner run
+	// (the layout probe it needs) are confirmed.
+	exact bool
 }
 
 type gateResult struct {
@@ -361,6 +365,25 @@ var gateCases = []gateCase{
 	{id: "p2.unsupported-after-probe-once", test: "TestP2/prctl.set0", scenario: "P2.prctl.set0", inject: "p2-unsupported-after-probe-once", want: invalid, goos: []string{"linux"}, hit: true, because: "says unsupported but contradicts it"},
 	{id: "p2.unsupported-after-check-once", test: "TestP2/prctl.set0", scenario: "P2.prctl.set0", inject: "p2-unsupported-after-check-once", want: invalid, goos: []string{"linux"}, hit: true, because: "says unsupported but contradicts it"},
 	{id: "p2.self-read-unknown-once", test: "TestP2/prctl.set1", scenario: "P2.prctl.set1", inject: "p2-self-read-unknown-once", want: invalid, goos: []string{"linux"}, hit: true, because: "observation failed: the experiment process's read of its own /proc entry"},
+
+	// P-3 (spec §19.12; plan in docs/wp2.5-prototype.md §15): one read of the
+	// kernel's real answer is rewritten after the call. The candidate decoder
+	// must reject it by the expected rule, for that reason alone, with its
+	// cleanup verified and the layout probe of the same inner run confirmed.
+	// The controls: the healthy runs of the same scenarios.
+	{id: "control.p3-k-exit7", test: "TestP3$/^(layout.1|k.exit7.1)", scenario: "P3.k.exit7.1", want: confirmed, goos: []string{"darwin"}, exact: true},
+	{id: "control.p3-w-exit7", test: "TestP3$/^(layout.1|w.exit7.1)", scenario: "P3.w.exit7.1", want: confirmed, goos: []string{"darwin"}, exact: true},
+	{id: "control.p3-c-exit7", test: "TestP3$/^(layout.1|c.exit7.1)", scenario: "P3.c.exit7.1", want: confirmed, goos: []string{"darwin"}, exact: true},
+	{id: "p3.w-sipid-once", test: "TestP3$/^(layout.1|w.exit7.1)", scenario: "P3.w.exit7.1", inject: "p3-w-sipid-once", want: invalid, goos: []string{"darwin"}, hit: true, exact: true, because: "planned corruption detected by W1"},
+	{id: "p3.w-signo-once", test: "TestP3$/^(layout.1|w.exit7.1)", scenario: "P3.w.exit7.1", inject: "p3-w-signo-once", want: invalid, goos: []string{"darwin"}, hit: true, exact: true, because: "planned corruption detected by W1"},
+	{id: "p3.w-code-once", test: "TestP3$/^(layout.1|w.exit7.1)", scenario: "P3.w.exit7.1", inject: "p3-w-code-once", want: invalid, goos: []string{"darwin"}, hit: true, exact: true, because: "planned corruption detected by W1"},
+	{id: "p3.w-highbyte-once", test: "TestP3$/^(layout.1|w.exit7.1)", scenario: "P3.w.exit7.1", inject: "p3-w-highbyte-once", want: invalid, goos: []string{"darwin"}, hit: true, exact: true, because: "planned corruption detected by W3a"},
+	{id: "p3.w-negative-once", test: "TestP3$/^(layout.1|w.exit7.1)", scenario: "P3.w.exit7.1", inject: "p3-w-negative-once", want: invalid, goos: []string{"darwin"}, hit: true, exact: true, because: "planned corruption detected by W3a"},
+	{id: "p3.w-reread-once", test: "TestP3$/^(layout.1|w.exit7.1)", scenario: "P3.w.exit7.1", inject: "p3-w-reread-once", want: invalid, goos: []string{"darwin"}, hit: true, exact: true, because: "planned corruption detected by W5"},
+	{id: "p3.k-nostatus-once", test: "TestP3$/^(layout.1|k.exit7.1)", scenario: "P3.k.exit7.1", inject: "p3-k-nostatus-once", want: invalid, goos: []string{"darwin"}, hit: true, exact: true, because: "planned corruption detected by K1"},
+	{id: "p3.k-range-once", test: "TestP3$/^(layout.1|k.exit7.1)", scenario: "P3.k.exit7.1", inject: "p3-k-range-once", want: invalid, goos: []string{"darwin"}, hit: true, exact: true, because: "planned corruption detected by K1"},
+	{id: "p3.k-stopped-once", test: "TestP3$/^(layout.1|k.exit7.1)", scenario: "P3.k.exit7.1", inject: "p3-k-stopped-once", want: invalid, goos: []string{"darwin"}, hit: true, exact: true, because: "planned corruption detected by K2"},
+	{id: "p3.c-mismatch-once", test: "TestP3$/^(layout.1|c.exit7.1)", scenario: "P3.c.exit7.1", inject: "p3-c-mismatch-once", want: invalid, goos: []string{"darwin"}, hit: true, exact: true, because: "planned corruption detected by C1"},
 
 	// Review 077 B1-R2-W: the witness itself fails. The outer check must
 	// reject the evidence, whatever the inner run gives.
@@ -705,6 +728,26 @@ func runGate(t *testing.T, c gateCase, f outerFault) gateResult {
 				break
 			}
 		}
+		if c.exact && verdictOK {
+			var others []string
+			for id, o := range r.results {
+				if id != c.scenario && o.Verdict != confirmed {
+					others = append(others, id+" "+string(o.Verdict))
+				}
+			}
+			sort.Strings(others)
+			switch {
+			case c.want == invalid && len(got.Invalid) != 1:
+				verdictOK = false
+				g.Reason = fmt.Sprintf("want exactly one reason, got %d: %s", len(got.Invalid), got.Reason)
+			case !strings.HasPrefix(got.Cleanup, "verified"):
+				verdictOK = false
+				g.Reason = "the inner run's cleanup is not verified: " + got.Cleanup
+			case len(others) > 0:
+				verdictOK = false
+				g.Reason = "other scenarios of the inner run are not confirmed: " + strings.Join(others, ", ")
+			}
+		}
 	}
 	if r.proc == nil {
 		g.Problems = append(g.Problems, "inner: the inner run could not be started: "+fmt.Sprint(r.err))
@@ -873,10 +916,14 @@ func runGate(t *testing.T, c gateCase, f outerFault) gateResult {
 	// Registration: each created process is registered by the inner run
 	// (by PID and identity), or within the shortfall it declared. This is
 	// a count, not a match of objects: the shortfall also counts expected
-	// processes that were never created.
+	// processes that were never created. An inner run of two scenarios (P-3's
+	// layout probe and the case's own) registers through both.
 	owned := map[string]bool{}
-	for _, k := range got.Owned {
-		owned[k] = true
+	for _, res := range r.results {
+		for _, k := range res.Owned {
+			owned[k] = true
+		}
+		g.Shortfall += res.Shortfall
 	}
 	for k, w := range created {
 		if !owned[k] {
@@ -884,7 +931,6 @@ func runGate(t *testing.T, c gateCase, f outerFault) gateResult {
 		}
 	}
 	sort.Strings(g.Unowned)
-	g.Shortfall = got.Shortfall
 	if len(g.Unowned) > g.Shortfall {
 		g.Problems = append(g.Problems, fmt.Sprintf("unaccounted: %d created processes not registered by the inner run, %d declared short", len(g.Unowned), g.Shortfall))
 	}

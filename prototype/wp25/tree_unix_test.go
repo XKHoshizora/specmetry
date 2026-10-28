@@ -234,6 +234,19 @@ type unixTree struct {
 var errGroupGone = errors.New("the group leader is reaped: no more signals to the group")
 
 func startTree(s *scen, cmd *exec.Cmd) *unixTree {
+	t := startGroup(s, cmd)
+	obs, err := newExitObserver(t.pid)
+	if err != nil {
+		s.invalidf("exit observer: %v", err)
+	}
+	t.obs = obs
+	s.defer_(obs.close)
+	return t
+}
+
+// startGroup starts the check's group without an exit observer: P-3
+// registers its own, or none (p3_darwin_test.go).
+func startGroup(s *scen, cmd *exec.Cmd) *unixTree {
 	if cmd.SysProcAttr == nil {
 		cmd.SysProcAttr = &syscall.SysProcAttr{}
 	}
@@ -245,12 +258,6 @@ func startTree(s *scen, cmd *exec.Cmd) *unixTree {
 		s.invalidf("the main process %d cannot be read", t.pid)
 	}
 	t.start = st.start
-	obs, err := newExitObserver(t.pid)
-	if err != nil {
-		s.invalidf("exit observer: %v", err)
-	}
-	t.obs = obs
-	s.defer_(obs.close)
 	// If the scenario stops early, its group is still its own while the
 	// leader is held: end the group before the leader is reaped.
 	s.defer_(func() {

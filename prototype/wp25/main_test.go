@@ -56,6 +56,9 @@ func TestMain(m *testing.M) {
 		"os":       osVersion(),
 		"started":  time.Now().UTC().Format(time.RFC3339),
 	}
+	for k, v := range metaExtra() {
+		meta[k] = v
+	}
 	b, _ := json.Marshal(meta)
 	fmt.Println("WP25META " + string(b))
 	inner := os.Getenv(innerEnv) != "" && witnessOn()
@@ -113,6 +116,9 @@ type result struct {
 	// not make: a count, which includes expected processes never created.
 	Owned     []string `json:"owned,omitempty"`
 	Shortfall int      `json:"shortfall,omitempty"`
+	// Invalid lists every reason the run cannot count, each on its own (a
+	// P-3 gate check needs exactly one, spec §19.12).
+	Invalid []string `json:"invalid,omitempty"`
 }
 
 var (
@@ -160,8 +166,9 @@ type scen struct {
 	baseKids   []int // this process's children when the scenario began (Linux)
 	baseErr    error // the list of them could not be read
 	after      []func()
-	goid       uint64     // the test goroutine
-	mu         sync.Mutex // the scenario may be used from several goroutines
+	goid       uint64        // the test goroutine
+	mu         sync.Mutex    // the scenario may be used from several goroutines
+	cleanLimit time.Duration // the end's own limit, if any: over it, the run is invalid
 }
 
 // begin starts a scenario; the caller defers done. needLaunch and
@@ -284,6 +291,7 @@ func (s *scen) needLoad(ok bool, f string, a ...any) {
 }
 
 func (s *scen) done() {
+	ending := time.Now()
 	for i := len(s.after) - 1; i >= 0; i-- {
 		s.after[i]()
 	}
@@ -340,6 +348,10 @@ func (s *scen) done() {
 			s.r.Owned = append(s.r.Owned, p.identity())
 		}
 	}
+	if d := time.Since(ending); s.cleanLimit > 0 && d > s.cleanLimit {
+		s.invalid = append(s.invalid, fmt.Sprintf("cleanup not verified in time: the end took %v, over its %v", d.Round(time.Millisecond), s.cleanLimit))
+	}
+	s.r.Invalid = append([]string(nil), s.invalid...)
 	switch {
 	case len(s.invalid) > 0:
 		s.r.Verdict, s.r.Reason = invalid, strings.Join(s.invalid, "; ")

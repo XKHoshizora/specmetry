@@ -65,7 +65,6 @@ func censusTag(tag, since string) ([]survivor, error) {
 // the state read after the failure. Never its arguments, environment or name. It is evidence for a
 // reader, not of ownership: the census fails all the same.
 func unreadableDetail(k unix.KinfoProc, st string, s2 pinfo, pr presence) string {
-	const pWexit = 0x2000 // P_WEXIT in <sys/proc.h>: working on exiting
 	after := "unreadable"
 	switch pr {
 	case absent:
