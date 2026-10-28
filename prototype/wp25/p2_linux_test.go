@@ -218,6 +218,9 @@ func p2Probe(r *p2Report) string {
 		return "poll(pidfd)"
 	}
 	_, pr := procInfo(os.Getpid())
+	if injectOnce("p2-self-read-unknown-once", "p2Probe.self-read(the real read gave "+map[presence]string{absent: "absent", present: "present", unknown: "unknown"}[pr]+")", os.Getpid()) {
+		pr = unknown // N-096-2: its own entry cannot be read once
+	}
 	_, derr := os.ReadDir("/proc")
 	r.step("/proc", derr, fmt.Sprint(pr == present))
 	if pr != present || derr != nil {
@@ -331,11 +334,21 @@ func p2AwaitAck(r *p2Report, ack string, d time.Duration) bool {
 	}
 }
 
+// p2UnsupportedFaults make the experiment report the filter as not
+// installable without making the real install (N-096-2); all but the
+// first then damage that report: withheld, its last byte cut, or naming
+// another process.
+var p2UnsupportedFaults = []string{"p2-unsupported-once", "p2-unsupported-withheld-once", "p2-unsupported-truncated-once", "p2-unsupported-foreign-once"}
+
 func p2Experiment(r *p2Report) int {
 	if rule, ok := p2Rules[r.Group]; ok {
 		arch, ok := p2Arch()
 		if !ok {
 			r.Unsupported = "no audit architecture for " + runtime.GOARCH
+			return 0
+		}
+		if f := os.Getenv(injectEnv); injectedAny(p2UnsupportedFaults...) && injectOnceAt(f, f+"/install", "p2Experiment.install(the real install was not made)", os.Getpid()) {
+			r.Unsupported = "injected: the filter cannot be installed"
 			return 0
 		}
 		if err := p2Install(p2Filter(arch, rule)); err != nil {
@@ -355,6 +368,10 @@ func p2Experiment(r *p2Report) int {
 		r.Refused, r.SubEnd = refused, r.get("(end)")
 		return 6
 	}
+	if injectOnce("p2-unsupported-after-probe-once", "p2Experiment.after-probe(the probe held; the filter was installed; nothing after the probe was made)", os.Getpid()) {
+		r.Unsupported = "injected: unsupported after the probe" // N-096-2: a report that contradicts itself
+		return 0
+	}
 	// S0, step 5: set, then read back; then the check; then the clear.
 	err := unix.Prctl(unix.PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0)
 	r.step("prctl(PR_SET_CHILD_SUBREAPER, 1)", err, "")
@@ -368,6 +385,13 @@ func p2Experiment(r *p2Report) int {
 		return 6
 	}
 	p2Check(r, os.Getenv(p2OutEnv)+".ack")
+	if injectOnce("p2-unsupported-after-check-once", "p2Experiment.after-check(the check was started; the clear was not made)", os.Getpid()) {
+		// N-096-2: a started check behind a report of unsupported. The
+		// attribute stays set until this process exits; that exit is not a
+		// clear.
+		r.Unsupported = "injected: unsupported after the check"
+		return 0
+	}
 	err = unix.Prctl(unix.PR_SET_CHILD_SUBREAPER, 0, 0, 0, 0)
 	r.step("prctl(PR_SET_CHILD_SUBREAPER, 0)", err, "")
 	if err != nil {
@@ -399,6 +423,21 @@ func p2Helper(mode string, args []string) (int, bool) {
 	b, err := json.Marshal(r)
 	if err != nil {
 		return exitReport, true
+	}
+	if f := os.Getenv(injectEnv); r.Unsupported != "" {
+		switch {
+		case f == "p2-unsupported-withheld-once" && injectOnceAt(f, f+"/report", "p2Helper.report(withheld: not written)", os.Getpid()):
+			awaitRelease()
+			return code, true
+		case f == "p2-unsupported-truncated-once" && injectOnceAt(f, f+"/report", "p2Helper.report(its last byte cut)", os.Getpid()):
+			b = b[:len(b)-1]
+		case f == "p2-unsupported-foreign-once" && injectOnceAt(f, f+"/report", "p2Helper.report(naming the parent's PID)", os.Getpid()):
+			fr := *r
+			fr.PID = os.Getppid()
+			if b, err = json.Marshal(fr); err != nil {
+				return exitReport, true
+			}
+		}
 	}
 	out := os.Getenv(p2OutEnv)
 	if os.WriteFile(out+".tmp", b, 0o600) != nil || os.Rename(out+".tmp", out) != nil {
