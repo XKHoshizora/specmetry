@@ -68,6 +68,9 @@ type gateCase struct {
 	// B1): the run is rejected for the injected failure itself, not for a
 	// consequence of it, such as a load the failure happened to break.
 	because string
+	// alsoBecause, when set, must be part of the reason too (Review 096
+	// B1-R): a second failure the run met, kept beside the first.
+	alsoBecause string
 }
 
 type gateResult struct {
@@ -81,6 +84,10 @@ type gateResult struct {
 	Launches  int      `json:"launches"`
 	Work      int64    `json:"work"`
 	Hits      int      `json:"inject_hits"`
+	Sites     []string `json:"inject_sites,omitempty"` // where the inner test process's hits were, as each recorded it
+	// Observed is what the inner run recorded, for a fault case: the state
+	// it read after the fault, kept apart from the fault's own result.
+	Observed  string   `json:"inner_observed,omitempty"`
 	Reject    string   `json:"reject,omitempty"`
 	Created   int      `json:"created"`    // creation records: processes the inner run started
 	Receipts  int      `json:"receipts"`   // helpers' own records
@@ -314,6 +321,26 @@ var gateCases = []gateCase{
 	{id: "p4.outer-wait-fail-once", test: "TestP4/pre.assign.1", scenario: "P4.pre.assign.1", inject: "p4-outer-wait-fail-once", want: invalid, goos: []string{"windows"}, hit: true, because: "observation failed: the outer's wait on"},
 	{id: "p4.item-wait-fail-once", test: "TestP4/pre.unconfirmed.1", scenario: "P4.pre.unconfirmed.1", inject: "p4-item-wait-fail-once", want: invalid, goos: []string{"windows"}, hit: true, because: "observation failed: the wait on the handed handle"},
 
+	// Review 096 B1-R: the clear of the subreaper at the end of an exclusive
+	// interval fails once; only its result is replaced, the real clear is
+	// made. The run must be invalid for that failure, whichever caller holds
+	// the interval and whatever it does with the result: P-1's barrier and
+	// its inner call, and T2's callers that count, check or drop it. With
+	// it, the callback ending early through a failure of its own; and the
+	// other steps of the interval, an unread baseline and a failed set. The
+	// controls: the healthy runs, and a baseline read and found not empty.
+	{id: "control.p1-exited", test: "TestP1/exited.1", scenario: "P1.exited.1", want: confirmed},
+	{id: "control.t2-gate", test: "TestExclusiveGate", scenario: "T2.gate.exclusive-interval", want: confirmed, goos: []string{"linux"}},
+	{id: "control.t2-bypass", test: "TestExclusiveBypass", scenario: "T2.gate.bypass", want: confirmed, goos: []string{"linux"}},
+	{id: "p1.barrier-clear-fail-once", test: "TestP1/healthy.1", scenario: "P1.healthy.1", inject: "p1-barrier-clear-fail-once", want: invalid, goos: []string{"linux"}, hit: true, because: "the subreaper could not be cleared at the end of the interval (p1.barrier)", alsoBecause: "observation failed: the barrier's interval"},
+	{id: "p1.inner-clear-fail-once", test: "TestP1/healthy.1", scenario: "P1.healthy.1", inject: "p1-inner-clear-fail-once", want: invalid, goos: []string{"linux"}, hit: true, because: "the subreaper could not be cleared at the end of the interval (p1.inner)", alsoBecause: "the exclusive interval: "},
+	{id: "p1.observer-and-clear-fail-once", test: "TestP1/healthy.1", scenario: "P1.healthy.1", inject: "p1-observer-and-clear-fail-once", want: invalid, goos: []string{"linux"}, hit: true, because: "the subreaper could not be cleared at the end of the interval (p1.inner)", alsoBecause: "exit observer: injected"},
+	{id: "t2.clear-fail-once-counted", test: "TestExclusiveGate", scenario: "T2.gate.exclusive-interval", inject: "t2-clear-fail-once", want: invalid, goos: []string{"linux"}, hit: true, because: "the subreaper could not be cleared at the end of the interval (T2)"},
+	{id: "t2.clear-fail-once-checked", test: "TestAdoptionChain", scenario: "T2.adoption.chain", inject: "t2-clear-fail-once", want: invalid, goos: []string{"linux"}, hit: true, because: "the subreaper could not be cleared at the end of the interval (T2)"},
+	{id: "t2.clear-fail-once-dropped", test: "TestExclusiveBypass", scenario: "T2.gate.bypass", inject: "t2-clear-fail-once", want: invalid, goos: []string{"linux"}, hit: true, because: "the subreaper could not be cleared at the end of the interval (T2)"},
+	{id: "t2.baseline-unread-once", test: "TestExclusiveBaselineLive", scenario: "T2.baseline.live-child", inject: "t2-baseline-unread-once", want: invalid, goos: []string{"linux"}, hit: true, because: "the interval's baseline cannot be read (T2)"},
+	{id: "t2.set1-fail-once", test: "TestExclusiveGate", scenario: "T2.gate.exclusive-interval", inject: "t2-set1-fail-once", want: invalid, goos: []string{"linux"}, hit: true, because: "the subreaper could not be set at the start of the interval (T2)"},
+
 	// Review 077 B1-R2-W: the witness itself fails. The outer check must
 	// reject the evidence, whatever the inner run gives.
 	{id: "witness.write-fail", test: "TestPipeSilentHolderReal", scenario: "T1.pipe.silent-holder", inject: "witness-write-fail", hit: true, reject: "witness-raised"},
@@ -416,6 +443,7 @@ type innerRun struct {
 	exit    int
 	results map[string]result
 	hits    int
+	sites   []string // the site of each hit the inner test process printed
 	seals   []string // the JSON of the WP25WITNESS lines
 	proc    *innerProc
 	err     error
@@ -453,8 +481,14 @@ func runInner(test, inject string, env []string) innerRun {
 	sc.Buffer(make([]byte, 1<<20), 1<<20)
 	for sc.Scan() {
 		line := sc.Text()
-		if strings.Contains(line, "WP25INJECT ") {
+		if i := strings.Index(line, "WP25INJECT "); i >= 0 {
 			r.hits++
+			var h struct {
+				Site string `json:"site"`
+			}
+			if json.Unmarshal([]byte(line[i+len("WP25INJECT "):]), &h) == nil {
+				r.sites = append(r.sites, h.Site)
+			}
 		}
 		if i := strings.Index(line, "WP25WITNESS "); i >= 0 {
 			r.seals = append(r.seals, line[i+len("WP25WITNESS "):])
@@ -625,7 +659,7 @@ func runGate(t *testing.T, c gateCase, f outerFault) gateResult {
 	}
 	defer rw.close()
 	r := runInner(c.test, c.inject, []string{witnessEnv + "=" + wf, injectLogEnv + "=" + il, rw.env()})
-	g := gateResult{ID: c.id, Test: c.test, Inject: c.inject, Want: c.want, Reject: c.reject, InnerExit: r.exit, Hits: r.hits, Total: -1}
+	g := gateResult{ID: c.id, Test: c.test, Inject: c.inject, Want: c.want, Reject: c.reject, InnerExit: r.exit, Hits: r.hits, Sites: r.sites, Total: -1}
 	got, ok := r.results[c.scenario]
 	verdictOK := false
 	switch {
@@ -635,12 +669,18 @@ func runGate(t *testing.T, c gateCase, f outerFault) gateResult {
 		g.Reason = "the inner run gave no result for " + c.scenario
 	default:
 		g.Got, g.Reason, g.Launches, g.Work = got.Verdict, got.Reason, got.Launches, got.Work
+		if c.hit {
+			g.Observed = got.Observed
+		}
 		// A control must be accepted and exit 0; a broken run must be
 		// rejected as invalid and make the diagnostic fail.
 		verdictOK = c.want == "" || got.Verdict == c.want && (r.exit == 0) == (c.want == confirmed)
-		if c.because != "" && !strings.Contains(got.Reason, c.because) {
-			verdictOK = false
-			g.Reason = fmt.Sprintf("the reason does not name %q: %s", c.because, got.Reason)
+		for _, b := range []string{c.because, c.alsoBecause} {
+			if b != "" && !strings.Contains(got.Reason, b) {
+				verdictOK = false
+				g.Reason = fmt.Sprintf("the reason does not name %q: %s", b, got.Reason)
+				break
+			}
 		}
 	}
 	if r.proc == nil {

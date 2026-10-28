@@ -305,16 +305,20 @@ var (
 
 // injectOnce reports whether the named fault is injected and has not acted
 // yet in this process; the call that says so records the hit.
-func injectOnce(name, site string, pid int) bool {
+func injectOnce(name, site string, pid int) bool { return injectOnceAt(name, name, site, pid) }
+
+// injectOnceAt is injectOnce for one of the sites of a fault that acts at
+// several (Review 096 B1-R): each key acts once.
+func injectOnceAt(name, key, site string, pid int) bool {
 	if !injected(name) {
 		return false
 	}
 	onceMu.Lock()
 	defer onceMu.Unlock()
-	if onceDone[name] {
+	if onceDone[key] {
 		return false
 	}
-	onceDone[name] = true
+	onceDone[key] = true
 	injectHit(site, pid)
 	return true
 }

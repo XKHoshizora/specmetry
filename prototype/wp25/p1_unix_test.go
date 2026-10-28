@@ -44,6 +44,10 @@ func p1Inner(s *scen, h *host, variant string) p1Run {
 		}
 		r.start = st.start
 		obs, err := newExitObserver(r.PID)
+		if err == nil && injectOnceAt("p1-observer-and-clear-fail-once", "p1-observer-and-clear-fail-once/observer", "p1Inner.observer", r.PID) {
+			obs.close() // the real observer was made: this callback ends without it
+			err = errors.New("injected: the exit observer could not be made")
+		}
 		if err != nil {
 			s.invalidf("exit observer: %v", err)
 		}

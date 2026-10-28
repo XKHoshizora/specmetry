@@ -44,6 +44,17 @@ type procGate struct {
 	excl    bool
 	shared  []interval
 	checks  []interval
+	// label names the caller's interval in messages and fault sites:
+	// "p1.inner", "p1.barrier", or "" for T2's own gates.
+	label string
+}
+
+// where names the interval for a message.
+func (g *procGate) where() string {
+	if g.label == "" {
+		return "T2"
+	}
+	return g.label
 }
 
 func newGate2() *procGate {
@@ -104,7 +115,8 @@ func (g *procGate) exclusive(fn func() error) error {
 		g.mu.Unlock()
 	}()
 	kids, err := childrenOf(os.Getpid())
-	if p1Probing.Load() && injectOnce("p1-baseline-unread-once", "exclusive.baseline", os.Getpid()) {
+	if g.label == "p1.barrier" && injectOnce("p1-baseline-unread-once", "exclusive.baseline", os.Getpid()) ||
+		g.label == "" && injectOnce("t2-baseline-unread-once", "exclusive.baseline(T2)", os.Getpid()) {
 		kids, err = nil, errors.New("injected: the baseline could not be read") // the real read was made
 	}
 	if err != nil {
@@ -113,11 +125,42 @@ func (g *procGate) exclusive(fn func() error) error {
 	if len(kids) > 0 {
 		return fmt.Errorf("%w: %s", errBaseline, describe(kids))
 	}
-	if err := unix.Prctl(unix.PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0); err != nil {
-		return err
+	var serr error
+	if g.label == "" && injectOnce("t2-set1-fail-once", "exclusive.set1(T2; the real call was not made)", os.Getpid()) {
+		serr = errors.New("injected: PR_SET_CHILD_SUBREAPER 1 failed")
+	} else {
+		serr = unix.Prctl(unix.PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0)
 	}
-	defer func() { _ = unix.Prctl(unix.PR_SET_CHILD_SUBREAPER, 0, 0, 0, 0) }()
+	if serr != nil {
+		return serr
+	}
+	defer func() {
+		cerr := unix.Prctl(unix.PR_SET_CHILD_SUBREAPER, 0, 0, 0, 0)
+		if g.clearFault(cerr) {
+			cerr = fmt.Errorf("injected: PR_SET_CHILD_SUBREAPER 0 failed (the real clear returned %v)", cerr)
+		}
+		_ = cerr
+	}()
 	return fn()
+}
+
+// clearFault says whether the clear at the end of this interval is to fail
+// once (Review 096 B1-R). The real clear has been made: only its result is
+// replaced, so the setting itself is cleared or not as the real call left
+// it, and the hit records which.
+func (g *procGate) clearFault(got error) bool {
+	site := fmt.Sprintf("exclusive.clear(%s; the real clear returned %v)", g.where(), got)
+	pid := os.Getpid()
+	switch g.label {
+	case "p1.inner":
+		return injectOnce("p1-inner-clear-fail-once", site, pid) ||
+			injectOnceAt("p1-observer-and-clear-fail-once", "p1-observer-and-clear-fail-once/clear", site, pid)
+	case "p1.barrier":
+		return injectOnce("p1-barrier-clear-fail-once", site, pid)
+	case "":
+		return injectOnce("t2-clear-fail-once", site, pid)
+	}
+	return false
 }
 
 // overlaps counts shared leases that overlapped a check's interval.

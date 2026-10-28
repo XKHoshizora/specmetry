@@ -8,16 +8,16 @@ import (
 	"io/fs"
 	"os"
 	"strconv"
-	"sync/atomic"
 )
 
-// p1Probing is set while p1Barrier asks for an interval, so that a gate
-// regression can fail the baseline read of that call only.
-var p1Probing atomic.Bool
-
 // p1Exclusive runs fn in the exclusive interval of a gate of its own: the
-// baseline check, the subreaper set for fn only.
-func p1Exclusive(fn func() error) error { return newGate2().exclusive(fn) }
+// baseline check, the subreaper set for fn only. The label lets a gate
+// regression fail this interval's own steps, not the barrier's.
+func p1Exclusive(fn func() error) error {
+	g := newGate2()
+	g.label = "p1.inner"
+	return g.exclusive(fn)
+}
 
 func p1Subreaper(s *scen) int { return subreaper(s) }
 
@@ -26,10 +26,15 @@ func p1Subreaper(s *scen) int { return subreaper(s) }
 // baseline read and found not empty is that barrier's refusal; one that
 // cannot be read, or any other error, is a failed observation of this
 // run (Review 095 B1), whatever it would do to a real check.
+//
+// The setting is read again after the interval (Review 096 B1-R): what
+// the barrier's own clear left, recorded apart from what it returned.
 func p1Barrier(s *scen) (refused, entered bool, detail string) {
-	p1Probing.Store(true)
-	err := newGate2().exclusive(func() error { entered = true; return nil })
-	p1Probing.Store(false)
+	g := newGate2()
+	g.label = "p1.barrier"
+	err := g.exclusive(func() error { entered = true; return nil })
+	sub := subreaper(s)
+	s.expect("subreaper after the barrier's interval", 0, sub)
 	switch {
 	case errors.Is(err, errBaselineUnread):
 		s.flag("observation failed: the barrier's baseline: %v", err)
@@ -37,7 +42,7 @@ func p1Barrier(s *scen) (refused, entered bool, detail string) {
 		s.flag("observation failed: the barrier's interval: %v", err)
 	}
 	refused = errors.Is(err, errBaseline) && !errors.Is(err, errBaselineUnread) && !entered
-	return refused, entered, fmt.Sprintf("refused by a baseline that has children: %v; entered: %v; error: %v", refused, entered, err)
+	return refused, entered, fmt.Sprintf("refused by a baseline that has children: %v; entered: %v; error: %v; subreaper after it: %d", refused, entered, err, sub)
 }
 
 func obsFD(o exitObserver) int { return o.fd }
