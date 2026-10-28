@@ -40,8 +40,9 @@ type p1Run interface {
 	// branch is the outer's own confirmation that the target branch was
 	// hit, with its own reads, not the inner call's objects.
 	branch(s *scen, variant string) (bool, string)
-	// item says whether the inventory item is this run's.
-	item(it invItem) (bool, string)
+	// item says whether the inventory item is this run's; a read of it
+	// that fails is a failed observation.
+	item(s *scen, it invItem) (bool, string)
 	// extra records the platform's own inner expectations.
 	extra(s *scen, variant string)
 	// remedy is the outer's remediation.
@@ -114,10 +115,10 @@ func runP1(t *testing.T, variant string, n int) {
 	disabled, reason, items := h.state()
 	hit, branch := r.branch(s, variant)
 	acc, aerr := h.request(func(a *access) { a.db, a.git, a.procs = 1, 1, 1 })
-	refusedByBarrier, barrier := p1Barrier(s)
+	refusedByBarrier, entered, barrier := p1Barrier(s)
 	itemOK, itemDetail := false, fmt.Sprintf("%d items", len(items))
 	if len(items) == 1 {
-		itemOK, itemDetail = r.item(items[0])
+		itemOK, itemDetail = r.item(s, items[0])
 	}
 	if d := time.Since(ev); d > 10*time.Second {
 		s.flag("the evidence took %v, over its 10 s", d)
@@ -158,14 +159,17 @@ func runP1(t *testing.T, variant string, n int) {
 	s.expectTrue("no goroutine waits for a process", len(waiting) == 0, fmt.Sprint(waiting))
 	s.expectTrue("no new prototype goroutine", len(fresh) == 0, fmt.Sprint(fresh))
 	if runtime.GOOS == "linux" {
-		s.expect("Linux baseline barrier refuses the next interval", f1, refusedByBarrier)
+		if f1 {
+			s.expect("Linux baseline barrier refuses the next interval (children seen)", true, refusedByBarrier)
+		} else {
+			s.expect("Linux baseline barrier admits the next interval and enters it", true, entered)
+		}
 	}
 	r.extra(s, variant)
 
 	// The remediation, after the evidence is kept.
 	rem := time.Now()
 	rerr := r.remedy(s, variant)
-	acc2, aerr2 := h.request(func(a *access) { a.db, a.git, a.procs = 1, 1, 1 })
 	var relErrs []string
 	released := h.release()
 	for _, it := range released {
@@ -173,6 +177,8 @@ func runP1(t *testing.T, variant string, n int) {
 			relErrs = append(relErrs, err.Error())
 		}
 	}
+	// After the end and the release (Review 095 N1).
+	acc2, aerr2 := h.request(func(a *access) { a.db, a.git, a.procs = 1, 1, 1 })
 	remedy := "not needed"
 	switch {
 	case rerr != nil:

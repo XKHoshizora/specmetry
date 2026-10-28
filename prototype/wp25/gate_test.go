@@ -64,6 +64,10 @@ type gateCase struct {
 	// noReceipt: the outer check must see a process created without its
 	// own record (one that ended before it ran), and confirm its end.
 	noReceipt bool
+	// because, when set, must be part of the inner run's reason (Review 095
+	// B1): the run is rejected for the injected failure itself, not for a
+	// consequence of it, such as a load the failure happened to break.
+	because string
 }
 
 type gateResult struct {
@@ -291,24 +295,24 @@ var gateCases = []gateCase{
 	// healthy run and its planned faults stay confirmed.
 	{id: "control.p1-alive", test: "TestP1/alive.1", scenario: "P1.alive.1", want: confirmed},
 	{id: "control.p1-healthy", test: "TestP1/healthy.1", scenario: "P1.healthy.1", want: confirmed},
-	{id: "p1.baseline-unread-once", test: "TestP1/exited.1", scenario: "P1.exited.1", inject: "p1-baseline-unread-once", want: invalid, goos: []string{"linux"}, hit: true},
-	{id: "p1.observe-fail-once", test: "TestP1/healthy.1", scenario: "P1.healthy.1", inject: "p1-observe-fail-once", want: invalid, hit: true},
-	{id: "p1.item-wait-fail-once", test: "TestP1/exited.1", scenario: "P1.exited.1", inject: "p1-item-wait-fail-once", want: invalid, goos: []string{"windows"}, hit: true},
+	{id: "p1.baseline-unread-once", test: "TestP1/exited.1", scenario: "P1.exited.1", inject: "p1-baseline-unread-once", want: invalid, goos: []string{"linux"}, hit: true, because: "observation failed: the barrier's baseline"},
+	{id: "p1.observe-fail-once", test: "TestP1/healthy.1", scenario: "P1.healthy.1", inject: "p1-observe-fail-once", want: invalid, hit: true, because: "observation failed: the healthy control's"},
+	{id: "p1.item-wait-fail-once", test: "TestP1/exited.1", scenario: "P1.exited.1", inject: "p1-item-wait-fail-once", want: invalid, goos: []string{"windows"}, hit: true, because: "observation failed: the wait on the handed handle"},
 	{id: "control.p2-normal", test: "TestP2/normal.1", scenario: "P2.normal.1", want: confirmed, goos: []string{"linux"}},
 	{id: "control.p2-denied", test: "TestP2/waitid.EPERM", scenario: "P2.waitid.EPERM", want: confirmed, goos: []string{"linux"}},
 	{id: "control.p2-set0", test: "TestP2/prctl.set0", scenario: "P2.prctl.set0", want: confirmed, goos: []string{"linux"}},
-	{id: "p2.check-poll-fail-once", test: "TestP2/normal.1", scenario: "P2.normal.1", inject: "p2-check-poll-fail-once", want: invalid, goos: []string{"linux"}, hit: true},
-	{id: "p2.close-fail-once", test: "TestP2/waitid.EPERM", scenario: "P2.waitid.EPERM", inject: "p2-close-fail-once", want: invalid, goos: []string{"linux"}, hit: true},
-	{id: "p2.status-unreadable-once", test: "TestP2/normal.1", scenario: "P2.normal.1", inject: "p2-status-unreadable-once", want: invalid, goos: []string{"linux"}, hit: true},
+	{id: "p2.check-poll-fail-once", test: "TestP2/normal.1", scenario: "P2.normal.1", inject: "p2-check-poll-fail-once", want: invalid, goos: []string{"linux"}, hit: true, because: "unplanned result of poll(check pidfd"},
+	{id: "p2.close-fail-once", test: "TestP2/waitid.EPERM", scenario: "P2.waitid.EPERM", inject: "p2-close-fail-once", want: invalid, goos: []string{"linux"}, hit: true, because: "unplanned result of close(own pidfd)"},
+	{id: "p2.status-unreadable-once", test: "TestP2/normal.1", scenario: "P2.normal.1", inject: "p2-status-unreadable-once", want: invalid, goos: []string{"linux"}, hit: true, because: "observation failed: the outer's read of the experiment process's status"},
 	{id: "control.p4-resume-gt1", test: "TestP4/resume.gt1.1", scenario: "P4.resume.gt1.1", want: confirmed, goos: []string{"windows"}},
 	{id: "control.p4-pre-unconfirmed", test: "TestP4/pre.unconfirmed.1", scenario: "P4.pre.unconfirmed.1", want: confirmed, goos: []string{"windows"}},
 	{id: "control.p4-anomaly-unconfirmed", test: "TestP4/anomaly.unconfirmed.1", scenario: "P4.anomaly.unconfirmed.1", want: confirmed, goos: []string{"windows"}},
-	{id: "p4.exitcode-fail-once", test: "TestP4/resume.gt1.1", scenario: "P4.resume.gt1.1", inject: "p4-exitcode-fail-once", want: invalid, goos: []string{"windows"}, hit: true},
-	{id: "p4.exitcode-fail-once-healthy", test: "TestP4/healthy.1", scenario: "P4.healthy.1", inject: "p4-exitcode-fail-once", want: invalid, goos: []string{"windows"}, hit: true},
-	{id: "p4.outer-exitcode-fail-once", test: "TestP4/pre.assign.1", scenario: "P4.pre.assign.1", inject: "p4-exitcode-fail-once", want: invalid, goos: []string{"windows"}, hit: true},
-	{id: "p4.anomaly-wait-fail-once", test: "TestP4/resume.gt1.1", scenario: "P4.resume.gt1.1", inject: "p4-anomaly-wait-fail-once", want: invalid, goos: []string{"windows"}, hit: true},
-	{id: "p4.outer-wait-fail-once", test: "TestP4/pre.assign.1", scenario: "P4.pre.assign.1", inject: "p4-outer-wait-fail-once", want: invalid, goos: []string{"windows"}, hit: true},
-	{id: "p4.item-wait-fail-once", test: "TestP4/pre.unconfirmed.1", scenario: "P4.pre.unconfirmed.1", inject: "p4-item-wait-fail-once", want: invalid, goos: []string{"windows"}, hit: true},
+	{id: "p4.exitcode-fail-once", test: "TestP4/resume.gt1.1", scenario: "P4.resume.gt1.1", inject: "p4-exitcode-fail-once", want: invalid, goos: []string{"windows"}, hit: true, because: "observation failed: the exit code of the main process"},
+	{id: "p4.exitcode-fail-once-healthy", test: "TestP4/healthy.1", scenario: "P4.healthy.1", inject: "p4-exitcode-fail-once", want: invalid, goos: []string{"windows"}, hit: true, because: "observation failed: the exit code of the main process"},
+	{id: "p4.outer-exitcode-fail-once", test: "TestP4/pre.assign.1", scenario: "P4.pre.assign.1", inject: "p4-exitcode-fail-once", want: invalid, goos: []string{"windows"}, hit: true, because: "observation failed: the outer's read of the exit code"},
+	{id: "p4.anomaly-wait-fail-once", test: "TestP4/resume.gt1.1", scenario: "P4.resume.gt1.1", inject: "p4-anomaly-wait-fail-once", want: invalid, goos: []string{"windows"}, hit: true, because: "observation failed: waiting for the main process"},
+	{id: "p4.outer-wait-fail-once", test: "TestP4/pre.assign.1", scenario: "P4.pre.assign.1", inject: "p4-outer-wait-fail-once", want: invalid, goos: []string{"windows"}, hit: true, because: "observation failed: the outer's wait on"},
+	{id: "p4.item-wait-fail-once", test: "TestP4/pre.unconfirmed.1", scenario: "P4.pre.unconfirmed.1", inject: "p4-item-wait-fail-once", want: invalid, goos: []string{"windows"}, hit: true, because: "observation failed: the wait on the handed handle"},
 
 	// Review 077 B1-R2-W: the witness itself fails. The outer check must
 	// reject the evidence, whatever the inner run gives.
@@ -634,6 +638,10 @@ func runGate(t *testing.T, c gateCase, f outerFault) gateResult {
 		// A control must be accepted and exit 0; a broken run must be
 		// rejected as invalid and make the diagnostic fail.
 		verdictOK = c.want == "" || got.Verdict == c.want && (r.exit == 0) == (c.want == confirmed)
+		if c.because != "" && !strings.Contains(got.Reason, c.because) {
+			verdictOK = false
+			g.Reason = fmt.Sprintf("the reason does not name %q: %s", c.because, got.Reason)
+		}
 	}
 	if r.proc == nil {
 		g.Problems = append(g.Problems, "inner: the inner run could not be started: "+fmt.Sprint(r.err))

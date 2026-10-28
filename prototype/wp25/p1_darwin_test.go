@@ -14,7 +14,9 @@ func p1Exclusive(fn func() error) error { return fn() }
 
 func p1Subreaper(*scen) int { return -1 }
 
-func p1Barrier(*scen) (bool, string) { return false, "no baseline barrier on this platform" }
+func p1Barrier(*scen) (bool, bool, string) {
+	return false, false, "no baseline barrier on this platform"
+}
 
 func obsFD(o exitObserver) int { return o.s.kq }
 

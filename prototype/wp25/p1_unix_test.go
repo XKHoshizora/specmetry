@@ -54,9 +54,13 @@ func p1Inner(s *scen, h *host, variant string) p1Run {
 			s.awaitReport(rep, "pid", 1, 5*time.Second)
 			r.Facts = append(r.Facts, "fixture: the main process reported itself running")
 		case "exited":
-			if !p1AwaitZombie(r.PID, r.start, 5*time.Second) {
+			zombie, zerr := p1AwaitZombie(r.PID, r.start, 5*time.Second)
+			if zerr != nil {
+				s.flag("observation failed: %v", zerr)
+			}
+			if !zombie {
 				obs.close()
-				s.invalidf("load not established: the main process did not exit within 5 s")
+				s.invalidf("load not established: the main process was not seen exited within 5 s")
 			}
 			r.Facts = append(r.Facts, "fixture: the main process had exited (an unreaped zombie, same start time) before the observation")
 		}
@@ -67,6 +71,9 @@ func p1Inner(s *scen, h *host, variant string) p1Run {
 			ok, status, oerr := obs.wait(10 * time.Second)
 			if injectOnce("p1-observe-fail-once", "p1Inner.observe", r.PID) {
 				oerr = errors.New("injected: the observation failed once") // the real wait was made
+			}
+			if oerr != nil {
+				s.flag("observation failed: the healthy control's E-main: %v", oerr)
 			}
 			r.Status = status
 			failed = oerr != nil || !ok
@@ -119,16 +126,19 @@ func p1Inner(s *scen, h *host, variant string) p1Run {
 }
 
 // p1AwaitZombie waits at most d for pid to be an unreaped zombie child of
-// this process with the given start time.
-func p1AwaitZombie(pid int, start string, d time.Duration) bool {
+// this process with the given start time. A state that cannot be read is
+// an error, not a process that has not exited.
+func p1AwaitZombie(pid int, start string, d time.Duration) (bool, error) {
 	deadline := time.Now().Add(d)
 	for {
 		st, pr := procInfo(pid)
-		if pr == present && st.zombie && st.start == start && st.ppid == os.Getpid() {
-			return true
-		}
-		if pr != present || time.Now().After(deadline) {
-			return false
+		switch {
+		case pr == unknown:
+			return false, fmt.Errorf("the state of the main process %d cannot be read", pid)
+		case pr == present && st.zombie && st.start == start && st.ppid == os.Getpid():
+			return true, nil
+		case pr != present || time.Now().After(deadline):
+			return false, nil
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
@@ -168,7 +178,7 @@ func (r *p1Unix) branch(s *scen, variant string) (bool, string) {
 	return true, fmt.Sprintf("exited: pid %d is this process's unreaped zombie, the same start time", r.PID)
 }
 
-func (r *p1Unix) item(it invItem) (bool, string) {
+func (r *p1Unix) item(_ *scen, it invItem) (bool, string) {
 	ok := it.kind == "unconfirmed-process" && it.cmd == r.cmd && it.pid == r.PID && it.handle == 0
 	return ok, fmt.Sprintf("kind %s, the run's Cmd %v, pid %d", it.kind, it.cmd == r.cmd, it.pid)
 }

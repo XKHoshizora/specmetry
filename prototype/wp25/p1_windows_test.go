@@ -89,10 +89,14 @@ func p1Inner(s *scen, h *host, variant string) p1Run {
 		if injectOnce("p1-observe-fail-once", "p1Inner.observe", r.PID) {
 			werr = errors.New("injected: the observation failed once") // the real wait was made
 		}
+		if werr != nil {
+			s.flag("observation failed: the healthy control's wait for its main process: %v", werr)
+		}
 		failed = werr != nil || ev != windows.WAIT_OBJECT_0
 		if !failed {
 			var code uint32
 			if gerr := windows.GetExitCodeProcess(tr.proc, &code); gerr != nil {
+				s.flag("observation failed: the healthy control's exit code: %v", gerr)
 				failed = true
 			} else {
 				r.Status = "exit " + strconv.Itoa(int(code))
@@ -178,11 +182,14 @@ func (r *p1Win) branch(s *scen, variant string) (bool, string) {
 	return code == 7, fmt.Sprintf("exited: the outer's handle signalled, exit code %d", code)
 }
 
-func (r *p1Win) item(it invItem) (bool, string) {
+func (r *p1Win) item(s *scen, it invItem) (bool, string) {
 	h := windows.Handle(it.handle)
 	ev, err := windows.WaitForSingleObject(h, 0)
 	if injectOnce("p1-item-wait-fail-once", "p1.item-wait", r.PID) {
 		err = errors.New("injected: the wait on the handed handle failed once") // the real call was made
+	}
+	if err != nil {
+		s.flag("observation failed: the wait on the handed handle: %v", err)
 	}
 	valid := err == nil && (ev == windows.WAIT_OBJECT_0 || ev == uint32(windows.WAIT_TIMEOUT))
 	ok := it.kind == "unconfirmed-process" && it.cmd == r.cmd && it.pid == r.PID && h == r.handed && h != 0 && valid
@@ -252,4 +259,6 @@ func (r *p1Win) release(it invItem) error {
 }
 
 // The baseline barrier is Linux's; Windows has none.
-func p1Barrier(*scen) (bool, string) { return false, "no baseline barrier on this platform" }
+func p1Barrier(*scen) (bool, bool, string) {
+	return false, false, "no baseline barrier on this platform"
+}

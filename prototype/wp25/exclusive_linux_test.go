@@ -27,6 +27,10 @@ import (
 
 var errBaseline = errors.New("the process has children: the exclusive interval cannot start")
 
+// errBaselineUnread is the baseline that cannot be read: still a refusal
+// (errBaseline), but not evidence of a child.
+var errBaselineUnread = errors.New("the baseline cannot be read")
+
 type interval struct{ from, to time.Time }
 
 // procGate is the candidate enforcement: every child process goes
@@ -104,7 +108,7 @@ func (g *procGate) exclusive(fn func() error) error {
 		kids, err = nil, errors.New("injected: the baseline could not be read") // the real read was made
 	}
 	if err != nil {
-		return fmt.Errorf("%w: the baseline cannot be read: %v", errBaseline, err)
+		return fmt.Errorf("%w: %w: %v", errBaseline, errBaselineUnread, err)
 	}
 	if len(kids) > 0 {
 		return fmt.Errorf("%w: %s", errBaseline, describe(kids))

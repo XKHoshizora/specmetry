@@ -12,6 +12,13 @@ func runHelperP(mode string, args []string) (int, bool) {
 			return exitWrite, true
 		}
 		return 0, true
+	case "report-exit":
+		// P-2's check: it reports itself, so that the outer can register
+		// it, and exits 0.
+		if report("pid") != nil {
+			return exitReport, true
+		}
+		return 0, true
 	}
 	return p2Helper(mode, args)
 }

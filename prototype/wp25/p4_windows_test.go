@@ -55,14 +55,17 @@ type p4Seams struct {
 
 // p4Inner is what the inner call reports.
 type p4Inner struct {
-	Knowledge   string   `json:"knowledge"` // "definitely not run", "possibly run", "started by protocol"
-	Step        string   `json:"failed_step,omitempty"`
-	Resume      string   `json:"resume,omitempty"` // the raw result of the Runner's ResumeThread
-	Case        string   `json:"case"`             // A4, A5, A6, A10, A12
-	TStart      bool     `json:"t_start"`
-	TAnom       bool     `json:"t_anom"`
-	Ended       string   `json:"ended"`
-	Exit        string   `json:"exit,omitempty"` // the status the Runner reliably read
+	Knowledge string `json:"knowledge"` // "definitely not run", "possibly run", "started by protocol"
+	Step      string `json:"failed_step,omitempty"`
+	Resume    string `json:"resume,omitempty"` // the raw result of the Runner's ResumeThread
+	Case      string `json:"case"`             // A4, A5, A6, A10, A12
+	TStart    bool   `json:"t_start"`
+	TAnom     bool   `json:"t_anom"`
+	Ended     string `json:"ended"`
+	Exit      string `json:"exit,omitempty"` // the status the Runner reliably read
+	// ExitHow says why Exit is what it is: "obtained", "not obtained: the
+	// wait timed out", or "read failed" (an observation failure, flagged).
+	ExitHow     string   `json:"exit_how,omitempty"`
 	Record      *record  `json:"record"`
 	JobClose    string   `json:"job_close"`
 	ProcClose   string   `json:"proc_close,omitempty"`
@@ -116,11 +119,13 @@ func p4Run(s *scen, h *host, cmd *exec.Cmd, seams p4Seams) (*p4Inner, *exec.Cmd)
 	default:
 		if err := windows.AssignProcessToJobObject(job, proc); err != nil {
 			failed = "assign: " + err.Error()
+			s.flag("unplanned failure of the start chain: %s", failed)
 			break
 		}
 		ok, err := isProcessInJob(proc, job)
 		if err != nil || !ok {
 			failed = fmt.Sprintf("confirm: %v %v", ok, err)
+			s.flag("unplanned failure of the start chain: %s", failed)
 			break
 		}
 		inJob = true
@@ -135,6 +140,7 @@ func p4Run(s *scen, h *host, cmd *exec.Cmd, seams p4Seams) (*p4Inner, *exec.Cmd)
 			tid, threads, err = p4Threads(uint32(pid))
 			if err != nil || threads == 0 {
 				failed = fmt.Sprintf("snapshot: %d threads, %v", threads, err)
+				s.flag("unplanned failure of the start chain: %s", failed)
 			}
 			// More than one thread (5') is a resume anomaly without a
 			// ResumeThread; no scenario here constructs it.
@@ -155,6 +161,7 @@ func p4Run(s *scen, h *host, cmd *exec.Cmd, seams p4Seams) (*p4Inner, *exec.Cmd)
 			th, err = windows.OpenThread(access, false, tid)
 			if err != nil {
 				failed = "open thread: " + err.Error()
+				s.flag("unplanned failure of the start chain: %s", failed)
 			}
 		}
 	}
@@ -213,12 +220,10 @@ func p4Run(s *scen, h *host, cmd *exec.Cmd, seams p4Seams) (*p4Inner, *exec.Cmd)
 		// Started by protocol: t_start; S2 waits for E-main.
 		in.Knowledge, in.TStart = "started by protocol", true
 		ev, werr := windows.WaitForSingleObject(proc, 10000)
-		if werr != nil {
-			s.flag("observation failed: waiting for the main process: %v", werr)
-		}
 		tMain := time.Duration(-1)
-		if werr == nil && ev == windows.WAIT_OBJECT_0 {
-			in.Exit, tMain = p4Exit(proc), time.Since(clock)
+		in.ExitHow = p4ReadExit(s, in, proc, ev, werr)
+		if in.ExitHow == "obtained" {
+			tMain = time.Since(clock)
 		}
 		_ = windows.TerminateJobObject(job, 1) // D11: what is left in the Job
 		if !p4Confirm(s, job, seams.query, time.Now().Add(tKill)) {
@@ -251,9 +256,7 @@ func p4Run(s *scen, h *host, cmd *exec.Cmd, seams p4Seams) (*p4Inner, *exec.Cmd)
 	if injectOnce("p4-anomaly-wait-fail-once", "p4Run.anomaly-wait", pid) {
 		werr = errors.New("injected: the wait failed once") // the real call was made
 	}
-	if werr == nil && ev == windows.WAIT_OBJECT_0 {
-		in.Exit = p4Exit(proc)
-	}
+	in.ExitHow = p4ReadExit(s, in, proc, ev, werr)
 	run := anomalyRun{treeConfirmed: confirmed, tAnom: tAnom, tS3: tS3}
 	if code, ok := p4Code(in.Exit); ok {
 		run.exitObtained, run.exitCode = true, code
@@ -333,16 +336,38 @@ func p4Confirm(s *scen, job windows.Handle, fail bool, deadline time.Time) bool 
 	}
 }
 
-func p4Exit(h windows.Handle) string {
+// p4Exit reads a signalled process's exit code; a read that fails is an
+// error, never an empty value that could pass for "not obtained".
+func p4Exit(h windows.Handle) (string, error) {
 	var code uint32
 	err := windows.GetExitCodeProcess(h, &code)
 	if injectOnce("p4-exitcode-fail-once", "p4Exit", 0) {
 		err = errors.New("injected: GetExitCodeProcess failed once") // the real call was made
 	}
 	if err != nil {
-		return ""
+		return "", err
 	}
-	return "exit " + strconv.Itoa(int(code))
+	return "exit " + strconv.Itoa(int(code)), nil
+}
+
+// p4ReadExit is the Runner's E-main read after a bounded wait: a timeout
+// is a legitimate "not obtained"; a failed wait or read is an observation
+// failure of the run, kept whatever follows (Review 095 B1).
+func p4ReadExit(s *scen, in *p4Inner, proc windows.Handle, ev uint32, werr error) string {
+	switch {
+	case werr != nil:
+		s.flag("observation failed: waiting for the main process: %v", werr)
+		return "read failed"
+	case ev != windows.WAIT_OBJECT_0:
+		return "not obtained: the wait timed out"
+	}
+	exit, err := p4Exit(proc)
+	if err != nil {
+		s.flag("observation failed: the exit code of the main process: %v", err)
+		return "read failed"
+	}
+	in.Exit = exit
+	return "obtained"
 }
 
 func p4Code(exit string) (int, bool) {
@@ -521,10 +546,18 @@ func runP4(t *testing.T, sc p4Scenario, n int) {
 	if injectOnce("p4-outer-wait-fail-once", "runP4.outer-wait", cmd.Process.Pid) {
 		werr = errors.New("injected: the outer's wait failed once") // the real call was made
 	}
+	if werr != nil {
+		s.flag("observation failed: the outer's wait on %d: %v", cmd.Process.Pid, werr)
+	}
 	alive := werr == nil && ev == uint32(windows.WAIT_TIMEOUT)
+	ended := werr == nil && ev == windows.WAIT_OBJECT_0
 	outerExit := ""
-	if werr == nil && ev == windows.WAIT_OBJECT_0 {
-		outerExit = p4Exit(oh)
+	if ended {
+		x, xerr := p4Exit(oh)
+		if xerr != nil {
+			s.flag("observation failed: the outer's read of the exit code of %d: %v", cmd.Process.Pid, xerr)
+		}
+		outerExit = x
 	}
 	itemOK, itemDetail := false, fmt.Sprintf("%d items", len(items))
 	if len(items) == 1 {
@@ -532,6 +565,9 @@ func runP4(t *testing.T, sc p4Scenario, n int) {
 		iev, ierr := windows.WaitForSingleObject(hv, 0)
 		if injectOnce("p4-item-wait-fail-once", "runP4.item-wait", cmd.Process.Pid) {
 			ierr = errors.New("injected: the wait on the handed handle failed once") // the real call was made
+		}
+		if ierr != nil {
+			s.flag("observation failed: the wait on the handed handle: %v", ierr)
 		}
 		valid := ierr == nil && (iev == windows.WAIT_OBJECT_0 || iev == uint32(windows.WAIT_TIMEOUT))
 		itemOK = items[0].cmd == cmd && hv == in.handle && valid
@@ -566,9 +602,9 @@ func runP4(t *testing.T, sc p4Scenario, n int) {
 		s.needLoad(alive, "the suspended process still exists before the cleanup (outer handle not signalled)")
 	}
 
+	s.needLoad(in.Resume == sc.resume, "the Runner's ResumeThread result %q (the row is about %q)", in.Resume, sc.resume)
 	s.expect("knowledge", sc.knowledge, in.Knowledge)
 	s.expect("case", sc.caseRow, in.Case)
-	s.expect("resume result", sc.resume, in.Resume)
 	s.expect("t_start", sc.knowledge == "started by protocol", in.TStart)
 	s.expect("t_anom", sc.knowledge == "possibly run", in.TAnom)
 	s.expect("Job handle closed", "ok", in.JobClose)
@@ -606,9 +642,12 @@ func runP4(t *testing.T, sc p4Scenario, n int) {
 		// The exit code is kept whenever the Runner reliably read it, and
 		// is then the outer's own reading.
 		want := "NULL"
-		if in.Exit != "" {
+		switch in.ExitHow {
+		case "obtained":
 			want = in.Exit
 			s.expect("the Runner's exit reading agrees with the outer's", in.Exit, outerExit)
+		case "not obtained: the wait timed out":
+			s.note("the Runner did not obtain the exit status: its wait timed out; the outer read %q", outerExit)
 		}
 		got := "NULL"
 		if r != nil && r.ExitCode != nil {
@@ -618,7 +657,7 @@ func runP4(t *testing.T, sc p4Scenario, n int) {
 	}
 
 	// The cleanup, after the evidence is kept.
-	if alive {
+	if !ended {
 		_ = windows.TerminateProcess(oh, 1)
 	}
 	cev, cerr := windows.WaitForSingleObject(oh, 10000)

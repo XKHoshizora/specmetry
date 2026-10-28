@@ -22,14 +22,22 @@ func p1Exclusive(fn func() error) error { return newGate2().exclusive(fn) }
 func p1Subreaper(s *scen) int { return subreaper(s) }
 
 // p1Barrier asks for the next exclusive interval while bypassing the
-// host's admission: Linux's own barrier, recorded apart from Q-1.
-func p1Barrier(*scen) (bool, string) {
-	called := false
+// host's admission: Linux's own barrier, recorded apart from Q-1. Only a
+// baseline read and found not empty is that barrier's refusal; one that
+// cannot be read, or any other error, is a failed observation of this
+// run (Review 095 B1), whatever it would do to a real check.
+func p1Barrier(s *scen) (refused, entered bool, detail string) {
 	p1Probing.Store(true)
-	err := newGate2().exclusive(func() error { called = true; return nil })
+	err := newGate2().exclusive(func() error { entered = true; return nil })
 	p1Probing.Store(false)
-	refused := errors.Is(err, errBaseline) && !called
-	return refused, fmt.Sprintf("refused by the baseline: %v; entered: %v", refused, called)
+	switch {
+	case errors.Is(err, errBaselineUnread):
+		s.flag("observation failed: the barrier's baseline: %v", err)
+	case err != nil && !errors.Is(err, errBaseline):
+		s.flag("observation failed: the barrier's interval: %v", err)
+	}
+	refused = errors.Is(err, errBaseline) && !errors.Is(err, errBaselineUnread) && !entered
+	return refused, entered, fmt.Sprintf("refused by a baseline that has children: %v; entered: %v; error: %v", refused, entered, err)
 }
 
 func obsFD(o exitObserver) int { return o.fd }

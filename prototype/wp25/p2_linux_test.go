@@ -37,6 +37,9 @@ type p2Step struct {
 	Call  string `json:"call"`
 	Errno string `json:"errno,omitempty"` // "" when it succeeded
 	Value string `json:"value,omitempty"`
+	// EINTR is how often the call was interrupted and retried within its
+	// deadline, the only retry the experiment makes.
+	EINTR int `json:"eintr,omitempty"`
 }
 
 // p2Report is what the experiment process reports before its release.
@@ -45,6 +48,7 @@ type p2Report struct {
 	PID         int      `json:"pid"`
 	Unsupported string   `json:"unsupported,omitempty"`
 	Status      string   `json:"status"` // its own read of /proc/self/status
+	StatusErr   string   `json:"status_error,omitempty"`
 	Steps       []p2Step `json:"steps"`
 	Refused     string   `json:"refused,omitempty"` // the capability that did not hold
 	CheckPID    int      `json:"check_pid,omitempty"`
@@ -135,11 +139,11 @@ func p2Install(prog []unix.SockFilter) error {
 }
 
 // seccompStatus reads NoNewPrivs, Seccomp and Seccomp_filters of a
-// process's status file.
-func seccompStatus(path string) string {
+// process's status file; a read that fails is an error, not a status.
+func seccompStatus(path string) (string, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
-		return "unreadable: " + err.Error()
+		return "", err
 	}
 	v := map[string]string{}
 	for _, l := range strings.Split(string(b), "\n") {
@@ -147,7 +151,7 @@ func seccompStatus(path string) string {
 			v[k] = strings.TrimSpace(val)
 		}
 	}
-	return fmt.Sprintf("NoNewPrivs=%s Seccomp=%s Seccomp_filters=%s", v["NoNewPrivs"], v["Seccomp"], v["Seccomp_filters"])
+	return fmt.Sprintf("NoNewPrivs=%s Seccomp=%s Seccomp_filters=%s", v["NoNewPrivs"], v["Seccomp"], v["Seccomp_filters"]), nil
 }
 
 func errnoOf(err error) string {
@@ -158,7 +162,7 @@ func errnoOf(err error) string {
 }
 
 func (r *p2Report) step(call string, err error, value string) {
-	r.Steps = append(r.Steps, p2Step{call, errnoOf(err), value})
+	r.Steps = append(r.Steps, p2Step{Call: call, Errno: errnoOf(err), Value: value})
 }
 
 func (r *p2Report) get(when string) int {
@@ -226,30 +230,105 @@ func p2Probe(r *p2Report) string {
 	return ""
 }
 
-// p2Check starts a minimal check, observes its exit without reaping it
-// (pidfd and waitid WNOWAIT), then reaps it.
-func p2Check(r *p2Report) {
-	cmd := helper("exit-after", nil, "0", "0")
+// p2Check starts a minimal check that reports itself, observes its exit
+// without reaping it (a bounded poll on its pidfd, then waitid WNOWAIT,
+// each retried on EINTR within its deadline), waits until the outer has
+// registered it, then reaps it. A step that fails stops the observation;
+// once registered, the check, this process's own unreaped child, is ended
+// and reaped within a bound, never through a wait without one (Review 095
+// B1).
+func p2Check(r *p2Report, ack string) {
+	cmd := helper("report-exit", nil)
 	if err := start(cmd); err != nil {
 		r.step("start the check", err, "")
 		return
 	}
 	r.CheckPID = cmd.Process.Pid
+	r.step("start the check", nil, "")
+	ok := p2Observe(r)
+	// Registered whatever the observation gave: the outer verifies the
+	// check while it is still this process's child, and only then may it
+	// be ended and reaped.
+	if !p2AwaitAck(r, ack, 10*time.Second) {
+		ok = false
+	}
+	if !ok {
+		_ = unix.Kill(r.CheckPID, unix.SIGKILL)
+	}
+	done := make(chan struct{})
+	go func() {
+		_ = cmd.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		r.step("reap(check)", nil, cmd.ProcessState.String())
+		r.CheckReaped = true
+	case <-time.After(5 * time.Second):
+		r.step("reap(check)", errors.New("not reaped within 5 s"), "")
+	}
+}
+
+// p2Observe is the check's E-main: the pidfd, a bounded poll, the status
+// without reaping; its pidfd is closed on every path.
+func p2Observe(r *p2Report) bool {
 	fd, err := unix.PidfdOpen(r.CheckPID, 0)
 	r.step("pidfd_open(check)", err, "")
-	if err == nil {
-		n, perr := unix.Poll([]unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}, 5000)
-		if injectOnce("p2-check-poll-fail-once", "p2Check.poll", r.CheckPID) {
-			perr = errors.New("injected: poll failed once") // the real call was made
-		}
-		r.step("poll(check pidfd, 5 s)", perr, strconv.Itoa(n))
-		st, werr := waitidNoWait(r.CheckPID)
-		r.step("waitid(P_PID, check, WEXITED|WNOWAIT)", werr, st)
-		r.CheckStatus = st
-		r.step("close(check pidfd)", unix.Close(fd), "")
+	if err != nil {
+		return false
 	}
-	_ = cmd.Wait()
-	r.CheckReaped = cmd.ProcessState != nil
+	ok := false
+	deadline := time.Now().Add(5 * time.Second)
+	n, eintr, perr := 0, 0, error(nil)
+	for {
+		n, perr = unix.Poll([]unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}, pollMillis(deadline))
+		if !errors.Is(perr, unix.EINTR) || time.Now().After(deadline) {
+			break
+		}
+		eintr++
+	}
+	if injectOnce("p2-check-poll-fail-once", "p2Check.poll", r.CheckPID) {
+		perr = errors.New("injected: poll failed once") // the real call was made
+	}
+	r.Steps = append(r.Steps, p2Step{"poll(check pidfd, 5 s)", errnoOf(perr), strconv.Itoa(n), eintr})
+	if perr == nil && n == 1 {
+		st, werr := "", error(nil)
+		eintr = 0
+		for {
+			st, werr = waitidNoWait(r.CheckPID)
+			if !errors.Is(werr, unix.EINTR) || time.Now().After(deadline) {
+				break
+			}
+			eintr++
+		}
+		r.Steps = append(r.Steps, p2Step{"waitid(P_PID, check, WEXITED|WNOWAIT)", errnoOf(werr), st, eintr})
+		r.CheckStatus = st
+		ok = werr == nil
+	}
+	cerr := unix.Close(fd)
+	r.step("close(check pidfd)", cerr, "")
+	return ok && cerr == nil
+}
+
+// p2AwaitAck waits for the outer to register the check (its file at
+// ack), while the check is still this process's unreaped child.
+func p2AwaitAck(r *p2Report, ack string, d time.Duration) bool {
+	deadline := time.Now().Add(d)
+	for {
+		_, err := os.Stat(ack)
+		switch {
+		case err == nil:
+			r.step("await the outer's registration", nil, "")
+			return true
+		case !errors.Is(err, os.ErrNotExist):
+			r.step("await the outer's registration", err, "")
+			return false
+		case time.Now().After(deadline):
+			r.step("await the outer's registration", errors.New("timed out"), "")
+			return false
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 }
 
 func p2Experiment(r *p2Report) int {
@@ -267,7 +346,11 @@ func p2Experiment(r *p2Report) int {
 		r.Unsupported = "unknown group"
 		return 0
 	}
-	r.Status = seccompStatus("/proc/self/status")
+	st, serr := seccompStatus("/proc/self/status")
+	r.Status = st
+	if serr != nil {
+		r.StatusErr = serr.Error()
+	}
 	if refused := p2Probe(r); refused != "" {
 		r.Refused, r.SubEnd = refused, r.get("(end)")
 		return 6
@@ -284,7 +367,7 @@ func p2Experiment(r *p2Report) int {
 		r.Refused, r.SubEnd = "subreaper (not read back)", r.get("(end)")
 		return 6
 	}
-	p2Check(r)
+	p2Check(r, os.Getenv(p2OutEnv)+".ack")
 	err = unix.Prctl(unix.PR_SET_CHILD_SUBREAPER, 0, 0, 0, 0)
 	r.step("prctl(PR_SET_CHILD_SUBREAPER, 0)", err, "")
 	if err != nil {
@@ -368,6 +451,92 @@ func TestP2(t *testing.T) {
 	}
 }
 
+// p2Exp is one declared step of a group: the call, its planned errno and
+// value. An observation step's value is the experiment's own load (a
+// different value is a failed observation); a probe step's value is the
+// mechanism's (a different value is a finding).
+type p2Exp struct {
+	call, errno, value string
+	obs                bool
+}
+
+var (
+	p2ProbeSteps = []p2Exp{
+		{"prctl(PR_GET_CHILD_SUBREAPER) (probe)", "", "0", false},
+		{"pidfd_open(self)", "", "", false},
+		{"pidfd_send_signal(own, 0)", "", "", false},
+		{"waitid(P_PIDFD, own, WEXITED|WNOHANG)", "ECHILD", "", false},
+		{"poll(own pidfd, 0)", "", "0", false},
+		{"/proc", "", "true", false},
+		{"close(own pidfd)", "", "", true},
+	}
+	p2SetSteps = []p2Exp{
+		{"prctl(PR_SET_CHILD_SUBREAPER, 1)", "", "", false},
+		{"prctl(PR_GET_CHILD_SUBREAPER) (after the set)", "", "1", false},
+	}
+	p2CheckSteps = []p2Exp{
+		{"start the check", "", "", true},
+		{"pidfd_open(check)", "", "", true},
+		{"poll(check pidfd, 5 s)", "", "1", true},
+		{"waitid(P_PID, check, WEXITED|WNOWAIT)", "", "exit 0", true},
+		{"close(check pidfd)", "", "", true},
+		{"await the outer's registration", "", "", true},
+		{"reap(check)", "", "exit status 0", true},
+	}
+	getEnd0 = p2Exp{"prctl(PR_GET_CHILD_SUBREAPER) (end)", "", "0", false}
+)
+
+func p2Seq(parts ...[]p2Exp) []p2Exp {
+	var out []p2Exp
+	for _, p := range parts {
+		out = append(out, p...)
+	}
+	return out
+}
+
+var p2Steps = map[string][]p2Exp{
+	"normal":                  p2Seq(p2ProbeSteps, p2SetSteps, p2CheckSteps, []p2Exp{{"prctl(PR_SET_CHILD_SUBREAPER, 0)", "", "", false}, getEnd0}),
+	"pidfd_open.EPERM":        p2Seq(p2ProbeSteps[:1], []p2Exp{{"pidfd_open(self)", "EPERM", "", false}, getEnd0}),
+	"pidfd_open.ENOSYS":       p2Seq(p2ProbeSteps[:1], []p2Exp{{"pidfd_open(self)", "ENOSYS", "", false}, getEnd0}),
+	"pidfd_send_signal.EPERM": p2Seq(p2ProbeSteps[:2], []p2Exp{{"pidfd_send_signal(own, 0)", "EPERM", "", false}, p2ProbeSteps[6], getEnd0}),
+	"waitid.EPERM":            p2Seq(p2ProbeSteps[:3], []p2Exp{{"waitid(P_PIDFD, own, WEXITED|WNOHANG)", "EPERM", "", false}, p2ProbeSteps[6], getEnd0}),
+	"prctl.set1":              p2Seq(p2ProbeSteps, []p2Exp{{"prctl(PR_SET_CHILD_SUBREAPER, 1)", "EPERM", "", false}, getEnd0}),
+	"prctl.set0":              p2Seq(p2ProbeSteps, p2SetSteps, p2CheckSteps, []p2Exp{{"prctl(PR_SET_CHILD_SUBREAPER, 0)", "EPERM", "", false}, {"prctl(PR_GET_CHILD_SUBREAPER) (after the failed clear)", "", "1", false}}),
+}
+
+// p2Judge checks every step against the group's declaration (Review 095
+// B1): an errno other than the planned one, at any step, is a failed
+// observation of the run (the planned denial that did not happen is a
+// fault that did not hit); so is an observation step's other value. A
+// different sequence of calls, or a probe step's other value, is the
+// mechanism taking another path: a finding.
+func p2Judge(s *scen, group string, r p2Report) {
+	exp := p2Steps[group]
+	var wantSeq, gotSeq, probeDiff []string
+	for _, e := range exp {
+		wantSeq = append(wantSeq, e.call)
+	}
+	for i, st := range r.Steps {
+		gotSeq = append(gotSeq, st.Call)
+		if i >= len(exp) || exp[i].call != st.Call {
+			continue
+		}
+		e := exp[i]
+		switch {
+		case st.Errno != e.errno && e.errno != "" && e.errno != "ECHILD" && st.Errno == "":
+			s.flag("the fault did not hit: %s succeeded, planned %s", st.Call, e.errno)
+		case st.Errno != e.errno:
+			s.flag("observation failed: unplanned result of %s: %q, planned %q", st.Call, st.Errno, e.errno)
+		case st.Value != e.value && e.obs:
+			s.flag("load not established: %s gave %q, planned %q", st.Call, st.Value, e.value)
+		case st.Value != e.value:
+			probeDiff = append(probeDiff, fmt.Sprintf("%s=%q", st.Call, st.Value))
+		}
+	}
+	s.expect("step sequence", strings.Join(wantSeq, " > "), strings.Join(gotSeq, " > "))
+	s.expectTrue("probe values as planned", len(probeDiff) == 0, strings.Join(probeDiff, ", "))
+}
+
 // p2Want is a group's fixed expectation (§14.4).
 type p2Want struct {
 	status, refused, denied, deniedErrno string
@@ -409,12 +578,35 @@ func runP2(t *testing.T, id string) {
 		s.invalidf("not executed: the total deadline of P-2 has %v left, less than one run's %v", left.Round(time.Second), p2Budget.per)
 	}
 	out := filepath.Join(s.t.TempDir(), "p2.json")
-	cmd := helper("p2-probe", []string{p2OutEnv + "=" + out}, group)
+	checks := 0
+	if w.check {
+		checks = 1
+	}
+	rep := s.newReport(reportSpec{"pid": checks})
+	cmd := helper("p2-probe", []string{p2OutEnv + "=" + out, reportEnv + "=" + rep}, group)
 	release := gated(s, cmd)
 	startHelper(s, cmd)
 	pid := cmd.Process.Pid
+	if checks == 1 {
+		// The check is the experiment process's own child; the outer
+		// registers it from its record while it can still verify that
+		// (Review 095: every created process is registered).
+		s.awaitOwned(rep, 1, 10*time.Second, func(cpid int) {
+			st, pr := procInfo(cpid)
+			switch {
+			case pr != present:
+				s.invalidf("ownership not established: the check %d cannot be read", cpid)
+			case st.ppid != pid:
+				s.invalidf("ownership not established: %d is not a child of the experiment process %d", cpid, pid)
+			}
+			s.own(&pidProc{pid: cpid, id: st.start})
+		})
+		if err := os.WriteFile(out+".ack", nil, 0o600); err != nil {
+			s.invalidf("the acknowledgement of the registration: %v", err)
+		}
+	}
 	var r p2Report
-	deadline := time.Now().Add(20 * time.Second)
+	deadline := time.Now().Add(15 * time.Second)
 	for {
 		b, err := os.ReadFile(out)
 		if err == nil {
@@ -427,7 +619,7 @@ func runP2(t *testing.T, id string) {
 			s.invalidf("observation failed: the experiment's report: %v", err)
 		}
 		if time.Now().After(deadline) {
-			s.invalidf("load not established: no report from the experiment process within 20 s")
+			s.invalidf("load not established: no report from the experiment process within 15 s")
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
@@ -438,9 +630,15 @@ func runP2(t *testing.T, id string) {
 		s.unsupported("the filter cannot be installed here: %s", r.Unsupported)
 	}
 	// The outer, while the experiment process waits for its release.
-	outer := seccompStatus("/proc/" + strconv.Itoa(pid) + "/status")
+	outer, oerr := seccompStatus("/proc/" + strconv.Itoa(pid) + "/status")
 	if injectOnce("p2-status-unreadable-once", "runP2.outer-status", pid) {
-		outer = "unreadable: injected: the read failed once" // the real read was made
+		outer, oerr = "", errors.New("injected: the read failed once") // the real read was made
+	}
+	if oerr != nil {
+		s.flag("observation failed: the outer's read of the experiment process's status: %v", oerr)
+	}
+	if r.StatusErr != "" {
+		s.flag("observation failed: the experiment process's read of its own status: %s", r.StatusErr)
 	}
 	kids, kerr := childrenOf(pid)
 	if kerr != nil {
@@ -453,8 +651,8 @@ func runP2(t *testing.T, id string) {
 	pline("P2."+id, map[string]any{"report": r, "outer_status": outer, "children": kids, "pidfds": pidfds})
 	release()
 	c := childOf(cmd)
-	if !c.reap(10 * time.Second) {
-		s.invalidf("the experiment process did not exit within 10 s of its release")
+	if !c.reap(5 * time.Second) {
+		s.invalidf("the experiment process did not exit within 5 s of its release")
 	}
 	code := cmd.ProcessState.ExitCode()
 
@@ -473,6 +671,7 @@ func runP2(t *testing.T, id string) {
 		s.note("%s: %s %s", st.Call, map[bool]string{true: "ok", false: st.Errno}[st.Errno == ""], st.Value)
 	}
 	s.worked(int64(len(r.Steps)))
+	p2Judge(s, group, r)
 	s.expect("filter, its own read", w.status, r.Status)
 	s.expect("filter, the outer's read", w.status, outer)
 	if w.denied != "" {
