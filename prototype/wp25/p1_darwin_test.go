@@ -10,7 +10,7 @@ import (
 )
 
 // macOS has no subreaper and no baseline barrier.
-func p1Exclusive(fn func() error) error { return fn() }
+func p1Exclusive(_ *scen, fn func() error) error { return fn() }
 
 func p1Subreaper(*scen) int { return -1 }
 

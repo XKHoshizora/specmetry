@@ -13,10 +13,10 @@ import (
 // p1Exclusive runs fn in the exclusive interval of a gate of its own: the
 // baseline check, the subreaper set for fn only. The label lets a gate
 // regression fail this interval's own steps, not the barrier's.
-func p1Exclusive(fn func() error) error {
+func p1Exclusive(s *scen, fn func() error) error {
 	g := newGate2()
 	g.label = "p1.inner"
-	return g.exclusive(fn)
+	return g.exclusive(s, fn)
 }
 
 func p1Subreaper(s *scen) int { return subreaper(s) }
@@ -32,7 +32,7 @@ func p1Subreaper(s *scen) int { return subreaper(s) }
 func p1Barrier(s *scen) (refused, entered bool, detail string) {
 	g := newGate2()
 	g.label = "p1.barrier"
-	err := g.exclusive(func() error { entered = true; return nil })
+	err := g.exclusive(s, func() error { entered = true; return nil })
 	sub := subreaper(s)
 	s.expect("subreaper after the barrier's interval", 0, sub)
 	switch {

@@ -35,7 +35,7 @@ func p1Inner(s *scen, h *host, variant string) p1Run {
 		cmd = helper("exit-after", nil, "100", "0")
 	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	err := p1Exclusive(func() error {
+	err := p1Exclusive(s, func() error {
 		startHelper(s, cmd)
 		r.cmd, r.PID = cmd, cmd.Process.Pid
 		st, pr := procInfo(r.PID)
