@@ -84,7 +84,7 @@ type gateResult struct {
 	Launches  int      `json:"launches"`
 	Work      int64    `json:"work"`
 	Hits      int      `json:"inject_hits"`
-	Sites     []string `json:"inject_sites,omitempty"` // where the inner test process's hits were, as each recorded it
+	Sites     []string `json:"inject_sites,omitempty"` // where the hits were, as each recorded it; a helper's prefixed "helper: "
 	// Observed is what the inner run recorded, for a fault case: the state
 	// it read after the fault, kept apart from the fault's own result; and
 	// InnerCleanup, what its own cleanup found.
@@ -342,6 +342,25 @@ var gateCases = []gateCase{
 	{id: "t2.clear-fail-once-dropped", test: "TestExclusiveBypass", scenario: "T2.gate.bypass", inject: "t2-clear-fail-once", want: invalid, goos: []string{"linux"}, hit: true, because: "the subreaper could not be cleared at the end of the interval (T2)"},
 	{id: "t2.baseline-unread-once", test: "TestExclusiveBaselineLive", scenario: "T2.baseline.live-child", inject: "t2-baseline-unread-once", want: invalid, goos: []string{"linux"}, hit: true, because: "the interval's baseline cannot be read (T2)"},
 	{id: "t2.set1-fail-once", test: "TestExclusiveGate", scenario: "T2.gate.exclusive-interval", inject: "t2-set1-fail-once", want: invalid, goos: []string{"linux"}, hit: true, because: "the subreaper could not be set at the start of the interval (T2)"},
+
+	// Review 096 N-096-2: P-2's own classification. The experiment reports
+	// the filter as not installable without making the real install: a
+	// valid report of it, while the outer waits for the check's
+	// registration, is unsupported, not a registration that timed out. A
+	// report that is withheld, truncated, another process's, or that
+	// contradicts it (steps were made, a check was started) never passes
+	// for one; a check that was started stays registered, judged and
+	// cleaned up. The experiment's read of its own /proc entry that cannot
+	// be read once is a failed observation, whatever succeeds after it, not
+	// the capability found absent (refuted).
+	{id: "control.p2-set1", test: "TestP2/prctl.set1", scenario: "P2.prctl.set1", want: confirmed, goos: []string{"linux"}},
+	{id: "p2.unsupported-once", test: "TestP2/prctl.set0", scenario: "P2.prctl.set0", inject: "p2-unsupported-once", want: unsupported, goos: []string{"linux"}, hit: true, because: "the filter cannot be installed here: injected"},
+	{id: "p2.unsupported-withheld-once", test: "TestP2/prctl.set0", scenario: "P2.prctl.set0", inject: "p2-unsupported-withheld-once", want: invalid, goos: []string{"linux"}, hit: true, because: "only 0 of 1 pid records"},
+	{id: "p2.unsupported-truncated-once", test: "TestP2/prctl.set0", scenario: "P2.prctl.set0", inject: "p2-unsupported-truncated-once", want: invalid, goos: []string{"linux"}, hit: true, because: "the experiment's report does not parse"},
+	{id: "p2.unsupported-foreign-once", test: "TestP2/prctl.set0", scenario: "P2.prctl.set0", inject: "p2-unsupported-foreign-once", want: invalid, goos: []string{"linux"}, hit: true, because: "load not established: a report of pid"},
+	{id: "p2.unsupported-after-probe-once", test: "TestP2/prctl.set0", scenario: "P2.prctl.set0", inject: "p2-unsupported-after-probe-once", want: invalid, goos: []string{"linux"}, hit: true, because: "says unsupported but contradicts it"},
+	{id: "p2.unsupported-after-check-once", test: "TestP2/prctl.set0", scenario: "P2.prctl.set0", inject: "p2-unsupported-after-check-once", want: invalid, goos: []string{"linux"}, hit: true, because: "says unsupported but contradicts it"},
+	{id: "p2.self-read-unknown-once", test: "TestP2/prctl.set1", scenario: "P2.prctl.set1", inject: "p2-self-read-unknown-once", want: invalid, goos: []string{"linux"}, hit: true, because: "observation failed: the experiment process's read of its own /proc entry"},
 
 	// Review 077 B1-R2-W: the witness itself fails. The outer check must
 	// reject the evidence, whatever the inner run gives.
@@ -675,8 +694,10 @@ func runGate(t *testing.T, c gateCase, f outerFault) gateResult {
 			g.Observed, g.InnerCleanup = got.Observed, got.Cleanup
 		}
 		// A control must be accepted and exit 0; a broken run must be
-		// rejected as invalid and make the diagnostic fail.
-		verdictOK = c.want == "" || got.Verdict == c.want && (r.exit == 0) == (c.want == confirmed)
+		// rejected as invalid and make the diagnostic fail. A mechanism
+		// verified as unavailable is unsupported and exits 0 (N-096-2):
+		// it fails nothing, and is not counted as confirmed.
+		verdictOK = c.want == "" || got.Verdict == c.want && (r.exit == 0) == (c.want == confirmed || c.want == unsupported)
 		for _, b := range []string{c.because, c.alsoBecause} {
 			if b != "" && !strings.Contains(got.Reason, b) {
 				verdictOK = false
@@ -836,6 +857,14 @@ func runGate(t *testing.T, c gateCase, f outerFault) gateResult {
 	// log (not the witness file).
 	if b, err := os.ReadFile(il); err == nil {
 		g.Hits += strings.Count(string(b), "\n")
+		for _, l := range strings.Split(string(b), "\n") {
+			var h struct {
+				Site string `json:"site"`
+			}
+			if l != "" && json.Unmarshal([]byte(l), &h) == nil {
+				g.Sites = append(g.Sites, "helper: "+h.Site)
+			}
+		}
 	}
 	if c.hit && g.Hits == 0 {
 		g.Problems = append(g.Problems, "hit: the fault never reached its site")
