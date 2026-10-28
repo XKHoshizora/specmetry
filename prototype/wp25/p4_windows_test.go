@@ -248,6 +248,9 @@ func p4Run(s *scen, h *host, cmd *exec.Cmd, seams p4Seams) (*p4Inner, *exec.Cmd)
 		left = 0
 	}
 	ev, werr := windows.WaitForSingleObject(proc, uint32(left.Milliseconds()))
+	if injectOnce("p4-anomaly-wait-fail-once", "p4Run.anomaly-wait", pid) {
+		werr = errors.New("injected: the wait failed once") // the real call was made
+	}
 	if werr == nil && ev == windows.WAIT_OBJECT_0 {
 		in.Exit = p4Exit(proc)
 	}
@@ -332,7 +335,11 @@ func p4Confirm(s *scen, job windows.Handle, fail bool, deadline time.Time) bool 
 
 func p4Exit(h windows.Handle) string {
 	var code uint32
-	if err := windows.GetExitCodeProcess(h, &code); err != nil {
+	err := windows.GetExitCodeProcess(h, &code)
+	if injectOnce("p4-exitcode-fail-once", "p4Exit", 0) {
+		err = errors.New("injected: GetExitCodeProcess failed once") // the real call was made
+	}
+	if err != nil {
 		return ""
 	}
 	return "exit " + strconv.Itoa(int(code))
@@ -452,9 +459,6 @@ func cycles(th windows.Handle) string {
 var p4Budget = &budget{name: "P-4", total: 4 * time.Minute, per: 30 * time.Second}
 
 func TestP4(t *testing.T) {
-	if os.Getenv(innerEnv) != "" {
-		t.Skip("inner run")
-	}
 	for _, sc := range p4Scenarios {
 		for n := 1; n <= 2; n++ {
 			t.Run(fmt.Sprintf("%s.%d", sc.id, n), func(t *testing.T) { runP4(t, sc, n) })
@@ -514,6 +518,9 @@ func runP4(t *testing.T, sc p4Scenario, n int) {
 	waiting, fresh := waitingGoroutines(gs), freshProto(gs, base, goid())
 	disabled, reason, items := h.state()
 	ev, werr := windows.WaitForSingleObject(oh, 0)
+	if injectOnce("p4-outer-wait-fail-once", "runP4.outer-wait", cmd.Process.Pid) {
+		werr = errors.New("injected: the outer's wait failed once") // the real call was made
+	}
 	alive := werr == nil && ev == uint32(windows.WAIT_TIMEOUT)
 	outerExit := ""
 	if werr == nil && ev == windows.WAIT_OBJECT_0 {
@@ -523,6 +530,9 @@ func runP4(t *testing.T, sc p4Scenario, n int) {
 	if len(items) == 1 {
 		hv := windows.Handle(items[0].handle)
 		iev, ierr := windows.WaitForSingleObject(hv, 0)
+		if injectOnce("p4-item-wait-fail-once", "runP4.item-wait", cmd.Process.Pid) {
+			ierr = errors.New("injected: the wait on the handed handle failed once") // the real call was made
+		}
 		valid := ierr == nil && (iev == windows.WAIT_OBJECT_0 || iev == uint32(windows.WAIT_TIMEOUT))
 		itemOK = items[0].cmd == cmd && hv == in.handle && valid
 		itemDetail = fmt.Sprintf("the run's Cmd %v, the Runner's handle %v, a zero wait on it %s", items[0].cmd == cmd, hv == in.handle, waitResult(iev, ierr))

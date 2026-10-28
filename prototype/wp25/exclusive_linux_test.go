@@ -100,6 +100,9 @@ func (g *procGate) exclusive(fn func() error) error {
 		g.mu.Unlock()
 	}()
 	kids, err := childrenOf(os.Getpid())
+	if p1Probing.Load() && injectOnce("p1-baseline-unread-once", "exclusive.baseline", os.Getpid()) {
+		kids, err = nil, errors.New("injected: the baseline could not be read") // the real read was made
+	}
 	if err != nil {
 		return fmt.Errorf("%w: the baseline cannot be read: %v", errBaseline, err)
 	}

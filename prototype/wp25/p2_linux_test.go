@@ -188,6 +188,9 @@ func p2Probe(r *p2Report) string {
 	}
 	closeFD := func() bool {
 		cerr := unix.Close(fd)
+		if injectOnce("p2-close-fail-once", "p2Probe.close", os.Getpid()) {
+			cerr = errors.New("injected: close failed once") // the real call was made
+		}
 		r.step("close(own pidfd)", cerr, "")
 		return cerr == nil
 	}
@@ -236,6 +239,9 @@ func p2Check(r *p2Report) {
 	r.step("pidfd_open(check)", err, "")
 	if err == nil {
 		n, perr := unix.Poll([]unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}, 5000)
+		if injectOnce("p2-check-poll-fail-once", "p2Check.poll", r.CheckPID) {
+			perr = errors.New("injected: poll failed once") // the real call was made
+		}
 		r.step("poll(check pidfd, 5 s)", perr, strconv.Itoa(n))
 		st, werr := waitidNoWait(r.CheckPID)
 		r.step("waitid(P_PID, check, WEXITED|WNOWAIT)", werr, st)
@@ -355,9 +361,6 @@ func pidfdsOf(pid int) (int, error) {
 var p2Budget = &budget{name: "P-2", total: 3 * time.Minute, per: 30 * time.Second}
 
 func TestP2(t *testing.T) {
-	if os.Getenv(innerEnv) != "" {
-		t.Skip("inner run")
-	}
 	runs := []string{"normal.1", "normal.2", "normal.3", "pidfd_open.EPERM", "pidfd_open.ENOSYS",
 		"pidfd_send_signal.EPERM", "waitid.EPERM", "prctl.set1", "prctl.set0"}
 	for _, id := range runs {
@@ -436,6 +439,9 @@ func runP2(t *testing.T, id string) {
 	}
 	// The outer, while the experiment process waits for its release.
 	outer := seccompStatus("/proc/" + strconv.Itoa(pid) + "/status")
+	if injectOnce("p2-status-unreadable-once", "runP2.outer-status", pid) {
+		outer = "unreadable: injected: the read failed once" // the real read was made
+	}
 	kids, kerr := childrenOf(pid)
 	if kerr != nil {
 		s.flag("observation failed: the experiment process's children: %v", kerr)

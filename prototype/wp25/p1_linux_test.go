@@ -8,7 +8,12 @@ import (
 	"io/fs"
 	"os"
 	"strconv"
+	"sync/atomic"
 )
+
+// p1Probing is set while p1Barrier asks for an interval, so that a gate
+// regression can fail the baseline read of that call only.
+var p1Probing atomic.Bool
 
 // p1Exclusive runs fn in the exclusive interval of a gate of its own: the
 // baseline check, the subreaper set for fn only.
@@ -20,7 +25,9 @@ func p1Subreaper(s *scen) int { return subreaper(s) }
 // host's admission: Linux's own barrier, recorded apart from Q-1.
 func p1Barrier(*scen) (bool, string) {
 	called := false
+	p1Probing.Store(true)
 	err := newGate2().exclusive(func() error { called = true; return nil })
+	p1Probing.Store(false)
 	refused := errors.Is(err, errBaseline) && !called
 	return refused, fmt.Sprintf("refused by the baseline: %v; entered: %v", refused, called)
 }

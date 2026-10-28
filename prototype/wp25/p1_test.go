@@ -11,7 +11,6 @@ package wp25
 import (
 	"errors"
 	"fmt"
-	"os"
 	"os/exec"
 	"runtime"
 	"testing"
@@ -54,9 +53,6 @@ type p1Run interface {
 var p1Budget = &budget{name: "P-1", total: 3 * time.Minute, per: time.Minute}
 
 func TestP1(t *testing.T) {
-	if os.Getenv(innerEnv) != "" {
-		t.Skip("inner run")
-	}
 	for _, v := range []string{"alive", "exited", "healthy"} {
 		for n := 1; n <= 2; n++ {
 			t.Run(fmt.Sprintf("%s.%d", v, n), func(t *testing.T) { runP1(t, v, n) })

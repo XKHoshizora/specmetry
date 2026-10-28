@@ -65,6 +65,9 @@ func p1Inner(s *scen, h *host, variant string) p1Run {
 		failed := false
 		if variant == "healthy" {
 			ok, status, oerr := obs.wait(10 * time.Second)
+			if injectOnce("p1-observe-fail-once", "p1Inner.observe", r.PID) {
+				oerr = errors.New("injected: the observation failed once") // the real wait was made
+			}
 			r.Status = status
 			failed = oerr != nil || !ok
 		} else {

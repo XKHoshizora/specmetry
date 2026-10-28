@@ -284,6 +284,32 @@ var gateCases = []gateCase{
 	{id: "stop.error-after-copier", test: "TestInnerStopError", scenario: "gate.stop-error", inject: "stop-error-after-copier", want: invalid, hit: true},
 	{id: "stop.error-one-of-two", test: "TestInnerStopError", scenario: "gate.stop-error", inject: "stop-error-one-of-two", want: invalid, hit: true},
 
+	// Review 095 B1: one read of a new observation entry fails, the reads
+	// after it succeed. The failure must make the run invalid, whatever the
+	// legitimate value it could pass for (a NULL exit code, a refusal by
+	// the baseline, an ended process). The controls: each experiment's own
+	// healthy run and its planned faults stay confirmed.
+	{id: "control.p1-alive", test: "TestP1/alive.1", scenario: "P1.alive.1", want: confirmed},
+	{id: "control.p1-healthy", test: "TestP1/healthy.1", scenario: "P1.healthy.1", want: confirmed},
+	{id: "p1.baseline-unread-once", test: "TestP1/exited.1", scenario: "P1.exited.1", inject: "p1-baseline-unread-once", want: invalid, goos: []string{"linux"}, hit: true},
+	{id: "p1.observe-fail-once", test: "TestP1/healthy.1", scenario: "P1.healthy.1", inject: "p1-observe-fail-once", want: invalid, hit: true},
+	{id: "p1.item-wait-fail-once", test: "TestP1/exited.1", scenario: "P1.exited.1", inject: "p1-item-wait-fail-once", want: invalid, goos: []string{"windows"}, hit: true},
+	{id: "control.p2-normal", test: "TestP2/normal.1", scenario: "P2.normal.1", want: confirmed, goos: []string{"linux"}},
+	{id: "control.p2-denied", test: "TestP2/waitid.EPERM", scenario: "P2.waitid.EPERM", want: confirmed, goos: []string{"linux"}},
+	{id: "control.p2-set0", test: "TestP2/prctl.set0", scenario: "P2.prctl.set0", want: confirmed, goos: []string{"linux"}},
+	{id: "p2.check-poll-fail-once", test: "TestP2/normal.1", scenario: "P2.normal.1", inject: "p2-check-poll-fail-once", want: invalid, goos: []string{"linux"}, hit: true},
+	{id: "p2.close-fail-once", test: "TestP2/waitid.EPERM", scenario: "P2.waitid.EPERM", inject: "p2-close-fail-once", want: invalid, goos: []string{"linux"}, hit: true},
+	{id: "p2.status-unreadable-once", test: "TestP2/normal.1", scenario: "P2.normal.1", inject: "p2-status-unreadable-once", want: invalid, goos: []string{"linux"}, hit: true},
+	{id: "control.p4-resume-gt1", test: "TestP4/resume.gt1.1", scenario: "P4.resume.gt1.1", want: confirmed, goos: []string{"windows"}},
+	{id: "control.p4-pre-unconfirmed", test: "TestP4/pre.unconfirmed.1", scenario: "P4.pre.unconfirmed.1", want: confirmed, goos: []string{"windows"}},
+	{id: "control.p4-anomaly-unconfirmed", test: "TestP4/anomaly.unconfirmed.1", scenario: "P4.anomaly.unconfirmed.1", want: confirmed, goos: []string{"windows"}},
+	{id: "p4.exitcode-fail-once", test: "TestP4/resume.gt1.1", scenario: "P4.resume.gt1.1", inject: "p4-exitcode-fail-once", want: invalid, goos: []string{"windows"}, hit: true},
+	{id: "p4.exitcode-fail-once-healthy", test: "TestP4/healthy.1", scenario: "P4.healthy.1", inject: "p4-exitcode-fail-once", want: invalid, goos: []string{"windows"}, hit: true},
+	{id: "p4.outer-exitcode-fail-once", test: "TestP4/pre.assign.1", scenario: "P4.pre.assign.1", inject: "p4-exitcode-fail-once", want: invalid, goos: []string{"windows"}, hit: true},
+	{id: "p4.anomaly-wait-fail-once", test: "TestP4/resume.gt1.1", scenario: "P4.resume.gt1.1", inject: "p4-anomaly-wait-fail-once", want: invalid, goos: []string{"windows"}, hit: true},
+	{id: "p4.outer-wait-fail-once", test: "TestP4/pre.assign.1", scenario: "P4.pre.assign.1", inject: "p4-outer-wait-fail-once", want: invalid, goos: []string{"windows"}, hit: true},
+	{id: "p4.item-wait-fail-once", test: "TestP4/pre.unconfirmed.1", scenario: "P4.pre.unconfirmed.1", inject: "p4-item-wait-fail-once", want: invalid, goos: []string{"windows"}, hit: true},
+
 	// Review 077 B1-R2-W: the witness itself fails. The outer check must
 	// reject the evidence, whatever the inner run gives.
 	{id: "witness.write-fail", test: "TestPipeSilentHolderReal", scenario: "T1.pipe.silent-holder", inject: "witness-write-fail", hit: true, reject: "witness-raised"},
