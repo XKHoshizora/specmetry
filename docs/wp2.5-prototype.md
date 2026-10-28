@@ -19,6 +19,7 @@
 > - **合并之后**（§104、§105）：PR #34 合并为 `cc4514a`；master push CI run 40122051541 的 attempt 1 为 7/8（Windows 的 `TestSourceRemoveInTerminal`，登记为 M-17），按负责人的单独授权只重跑失败作业的 attempt 2 正式成功。M-17 的登记与诊断（PR #35）已合并为 `bd45583`；M-17 未解决。
 > - **2026-10-25**（§106）：负责人决定了草案 §17.3 的 14 项产品选择与 C-4。规范第 5 版草案对 C-1 ~ C-20 逐项给出采纳建议（草案 §17.4），都待审查。Review 089 之后，草案的 S6 按本文 §2.13、§2.14 的停止结果生命周期改写（先建立阶段 J 的截止，再启动停止任务），C-4 落实为 O3 之后宿主的持续禁用（§107）；Review 090 技术 GO（§108），PR #36 已合并为 `f3fbe83`；第 6 版草案增加 D21 与冻结之前的规格草案（草案 §19，§109），其中 G3、G5、G6、G7 的最小原型只有计划，没有实施。本文 §9 ~ §12 是决定之前的记录，保持原样：§10 标题中的“全部未批准”是当时的状态。
 > - **2026-10-27**（§114）：PR #37 合并为 `2c5cf23` 之后，负责人决定 Q-1、Q-2 (a)，并授权 P-1、P-2、P-4 的隔离原型与 P-3 的整理。计划在写代码之前固定（§14.1 ~ §14.6，`dcdb2b2`），固定代码点 `d45a319` 的诊断 run 40439516254 三平台 success（P-1 18/18、P-2 9/9、P-4 18/18 confirmed，§14.7）；结果与门槛的状态（§14.10）**待独立审查**。
+> - [Review 095](reviews/codex-review-095.md) 对 `1be48c3` 为**技术 NO-GO**（B1：新增观察入口没有完整失败关闭；N1、N2 非阻塞）。已定向修复（§14.11 ~ §14.14）：回归先行 `0a9a01a`（诊断 run 40641559468 为 failure，预期），修复与固定代码点 `85ec2ca`（诊断 run 40643975558 三平台 success）；`d45a319` 的证据降为历史观测。**已修复，待独立复审**；不宣布 B1 关闭。
 > - 这**不是**规范冻结：草案为第 7 版，待独立审查和冻结；14 项产品选择、D21、Q-1 与 Q-2 已决定，技术候选仍待审查。T1 ~ T6 按 Review 075 的裁定只得到**局部支持**（§11；草案 §17.5 的 G1 ~ G15 与 §19）。
 > - 原型成功**不是**生产验收：生产 Check Runner、迁移 0009、CLI 接线都没有授权，WP2.5 没有实现或验收，M2 没有整体验收。
 > - 本文中的“候选规格”都待审查；其中涉及可见行为的（例如 C-4、C-7、C-10）依赖对应的产品选择（§9、§10）。C-4 的产品语义与 C-7（D20 (i)）已于 2026-10-25 决定，其技术部分仍待审查。本文不新增接受风险，也不批准任何保证调整。
@@ -2452,6 +2453,8 @@ E-main 与组身份的场景同时属于 T1（Linux）与 T3（macOS），这里
 
 ### 14.7 结果（固定代码点 `d45a319`）
 
+> Review 095 B1 之后，本节与 §14.8 是修复之前的**历史观测**，保留原文；有效门禁之下的替代证据见 §14.12、§14.14。
+
 **固定的代码点**：`d45a319dd3f61b5e98ff7bb95249c082fb2541dd`（`test: add the P-1, P-2 and P-4 isolated prototypes`）。14.1 ~ 14.6 在它之前的提交 `dcdb2b2` 中固定；之后只有文档的提交，不触发诊断，也不改变原型代码。
 
 **诊断 CI**（`.github/workflows/wp25-prototype.yml`，与常规 CI 分开）：run 40439516254，push，attempt 1，completed/success，没有重跑、没有取消。
@@ -2571,3 +2574,152 @@ E-main 与组身份的场景同时属于 T1（Linux）与 T3（macOS），这里
 | G15 | 生产阶段 | 不变 | 不变 |
 
 这些状态都是作者的登记，待独立审查；不宣布任何门槛满足，不冻结规范。
+
+### 14.11 Review 095 B1：新增观察入口的错误传播（修复）
+
+[Review 095](reviews/codex-review-095.md) 对 `1be48c3` 为**技术 NO-GO**。B1：P-4、P-2、P-1 的新增观察入口没有完整接入 §14.2 的失败关闭规则——P-4 的退出码读取错误被吸收为合法的 NULL，外层的一次读取失败被之后的成功掩盖，仍可 confirmed / 0；P-2 正常组的步骤错误只被打印；P-1 读不到的基线被当作“有子进程而拒绝”。修复限定在这三个原型的观察链与它们的调用者；预测、预算、归属规则与清理要求不变，没有减少断言、扩大允许的错误或增加重试（EINTR 在原有期限之内的重试除外，见 P-2）。
+
+**区分两类失败**（§14.2 的细化，不改变计划）：被测机制按计划返回的拒绝或故障（seccomp 的 errno、恢复异常、计划的 Job 查询失败、被吞掉的终止请求）照常按机制判定；用来观察机制的工具发生计划外的失败（读取、等待、关闭、状态读数），使这次运行 invalid，之后的成功、补救或其他成功的读数都不豁免它。机制把观察失败当作 F1 处理（C-19）这一点不变：在内层，它是被测分支；在实验的有效性上，它是计划外的工具失败。
+
+**逐项的错误传播**（“新”为本轮的修复；其余为审计之后保持不变的入口）：
+
+| 入口 | 返回的状态与错误 | 保存者 | 调用者 | 最终判定 |
+|---|---|---|---|---|
+| **P-1** 起点的 `procInfo`、E-main 观察者的创建、`awaitReport` | 状态 / error | `p1Inner` | `p1Inner` | 不是 present、错误 → invalid（不变） |
+| P-1 `exited` 夹具：`p1AwaitZombie` | 是否僵尸、**读取错误**（新） | `p1Inner` | `p1Inner` | 读不到 → 观察失败（新，原来与“没有退出”混同）；没有看到退出 → invalid |
+| P-1 `healthy` 的 E-main（Unix `obs.wait`；Windows 的等待与 `GetExitCodeProcess`） | 是否退出、状态、error | `p1Inner` | `p1Inner` | 计划外的错误 → **观察失败**（新）；机制照 C-19 走 F1 |
+| P-1 S5：`groupLive` / Job 的 `ActiveProcesses` | 成员 / 计数、error | `p1Inner` | `p1Inner` | 错误 → 观察失败（不变） |
+| P-1 终止请求（`kill`、`TerminateJobObject`） | error | — | `p1Inner` | 机制的请求，不是观察；结束由 S5 确认（C-17，不变） |
+| P-1 E-main 观察者的关闭 → `fdClosed`（Unix） | 已关闭、能否判断 | 驱动 | 驱动 | 不能判断 → 观察失败（不变） |
+| P-1 外层的分支确认（Unix `procInfo`；Windows 零等待、`IsProcessInJob`、`GetExitCodeProcess`） | 状态、error | 驱动 | 驱动 | 读不到 → 观察失败；没有命中 → invalid（不变） |
+| P-1 清单项的核对（Windows 对移交句柄的零等待） | 事件、error | 驱动 | 驱动 | 错误 → **观察失败**（新，原来只使断言不符，判 refuted） |
+| P-1 `p1Barrier` → `exclusive` 的基线读取 | `errBaseline`、**`errBaselineUnread`**（新）、其他错误 | `exclusive` | `p1Barrier` | 读不到、其他错误 → **观察失败**（新）；只有读到非空的基线才算屏障的拒绝；`healthy` 必须实际进入区间（新） |
+| P-1 subreaper 的读取、补救、清单的释放 | 值 / error | 驱动 | 驱动 | 错误 → 观察失败（不变） |
+| P-1 释放之后的准入（Review 095 N1） | — | 宿主模型 | 驱动 | 取样移到释放之后（新） |
+| **P-2** 实验子进程的每一步（探测、设置、清除） | errno、值 | 报告的步骤 | 外层 `p2Judge`（新） | 与该组声明的**完整**步骤序列逐步比较：计划外的 errno → 观察失败；计划的拒绝没有发生 → 故障没有命中（invalid）；观察步骤的值不符 → 负载没有建立；序列或探测值不同 → refuted（机制走了另一条路）。原来只扫描被拒调用之前的前缀，正常组完全不扫 |
+| P-2 检查进程的观察（`pidfd_open`、`poll`、`waitid WNOWAIT`、关闭） | errno、值；**EINTR 在剩余期限内重试**（新） | 报告 | `p2Judge` | 同上；失败之后不再落入没有期限的 `waitid` 或 `Wait`：登记之后结束并在 5 s 内回收（新） |
+| P-2 检查进程的登记（新） | 检查进程自己的 `pid` 记录 | 场景（`awaitOwned`） | `runP2` | 外层在它仍是实验子进程的子进程时核对归属并登记，然后写确认文件；实验子进程收到确认之后才回收它。核对不了 → invalid |
+| P-2 实验子进程自读 `/proc/self/status` | 值、**error**（新） | 报告 | `runP2` | 错误 → 观察失败（新，原来变成字符串，判 refuted） |
+| P-2 外层读 `/proc/<pid>/status` | 值、**error**（新） | `runP2` | `runP2` | 错误 → 观察失败（新） |
+| P-2 实验进程的子进程、pidfd、报告的读取、回收 | 列表 / error / bool | `runP2` | `runP2` | 错误 → 观察失败或 invalid（不变） |
+| P-2 过滤器装不上 | 原因 | 报告 | `runP2` | unsupported（不变；不算通过） |
+| **P-4** 启动链（加入 Job、`IsProcessInJob`、快照、`OpenThread`） | error | `p4Run` | `p4Run` | 计划的接缝 → 被测分支；**计划外的真实失败 → 观察失败**（新，原来落入 A4 后判 refuted） |
+| P-4 Runner 的 `ResumeThread` | 返回值、error | `p4Inner.Resume` | `runP4` | 与这一行的计划不符 → 负载没有建立（新，原来判 refuted） |
+| P-4 Runner 对进程句柄的等待（正常启动与恢复异常）与读退出码 | 事件、error | `p4ReadExit`（新） | `p4Run` | 超时 → 合法的“没有取得”（记录 NULL）；**等待或读取失败 → 观察失败**（新，原来被吸收为 NULL，异常路径的等待错误被忽略） |
+| P-4 `p4Exit`（`GetExitCodeProcess`） | 值、**error**（新） | 调用者 | `p4ReadExit`、`runP4` | 错误不再变成空值 |
+| P-4 Job 的查询（`p4Confirm`） | 是否确认、error | `p4Run` | `p4Run` | 真实错误 → 观察失败；计划的查询故障 → 不确认（不变） |
+| P-4 外层的零等待与读退出码 | 事件 / 值、error | `runP4` | `runP4` | 错误 → **观察失败**（新） |
+| P-4 清单句柄的零等待 | 事件、error | `runP4` | `runP4` | 错误 → **观察失败**（新） |
+| P-4 两侧退出码的对照 | — | `runP4` | `runP4` | Runner 取得 → 必须与外层相同；Runner 合法地没有取得（超时）→ 记下理由；不再因一方为空而豁免（新） |
+| P-4 夹具的构造（`ResumeThread` / `SuspendThread`）与接缝命中 | 返回值 | 夹具事件 | `runP4` | 不符 → 负载没有建立（不变） |
+| P-4 辅助读数（周期时间、标记文件） | 值或 unsupported | `runP4` | — | 不参与任何判定（不变） |
+| P-4 外层的清理 | 事件、error | `runP4` | `runP4` | 外层没有亲见结束就终止（新，原来只在“仍存活”时终止）；没有确认结束 → 观察失败 |
+| 共享模型（宿主、栈证据、总期限） | 没有错误返回 | — | — | 不变 |
+
+**本轮新发现的登记缺口**（回归先行时暴露，与 B1 同源，一并修复）：P 测试原来跳过门禁的内层运行，所以 P-2 从未在门禁之下运行。本轮让它们也作为门禁的内层运行之后，外层普查报告 P-2 的检查进程“已创建、没有被内层登记”（`control.p2-normal`、`control.p2-set0` 的内层 confirmed / 0，门禁不通过）。检查进程由实验子进程创建并回收，场景从未登记它，违反 §2.2 的归属规则。修复见上表的“检查进程的登记”。拒绝组的报告声明 `pid` 恰好 0 条：机制错误地启动检查时，判为 invalid（保守），不是 refuted。
+
+**门禁回归的判定**（新）：门禁用例可以要求内层的理由包含被注入的那次失败本身（`because`）。B1 的用例都这样要求，所以一次故障通过其他后果（例如使负载没有建立）碰巧得到 invalid，不算检出。
+
+### 14.12 回归先行、修复与诊断
+
+**提交的顺序**：
+
+1. `9d80431`：原样归档 Review 095。
+2. `0a9a01a`（回归先行，旧实现没有改动）：
+   - 新增观察入口各加一个一次性故障（只失败一次，之后的读取照常）；
+   - 增加 12 个 B1 门禁用例与 8 个对照；
+   - P 测试也作为门禁的内层运行。
+3. `85ec2ca`（修复，**固定的原型代码点**）：14.11 的修复，以及门禁用例的 `because`。
+4. 之后只有文档的提交：原型代码与 workflow 与 `85ec2ca` 相同（14.14）。
+
+**B1 用例**（每个都是一次失败、之后读取成功；“旧”为 `0a9a01a`，“新”为 `85ec2ca`）：
+
+| 用例 | 平台 | 旧实现的内层结论 / 退出码 | 新实现 |
+|---|---|---|---|
+| `p4.exitcode-fail-once`（审查的原反例：A12 中 Runner 读退出码失败） | Windows | **confirmed / 0** | invalid / 非零：the exit code of the main process |
+| `p4.outer-wait-fail-once`（审查的外层变体：`pre.assign` 中外层零等待失败） | Windows | **confirmed / 0** | invalid：the outer's wait |
+| `p4.anomaly-wait-fail-once`（异常路径的等待错误） | Windows | **confirmed / 0** | invalid：waiting for the main process |
+| `p4.outer-exitcode-fail-once`（外层读退出码失败） | Windows | **confirmed / 0** | invalid：the outer's read of the exit code |
+| `p4.exitcode-fail-once-healthy`（正常启动路径） | Windows | refuted（把工具失败当作发现） | invalid |
+| `p4.item-wait-fail-once`（移交句柄的读取） | Windows | refuted | invalid |
+| `p1.item-wait-fail-once`（移交句柄的读取） | Windows | refuted | invalid |
+| `p1.observe-fail-once`（`healthy` 的 E-main） | 三平台 | invalid，但理由是“负载没有建立”（碰巧，不是观察失败本身） | invalid：the healthy control's（理由点名观察失败） |
+| `p1.baseline-unread-once`（审查的原反例：屏障的基线读不到） | Linux | **confirmed / 0** | invalid：the barrier's baseline |
+| `p2.check-poll-fail-once`（审查的原反例：正常组检查进程的 poll） | Linux | **confirmed / 0**（另有登记缺口） | invalid：unplanned result of poll(check pidfd |
+| `p2.close-fail-once`（拒绝分支中关闭自有 pidfd） | Linux | **confirmed / 0** | invalid：unplanned result of close(own pidfd) |
+| `p2.status-unreadable-once`（外层读状态） | Linux | refuted | invalid |
+
+- 对照 `control.p1-alive`、`control.p1-healthy`、`control.p2-denied`、`control.p4-resume-gt1`、`control.p4-pre-unconfirmed`、`control.p4-anomaly-unconfirmed` 在旧、新实现上都是 confirmed / 0。其中包括计划内的 seccomp 拒绝、恢复异常与计划的 Job 查询失败：它们没有被一律判为 invalid。
+- `control.p2-normal`、`control.p2-set0` 在旧实现上，内层 confirmed / 0，但门禁不通过：外层普查报告检查进程没有被登记（14.11 的登记缺口）。新实现上两者都通过。
+- 每个 B1 用例的故障都有命中记录（hits 1）。
+
+**作者本机**（作者证据）：
+
+- Windows 11 26300：上表的 Windows 用例在旧实现上如上表；新实现上全部通过。完整原型套件为场景 53/53 confirmed、门禁回归 91/91、组合 13/13。
+- WSL2 6.18（不带 `-race`）：Linux 用例同上表；新实现上全部通过。完整原型套件为场景 52 confirmed、1 unsupported（既有的 `T5.adapter.pwsh-argv`，没有 pwsh），门禁回归 92/92，组合 13/13。
+
+**诊断 CI**（`.github/workflows/wp25-prototype.yml`；与常规 CI 分开，都没有重跑或取消）：
+
+| run | 代码点 | 结论 | macOS 26.6.2 arm64 | Ubuntu 6.17（`-race`） | Windows 10.0.26100 |
+|---|---|---|---|---|---|
+| 40641559468 | `0a9a01a`（回归先行） | **failure**（预期） | failure：场景 33/33，门禁回归 75/76 | failure：场景 53/53，门禁回归 86/92 | failure：场景 53/53，门禁回归 84/91 |
+| 40643975558 | `85ec2ca`（修复） | **success** | 场景 33/33，门禁回归 76/76，组合 13/13 | 场景 53/53，门禁回归 92/92，组合 13/13 | 场景 53/53，门禁回归 91/91，组合 13/13 |
+
+- 两个 run 的三个作业都实际检出各自的代码点，WP25META 声明相同的 SHA。
+- 40641559468 的门禁失败：
+  - Ubuntu 6 项：`p1.baseline-unread-once`、`control.p2-normal`、`control.p2-set0`、`p2.check-poll-fail-once`、`p2.close-fail-once`、`p2.status-unreadable-once`；
+  - Windows 7 项：`p1.item-wait-fail-once` 与上表 6 个 P-4 用例；
+  - macOS 1 项：既有的 `report.epipe-unwritable`。它与 B1 无关：外层普查读不到一个无关进程（PID 2668，父进程为 1，短命令名不是本测试的）的环境，EINVAL。这是 §2.14、§2.15 记录的 macOS 普查问题的又一次观测，没有重跑，原因仍未查明。
+- 40643975558 中，B1 用例在各自的平台上都是 invalid / 非零，理由点名被注入的失败；对照都是 confirmed / 0。P 场景：
+  - Windows：P-1 6、P-4 18，都 confirmed；
+  - macOS：P-1 6，都 confirmed；
+  - Ubuntu：P-1 6、P-2 9，都 confirmed。
+
+**常规 CI**（`ci.yml`，不运行原型模块）：
+
+- 回归先行的 `0a9a01a` 上，run 40641564083 为 success 8/8，而同一代码点的原型诊断为 failure。这说明常规 CI 不能代替原型诊断。
+- 最终 HEAD 的常规 CI 写在 PR 描述中。
+
+### 14.13 定向撤回（作者本机，变异之后已恢复，没有提交）
+
+每次只撤回一项关键修复，运行应检出它的 B1 用例：
+
+| 撤回 | 应检出的用例 | 结果 |
+|---|---|---|
+| M1 P-4 Runner 读退出码失败不报告 | `p4.exitcode-fail-once`、`p4.exitcode-fail-once-healthy` | 检出（前者 confirmed / 0，后者 refuted；理由都没有点名观察失败） |
+| M2 P-4 异常路径的等待失败不报告 | `p4.anomaly-wait-fail-once` | 检出（confirmed / 0） |
+| M3 P-4 外层的零等待失败不报告 | `p4.outer-wait-fail-once` | 检出（confirmed / 0） |
+| M4 P-4 外层读退出码失败不报告 | `p4.outer-exitcode-fail-once` | 检出（confirmed / 0） |
+| M5 P-4 移交句柄的读取失败不报告 | `p4.item-wait-fail-once` | 检出（refuted） |
+| M6 P-1 `healthy` 的观察失败不报告（Windows） | `p1.observe-fail-once` | 检出（invalid，但理由只是“负载没有建立”） |
+| M7 P-1 移交句柄的读取失败不报告 | `p1.item-wait-fail-once` | 检出（refuted） |
+| M8 P-1 读不到的基线不报告 | `p1.baseline-unread-once` | 检出（refuted） |
+| M9 P-1 `healthy` 的观察失败不报告（Unix） | `p1.observe-fail-once` | 检出（同 M6） |
+| M10 P-2 不逐步判定 | `p2.check-poll-fail-once`、`p2.close-fail-once` | 检出（前者 refuted，后者 confirmed / 0） |
+| M11 P-2 外层读状态失败不报告 | `p2.status-unreadable-once` | 检出（refuted） |
+| M12 P-2 观察失败之后不等登记就结束检查进程 | `p2.check-poll-fail-once` | 检出（invalid，但理由是归属无法确认，不是 poll 失败） |
+
+- Windows 的 M1 ~ M7 在 Windows 11 上运行，Linux 的 M8 ~ M12 在 WSL2 上运行；macOS 没有变异。
+- M6、M9、M12 说明了为什么需要 `because`：只看结论，这三项撤回都检不出来，因为那次故障还通过其他后果使运行 invalid。
+- 修复过程中如实保留的问题：
+  - 修复的第一稿中，P-2 在观察失败之后没等外层登记就结束了检查进程，`p2.check-poll-fail-once` 的理由因此是归属失败。已改为不论观察结果都先等登记（即 M12 撤回的那一项）。
+  - P-4 正常启动路径原有一处对同一等待错误的报告，与新的 `p4ReadExit` 重复，已删去。
+
+### 14.14 受影响的证据范围与门槛的状态
+
+- **降为历史观测**：§14.7 中固定代码点 `d45a319` 的诊断 run 40439516254，以及 §14.8 的作者本地运行，是 B1 修复之前的观测，保留原文。新增观察入口当时没有失败关闭，所以它们的 P-1、P-2、P-4 结论只是“在没有发生这些读取错误的那次运行中观察到的结果”，不是有效门禁之下的证据。P-2 的检查进程当时也没有被登记。
+- **替代的证据**：固定代码点 `85ec2ca` 的诊断 run 40643975558（14.12）。§14.7 的结论表在新代码点上逐项重现：P-1 18/18、P-2 9/9、P-4 18/18 都为 confirmed。各项的数值（构造的返回值、记录判定、所有权、Q-1 的准入）以 40643975558 的日志为准。
+- **证据中不变的部分**：§14.9 的未验证边界、P-3 的整理（§14.6）不受影响。
+- **固定点之后**：之后只有文档的提交；`git diff 85ec2ca HEAD -- prototype .github` 为空（最终核对见 review-resolution §115 与 PR 描述）。
+
+**门槛的状态**（作者的登记，待独立复审；§14.10 是修复之前的登记，保留原文）：
+
+| 门槛 | 状态 |
+|---|---|
+| G1 | Q-1 的规格写定；模型的准入、置位与“释放之后仍拒绝”（N1 更正之后按实际顺序取样）由 P-1、P-4 驱动；生产接线待授权 |
+| G3 | P-1 在有效门禁之下三平台 18/18 confirmed；Windows `alive` 依赖外层另持 Job 句柄的构造；不宣布整体满足 |
+| G5 | **没有满足**（本轮不补做 P-3） |
+| G6 | P-2 在有效门禁之下 Ubuntu 9/9 confirmed，检查进程已登记；只有 x86_64；不宣布满足 |
+| G7 | P-4 在有效门禁之下 Windows 18/18 confirmed；未构造的失败点见 §14.9；不宣布满足 |
+| G12、D14 | Q-2 (a) 的规格写定；生产记录、事务与迁移待授权 |
+| 其余 | 不变 |
