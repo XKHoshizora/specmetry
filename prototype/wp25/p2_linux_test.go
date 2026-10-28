@@ -49,6 +49,7 @@ type p2Report struct {
 	Unsupported string   `json:"unsupported,omitempty"`
 	Status      string   `json:"status"` // its own read of /proc/self/status
 	StatusErr   string   `json:"status_error,omitempty"`
+	SelfReadErr string   `json:"self_read_error,omitempty"` // the probe's read of its own /proc entry gave unknown
 	Steps       []p2Step `json:"steps"`
 	Refused     string   `json:"refused,omitempty"` // the capability that did not hold
 	CheckPID    int      `json:"check_pid,omitempty"`
@@ -222,6 +223,15 @@ func p2Probe(r *p2Report) string {
 		pr = unknown // N-096-2: its own entry cannot be read once
 	}
 	_, derr := os.ReadDir("/proc")
+	if pr == unknown {
+		// A read of its own entry that fails is a failed observation of the
+		// run, kept as such (N-096-2), not the capability found absent; the
+		// probe still refuses.
+		r.SelfReadErr = errUnknownState.Error()
+		if derr == nil {
+			derr = errUnknownState
+		}
+	}
 	r.step("/proc", derr, fmt.Sprint(pr == present))
 	if pr != present || derr != nil {
 		closeFD()
@@ -480,6 +490,61 @@ func pidfdsOf(pid int) (int, error) {
 	return n, nil
 }
 
+// p2ReadReport reads the experiment's report into r: false while it is not
+// there; a read that fails, or a report that does not parse, stops the run
+// as invalid.
+func p2ReadReport(s *scen, out string, r *p2Report) bool {
+	b, err := os.ReadFile(out)
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		return false
+	case err != nil:
+		s.invalidf("observation failed: the experiment's report: %v", err)
+	}
+	if jerr := json.Unmarshal(b, r); jerr != nil {
+		s.invalidf("load not established: the experiment's report does not parse: %v", jerr)
+	}
+	return true
+}
+
+// p2NoCheck checks a report that names the filter as not installable
+// (N-096-2). The experiment returns before its first step then: no step,
+// no check, nothing read or set, exit 0. The outer sees no check either:
+// no record in the check's report file, no child of the experiment
+// process. It returns what contradicts that; a read that fails is a failed
+// observation, and what it could not read is not taken as empty.
+func p2NoCheck(s *scen, r p2Report, rep string, pid int) []string {
+	var c []string
+	if n := len(r.Steps); n > 0 {
+		c = append(c, fmt.Sprintf("%d steps reported", n))
+	}
+	if r.CheckPID != 0 {
+		c = append(c, fmt.Sprintf("a check %d reported", r.CheckPID))
+	}
+	if r.Status != "" || r.StatusErr != "" || r.SelfReadErr != "" || r.Refused != "" || r.CheckStatus != "" ||
+		r.CheckReaped || r.ClearErr != "" || r.Next != "" || r.SubEnd != -1 {
+		c = append(c, "results after the install reported")
+	}
+	if r.Exit != 0 {
+		c = append(c, fmt.Sprintf("exit %d reported", r.Exit))
+	}
+	switch lines, err := parseReport(rep, false); {
+	case err != nil:
+		s.flag("observation failed: the check's report file: %v", err)
+		c = append(c, "the check's report file unread")
+	case len(lines) > 0:
+		c = append(c, fmt.Sprintf("%d records in the check's report file", len(lines)))
+	}
+	switch kids, err := childrenOf(pid); {
+	case err != nil:
+		s.flag("observation failed: the experiment process's children: %v", err)
+		c = append(c, "its children unread")
+	case len(kids) > 0:
+		c = append(c, "its children "+describe(kids))
+	}
+	return c
+}
+
 var p2Budget = &budget{name: "P-2", total: 3 * time.Minute, per: 30 * time.Second}
 
 func TestP2(t *testing.T) {
@@ -626,11 +691,16 @@ func runP2(t *testing.T, id string) {
 	release := gated(s, cmd)
 	startHelper(s, cmd)
 	pid := cmd.Process.Pid
+	var r p2Report
+	early := false // the report ended the wait for the check's registration
 	if checks == 1 {
 		// The check is the experiment process's own child; the outer
 		// registers it from its record while it can still verify that
-		// (Review 095: every created process is registered).
-		s.awaitOwned(rep, 1, 10*time.Second, func(cpid int) {
+		// (Review 095: every created process is registered). An experiment
+		// that cannot install its filter returns before its first step and
+		// starts no check: its report of that ends the wait (N-096-2), and
+		// is verified below, as any other.
+		_, early = s.awaitOwnedUnless(rep, 1, 10*time.Second, func(cpid int) {
 			st, pr := procInfo(cpid)
 			switch {
 			case pr != present:
@@ -639,24 +709,22 @@ func runP2(t *testing.T, id string) {
 				s.invalidf("ownership not established: %d is not a child of the experiment process %d", cpid, pid)
 			}
 			s.own(&pidProc{pid: cpid, id: st.start})
+		}, func() bool {
+			var e p2Report
+			if p2ReadReport(s, out, &e) && e.Unsupported != "" {
+				r = e
+				return true
+			}
+			return false
 		})
-		if err := os.WriteFile(out+".ack", nil, 0o600); err != nil {
-			s.invalidf("the acknowledgement of the registration: %v", err)
+		if !early {
+			if err := os.WriteFile(out+".ack", nil, 0o600); err != nil {
+				s.invalidf("the acknowledgement of the registration: %v", err)
+			}
 		}
 	}
-	var r p2Report
 	deadline := time.Now().Add(15 * time.Second)
-	for {
-		b, err := os.ReadFile(out)
-		if err == nil {
-			if jerr := json.Unmarshal(b, &r); jerr != nil {
-				s.invalidf("load not established: the experiment's report does not parse: %v", jerr)
-			}
-			break
-		}
-		if !errors.Is(err, os.ErrNotExist) {
-			s.invalidf("observation failed: the experiment's report: %v", err)
-		}
+	for !early && !p2ReadReport(s, out, &r) {
 		if time.Now().After(deadline) {
 			s.invalidf("load not established: no report from the experiment process within 15 s")
 		}
@@ -666,7 +734,16 @@ func runP2(t *testing.T, id string) {
 		s.invalidf("load not established: a report of pid %d, group %q", r.PID, r.Group)
 	}
 	if r.Unsupported != "" {
-		s.unsupported("the filter cannot be installed here: %s", r.Unsupported)
+		// Unsupported only for what the experiment says it did not do and
+		// the outer sees it did not do (N-096-2). Anything else is a failed
+		// observation: the run goes on, so a check it started is still
+		// judged, released and cleaned up.
+		if c := p2NoCheck(s, r, rep, pid); len(c) > 0 {
+			s.flag("observation failed: the report says unsupported but contradicts it (%s): %s", r.Unsupported, strings.Join(c, "; "))
+		} else {
+			s.noneExpected(rep)
+			s.unsupported("the filter cannot be installed here: %s", r.Unsupported)
+		}
 	}
 	// The outer, while the experiment process waits for its release.
 	outer, oerr := seccompStatus("/proc/" + strconv.Itoa(pid) + "/status")
@@ -678,6 +755,9 @@ func runP2(t *testing.T, id string) {
 	}
 	if r.StatusErr != "" {
 		s.flag("observation failed: the experiment process's read of its own status: %s", r.StatusErr)
+	}
+	if r.SelfReadErr != "" {
+		s.flag("observation failed: the experiment process's read of its own /proc entry: %s", r.SelfReadErr)
 	}
 	kids, kerr := childrenOf(pid)
 	if kerr != nil {

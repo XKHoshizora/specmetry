@@ -197,6 +197,17 @@ func (s *scen) reportFile(path string) *reportFile {
 // could not own is counted as short (rf.shortfall); the PIDs in a report
 // are never acted on without the ownership check.
 func (s *scen) awaitOwned(path string, n int, d time.Duration, own func(pid int)) []int {
+	got, _ := s.awaitOwnedUnless(path, n, d, own, nil)
+	return got
+}
+
+// awaitOwnedUnless is awaitOwned that also stops before all n records are
+// there once ended (if not nil) says their writer has ended without them
+// (N-096-2); it then returns what was owned so far and true. Each time,
+// the records that arrived are owned before ended is asked, and what was
+// not owned stays short until the caller verifies that it was never
+// created (noneExpected).
+func (s *scen) awaitOwnedUnless(path string, n int, d time.Duration, own func(pid int), ended func() bool) ([]int, bool) {
 	rf := s.reportFile(path)
 	if rf == nil {
 		s.invalidf("report %s was not created by this scenario", path)
@@ -228,12 +239,25 @@ func (s *scen) awaitOwned(path string, n int, d time.Duration, own func(pid int)
 		case err != nil:
 			s.invalidf("load not established: report: %v", err)
 		case len(got) == n:
-			return got
+			return got, false
+		case ended != nil && ended():
+			return got, true
 		case time.Now().After(deadline):
 			s.invalidf("load not established: report: only %d of %d pid records within %v", len(got), n, d)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+}
+
+// noneExpected declares a report's writers verified as never started
+// (N-096-2): it must then hold no record at all, which done checks once
+// they could have ended, and no registration is short.
+func (s *scen) noneExpected(path string) {
+	rf := s.reportFile(path)
+	if rf == nil {
+		s.invalidf("report %s was not created by this scenario", path)
+	}
+	s.locked(func() { rf.spec, rf.shortfall = reportSpec{}, 0 })
 }
 
 // awaitReport waits until the report holds exactly n records of the kind
