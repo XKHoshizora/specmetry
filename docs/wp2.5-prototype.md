@@ -28,6 +28,7 @@
 > - [Review 099](reviews/codex-review-099.md) 对 `657ffc9`：**技术 NO-GO**（B1：错误套用用户态的 `WEXITSTATUS`，waitid 的退出值可带 exit 参数的第 8 ~ 23 位；B2：P-3 对同一原生反证同时规定 refuted 与 invalid）。规范第 8 版第二稿定向修订（草案 §19.5、§19.12、§19.13、§20；review-resolution §121），**两项阻塞已修订，待独立复审**；新增负责人待决的 Q-3；P-3 的启动条件仍未满足。本文的原型代码没有改动。
 > - **2026-10-29**（review-resolution §122）：负责人决定 Q-3 选 (a)：macOS 的正常退出在核对成立之后取原始 `si_status` 的低 8 位，waitid 的第 8 ~ 23 位不进入事实。P-3 的预测已按它收敛（草案 §19.12）；启动条件仍须独立复审明确允许。本文的原型代码没有改动。
 > - [Review 100](reviews/codex-review-100.md) 对 `344cbca`：**技术 GO**，Review 099 的 B1、B2 在规范与计划层面关闭；P-3 可按既有条件授权启动（review-resolution §123），尚未执行。本文中 macOS 的 T3 证据仍**不**覆盖第 8 版的 W / K / C 核对。
+> - **2026-10-29**（PR #40 合并为 `dbcd5d4` 之后）：P-3 在分支 `test/wp2.5-prototype-p3` 的独立原型 PR 中实施。实施的计划在写任何原型代码之前登记（§15），固定 base `dbcd5d4`、受审的文档提交 `344cbca` 与计划的版本；**结果待诊断与独立审查**，不宣布 G5 满足。
 > - 这**不是**规范冻结：草案为第 7 版，待独立审查和冻结；14 项产品选择、D21、Q-1 与 Q-2 已决定，技术候选仍待审查。T1 ~ T6 按 Review 075 的裁定只得到**局部支持**（§11；草案 §17.5 的 G1 ~ G15 与 §19）。
 > - 原型成功**不是**生产验收：生产 Check Runner、迁移 0009、CLI 接线都没有授权，WP2.5 没有实现或验收，M2 没有整体验收。
 > - 本文中的“候选规格”都待审查；其中涉及可见行为的（例如 C-4、C-7、C-10）依赖对应的产品选择（§9、§10）。C-4 的产品语义与 C-7（D20 (i)）已于 2026-10-25 决定，其技术部分仍待审查。本文不新增接受风险，也不批准任何保证调整。
@@ -3241,3 +3242,191 @@ R2 也说明 `done` 的报告文件检查是第二道防线：即使没有核验
 | G5 / P-3 | 没有新增 | **没有满足**，P-3 没有执行；不因本轮的绿色自动缩小支持平台 |
 
 **收尾的范围**：相对受审 HEAD `8b6aca1` 只有文档；原型与 workflow 仍与 `18bc6a4` 相同，不为纯文档收尾重跑原型诊断。技术 GO 不是规范冻结、产品批准、生产授权或 WP2.5 / M2 验收。
+
+## 15. P-3：macOS 的 ABI 与 x86_64 的最小原型（2026-10-29 起实施）
+
+### 15.1 授权、固定的身份与计划的版本
+
+- **授权**：负责人 2026-10-29 的条件授权（review-resolution §120）；[Review 100](reviews/codex-review-100.md) 明确允许实施（§123）。另开原型 PR，不合并，不宣布 G5 满足。
+- **固定的身份**：
+  - base：核验之后的 master `dbcd5d4597e295b31d6a3e0fb3d295b135e6386b`（PR #40 的合并）；
+  - 受审的文档提交：`344cbcae2f2ac0903c1a1052a0266cbb68cd03ef`（Review 100 的对象）；
+  - 计划的版本：规范第 8 版第二稿 §19.5、§19.12，以 `b359b0cb02848434e3c38475b42f157dff1b9014` 的内容为准（Review 100 收尾时只做了不改变语义的措辞精化，随 PR #40 合并进 `dbcd5d4`）。
+- **本节在写任何原型代码之前提交**。实施若须偏离本节，先在这里登记偏离与理由，再改代码。不为取得绿色改动预测。
+
+### 15.2 范围
+
+- 只改 test-only 的 `prototype/wp25`，以及诊断 workflow。workflow 只增加三项：
+  - 本分支 `test/wp2.5-prototype-p3` 的精确匹配；
+  - 标准的 `macos-26-intel`；
+  - 受控的环境元数据。
+- 既有平台、只读权限、失败传播、作业 20 min 与 `go test` 15 min 的期限都不变。不增加 `macos-15-intel`、larger runner、root、付费资源或工具安装。
+- 不改生产代码、根依赖、Schema、迁移或根 `ci.yml`。
+- 只验证 E1（直接陷入），不新增 E2 的原型，不选择生产调用入口。
+
+### 15.3 实施的落点（按 §19.12 写定，不改变其语义）
+
+**被测的解码器 M**（`tree_darwin_test.go`，darwin）：
+
+- waitid：
+  - 原始读取 `readWaitid` 返回前六个字段（按 `uint32`）；
+  - 解码 `decodeW` 依次检查 W1、W3a、W4，按 W3b（Q-3 (a)）取值；W2 由按 `uint32` 读取实现；
+  - 读两次时，第一次的解码通过之后按 W5 比较两次的全部六个字段。
+- kqueue：
+  - 原始读取 `kqWaitRaw` 返回事件的 `ident`、`filter`、`flags`、`fflags` 与有符号的 `data`；
+  - 解码 `decodeK` 按 K1、K2。
+- C1：比较两条路径规范化之后的结果。
+- M 以第一条拒绝的规则为结论，之后的读取不改变它（C-19）。
+- 事件的 `ident` 不是所查的进程、或 `filter` 不是 `EVFILT_PROC`，是调用本身的错误（观察失败），不属于 K 规则。
+- 既有的 `waitidNoWait` 与 `exitObserver.wait` 改为经这些解码，拒绝时返回错误（观察失败）。
+  - 所以既有的 macOS 场景（T3、P-1）也受新的核对约束，须在同一个固定代码点重新取得证据；之前代码点的 macOS 证据降为历史观测。
+  - `waitidNoWait` 在注册时已退出的路径上只读一次。
+
+**独立的规范化 N**（`p3_darwin_test.go`）：
+
+- 按 §19.5 的规则另行实现，不调用 `decodeW`、`decodeK`：W1、W3a、W4 与 K1、K2 不成立时为“无”。
+
+**场景**：
+
+- `TestP3` 的子测试按声明顺序运行：先 `layout.1` ~ `layout.3`，再其余场景。
+- 场景 ID 为 `P3.<路径>.<名字>.<n>`，子测试名为 `<路径>.<名字>.<n>`。
+- 每次运行的证据另以 `WP25P` 行输出，在任何补救之前打印：
+  - R、N、M、F、E 的各项，以及到那时为止的工具失效；
+  - 最终的 T、C 与 V 在 `WP25RESULT` 中：`invalid` 的全部理由、`cleanup` 与 `verdict`。
+
+**前提的判定**（每次运行开始时）：
+
+- **原生架构**：
+  - `uname -m` 由 `uname(2)` 读取（不启动进程），另记录 `hw.machine`；
+  - `GOARCH` 为 amd64 时须 `uname -m` 为 `x86_64`，arm64 时须为 `arm64`；
+  - `proc_translated` 为 1，或 `uname -m` 与 `GOARCH` 不符 → E 不具备；
+  - `proc_translated` 为 0 或不存在（`ENOENT`）→ 原生；其他读取错误 → T 失效。
+- **布局前提**（`layout` 以外的场景）：只在同一进程中已运行的布局场景都为 confirmed 时成立。
+  - 都没有运行 → T 失效；
+  - 有 refuted 或 invalid → T 失效；
+  - 都为 unsupported → E 不具备。
+  - 所以门禁的内层运行同时选中 `layout.1`。
+- **可靠确认没有 Xcode / SDK**：只有在 `PATH` 中找不到 `xcrun`。`xcrun` 本身的失败与无法取得 SDK 都无法与工具失效可靠区分，按 T 失效（invalid），不按 unsupported。这比“没有 Xcode 或 SDK 为 unsupported”保守，不会产生通过。
+
+**观察改写类的接缝**（只在门禁的内层运行中按 `WP25_INJECT` 生效；`readWaitid` 与 `kqWaitRaw` 读完真实结果之后，经 P-3 设置的钩子改写缓冲区或事件）：
+
+- 改写的值：
+  - `p3.w-sipid-once`：第一次读取的 `si_pid` 改为 `pid + 1`；
+  - `p3.w-reread-once`：第二次读取的 `si_status` 改为 8，在 W1 ~ W4 下合法，只有 W5 能检出；
+  - `p3.k-stopped-once`：`data` 改为 `0x117f`（被 SIGSTOP 停止）；
+  - 其余按规范 §19.12 的表。
+- 命中记录：`WP25INJECT` 行的 `site` 写明读取的序号、字段、真实值与改写之后的值。
+- 接缝模式下，场景不做原生的预测比较：
+  - M 以预期的规则拒绝 → `s.flag("planned corruption detected by <规则>: …")`（invalid）；
+  - M 接受，或以其他规则拒绝 → `s.expect` 不符（refuted）；
+  - 没有命中 → T 失效。
+
+**计划的故障 `group.enum-unknown`**（不由 `WP25_INJECT` 控制，在主诊断中运行）：
+
+- P-3 自己的确认循环中，第一次 `kern.proc.pgrp` 的读取先真实进行，再以一个注入的错误（不是 `ENOMEM`）代替结果。按 §19.5 的枚举预算，这是“未知 → 不确认结束”，不重试。
+- 命中写入 `WP25P` 的 F。之后钩子关闭，清理用既有的确认（读不到即为 invalid）。
+- 不调用既有的 `confirm` 来判定故障的响应：它把读取失败直接记为 invalid。
+
+**更严格的门禁**：
+
+- 场景的结果（`WP25RESULT`）增加 `invalid` 字段，列出全部 invalid 的理由。
+- 门禁用例增加 `exact`，要求：
+  - 理由恰好一条，并且包含预期的检出原因；
+  - 内层场景的清理以 `verified` 开头；
+  - 同一次内层运行中的其他场景（`layout.1`）都为 confirmed。
+- 外层的既有条件照常。
+- 内层运行含两个场景，所以登记的核对改为合并这次内层运行全部结果的 `owned` 与 `shortfall`。只有一个场景时与原来相同。
+
+**工具进程**：
+
+- `xcrun`、Clang 与探针经 `start` 直接启动，由场景登记（`childProc`）。环境中带本次运行的标记 `WP25_P3TOOL=<随机值>`；门禁的内层运行中，它们也继承见证的标记。
+- 输出写到临时文件，不经管道。
+- 每一步结束之后，按本次的标记普查（`censusTag`）。Clang 内部的后代也由普查找到：
+  - 找到存活的、或普查失败 → T 失效；
+  - 对找到的进程，只在标记与启动时间都核实时结束它们，归属未确认的零动作；补救不恢复有效性。
+- `xcrun --find clang`、`xcrun --sdk macosx --show-sdk-path` 与 `--show-sdk-version` 各一次；之后 `clang -arch <arm64 | x86_64> -isysroot <SDK>` 编译，再运行探针。退出码不为 0 → T 失效。
+
+**探针的键集**：
+
+- `siginfo_t` 的大小与六个字段的偏移、大小；
+- `struct kevent` 的大小与六个字段的偏移、大小；
+- `struct kinfo_proc` 的大小，与 §19.12 所列字段的偏移；
+- §19.12 所列的常量。
+
+比较的来源：
+
+- `unsafe.Sizeof` / `Offsetof`；
+- x/sys 的常量；
+- x/sys 没有的常量（`P_PID`、`CLD_*`、`SZOMB`、`P_WEXIT`、`KERN_PROC_*`、`KERN_PROCARGS2`）：与原型自己的常量，或规范 ABI 表登记的值比较；
+- `sizeof(siginfo_t)` 与 §19.5 的 104 比较，另检查不大于 128（只证明容量）。
+
+值按键的符号与位宽解析，并须是规范的十进制写法。
+
+**期限**：
+
+- 每次运行 60 s：内层 ≤ 20 s，外层核验 ≤ 10 s，清理 ≤ 20 s，余量 10 s。各段超出 → T 失效。
+- 工具各步的期限为 `min(单步上限, 内层剩余, 到 t.Deadline() 的剩余减 60 s)`。单步上限：`xcrun` 10 s，编译与链接 30 s，探针 5 s。
+- **准入**：每次运行开始之前检查两项，否则记为未执行（invalid）：
+  - P-3 的剩余预算 ≥ 60 s；
+  - 到 `t.Deadline()` 的剩余 ≥ 120 s。
+- P-3 的总预算 15 min 计 `TestP3` 的 63 次运行。门禁的内层运行在各自的进程中，按既有的门禁期限（内层 150 s、外层 180 s），另行计数。
+
+**环境元数据**：
+
+- WP25META 在 darwin 上加入 `kern.version`、`hw.machine`、`uname -m` 与 `proc_translated`。读到的值照实记录，或记为“不存在”“未知”。
+- workflow 在 macOS 作业的原型步骤之前加一个只打印的步骤：
+  - 记录 `sw_vers`、`uname -a`、`sysctl` 的几项、`xcodebuild -version`、`xcrun --show-sdk-version` 与 `--show-sdk-path`、Clang 的版本、`go env GOARCH GOHOSTARCH`；
+  - 每条命令失败也照实打印，不影响作业；
+  - 只记录，不参与判定。
+
+### 15.4 场景、构造与预测（每个场景 3 次）
+
+- 子进程都是本测试二进制的 helper，在自己的进程组中启动，由场景登记。`exit-after <ms> <code>` 以 `os.Exit(code)` 退出。
+- 原始值的预测依据规范 §19.5 的源码推演；N 按 Q-3 (a)；M 须等于 N。
+- 回收之后的 `ExitCode()` 按 §19.5 推演表的最后一列。
+
+| 场景 | 构造 | R 的预测 | N（M 须相同） |
+|---|---|---|---|
+| `layout` | `xcrun` 取得 Clang 与 SDK，编译、运行探针，严格解析，与 Go 侧逐项比较 | 键集完整、每键一次，全部与 Go 侧相同 | — |
+| `k.exit7` | `exit-after 200 7`；启动之后立即注册 kqueue，等事件（≤ 3 s） | 返回的 `fflags` 含 `NOTE_EXIT \| NOTE_EXITSTATUS`；`data` = `0x0700`；之后为本进程未回收的僵尸；回收之后 `ExitCode()` 为 7 | （退出，7） |
+| `k.signal9` | `sleep`；注册之后有期限地等 300 ms，之后 `SIGKILL` | 300 ms 内没有事件；之后 `data` 的低 7 位为 9；僵尸；回收之后为信号 9 | （被信号终止，9） |
+| `k.exit-100` / `-107` / `-ff` / `-7f` / `-80` | `exit-after 200` 加 256 / 263 / −1 / 2130706439 / −2147483648 | `data` = `0x0000` / `0x0700` / `0xFF00` / `0x0700` / `0x0000`；僵尸；`ExitCode()` 为 0 / 7 / 255 / 7 / 0 | （退出，0 / 7 / 255 / 7 / 0） |
+| `k.esrch` | `exit-after 0 7`；确认为本进程未回收的僵尸之后，以候选的观察器注册 kqueue | 注册得到 `ESRCH`（推理的预测）；候选转入 waitid，再读第二次，同 `w.exit7` | （退出，7） |
+| `w.exit7` | `exit-after 0 7`；确认为僵尸之后直接 waitid 两次（不注册 kqueue） | `si_signo` 20、`si_pid` 等于子进程、`si_code` 1、`si_status` 7；两次相同；仍为僵尸；回收之后为 7 | （退出，7） |
+| `w.signal9` | `sleep`；`SIGKILL`；确认为僵尸之后 waitid 两次 | `si_code` 2、`si_status` 9；两次相同；回收之后为信号 9 | （被信号终止，9） |
+| `w.exit-100` / `-107` / `-ff` / `-7f` / `-80` | `exit-after 0` 加上面的值；确认为僵尸之后 waitid 两次 | `si_status` = `0x100` / `0x107` / `0x00FFFFFF` / `0x7` / `0x0`；`si_code` 1；两次相同；`ExitCode()` 同上 | （退出，0 / 7 / 255 / 7 / 0） |
+| `c.exit7` / `c.exit-107` / `c.exit-ff` | `exit-after 200` 加 7 / 263 / −1；注册 kqueue，取得 K；确认为未回收的僵尸之后 waitid 一次，取得 W | K 的 `data` 与 W 的 `si_status` 分别如上（`-107`、`-ff` 的原始值不同） | K 与 W 都为（退出，7 / 7 / 255），C1 相同 |
+| `group.zombie-leader` | 组长 `member-parent`；成员报告之后放行，组长以 0 退出 | 组长为未回收的僵尸；不含僵尸的成员只有那个成员；结束成员并确认之后组为空；最后回收组长 | 确认结束 |
+| `group.enum-unknown` | 同上；P-3 的确认循环中第一次 `kern.proc.pgrp` 的读取被注入为失败 | 命中 1 次 | 不确认结束；之后钩子关闭，清理照常 |
+
+- 合计 21 个场景 × 3 次 = 63 次运行，每个 macOS 作业相同。
+- 门禁回归与对照（只在 darwin 上；内层的选择为 `TestP3/^(layout.1|<基于的场景>.1)`）：
+  - 10 个接缝用例：
+    - waitid：`p3.w-sipid-once`、`p3.w-signo-once`、`p3.w-code-once`、`p3.w-highbyte-once`、`p3.w-negative-once`、`p3.w-reread-once`；
+    - kqueue：`p3.k-nostatus-once`、`p3.k-range-once`、`p3.k-stopped-once`；
+    - 两条路径：`p3.c-mismatch-once`。
+  - 预期的规则见规范 §19.12 的表（`p3.w-negative-once` 由 W3a 拒绝）；每个都按 `exact`，`because` 为 `planned corruption detected by <规则>`。
+  - 3 个对照：`control.p3-k-exit7`、`control.p3-w-exit7`、`control.p3-c-exit7`，都为 confirmed / 0，同样要求 `layout.1` 为 confirmed。
+
+### 15.5 判定、命中与清理
+
+- **判定**按规范 §19.12 的优先级：
+  1. 工具失效 → invalid；
+  2. 环境不具备 → unsupported；
+  3. 观察改写被预期规则检出 → invalid（由门禁裁定）；
+  4. 没有检出 → refuted；
+  5. 机制故障类按预测；
+  6. 原生运行按预测为 refuted 或 confirmed。
+
+  对应到原型：工具失效以 `s.flag` 记入，不清除；预测以 `s.expect` 比较；E 以 `s.unsupported`。`done` 的既有优先级为 invalid、unsupported、refuted、confirmed，与上面一致。
+- 解码器对原生值的拒绝只作为 M 与预测比较，不记为工具失效。
+- 工具失效、清理没有核实或结束未知、计划的故障没有命中，都不得到 confirmed；找到预期的理由不豁免其他失败。
+- **命中**：每个接缝与计划的故障都有独立的命中记录（真实值、改写的位置）；门禁要求命中。
+- **清理**：
+  - 场景结束时，场景登记的进程都须核实已结束，工具的标记普查为空；
+  - 先保存被测的结论（`WP25P` 行），再补救；补救不恢复有效性；
+  - 外层门禁的既有条件（Final 为 ended、保险清理为 nothing left、归属核实）照常。
+- **结果的报告**：
+  - 诊断 CI 与常规 CI 分开；
+  - 失败、取消、unsupported、未执行、未知与夹具缺陷都保留，不擅自重跑；
+  - 不宣布 G5 满足。
