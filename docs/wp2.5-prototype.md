@@ -37,6 +37,7 @@
 > - [Review 102](reviews/codex-review-102.md) 对 PR #41（HEAD `fbcef6f`，代码点 `eb2317f`）：B1 ~ B3 在受审的原型调用链范围内**关闭**，修复技术 GO；当前**暂不建议合并**（诊断失败；arm64 的 `p3.k-nostatus-once` 没有执行目标、没有命中接缝；同一内层运行中布局场景的失效详情丢失，N-102-1 非阻塞）。按负责人授权的最小观测与补证（§15.12）：门禁保留内层运行的全部最终结果，3 个组合回归；固定代码点 `9d45036` 的诊断 run 40847347022 四个作业 success。run 40817305419 中布局为何 invalid 仍**未知**。**待独立审查**。
 > - [Review 103](reviews/codex-review-103.md) 对 PR #41（HEAD `ab4b7dd`，代码点 `9d45036`）：**技术 GO，建议合并固定对象**；N-102-1 关闭；B1 ~ B3 按 Review 102 的范围保持关闭；N1、N2 仍为非阻塞；run 40817305419 的 failure 与布局失效的未知原因保留；证据足以作为冻结审查的输入，G5 **不认定整体满足**（§15.13）。负责人条件授权以 merge commit 合并 PR #41（review-resolution §127）。
 > - **2026-10-29**（review-resolution §128）：PR #41 以 merge commit 合并为 `03a6f6e`（锁定最终 HEAD `ee83482`），合并树与最终 HEAD 相同，master push CI run 40885279060 正式成功。G5 的冻结审查包在规范第 9 版 §21（独立文档 PR），**待冻结审查**；本文的原型代码没有改动。
+> - **2026-10-30**（review-resolution §131、§132）：负责人决定 Q-4 选 (a)：入口 E2 为拟采用的入口，先完成 P-5 及其独立审查再决定冻结。PR #42 已以 merge commit 合并为 `0442f14`，合并核验与 master push CI run 40916689386 正式成功。P-5 的计划在 §16 定稿，**待 Review 107**；P-5 的执行未授权，本文的原型代码没有改动。
 > - 这**不是**规范冻结：草案为第 7 版，待独立审查和冻结；14 项产品选择、D21、Q-1 与 Q-2 已决定，技术候选仍待审查。T1 ~ T6 按 Review 075 的裁定只得到**局部支持**（§11；草案 §17.5 的 G1 ~ G15 与 §19）。
 > - 原型成功**不是**生产验收：生产 Check Runner、迁移 0009、CLI 接线都没有授权，WP2.5 没有实现或验收，M2 没有整体验收。
 > - 本文中的“候选规格”都待审查；其中涉及可见行为的（例如 C-4、C-7、C-10）依赖对应的产品选择（§9、§10）。C-4 的产品语义与 C-7（D20 (i)）已于 2026-10-25 决定，其技术部分仍待审查。本文不新增接受风险，也不批准任何保证调整。
@@ -4053,3 +4054,265 @@ R2 也说明 `done` 的报告文件检查是第二道防线：即使没有核验
 | G3、G6、G7 | 没有新增 | 维持各自的局部支持 |
 
 **收尾的范围**：相对受审 HEAD `ab4b7dd` 只有 Review 103 的归档与文档；原型与 workflow 仍与 `9d45036` 相同，不为纯文档收尾重跑原型诊断。技术 GO 与合并建议不是规范冻结、产品批准、生产入口的选择、实施授权或 WP2.5 / M2 验收。
+
+## 16. P-5：macOS 入口 E2 的最小原型（计划定稿，待 Review 107）
+
+### 16.1 授权、依据与固定的身份
+
+- **授权**：
+  - 负责人 2026-10-30 决定 Q-4 选 (a)（review-resolution §131）：入口 E2 为拟采用的入口，先完成 P-5 及其独立审查，再决定冻结。
+  - 同日授权在 PR #42 合并核验成功之后，另开纯文档 PR 定稿本计划，交 Review 107。
+- **本节只是计划**：
+  - 固定计划、检查的办法与预期；不写原型代码，不构建或运行入口 E2。
+  - 本计划的提交先于任何原型代码。
+  - P-5 的执行须在本计划经独立复审之后另行明确授权。
+- **依据**：
+  - 规范第 9 版 §21.5（H1 ~ H6）、§21.6（Q-4 的决定）、§21.9（计划草稿、分类与期限）；
+  - Review 104 §8、Review 105 §6、Review 106 §4 ~ §6。
+  - 规范 §21.9 的草稿与本节不一致时，以本节为准；本节不改变规范的规则。
+
+**固定的身份**：
+
+| 项 | 固定值 |
+|---|---|
+| base 与所依赖的规范 | master `0442f14ebfc985d2dfadd9684efeb44d821763e4`（PR #42 的合并，规范第 9 版收尾稿） |
+| Go 工具链 | `go1.27.3`，标签解引用为 `2aae1000ea1d4b28923b96db28acf4e3b99d6aff`（官方仓库 `golang/go`） |
+| 依赖 | `golang.org/x/sys v0.49.0`（提交 `b6b8557e8e2974925aec7a136ba0e323eedc5f43`；`prototype/wp25/go.sum`：`h1:XbzkgYJHdqh/8m2Uu0W/dQv8nktxx4BFHp1M0gROTXA=`）；不新增依赖 |
+| 静态依据 | xnu 26.5 `ac9718fb1af618d5ce8678d0dc6e8a58f252216f`（规范 §19.5、§21.4、§21.5） |
+| 计划的版本 | 本节所在的提交（PR 描述登记它的 SHA） |
+| 平台 | `macos-latest`（arm64）与 `macos-26-intel`（x86_64），同一个固定代码点 |
+
+### 16.2 Go 1.27.3 的过滤逻辑与调用桩（重新核对）
+
+规范 §21.5、§21.9 引用的是本机的 Go 1.27.1。本计划固定 `go1.27.3`，所以按 `2aae1000` 重新取得下列文件。它们与 1.27.1 逐字节相同（SHA-256 相同），所以引用的行号不变：
+
+| 文件 | SHA-256 | 核对的内容 |
+|---|---|---|
+| `src/syscall/syscall_darwin.go` | `07eea080aae7b97b37943bb0964594a198c73b8ec35697b2b8912c0323cd129a` | `:330` ~ `335` 的 `errno(r, e)`：`int32(r) == -1` 时返回 e，否则返回 0。`:403` ~ `408` 的 `syscall6`：带 `//go:linkname`、`//go:nosplit`、`//go:uintptrkeepalive`，先调用 `syscalln`，再经 `errno(r1, err)` 返回 |
+| `src/runtime/sys_darwin.go` | `512814eff1c543337b9e5e57febf25641ff0b2520f2326ebaa9c9252ab393090` | `:23` ~ `31` 的 `syscall_syscalln`（`entersyscall` / `exitsyscall`）；`:38` 起的 `syscall_rawsyscalln`，`:49` 经 `libcCall` 进入 `syscallN_trampoline` |
+| `src/runtime/sys_darwin_arm64.s` | `4a9b539aca0682b4f8f90257fff4a2be645befb5a695623dd2f77c8ef853d17d` | `:484` 起的 `syscallN_trampoline`；目标调用之后，`:568` ~ `569` 读取线程的 errno |
+| `src/runtime/sys_darwin_amd64.s` | `4dc648f7324975e4a57fdb8d793844d798bd4db8d1c65aef42fe7502372bee6d` | `:510` 起的 `syscallN_trampoline`；`:571` ~ `572` 读取 errno |
+| `src/runtime/os_darwin.go` | `5fbeed78977bcae998e0b48dea235690be222cef8713c29397ae941cd1ea9685` | `:397` 信号处理带 `SA_RESTART` |
+| `src/runtime/signal_darwin.go` | `ec4119fe65a45c77833150bc11107e4a11bf1b062c04cd1c87c9731a01935d9b` | `:20` SIGSYS 为 `_SigThrow` |
+| `src/runtime/proc.go` | `40d15ce858cf058cff92606001a29ee1689db88c121a2f0c283163a0d64a7375` | `:5658` ~ `5660` `LockOSThread` 只绑定 goroutine 与线程 |
+| `src/cmd/compile/internal/noder/noder.go` | `2aa3493281bfced8419994a553606fe074f3dbde6a46cf7a66cff0519cb68e83` | `:315` 起：带库名的 `//go:cgo_import_dynamic` 允许在普通包中使用 |
+| `src/cmd/link/internal/ld/macho.go` | `665c2270cec3df9bc9b77931d7e87e50ad5726da147e8df651cead6230c1ef17` | `:449` macOS 的最低版本 13.0.0 |
+| `src/syscall/zsyscall_darwin_amd64.go` | `b7d5fe4a69c51b0cd8ecab53ae76ff599ac429dadd5fa43c3f5be0c8dda56f8a` | `:44` `wait4` 经 libSystem |
+| `src/syscall/zsyscall_darwin_arm64.go` | `941547c92d1204cf9666c40299b1685f393cb5546369b9238ec534dcd7a81201` | 同上（arm64） |
+
+- **由此推出**（Review 106 §4.1）：对这份过滤逻辑，`int32(r1)` 不为 −1 时，不论过滤之前的 e 是什么，输出的 err 都为 0。
+- **适用的前提**：入口 E2 确实调用这一个 `syscall6`，不改用未过滤的入口或自制的过滤器。
+- **作业的实际版本**：作业中 `go version` 不是 `go1.27.3` 时，记为 T，不继续。
+
+### 16.3 入口 E2 的实现方案
+
+**新的 test-only 子包** `prototype/wp25/e2waitid`（package `e2waitid`）：
+
+| 文件 | 内容 |
+|---|---|
+| `doc.go`（没有构建约束） | 只有包说明，使非 darwin 平台的 `./...` 不因没有可构建的文件而出错 |
+| `waitid_darwin.go`（`//go:build darwin`） | 写法见下面的说明 |
+| `waitid_darwin_arm64.s`、`waitid_darwin_amd64.s` | `#include "textflag.h"`；`TEXT libc_waitid_trampoline<>(SB),NOSPLIT,$0-0` 之后 `JMP libc_waitid(SB)`；`GLOBL ·libc_waitid_trampoline_addr(SB), RODATA, $8`；`DATA ·libc_waitid_trampoline_addr(SB)/8, $libc_waitid_trampoline<>(SB)`。与 x/sys `unix/zsyscall_darwin_arm64.s:96` ~ `99` 中 kevent 的写法相同 |
+
+`waitid_darwin.go` 的写法：
+
+- import `syscall`、`unsafe`；
+- `//go:cgo_import_dynamic libc_waitid waitid "/usr/lib/libSystem.B.dylib"`，以及 `var libc_waitid_trampoline_addr uintptr`；
+- `//go:linkname syscall_syscall6 syscall.syscall6`，加上没有函数体的声明 `func syscall_syscall6(fn, a1, a2, a3, a4, a5, a6 uintptr) (r1, r2 uintptr, err syscall.Errno)`，与 x/sys `unix/syscall_darwin_libSystem.go:13`、`:21` 相同；
+- `func Waitid(idtype, id uint32, info unsafe.Pointer, options uint32) (r1 uintptr, err syscall.Errno)`，函数体只有一次调用：`syscall_syscall6(libc_waitid_trampoline_addr, uintptr(idtype), uintptr(id), uintptr(info), uintptr(options), 0, 0)`。
+
+**ABI 与指针的生命周期**：
+
+- **参数**：C 的声明为 `int waitid(idtype_t, id_t, siginfo_t *, int)`，前两个与最后一个都是 32 位。四个参数经寄存器传递：arm64 为 x0 ~ x3，x86_64 为 rdi、rsi、rdx、rcx。动态导入的目标是 libSystem 的 `waitid`（C 的符号 `_waitid`），与 x/sys 对其他函数的写法相同，不用 `$NOCANCEL` 等变体。
+- **缓冲区**：
+  - 调用者用自己的局部数组 `[siSize]byte`，传入 `unsafe.Pointer(&buf[0])`。
+  - 向 uintptr 的转换只出现在没有函数体的函数的调用参数表中，适用 unsafe 的第 4 条规则。
+  - 调用之后，调用者 `runtime.KeepAlive(&buf)`。
+  - 这些是对源码的静态核对，不是运行的证明。
+- **返回值的解释**：消费者只按 `int32(r1)` 解释返回值：
+  - 0 且 err 为 0 → 成功；
+  - −1 且 err 不为 0 → 错误；
+  - 其他组合（例如 −1 而 err 为 0，或非 0、非 −1）→ T（“不一致的返回”）。
+
+**原型的接线**（`prototype/wp25/tree_darwin_test.go`）：
+
+- 新的低层函数 `waitidCall(idtype, id, options uint32) (ret int32, err syscall.Errno, si [siSize]byte, calls int)`：
+  - 调用之前写入哨兵：`si_pid` 置 0，其余字节为固定的模式；
+  - 调用 `e2waitid.Waitid`，之后 `runtime.KeepAlive`；
+  - 记录这一次调用。它是原型中 `e2waitid.Waitid` 唯一的调用者。
+- `readWaitid(pid)` 改为调用 `waitidCall(P_PID, pid, WEXITED|WNOWAIT)`，判定按上面的返回值解释。三个调用点都经它：
+  - `exitObserver.wait` 的提前路径（`:191`）；
+  - `waitidNoWait`（`:434`）；
+  - `p3Run.readW`（`p3_darwin_test.go:666`）。
+- 删去 `unix.Syscall6(unix.SYS_WAITID, …)`（`:310`）。P-5 的代码点中不再有入口 E1。P-3 的入口 E1 证据（`9d45036`）保留为历史。
+- `waitid2`：第一次读取失败之后不再读第二次。这与 §19.5 的错误出口一致：观察失败之后不再观察。
+  - P-3 的 W 门禁改写的是成功读取的字段，第一次调用本身是成功的，所以不受影响；
+  - `p3.w-reread-once` 改写的是第二次读取，同样不受影响。
+
+### 16.4 构建、符号与静态检查（办法与预期）
+
+都在两个 macOS 作业中执行；在 `prototype/wp25` 下，带 `CGO_ENABLED=0`：
+
+| ID | 检查 | 办法 | 预期 | 不成立时 |
+|---|---|---|---|---|
+| `P5.static.toolchain` | 工具链 | `go version`、`go env GOVERSION CGO_ENABLED GOTOOLCHAIN` | `go1.27.3`、`0`、`local` | T，不继续 |
+| `P5.static.vet` | vet（含 asmdecl） | `go vet ./...` | 通过 | T |
+| `P5.static.build` | 构建 | `go test -c -o "$RUNNER_TEMP/wp25.test" .` | 成功 | T（H1 不成立） |
+| `P5.static.settings` | 构建设置 | `go version -m "$RUNNER_TEMP/wp25.test"` | 含 `build	CGO_ENABLED=0` | T |
+| `P5.static.symbols` | 跳板与动态导入 | `go tool nm "$RUNNER_TEMP/wp25.test"`；Xcode 的 `nm -m "$RUNNER_TEMP/wp25.test"` | 前者有名字含 `e2waitid.libc_waitid_trampoline` 的符号，以及 `waitid` 的动态导入；后者 `_waitid` 为 `(undefined) external`，来自 `libSystem`。第一次运行时原样记录两份输出中的这几行 | T（H1 不成立） |
+| `P5.static.entry` | 入口的覆盖 | darwin 的测试用 `go/parser` 解析模块中的 Go 源文件，并把 `.s` 当作文本检查 | 见下面的四条断言 | T（不是机制的反证） |
+| `P5.static.load` | 加载 | 测试二进制在目标系统上启动，并执行到 `TestP5` | `TestP5` 开始运行 | T（H2 不成立） |
+
+`P5.static.entry` 的四条断言：
+
+1. `cgo_import_dynamic` 指令与 `libc_waitid` 只出现在 `e2waitid` 中；
+2. 没有参数中出现 `SYS_WAITID` 的 `unix.Syscall*`、`unix.RawSyscall*`、`syscall.Syscall*` 或 `syscall.RawSyscall*` 调用；
+3. `e2waitid.Waitid` 只被 `waitidCall` 调用；
+4. `readWaitid` 与 `P5.err.*` 都经 `waitidCall`。
+
+这些静态检查每个作业 1 次，计入“静态”证据，不计入原生的 confirmed。
+
+### 16.5 原生场景、受控对象与预测（每个场景 3 次）
+
+- **身份前提**：每个场景的被读对象，都是本进程以 `startGroup` 启动、在自己进程组中的直接子进程。读取之前，`r.zombie` 确认它是本进程未回收的僵尸，且启动时间相符（3 s 内）；不成立为 T。
+- **独立的预测**：N 用 `p3NormW` 与 `p3Pred` 由原始值 R 计算，不调用 M 的解码器。Review 101 的 N2 仍是限制。
+- **收尾顺序**：读取完毕 → `r.reap`（先确认组结束，再回收组长，预测 `wait4` 的状态）→ 普查，与 P-3 相同。
+
+| 场景 ID | 构造 | 经 E2 的 waitid 调用次数 | 预测（R / N） |
+|---|---|---|---|
+| `P5.layout` | P-3 的布局探针 | 0 | 55 项与 Go 侧相同 |
+| `P5.w.exit7`、`-100`、`-107`、`-ff`、`-7f`、`-80` | P-3 的 `p3W`（helper `exit-after`） | 2（`waitid2`） | R 与原型文档 §15.7 相同（`si_status` 依次为 `0x7`、`0x100`、`0x107`、`0xffffff`、`0x7`、`0x0`）；N 依次为 7、0、7、255、7、0；两次读取相同 |
+| `P5.w.signal9` | P-3 的 `p3WSignal` | 2 | `si_code` 2、`si_status` 9；N 为被信号终止、9 |
+| `P5.c.exit7`、`-107`、`-ff` | 同一个未回收的对象，kqueue 的事件加经 E2 的 `waitid2` | 2 | K 与 W 规范化之后相同（C1） |
+| `P5.k.esrch` | P-3 的 `p3KEsrch`：注册得到 `ESRCH` 之后的提前路径 | 2（提前路径 1 次加第二次读取） | 退出，7 |
+| `P5.err.echild` | 整个场景 `runtime.LockOSThread`，结束时释放。先建立受控的僵尸子进程（`exit-after 0 7`），再调用 `waitidCall(P_PID, getpid(), WEXITED\|WNOHANG\|WNOWAIT)`；随后对子进程做 `waitid2` | 3（错误 1 次、健康 2 次） | 错误：`int32(r1)` 为 −1、err 为 `ECHILD`，不读取缓冲区（依据：固定源码 `kern_exit.c:3501` ~ `3503`，本进程不是自己的子进程）。健康：每次 0 / 0，R 与 `w.exit7` 相同 |
+| `P5.err.einval` | 同上，错误调用改为 `waitidCall(P_PID, 子进程, 0)` | 3 | 错误：−1、`EINVAL`（`kern_exit.c:3316` ~ `3318`，在遍历子进程之前返回，不消费子进程的状态）。健康：同上 |
+
+- **计数**：原生共 21 + 9 + 3 + 6 = 39 次，布局 3 次。
+- **线程绑定**：只提供线程局部的语境（规范 §21.9）。不宣称残留负载已经建立。
+- **两个真实错误**：都不作用于其他进程，也不改变子进程的状态。
+
+### 16.6 门禁与对照（内层运行）
+
+| ID | 内层 | 注入（接缝） | 预期 | 经 E2 的调用次数 |
+|---|---|---|---|---|
+| `p5.eintr-once` | `TestP5$/^(layout.1\|w.exit7.1)`，目标 `P5.w.exit7.1` | `p5-eintr-once`，见下面的说明 | 命中恰好 1 次；内层 invalid（非零），理由恰好一条：`observation failed: waitid 1:` 加 EINTR 的错误文本；不读第二次；清理已核实 | 1 |
+| `control.p5-w-exit7` | 同上 | 不注入 | 内层 confirmed（零）；两次读取相同 | 2 |
+
+`p5-eintr-once` 的注入：
+
+- 位置：`readWaitid` 中、`waitidCall` 返回之后。
+- 先保存真实的结果（`ret`、err 与 R），记入证据。
+- 真实的结果是成功时，经 `injectOnce` 把这一次的结果换成（−1，`EINTR`）。站点文字为 `P-5 waitid: (0, 0) -> (-1, EINTR)`。
+- 真实的结果不是成功时，不改写，见 §16.7。
+
+两个门禁都按 P-3 门禁的 `exact` 判定，外层的见证、普查、补救与保险清理照旧。
+
+**另列为 P-5 相关的回归**（不计入上表，也不计入 39 次原生）：
+
+- P-3 的 W 与 C 门禁：`p3.w-sipid-once`、`p3.w-signo-once`、`p3.w-code-once`、`p3.w-highbyte-once`、`p3.w-negative-once`、`p3.w-reread-once`、`p3.c-mismatch-once`，以及对照 `control.p3-w-exit7`、`control.p3-c-exit7`。
+- 它们在 `TestGate` 中照常运行，因为入口替换而经过 E2。
+- P-3 的根层场景（`TestP3`）同样经 E2 运行。它们也只作回归另列，不再是入口 E1 的证据。
+
+### 16.7 注入之前真实结果的消费与唯一的分类
+
+- **消费**：`p5-eintr-once` 的真实调用不是成功时：
+  - 不改写，原样返回真实的错误；
+  - 同时记录 T：`the real waitid at the seam's site failed: …`，这一记录持续到终判；
+  - 这时注入没有命中，内层理由不止一条，门禁失败。
+  - 只保存而不消费，不算失败关闭。
+- **唯一的分类**：按规范 §21.9 的断言表，优先级沿用 §19.12 的层次，在 P-5 中逐项落实如下：
+
+| 状态 | 终判 |
+|---|---|
+| §16.4 的任何静态检查不成立；工具的报告、解析、关闭或身份观察出错；必要的元数据未知；清理失败或最终状态未知 | invalid（T），列出全部原因；之后的成功与补救的成功都不恢复结论 |
+| 可靠确认是 Rosetta、架构不符，或缺少 Xcode / SDK | unsupported，不计 confirmed；读不到元数据归 T |
+| 布局 invalid 或 refuted、预算不足、未执行、没有命中 | 依赖它的目标不能 confirmed，保留前提场景自己的理由 |
+| 工具前提有效时：原生 R 与预测不符；`ECHILD` / `EINVAL` 的返回值或 err 不同；健康调用不是 0 / 0 或 R 不同；调用次数与 §16.5、§16.6 不同 | refuted；与无关的工具错误叠加时为 invalid（T 优先） |
+| `p5.eintr-once` 被预期的规则拒绝 | 内层 invalid；门禁只在命中恰好 1 次、理由恰好一条、调用 1 次、内外层的清理与最终状态都满足时通过 |
+| 健康的原生场景全部与预测相同 | 只有这时才可 confirmed |
+
+### 16.8 期限与截止的传递（N-106-2）
+
+- **D 的建立**：S 为 `TestP5` 开始的时刻（在 `P5.layout.1` 之前），T 为 `TestP5` 的 `t.Deadline()`（`go test -timeout 15m`）。D = min(S + 180 s, T − 30 s)，只建立一次。
+- **D 覆盖**（不按 ID 的前缀区分）：
+  - `P5.static.entry`；
+  - `P5.layout` 的 3 次；
+  - 39 次原生运行；
+  - `p5.eintr-once` 与 `control.p5-w-exit7` 的内层运行与外层核验。
+- **D 不覆盖**：
+  - `P5.static.toolchain`、`vet`、`build`、`settings`、`symbols`：它们是 `go test` 之外的 workflow 步骤，以作业的 20 min 为界。
+  - P-3 的回归门禁：在 `TestGate` 中沿用既有的期限（内层 `-test.timeout=150s`、外层 180 s；P-3 的观察 20 s、外层 10 s、收尾 20 s、余量 120 s），只受同一个 `go test` 截止约束。它们不计入 P-5 的 3 min，也不会每项各得 15 min。
+- **单次截止**：
+  - 每一次根层运行从 s 开始，截止 d = min(s + 60 s, D)；
+  - 准入要求 D − s ≥ 60 s，否则不启动，记为未执行；
+  - 各阶段沿用 P-3 的观察 20 s、外层 10 s、收尾 20 s，都截取到 d。
+- **门禁的截止传递**：
+  - 外层在 s 计算 d_g = min(s + 60 s, D)；内层的截止 d_i = d_g − 30 s。
+  - 外层以环境变量 `WP25_P5_DEADLINE`（Unix 纳秒）传入 d_i，并设 `-test.timeout` 为 d_i − 当前时刻（向上取整到秒）再加 5 s。
+  - 内层把 d_i 当作自己的 D，不重新取得 180 s；它的单次截止为 min(开始 + 60 s, d_i)。
+  - 外层最多等到 d_i + 5 s，之后按 `runInner` 既有的路径结束内层，并记为“inner run did not end”。
+  - 外层的见证、普查、补救与保险清理，在 d_g 之前完成。
+- **D 之后的 30 s**：
+  - 责任人：`TestP5` 在 S 注册的收尾。
+  - 截止：D + 30 s，不越过 T。
+  - 内容：按既有的归属规则，收尾所有仍登记在 P-5 名下的进程、文件与观察器。没有确认的，记为 invalid / 未知，写入汇总；不另取期限。
+- **不完整**：有未执行的运行时，P-5 不算完整通过；不减少次数、不扩大预算、不重跑。
+- **用户态的期限不是单次系统调用的硬实时保证**。
+
+### 16.9 归属、收尾与失败记录
+
+- 复用 P-3 的工具与子进程登记、身份核对与独立的外层普查；每个 `Cmd`、文件、观察器与后代都有所有者。
+- 先保存被测的状态（`WP25P` 行），再补救；归属未知时不做任何动作；补救的成功不恢复结论。
+- 内层没有打印最终结果时，保留错误与正式的非零结果。
+
+### 16.10 workflow 与元数据（在 P-5 的原型 PR 中改动）
+
+- **工具链**：setup-go 由 `go-version-file` 改为 `go-version: 1.27.3`（四个作业都改）；作业的环境加 `GOTOOLCHAIN=local`。
+- **macOS 的两个作业**：
+  - 测试步骤加 `CGO_ENABLED=0`；
+  - 增加 §16.4 的步骤（vet、`go test -c`、`go version -m`、`go tool nm`、`nm -m`），各自的输出原样进入日志。
+- **Ubuntu、Windows**：只随工具链的固定而变。
+- **元数据**：
+  - 沿用 WP25META：OS 与内核、镜像、Xcode 与 SDK、`hw.machine`、`proc_translated`、实际检出的 SHA；
+  - 增加 `go version`、`CGO_ENABLED`、`GOTOOLCHAIN`、构建设置与跳板的符号。
+  - 环境未知时不当作健康。
+- **触发**：workflow 的触发、并发与“没有手动触发”的政策不变；一个代码点只有一次诊断，不重跑。
+
+### 16.11 结果模板
+
+- **根层**：每次运行一行 `WP25RESULT`（verdict、R、N、M、理由、清理、启动与工作量），增加 `calls`（经 E2 的调用次数）与 `kind`（`static` / `native`）。
+- **门禁**：沿用门禁行（含 `inner`）。
+- **汇总**：每个作业一行 `WP25P5`，内容为：
+  - 工具链与 cgo；
+  - 静态检查的逐项结论；
+  - 原生的 confirmed 数与应有的 39；
+  - 门禁与对照的结论；
+  - 模型检查（`TestP3Decode`、`TestP3Parse` 等纯函数测试）的结论；
+  - 未执行数、D 的值；
+  - H4、H6 的限制声明。
+- **报告**（原型文档的结果节）：
+  - 两个架构分开；
+  - 静态、原生、接缝、模型四类分开计数，不合计；
+  - 下面两条声明原样写入：
+
+    > H4：静态依据是固定的 Go 1.27.3 过滤源码；动态覆盖的是所测的真实错误（`ECHILD`、`EINVAL`）与错误之后的健康恢复；没有动态取样的是健康调用时过滤之前的 errno 是否非零。
+
+    > H6：只有接缝证据（消费者的不重试与失败）；真实的 EINTR 穿过跳板没有原生验证。
+
+### 16.12 会改变设计的结果与停止的条件
+
+按负责人 Q-4 的决定：P-5 出现反证、或无法取得有效证据时，报告并交负责人重新决定。不自行切换入口、扩大预算、降低判定条件或重跑。下列结果属于这种情况：
+
+- H1 或 H2 不成立（构建、链接、符号或加载失败）；
+- H3 ~ H5 被反证（原生值、真实错误或健康恢复与预测不同）；
+- 调用次数与计划不同。
+
+### 16.13 不在范围之内
+
+- 生产 Runner、生产的 C-9 lint；
+- 与入口 E1 的对照运行；
+- 原生的 EINTR、pthread 的取消路径、部署的 libSystem 的逐字节核对；
+- 过滤之前 errno 的取样（负责人决定 Q-4 (a) 时认可了不做）；
+- 其他 macOS 版本与物理的 Apple Silicon；
+- N1、N2 与维护事项。

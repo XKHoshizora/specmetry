@@ -8431,3 +8431,74 @@ PR #39 合并之后，按负责人的指令做了只读的冻结前差额整理�
 - B-P5-1 关闭；文档技术 GO；负责人已决定 Q-4 选 (a)，并条件授权以 merge commit 合并 PR #42。
 - P-5 的计划待另开文档 PR 定稿并经 Review 107 复审；P-5 的执行未授权。
 - 规范是第 9 版草案，**未冻结**；G5 未满足；生产实现未授权；WP2.5 与 M2 未验收。
+
+## 132．PR #42 的合并核验；P-5 的计划定稿（待 Review 107）
+
+**一：PR #42 的收尾与合并**（按 §131 的授权一）
+
+- **收尾**：
+  - Review 106 原样归档为 `c35ed8d`；
+  - Q-4 的决定、N-106-1 的精化与 §131 为 `3d0c2f1`。
+  - 只有文档。`git diff 4eaa5f6 3d0c2f1 -- prototype .github internal cmd schemas go.mod go.sum web` 为空，没有原型诊断；受审的对象没有预期外的变化。
+- **最终 HEAD 的常规 CI**：run 40914221592，pull_request，attempt 1，正式 success（8/8）。
+  - 八个作业都检出合并快照 `ab7654d84e1d574a7521a1c1bee931e52bf9a2d6`：父提交依次为 `03a6f6e`、`3d0c2f1`，树 `b7d07a9` 与 HEAD 相同。
+  - Go 测试作业的 SKIP 集合与 `4eaa5f6` 的 CI 相同（macOS 7、Ubuntu 15、Windows 10）；没有 FAIL；每个作业 26 个包 ok；Ubuntu 的 8 个 CrossUser 测试 PASS。
+  - 回执写入 PR 描述，没有为回执追加提交。
+- **合并**：
+  - 合并之前，PR 的标题与描述改为“未冻结草案”（unfrozen draft），并更新了过时的状态。
+  - 2026-10-29 16:57:46 UTC，以 merge commit 合并，`--match-head-commit` 锁定 `3d0c2f1fd21cefecc220c052aef4e5cdbd7db964`。
+  - 合并提交 `0442f14ebfc985d2dfadd9684efeb44d821763e4`：
+    - 父提交依次为 `03a6f6e`、`3d0c2f1`；
+    - 树 `b7d07a9` 与最终 HEAD 相同，`git diff 3d0c2f1 0442f14` 为空；
+    - `d31a0de`、`43f0c26`、`743a122`、`c8add1c`、`4eaa5f6`、`c35ed8d`、`3d0c2f1` 都是它的祖先。
+  - Auto-fix、Auto-merge 保持关闭。
+- **master push CI**：run 40916689386，push，attempt 1，正式 success（8/8）。八个作业都取得并检出合并提交 `0442f14` 本身（`checkout -B master`）；没有 FAIL；三个 Go 测试作业各 26 个包 ok。没有重跑。
+
+**二：P-5 的计划定稿**（按 §131 的授权二；上面的核验全部成功之后开始）
+
+- **分支与对象**：分支 `docs/wp2.5-p5-plan`，基于 master `0442f14`；独立的纯文档 PR，不合并，交 Review 107。
+- **计划**写在原型文档 §16（计划先于任何原型代码，与 P-3 的 §15 相同）。规范 §21.9 只加一条指向；两者不一致时以 §16 为准，§16 不改变规范的规则。
+- **按 Review 106 §4 ~ §6 固定的内容**：
+  - **固定的身份**：
+    - 工具链 `go1.27.3`（`2aae1000ea1d4b28923b96db28acf4e3b99d6aff`）；
+    - 依赖 `golang.org/x/sys v0.49.0`（不新增依赖）；
+    - 静态依据 xnu 26.5 `ac9718f`；
+    - base 与所依赖的规范为 `0442f14`。
+  - **重新核对**：按 `go1.27.3` 重新取得 11 个文件，与 1.27.1 逐字节相同，所以引用的行号不变。核对的内容包括 `syscall6` 与 `errno` 过滤、两个架构的 `syscallN` 跳板、`SA_RESTART`、SIGSYS 的处理、`LockOSThread`、动态导入的许可、链接器的最低版本、`wait4` 经 libSystem。
+  - **入口 E2 的实现方案**：
+    - 新的 test-only 子包 `prototype/wp25/e2waitid`，包含 `doc.go`、`waitid_darwin.go`，以及每个架构一份 `.s`；
+    - 写法与 x/sys 的生成代码相同：动态导入 libSystem 的 `waitid`，经 `//go:linkname` 取得 `syscall.syscall6`，跳板与地址；
+    - 指针的生命周期与返回值的 32 位解释；
+    - 原型中唯一的低层调用者 `waitidCall`，三个调用点都经它；
+    - 删去入口 E1；`waitid2` 在第一次读取失败之后不再读第二次。
+  - **构建、符号与静态检查**：`P5.static.toolchain`、`vet`、`build`、`settings`、`symbols`、`entry`、`load` 的办法与预期，都计为 T。
+  - **原生场景**：39 次原生运行与布局 3 次，写明受控对象、身份前提、独立的预测、调用次数与收尾顺序。其中 `P5.err.echild`、`P5.err.einval` 的预期来自固定源码，并在同一线程上接健康的 `waitid2`。
+  - **门禁与对照**：`p5.eintr-once` 与 `control.p5-w-exit7`，写明注入的位置、站点、调用次数与 `exact` 判定。P-3 的 W / C 门禁与 `TestP3` 经 E2 运行，只作回归另列。
+  - **消费与分类**：注入之前真实错误的消费（不改写、持续记为 T）；逐项的唯一分类。
+  - **期限（N-106-2）**：
+    - D 的建立与覆盖：显式包含 `control.p5-w-exit7`，不覆盖 workflow 的静态步骤与 P-3 的回归门禁；
+    - 单次截止与准入；
+    - 门禁的截止传递：d_g、d_i，`WP25_P5_DEADLINE` 与 `-test.timeout`；
+    - D 之后 30 s 的责任人与截止；
+    - P-3 门禁沿用既有期限的独立范围。
+  - **workflow 的改动**（在之后的原型 PR 中）：固定 `go-version: 1.27.3` 与 `GOTOOLCHAIN=local`；macOS 的 `CGO_ENABLED=0` 与静态步骤；元数据。
+  - **结果模板**：`WP25RESULT` 增加 `calls` 与 `kind`；每个作业一行 `WP25P5` 的汇总；四类证据分开；H4 与 H6 的限制声明原样写入。
+  - **停止的条件**：按 Q-4 的决定，反证或无法取得有效证据时，报告并交负责人；不切换入口、扩大预算、降低判定或重跑。
+- **同步**：规范开头与 §21.9 的指向、§21.8 的同步表；原型文档开头；AGENTS.md、implementation-plan 的状态。
+- **不变**：
+  - 原型代码与 workflow（改动在 P-5 获授权之后的原型 PR 中）；
+  - 生产代码、依赖、Schema、迁移与根 `ci.yml`；
+  - acceptance-criteria、data-model、prd、architecture；
+  - Q-3 (a)、Q-4 (a) 与其他已批准的决定，macOS 13+ / Intel 的支持，历史的未知。
+- **没有执行**：没有构建或运行入口 E2，没有改动或运行原型，没有触发诊断。
+
+**范围**：
+
+- 只有文档。
+- §1 ~ §131 与历史审查原文没有改动。
+
+**状态**：
+
+- PR #42 已合并为 `0442f14`，合并核验完成。
+- P-5 的计划在原型文档 §16 定稿，**待 Review 107**；P-5 的执行未授权。
+- 规范是第 9 版草案，**未冻结**；G5 未满足；生产实现未授权；WP2.5 与 M2 未验收。
