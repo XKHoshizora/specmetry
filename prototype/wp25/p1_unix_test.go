@@ -95,7 +95,7 @@ func p1Inner(s *scen, h *host, variant string) p1Run {
 			} else {
 				_ = syscall.Kill(-r.PID, syscall.SIGKILL)
 			}
-			m, gerr := groupLive(r.PID)
+			m, gerr := groupLive(r.PID, deadline)
 			if gerr != nil {
 				s.flag("observation failed: the members of group %d: %v", r.PID, gerr)
 				failed = true

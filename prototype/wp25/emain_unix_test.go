@@ -86,7 +86,7 @@ func TestGroupZombieLeader(t *testing.T) {
 	release()
 	exited, status, _ := tr.waitExit(5 * time.Second)
 	s.needLoad(exited && status == "exit 0", "the leader exited 0 (%v, %s)", exited, status)
-	live, err := tr.live()
+	live, err := tr.live(time.Now().Add(tKill))
 	if err != nil {
 		s.invalidf("observation failed: %v", err)
 	}

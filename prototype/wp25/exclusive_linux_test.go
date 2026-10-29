@@ -453,7 +453,7 @@ func (cr *checkRun) abort(s *scen) {
 	deadline := time.Now().Add(tKill)
 	for {
 		_ = cr.tr.kill()
-		m, err := cr.tr.live()
+		m, err := cr.tr.live(deadline)
 		if err != nil {
 			s.flag("observation failed while ending the rejected check's group: %v", err)
 			break

@@ -49,7 +49,7 @@ func unreadableCensus(t *testing.T, recheck func(int) (pinfo, presence)) (pid in
 	since := fmt.Sprintf("%d.%06d", k.Proc.P_starttime.Sec, k.Proc.P_starttime.Usec)
 	list, args, again := procList, procArgs, censusRecheck
 	t.Cleanup(func() { procList, procArgs, censusRecheck = list, args, again })
-	procList = func() ([]unix.KinfoProc, error) { return []unix.KinfoProc{*k}, nil }
+	procList = func(time.Time) ([]unix.KinfoProc, error) { return []unix.KinfoProc{*k}, nil }
 	procArgs = func(p int) ([]byte, error) {
 		if p == pid {
 			return nil, unix.EINVAL
@@ -57,7 +57,7 @@ func unreadableCensus(t *testing.T, recheck func(int) (pinfo, presence)) (pid in
 		return nil, fmt.Errorf("the check reads only its own helper, not %d", p)
 	}
 	censusRecheck = recheck
-	_, err = censusTag(token, since)
+	_, err = censusTag(token, since, time.Now().Add(tKill))
 	return pid, token, err
 }
 

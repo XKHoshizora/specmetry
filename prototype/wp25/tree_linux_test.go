@@ -93,7 +93,9 @@ func processes() (map[int]pinfo, error) {
 	return out, nil
 }
 
-func groupLive(pgid int) ([]int, error) {
+// groupLive lists the group's members that are not zombies. The deadline
+// is macOS's (its enumeration's retries); processes reads /proc once.
+func groupLive(pgid int, _ time.Time) ([]int, error) {
 	ps, err := processes()
 	if err != nil {
 		return nil, err

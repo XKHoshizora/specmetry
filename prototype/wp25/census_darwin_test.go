@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"golang.org/x/sys/unix"
 )
@@ -15,9 +16,10 @@ import (
 // censusTag lists the live processes of this user, started no earlier
 // than since (the inner run's start time), whose arguments and environment
 // (sysctl kern.procargs2) carry tag. A process that ends during the scan
-// is left out; one whose environment cannot be read is an error.
-func censusTag(tag, since string) ([]survivor, error) {
-	ks, err := procList()
+// is left out; one whose environment cannot be read is an error. The list
+// is read within the caller's deadline (kinfoProcs).
+func censusTag(tag, since string, deadline time.Time) ([]survivor, error) {
+	ks, err := procList(deadline)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", errCensus, err)
 	}
@@ -95,7 +97,7 @@ func commPrefix(k unix.KinfoProc) string {
 // The census's reads, which a direct check (census_check_darwin_test.go)
 // replaces; the real ones otherwise.
 var (
-	procList      = func() ([]unix.KinfoProc, error) { return unix.SysctlKinfoProcSlice("kern.proc.all") }
+	procList      = func(deadline time.Time) ([]unix.KinfoProc, error) { return kinfoProcs(deadline, "kern.proc.all") }
 	procArgs      = func(pid int) ([]byte, error) { return unix.SysctlRaw("kern.procargs2", pid) }
 	censusRecheck = procInfo
 )

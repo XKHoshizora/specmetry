@@ -75,6 +75,16 @@ type gateCase struct {
 	// own cleanup is verified, and the other scenarios of the inner run
 	// (the layout probe it needs) are confirmed.
 	exact bool
+	// reasons and cleanup refine exact (Review 101): the number of reasons
+	// (0: one), and how the inner run's cleanup must begin ("": verified).
+	reasons int
+	cleanup string
+	// hits, when set, is the exact number of the fault's hits (Review 101
+	// B3: each constructed ENOMEM is one).
+	hits int
+	// sees, when set, must be part of what the inner run observed (Review
+	// 101 B2: a file created before a failure is closed by its owner).
+	sees string
 }
 
 type gateResult struct {
@@ -384,6 +394,27 @@ var gateCases = []gateCase{
 	{id: "p3.k-range-once", test: "TestP3$/^(layout.1|k.exit7.1)", scenario: "P3.k.exit7.1", inject: "p3-k-range-once", want: invalid, goos: []string{"darwin"}, hit: true, exact: true, because: "planned corruption detected by K1"},
 	{id: "p3.k-stopped-once", test: "TestP3$/^(layout.1|k.exit7.1)", scenario: "P3.k.exit7.1", inject: "p3-k-stopped-once", want: invalid, goos: []string{"darwin"}, hit: true, exact: true, because: "planned corruption detected by K2"},
 	{id: "p3.c-mismatch-once", test: "TestP3$/^(layout.1|c.exit7.1)", scenario: "P3.c.exit7.1", inject: "p3-c-mismatch-once", want: invalid, goos: []string{"darwin"}, hit: true, exact: true, because: "planned corruption detected by C1"},
+
+	// Review 101: a failure of a real step must stay a tool failure of the
+	// run, whatever else holds, and reach its verdict for that reason, the
+	// injected text named. B1: the real read of the members that the
+	// planned fault acts on fails too, or the read of a run without the
+	// planned fault fails once and the next ones succeed. B2: a close of a
+	// tool step's output file, or of the kqueue observer once the run's
+	// observation is complete, fails after the real close; a file is
+	// created and the next one is not, and the first is closed by its
+	// owner; a failure of the read and of the close in one run, both kept.
+	// B3: 4 ENOMEMs in a row exceed §19.5's 3 retries. The controls: the
+	// planned fault alone, and 3 ENOMEMs that the legal retries absorb.
+	{id: "control.p3-enum-unknown", test: "TestP3$/^(layout.1|group.enum-unknown.1)", scenario: "P3.group.enum-unknown.1", want: confirmed, goos: []string{"darwin"}, exact: true},
+	{id: "control.p3-enum-enomem-retried", test: "TestP3$/^(layout.1|group.zombie-leader.1)", scenario: "P3.group.zombie-leader.1", inject: "p3-enum-enomem-3", want: confirmed, goos: []string{"darwin"}, hit: true, hits: 3, exact: true},
+	{id: "p3.enum-error-once", test: "TestP3$/^(layout.1|group.enum-unknown.1)", scenario: "P3.group.enum-unknown.1", inject: "p3-enum-error-once", want: invalid, goos: []string{"darwin"}, hit: true, hits: 1, exact: true, because: "observation failed: the members of group", alsoBecause: "injected: the read of the members failed"},
+	{id: "p3.enum-error-once-healthy", test: "TestP3$/^(layout.1|group.zombie-leader.1)", scenario: "P3.group.zombie-leader.1", inject: "p3-enum-error-once", want: invalid, goos: []string{"darwin"}, hit: true, hits: 1, exact: true, because: "observation failed: the members of group", alsoBecause: "injected: the read of the members failed"},
+	{id: "p3.enum-enomem-exhausted", test: "TestP3$/^(layout.1|group.zombie-leader.1)", scenario: "P3.group.zombie-leader.1", inject: "p3-enum-enomem-4", want: invalid, goos: []string{"darwin"}, hit: true, hits: 4, exact: true, because: "observation failed: the members of group", alsoBecause: "the 3 retries are used up"},
+	{id: "p3.close-out-once", test: "TestP3$/^(layout.1)", scenario: "P3.layout.1", inject: "p3-close-out-once", want: invalid, goos: []string{"darwin"}, hit: true, hits: 1, exact: true, cleanup: "NOT verified: closing failed", because: "cleanup not verified: closing the output file", alsoBecause: "injected: closing the output file failed"},
+	{id: "p3.close-kq-once", test: "TestP3$/^(layout.1|k.exit7.1)", scenario: "P3.k.exit7.1", inject: "p3-close-kq-once", want: invalid, goos: []string{"darwin"}, hit: true, hits: 1, exact: true, cleanup: "NOT verified: closing failed", because: "cleanup not verified: closing the exit observer", alsoBecause: "injected: closing the kqueue failed"},
+	{id: "p3.create-err-once", test: "TestP3$/^(layout.1)", scenario: "P3.layout.1", inject: "p3-create-err-once", want: invalid, goos: []string{"darwin"}, hit: true, hits: 1, exact: true, cleanup: "no processes", because: "the output files of the tool step", alsoBecause: "injected: the error file could not be created", sees: "created before the failure, closed"},
+	{id: "p3.enum-error-and-close-once", test: "TestP3$/^(layout.1|group.enum-unknown.1)", scenario: "P3.group.enum-unknown.1", inject: "p3-enum-error-and-close-once", want: invalid, goos: []string{"darwin"}, hit: true, hits: 2, exact: true, reasons: 2, cleanup: "NOT verified: closing failed", because: "injected: the read of the members failed", alsoBecause: "injected: closing the kqueue failed"},
 
 	// Review 077 B1-R2-W: the witness itself fails. The outer check must
 	// reject the evidence, whatever the inner run gives.
@@ -728,6 +759,10 @@ func runGate(t *testing.T, c gateCase, f outerFault) gateResult {
 				break
 			}
 		}
+		if c.sees != "" && verdictOK && !strings.Contains(got.Observed, c.sees) {
+			verdictOK = false
+			g.Reason = fmt.Sprintf("the inner run did not observe %q: %s", c.sees, got.Observed)
+		}
 		if c.exact && verdictOK {
 			var others []string
 			for id, o := range r.results {
@@ -736,13 +771,17 @@ func runGate(t *testing.T, c gateCase, f outerFault) gateResult {
 				}
 			}
 			sort.Strings(others)
+			reasons, cleanup := max(c.reasons, 1), c.cleanup
+			if cleanup == "" {
+				cleanup = "verified"
+			}
 			switch {
-			case c.want == invalid && len(got.Invalid) != 1:
+			case c.want == invalid && len(got.Invalid) != reasons:
 				verdictOK = false
-				g.Reason = fmt.Sprintf("want exactly one reason, got %d: %s", len(got.Invalid), got.Reason)
-			case !strings.HasPrefix(got.Cleanup, "verified"):
+				g.Reason = fmt.Sprintf("want exactly %d reasons, got %d: %s", reasons, len(got.Invalid), got.Reason)
+			case !strings.HasPrefix(got.Cleanup, cleanup):
 				verdictOK = false
-				g.Reason = "the inner run's cleanup is not verified: " + got.Cleanup
+				g.Reason = fmt.Sprintf("the inner run's cleanup does not begin %q: %s", cleanup, got.Cleanup)
 			case len(others) > 0:
 				verdictOK = false
 				g.Reason = "other scenarios of the inner run are not confirmed: " + strings.Join(others, ", ")
@@ -911,6 +950,9 @@ func runGate(t *testing.T, c gateCase, f outerFault) gateResult {
 	}
 	if c.hit && g.Hits == 0 {
 		g.Problems = append(g.Problems, "hit: the fault never reached its site")
+	}
+	if c.hits > 0 && g.Hits != c.hits {
+		g.Problems = append(g.Problems, fmt.Sprintf("hit: the fault reached its sites %d times, want %d", g.Hits, c.hits))
 	}
 
 	// Registration: each created process is registered by the inner run

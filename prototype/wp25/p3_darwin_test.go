@@ -160,8 +160,9 @@ func runP3(t *testing.T, c p3Case, n int) {
 		r.limits()
 		s.locked(func() { r.ev.T = append([]string(nil), s.invalid...) })
 		pline(id, r.ev)
-		p3Seam.w, p3Seam.k, p3Seam.n = nil, nil, 0
 		s.done()
+		// The seams stay set through the end: the observer's close is there.
+		p3Seam.w, p3Seam.k, p3Seam.n, p3Seam.enum, p3Seam.close = nil, nil, 0, nil, nil
 		if c.name == "layout" {
 			p3LayoutMu.Lock()
 			p3Layouts = append(p3Layouts, s.r.Verdict)
@@ -174,6 +175,7 @@ func runP3(t *testing.T, c p3Case, n int) {
 		r.layoutPremise()
 	}
 	r.seamFor(c.name, n)
+	r.closeFault()
 	c.run(r)
 }
 
@@ -204,6 +206,16 @@ func (r *p3Run) limits() {
 	if d := end.Sub(r.outer); d > p3Outer {
 		r.s.flag("the checks after the observation took %v, over their %v", d.Round(time.Millisecond), p3Outer)
 	}
+}
+
+// obsEnd is the end of the run's observation (§19.12): p3Inner from its
+// start, and no later than go test's deadline less p3Margin.
+func (r *p3Run) obsEnd() time.Time {
+	end := r.began.Add(p3Inner)
+	if dl, ok := r.t.Deadline(); ok && dl.Add(-p3Margin).Before(end) {
+		end = dl.Add(-p3Margin)
+	}
+	return end
 }
 
 // mark ends the observation.
@@ -488,6 +500,89 @@ func (r *p3Run) rewriteK(ev *unix.Kevent_t) {
 		r.hits++
 		r.ev.F = append(r.ev.F, site)
 	}
+}
+
+// The seams of Review 101's gate regressions (gate_test.go), in an inner
+// run only. Each answers in place of a real step, or replaces its result
+// after it, and records its hit; none is a native failure.
+//
+//   - p3-enum-error-once: the first read of the members in confirmEnd is
+//     answered by an injected error, the call not made (B1);
+//   - p3-enum-enomem-3, p3-enum-enomem-4: its first 3 or 4 calls are
+//     answered ENOMEM, the calls not made (B3);
+//   - p3-close-kq-once: the first real close of an exit observer's kqueue
+//     is made, its result replaced by an injected error (B2);
+//   - p3-close-out-once: the same for the first output file of a tool
+//     step (B2);
+//   - p3-create-err-once: the first error file of a tool step is not
+//     created; an injected error answers (B2);
+//   - p3-enum-error-and-close-once: p3-enum-error-once and
+//     p3-close-kq-once in one run.
+
+// enumFault is the construction for the first read of the members in
+// confirmEnd, or nil.
+func (r *p3Run) enumFault(pgid int) func(string) error {
+	inj := os.Getenv(injectEnv)
+	if os.Getenv(innerEnv) == "" {
+		return nil
+	}
+	switch inj {
+	case "p3-enum-error-once", "p3-enum-error-and-close-once":
+		return func(name string) error {
+			if name != "kern.proc.pgrp" || !injectOnceAt(inj, inj+"/enum", fmt.Sprintf("P-3 kern.proc.pgrp %d: the read of the members, the call not made, is answered by an injected error", pgid), os.Getpid()) {
+				return nil
+			}
+			r.ev.F = append(r.ev.F, fmt.Sprintf("the read of the members of %d is answered by an injected error, the call not made", pgid))
+			return errors.New("injected: the read of the members failed (the call was not made)")
+		}
+	case "p3-enum-enomem-3", "p3-enum-enomem-4":
+		limit := map[string]int{"p3-enum-enomem-3": 3, "p3-enum-enomem-4": 4}[inj]
+		n := 0
+		return func(name string) error {
+			if name != "kern.proc.pgrp" || n == limit {
+				return nil
+			}
+			n++
+			injectHit(fmt.Sprintf("P-3 kern.proc.pgrp %d: call %d of %d answered ENOMEM, the call not made", pgid, n, limit), os.Getpid())
+			r.ev.F = append(r.ev.F, fmt.Sprintf("constructed ENOMEM %d of %d for the read of the members of %d, the call not made", n, limit, pgid))
+			return unix.ENOMEM
+		}
+	}
+	return nil
+}
+
+// closeFault sets the construction for the observer's close, if any.
+func (r *p3Run) closeFault() {
+	inj := os.Getenv(injectEnv)
+	if os.Getenv(innerEnv) == "" || inj != "p3-close-kq-once" && inj != "p3-enum-error-and-close-once" {
+		return
+	}
+	p3Seam.close = func(err error) error {
+		if err != nil || !injectOnceAt(inj, inj+"/close", "P-3 the real close of an exit observer's kqueue was made; its result is replaced by an injected error", os.Getpid()) {
+			return err
+		}
+		r.ev.F = append(r.ev.F, "the real close of the exit observer's kqueue succeeded; its result is replaced by an injected error")
+		return errors.New("injected: closing the kqueue failed (the real close was made)")
+	}
+}
+
+// closeOut closes a tool step's output file, through the seam
+// p3-close-out-once.
+func closeOut(f *os.File, step string) error {
+	err := f.Close()
+	if err == nil && injectOnce("p3-close-out-once", "P-3 the real close of the output file of the tool step "+step+" was made; its result is replaced by an injected error", os.Getpid()) {
+		return errors.New("injected: closing the output file failed (the real close was made)")
+	}
+	return err
+}
+
+// createErr creates a tool step's error file, through the seam
+// p3-create-err-once.
+func createErr(path string) (*os.File, error) {
+	if injectOnce("p3-create-err-once", "P-3 the error file "+filepath.Base(path)+" of a tool step is not created; an injected error answers", os.Getpid()) {
+		return nil, errors.New("injected: the error file could not be created (no call made)")
+	}
+	return os.Create(path)
 }
 
 // corruption judges a gate regression's run by the decoder's answer
@@ -805,7 +900,7 @@ func p3Group(fail bool) func(*p3Run) {
 		r.answer("kqueue (the leader)", tr.obs.s.end, err)
 		r.predict("the leader's exit (kqueue)", "exit 0", status)
 		r.zombie(tr)
-		live, err := tr.live()
+		live, err := tr.live(r.obsEnd())
 		if err != nil {
 			s.invalidf("observation failed: the members of group %d: %v", tr.pid, err)
 		}
@@ -842,7 +937,11 @@ func p3Group(fail bool) func(*p3Run) {
 func (r *p3Run) confirmEnd(tr *unixTree, fail bool) string {
 	deadline := time.Now().Add(tKill)
 	for first := true; ; first = false {
-		m, err := groupLive(tr.pid)
+		if first {
+			p3Seam.enum = r.enumFault(tr.pid)
+		}
+		m, err := groupLive(tr.pid, deadline)
+		p3Seam.enum = nil
 		switch {
 		case fail && first:
 			r.hits++
@@ -1100,7 +1199,7 @@ func (r *p3Run) toolRaw(step string, limit time.Duration, name string, args ...s
 	}
 	outPath, errPath := filepath.Join(r.dir, step+".out"), filepath.Join(r.dir, step+".err")
 	stdout, err1 := os.Create(outPath)
-	stderr, err2 := os.Create(errPath)
+	stderr, err2 := createErr(errPath)
 	if err1 != nil || err2 != nil {
 		s.invalidf("the output files of the tool step %s: %v, %v", step, err1, err2)
 	}
@@ -1109,7 +1208,7 @@ func (r *p3Run) toolRaw(step string, limit time.Duration, name string, args ...s
 	cmd.Dir = r.dir
 	cmd.Stdout, cmd.Stderr = stdout, stderr
 	err := start(cmd)
-	_ = stdout.Close()
+	_ = closeOut(stdout, step)
 	_ = stderr.Close()
 	if err != nil {
 		s.invalidf("the tool step %s did not start: %v", step, err)
@@ -1143,7 +1242,7 @@ func (r *p3Run) toolRaw(step string, limit time.Duration, name string, args ...s
 // ended only while their identity and tag still hold, which does not make
 // the run valid again.
 func (r *p3Run) census(step string) {
-	ss, err := censusTag(r.tag, r.since)
+	ss, err := censusTag(r.tag, r.since, r.obsEnd())
 	if err != nil {
 		r.s.flag("cleanup not verified: the census of the tools after %s: %v", step, err)
 		return

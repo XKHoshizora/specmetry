@@ -51,9 +51,9 @@ func procInfo(pid int) (pinfo, presence) {
 }
 
 // groupLive lists the group's members that are not zombies, with sysctl
-// kern.proc.pgrp.
-func groupLive(pgid int) ([]int, error) {
-	ks, err := unix.SysctlKinfoProcSlice("kern.proc.pgrp", pgid)
+// kern.proc.pgrp, within the caller's deadline (kinfoProcs).
+func groupLive(pgid int, deadline time.Time) ([]int, error) {
+	ks, err := kinfoProcs(deadline, "kern.proc.pgrp", pgid)
 	if err != nil {
 		return nil, err
 	}
@@ -66,18 +66,47 @@ func groupLive(pgid int) ([]int, error) {
 	return out, nil
 }
 
-// groupAll lists every entry kern.proc.pgrp gives, zombies included, as
-// "pid:state".
-func groupAll(pgid int) []string {
-	ks, err := unix.SysctlKinfoProcSlice("kern.proc.pgrp", pgid)
-	if err != nil {
-		return []string{"error " + err.Error()}
+// The system call of a kinfo_proc list, which a direct check
+// (enum_check_darwin_test.go) replaces; the real one otherwise.
+var sysctlRaw = unix.SysctlRaw
+
+// kinfoProcs reads a kinfo_proc list (sysctl kern.proc.*). It is x/sys's
+// SysctlKinfoProcSlice, its loop unchanged, through the seams: ENOMEM, the
+// table having grown between the size and the read, is tried again.
+func kinfoProcs(_ time.Time, name string, args ...int) ([]unix.KinfoProc, error) {
+	for {
+		b, err := enumCall(name, args)
+		if errors.Is(err, unix.ENOMEM) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		return kinfoOf(b)
 	}
-	var out []string
-	for _, k := range ks {
-		out = append(out, fmt.Sprintf("%d:%d", k.Proc.P_pid, k.Proc.P_stat))
+}
+
+// enumCall is one call: a gate regression's construction answers it
+// instead (p3Seam.enum, the call is then not made), or the real one.
+func enumCall(name string, args []int) ([]byte, error) {
+	if h := p3Seam.enum; h != nil {
+		if err := h(name); err != nil {
+			return nil, err
+		}
 	}
-	return out
+	return sysctlRaw(name, args...)
+}
+
+// kinfoOf makes the list of what the call returned: whole entries only.
+func kinfoOf(b []byte) ([]unix.KinfoProc, error) {
+	if len(b)%unix.SizeofKinfoProc != 0 {
+		return nil, fmt.Errorf("sysctl returned %d bytes, not a multiple of %d", len(b), unix.SizeofKinfoProc)
+	}
+	ks := make([]unix.KinfoProc, len(b)/unix.SizeofKinfoProc)
+	if len(ks) > 0 {
+		copy(unsafe.Slice((*byte)(unsafe.Pointer(&ks[0])), len(b)), b)
+	}
+	return ks, nil
 }
 
 // exitObserver is the macOS candidate for E-main: a kqueue EVFILT_PROC
@@ -117,7 +146,13 @@ func newExitObserver(pid int) (exitObserver, error) {
 	return exitObserver{s: s}, nil
 }
 
-func (o exitObserver) close() { _ = unix.Close(o.s.kq) }
+func (o exitObserver) close() {
+	err := unix.Close(o.s.kq)
+	if h := p3Seam.close; h != nil {
+		err = h(err)
+	}
+	_ = err
+}
 
 // wait observes the exit within d. An event, or an early exit's status,
 // that the decoder rejects is an observation failure (spec §19.5): the
@@ -230,12 +265,20 @@ func ruleOf(err error) string {
 
 // p3Seam rewrites what a read returned, after the real call: P-3's gate
 // regressions only (p3_darwin_test.go), nil otherwise. n counts the waitid
-// reads while w is set, from 1.
+// reads while w is set, from 1. enum answers a call of a kinfo_proc list
+// in its place (a non-nil error: the call is not made); close replaces
+// the result of the observer's real close.
 var p3Seam struct {
-	w func(n int, si *[siSize]byte)
-	k func(ev *unix.Kevent_t)
-	n int
+	w     func(n int, si *[siSize]byte)
+	k     func(ev *unix.Kevent_t)
+	n     int
+	enum  func(name string) error
+	close func(err error) error
 }
+
+// The kqueue wait's system call, which a direct check
+// (enum_check_darwin_test.go) replaces; the real one otherwise.
+var keventCall = unix.Kevent
 
 // readWaitid calls waitid(P_PID, pid, WEXITED|WNOWAIT) through the raw
 // system call (E1; x/sys has no darwin wrapper) and returns its fields
@@ -306,7 +349,7 @@ func kqWaitRaw(kq int, d time.Duration) (kRaw, bool, error) {
 			left = 0
 		}
 		ts := unix.NsecToTimespec(left.Nanoseconds())
-		n, err := unix.Kevent(kq, nil, evs, &ts)
+		n, err := keventCall(kq, nil, evs, &ts)
 		if errors.Is(err, unix.EINTR) {
 			continue
 		}
