@@ -34,6 +34,7 @@
 >   - 固定代码点 `eb2317f`：诊断 run 40817305419 为 **failure**。Intel、Ubuntu、Windows 成功，B1 ~ B3 的新门禁与直接检查在两个架构上都通过；arm64 的既有门禁 `p3.k-nostatus-once` 因同一内层运行的 `layout.1` 为 invalid 而失败，原因没有记录，未知。
 >
 >   **已修复，待独立复审**。
+> - [Review 102](reviews/codex-review-102.md) 对 PR #41（HEAD `fbcef6f`，代码点 `eb2317f`）：B1 ~ B3 在受审的原型调用链范围内**关闭**，修复技术 GO；当前**暂不建议合并**（诊断失败；arm64 的 `p3.k-nostatus-once` 没有执行目标、没有命中接缝；同一内层运行中布局场景的失效详情丢失，N-102-1 非阻塞）。按负责人授权的最小观测与补证（§15.12）：门禁保留内层运行的全部最终结果，3 个组合回归；固定代码点 `9d45036` 的诊断 run 40847347022 四个作业 success。run 40817305419 中布局为何 invalid 仍**未知**。**待独立审查**。
 > - 这**不是**规范冻结：草案为第 7 版，待独立审查和冻结；14 项产品选择、D21、Q-1 与 Q-2 已决定，技术候选仍待审查。T1 ~ T6 按 Review 075 的裁定只得到**局部支持**（§11；草案 §17.5 的 G1 ~ G15 与 §19）。
 > - 原型成功**不是**生产验收：生产 Check Runner、迁移 0009、CLI 接线都没有授权，WP2.5 没有实现或验收，M2 没有整体验收。
 > - 本文中的“候选规格”都待审查；其中涉及可见行为的（例如 C-4、C-7、C-10）依赖对应的产品选择（§9、§10）。C-4 的产品语义与 C-7（D20 (i)）已于 2026-10-25 决定，其技术部分仍待审查。本文不新增接受风险，也不批准任何保证调整。
@@ -3853,3 +3854,161 @@ R2 也说明 `done` 的报告文件检查是第二道防线：即使没有核验
 - 未解决的：固定代码点的诊断正式为 failure，arm64 一项门禁失败，原因未知。
 - 作者**不宣布** G5 满足，也不宣布 B1 ~ B3 关闭；规范的支持声明与“已验证的组合”没有改动。
 - §15.10 所列冻结审查的内容不变。
+
+### 15.12 Review 102 的最小观测与补证（待独立审查）
+
+[Review 102](reviews/codex-review-102.md) 对 PR #41（HEAD `fbcef6f`，base `dbcd5d4`，修复代码点 `eb2317f`）的结论分两层：
+
+- Review 101 的 B1、B2、B3 在受审的原型调用链范围内分别**关闭**，修复本身**技术 GO**；没有发现有具体反例支持的新 BLOCKER。
+- 固定的 PR **暂不建议合并**：固定代码点的诊断正式为 failure；arm64 的 `p3.k-nostatus-once` 没有执行目标观察、没有命中接缝；同一内层运行中 `P3.layout.1` 的具体错误在外层输出中丢失。
+- **N-102-1**（NON-BLOCKER，诊断可追溯性缺陷）：`runInner` 解析了内层全部的 `WP25RESULT`，但 `runGate` 主要只复制目标的理由；`because` 不符时 `exact` 分支不运行，即使运行也只列 ID 与 verdict。
+
+本节只处理 Review 102 列出的最小观测（§6.3 的 1、2）与授权的一次补证；三项原缺陷不重开。修复的 GO 不是整个 PR 的合并建议。Review 101 的 N1（显式的结果集合与重复的拒绝）与 N2（R_before 的结构）仍为非阻塞，本轮没有实现。
+
+**起点、归档与提交**：
+
+- 起点核对：远程、本地与工作区一致；HEAD `fbcef6fd230cedd60bc4943a6192e3eb1a875698`，base / master `dbcd5d4597e295b31d6a3e0fb3d295b135e6386b`，修复代码点 `eb2317fa0be728202ceb705a5bf5aa72eb6ab012`；工作区只有未跟踪的 Review 102。
+- Review 102 原样归档为单独的提交 `5e16cb64f98ae31390640d6f8942cc71172484ff`（只有该文件，31064 字节）。源文件、暂存区与提交 blob 的 SHA-256 都为 `84d75601bb0cb640b41bb32a48ae856c809aaafacc60aa408925deb93c4abcbb`。
+- 历史审查原文与处理记录的旧内容没有改动。
+
+| 提交 | 内容 |
+|---|---|
+| `5e16cb6` | Review 102 的归档 |
+| `9d450365cb11f343a634f47d21cf962c9dddec35` | **观测修正与回归，新的固定代码点** |
+| 之后 | 只有文档：本节、review-resolution §126 与状态的同步 |
+
+- 范围：只改 test-only 的 `prototype/wp25` 的 3 个文件（`gate_test.go`、`gate_combo_test.go`、`p3_darwin_test.go`，相对 `eb2317f` +151 / −3）。
+- workflow 没有改：平台、只读权限、失败传播、作业 20 min 与 `go test` 15 min 的期限、P-3 的次数与预算都不变。
+- 生产代码、根依赖、Schema、迁移与根 `ci.yml` 没有改；规范只同步状态行。
+
+**观测修正**（`gate_test.go`）：
+
+- `runInner` 在解析每一条 `WP25RESULT` 时，除了原有的按 ID 的映射，另按打印的次序保存全部结果（`innerRun.all`）。
+- `gateResult` 增加 `inner`（JSON 键 `inner`）：该内层运行打印的**全部最终结果**，原样、按次序，不论目标的 `because`、命中或 `exact` 是否满足。每条都有：
+  - `id`、`verdict`、`reason` 与 `invalid`（每条理由）；
+  - `cleanup`；
+  - `expected` 与 `observed`（既有的预测与观测摘要）；
+  - `launches`、`work`、`owned`、`shortfall` 与 `ms`。
+- 命中与站点仍在门禁这一层（`inject_hits`、`inject_sites`），与之前相同；目标是否执行，由目标记录的 `launches`、`work` 与理由给出。
+- 来源是最终的 `WP25RESULT`，不是 `WP25P` 中提前打印的 T。工具的原始 stdout、stderr 不回显；理由中只有既有的 40 字符截断（`clip`）。
+- 只保存，不判定：
+  - 判定、解码、预测、故障注入的时点、判定的优先级、准入、预算、所有权与清理都不变；
+  - `exact` 分支及其理由文本不变；
+  - 按 ID 的映射与以前一样（后出现的覆盖先出现的），重复的结果只是在 `inner` 中按次序都可见，不被拒绝——这不是 N1 的实现。
+- `outerFault` 增加 `env`：组合检查给内层运行附加的环境。`TestGate` 传零值，内层环境与之前相同；witness 仍是第一项。
+
+**确定性回归**（`gate_combo_test.go`，3 个组合；它们使用的门禁只在 macOS 上运行，所以只在两个 macOS 作业中执行）：
+
+| 组合 | 构造 | 必须满足（全部） |
+|---|---|---|
+| `combo.trace-layout-tool` | 门禁 `p3.k-nostatus-once` 原样（K1 的接缝已武装）；组合在内层运行的 PATH 最前面放一个 `xcrun` 存根（shell 脚本，向 stderr 写一行后 exit 1）。这是**构造的真实工具失败**，不是接缝，也不是原生故障 | 门禁 `pass=false`；门禁的理由含 `not executed: the layout premise does not hold`；工具错误为 `hit` 类（`hit: the fault never reached its site`）；补救 not-needed，Final ended，保险清理确认结束；`inner` 恰为 2 条：`P3.layout.1` invalid、理由含 `the tool step xcrun-find-clang ended with exit 1`、清理以 `verified` 开头，`P3.k.exit7.1` invalid、理由含布局前提不成立、清理为 `no processes`；目标 launches 0、work 0；命中 0，没有站点 |
+| `combo.trace-layout-late` | 同一门禁，内层的故障换成新的接缝 `p3-layout-close-late`（K1 没有武装）：布局场景在开始时多取得一个文件 `/dev/null`，交给场景的关闭器，只在收尾中关闭；真实关闭之后，接缝把结果换成注入的错误。失败发生在布局的 `WP25P` 行之后，只在它的最终结果中 | 门禁 `pass=false`、理由同上；没有工具错误；补救、Final 与保险同上；`inner` 恰为 2 条：`P3.layout.1` invalid、理由含 `closing the seam's late file`、清理以 `NOT verified: closing failed` 开头，`P3.k.exit7.1` 同上；目标 launches 0、work 0；命中恰为 1，站点为该接缝（`the seam's late file`） |
+| `combo.trace-healthy`（对照） | 门禁 `control.p3-k-exit7` 原样 | 门禁 `pass=true`；没有工具错误；`inner` 恰为 2 条，都为 confirmed，清理都以 `verified` 开头；目标 launches 与 work 都大于 0；命中 0 |
+
+- 新的接缝 `p3-layout-close-late`（`p3_darwin_test.go` 的 `lateClose`）只在内层运行、这个注入名、第 1 次布局场景中作用；它记录命中，不称为原生 API 故障。其他注入名与非内层运行中，它直接返回，P-3 的行为不变。
+- 这些组合检查的是“保存了什么”，不重新判定：内层与门禁本身的判定仍由原有的 judge 作出；它们的通过只证明信息得到保存，**不是新的原生机制证据**。
+- 既有的门禁、组合与健康的多场景、双错、外层错误的对照都不变。
+- 两个 `trace-layout-*` 组合借用 `p3.k-nostatus-once` 的选择，但内层的条件不同（存根或另一个接缝），目标都不执行。布局前提成立、K1 命中的完整链，仍只在 `TestGate` 的那一次运行中按原有的严格条件判定；补证没有增加它的运行次数。
+- Linux 与 Windows 上，这 3 个组合按其门禁的平台跳过；`inner` 的保存由这些平台上的每一条门禁行实际经过（见下文对日志的核对）。
+
+**作者本地的证据**（与诊断 CI 分开；不是原生证据）：
+
+- **静态检查**：`go vet` 在 darwin/arm64、darwin/amd64、linux、windows 上通过；`gofmt` 干净。
+- **旧保存路径与新路径的对照**（只在仓库之外的临时副本中，没有提交，也没有为它触发旧代码的诊断）：
+  - 副本中加入一个只作内层运行的测试：前提场景以自己的理由（`R102-SCRATCH-PREMISE-REASON`）invalid，目标场景以“前提不成立”未执行。外层对目标调用真实的 `runGate`（`because` 指向一个不存在的理由，`exact`）。
+  - 旧路径（`fbcef6f` 的原型树）：门禁 `pass=false`，命中 0，Final ended，保险清理 nothing left；门禁的整行 JSON 中**没有**前提的理由。
+  - 新路径（`9d45036` 的原型树）：门禁的结论与上面相同；`inner` 中原样有两条结果，前提的理由与 `invalid` 都在。
+  - Windows 11 本机与 WSL Ubuntu（交叉编译，没有 `-race`）上结论相同。日志的 SHA-256：Windows 旧 `1f12a08a…6f3`、新 `028e868a…0e2`；WSL 旧 `2d16bf19…566e`、新 `308b653e…8b19`；临时测试文件 `d14f30c1…8955`。
+  - 只运行所选测试时没有根层场景，`summarize` 按设计返回 1，所以两份副本的包都以 1 退出；判断取自该测试自己的 PASS / FAIL。
+- **完整的包**（`9d45036` 的工作树）：
+  - Windows 11 本机：53/53，门禁 92/92，组合 13/13；
+  - WSL Ubuntu：52 confirmed、1 unsupported（WSL 中没有 pwsh，与本轮无关），门禁 111/111，组合 13/13；
+  - 与 `eb2317f` 的本地结果相同；每条门禁行都带 `inner`，其中目标的记录与该行的 `got`、`launches`、`work` 及故障用例的 `inner_cleanup` 一致。
+  - 3 个新组合只在 macOS 上运行，本机不能执行。
+
+**旧失败的保存**（run 40817305419，只读取，没有重跑）：
+
+- 重新取得并保存（作者本机的会话临时目录）：run、作业列表、attempt 1 与 artifact 列表的元数据，四个作业的完整日志与注释。四份日志与上一轮保存的副本逐字节相同。
+- SHA-256：
+  - 日志：arm64（123261288396）`25ecd74c…2a01`，Intel（123261288366）`175acdaf…619a`，Ubuntu（123261288385）`bac2e854…7c90`，Windows（123261288091）`d21f3149…8b92`；
+  - 元数据：run `d5486d87…6a08`，作业 `d00ff584…d403`，attempt 1 `a2718fe3…5025`，artifact 列表 `244563f9…856c`（0 个 artifact）。
+- 注释：arm64 作业为 `Process completed with exit code 1.`（failure）与一条关于 arm64 runner 排队时间的通知；Ubuntu 为 ubuntu-latest 标签迁移的通知；Intel、Windows 没有注释。
+- 日志与 artifact 中**没有** `P3.layout.1` 那次内层结果的理由。日志中可读到的事实：
+  - 失败的那次门禁：created 5、receipts 0，用时 352 ms；
+  - 同一用例通过的运行中：created 6、receipts 1，用时 550 ~ 716 ms（`4e690d8` 与 `7f9fda0` 的两个架构、`eb2317f` 的 Intel、`9d45036` 的两个架构，共 7 次）。
+
+  这只说明失败的那次门禁用时较短、没有启动目标的 helper（与目标的 launches 0 一致），**不说明** `layout.1` 为什么 invalid。
+- `layout.1` 的原因保持**未知**：
+  - 新的运行成功不能补写旧的原因；
+  - 镜像的变化不作为因果结论；
+  - 不声称与 B1 ~ B3 的修复或本轮的观测修正有关或无关。
+- 原有的失败记录、未命中的事实与未知项都不删改（§15.11、review-resolution §125）。新的观测只使之后的同类失败可以追溯，不保证复现或查明旧失败。
+
+**新固定代码点的诊断**：`9d45036`，run 40847347022（push，attempt 1，completed / **success**，09:08:52 ~ 09:17:00 UTC，0 个 artifact）。
+
+| 作业（job ID） | 镜像 | 结果 |
+|---|---|---|
+| `macos-latest`（123357986540） | `macos-26-arm64` **20261013.0424.1**（与回归先行 `7f9fda0` 那次相同，**不是**失败那次的 20261021.0445.8）；macOS 26.6.2（25G83），`xnu-12377.161.14~5`（`VMAPPLE`）；Xcode 26.6（17F113）、SDK 26.5、Apple clang 21.0.0 | success：场景 96/96 confirmed（P-3 63，既有 33）；门禁 99/99（P-3 22/22）；组合 16/16；5 项直接检查 PASS；`TestP3` 7.67 s；包 302.1 s |
+| `macos-26-intel`（123357986481） | `macos-26` 20260824.0517.1；macOS 26.6.1（25G76），`xnu-12377.161.13~4`；工具同上 | success：96/96；门禁 99/99（P-3 22/22）；组合 16/16；5 项直接检查 PASS；`TestP3` 7.59 s；包 307.1 s |
+| `ubuntu-latest`（123357986066） | `ubuntu-24.04` 20261025.353.1，工作流在 Linux 上加 `-race`（脚本未改） | success：53/53；门禁 111/111；组合 13/13；包 467.8 s |
+| `windows-latest`（123357986509） | `windows-2025-vs2026` 20261021.278.1 | success：53/53；门禁 92/92；组合 13/13；包 344.0 s |
+
+- 四个作业都取得并检出 `9d450365cb11f343a634f47d21cf962c9dddec35`（`fetch … +9d45036…`，`checkout -B test/wp2.5-prototype-p3`），WP25META 的 `sha` 也是它；arm64 与 Intel 是同一个固定代码点。
+- 没有重跑、取消或手动触发。各作业只有 3 个设计内的 SKIP（`TestInnerForeignPID`、`TestInnerLeak`、`TestInnerStopError` 只作内层运行），它们不计为通过；根层没有 refuted、invalid、unsupported 或未执行的结果。
+- 注释：arm64 作业仍有那条排队时间的通知，Ubuntu 有标签迁移的通知，都不是失败。
+- 日志与元数据已保存（同一临时目录），SHA-256：arm64 `7686260a…e537`，Intel `6d8403b9…cbe9`，Ubuntu `deb9c5cd…5939`，Windows `7d58110e…fefa`；run `f6c695a1…027a`，作业 `9704fe23…9bde`。
+
+**完整链**（`TestGate` 中那一次 `p3.k-nostatus-once`，由门禁行的 `inner` 逐项读出；两个架构相同）：
+
+| 环节 | arm64（123357986540） | Intel（123357986481） |
+|---|---|---|
+| 布局前提 | `P3.layout.1` confirmed：launches 5、work 55，清理 `verified: 5 processes gone` | 同左 |
+| 目标实际执行 | `P3.k.exit7.1`：launches 1、work 1，清理 `verified: 1 processes gone` | 同左 |
+| 接缝命中 | 命中 1：`P-3 kevent: fflags 0x84000000 -> 0x80000000, data 0x700 -> 0x700` | 同左 |
+| 被预期的 K1 拒绝 | invalid，恰好一条理由：`planned corruption detected by K1: K1: the returned fflags 0x80000000 lack NOTE_EXIT or NOTE_EXITSTATUS` | 同左 |
+| 外层的严格条件 | pass；内层退出 1；没有问题项与工具错误；created 6、receipts 1，登记没有缺口；补救 not-needed，Final ended，保险清理 nothing left；550 ms | pass；同左；679 ms |
+
+- 没有其他工具错误、额外的拒绝理由、清理失败或未知被预期的 K1 拒绝豁免：`exact` 要求的唯一理由、已核实的清理与布局的 confirmed 都成立，外层的 judge 没有任何问题项。
+
+**三个组合回归**（两个架构结果相同）：
+
+| 组合 | 组合的结论 | 自检（门禁）的实际结果 |
+|---|---|---|
+| `combo.trace-layout-tool` | pass（自检按预期**失败**） | `pass=false`；理由：目标的理由不含 K1、是布局前提不成立；工具错误 `hit: the fault never reached its site`；命中 0；`inner`：`P3.layout.1` invalid `the tool step xcrun-find-clang ended with exit 1: stub xcrun: exits 1`，launches 1、work 0，清理 `verified: 1 processes gone`；`P3.k.exit7.1` invalid、launches 0、work 0、`no processes`；created 1；补救 not-needed，Final ended，保险 nothing left |
+| `combo.trace-layout-late` | pass（自检按预期**失败**） | `pass=false`；理由同上；没有工具错误；命中 1，站点为 `p3-layout-close-late`；`inner`：`P3.layout.1` invalid `cleanup not verified: closing the seam's late file /dev/null failed: injected: closing the late file failed at the end (the real close was made)`，launches 5、work 55，清理 `NOT verified: closing failed (the seam's late file /dev/null); verified: 5 processes gone`；`P3.k.exit7.1` 同上；created 5；其余同上 |
+| `combo.trace-healthy` | pass（自检按预期通过） | `pass=true`；没有问题项；命中 0；`inner` 两条都为 confirmed、清理已核实；目标 launches 1、work 1 |
+
+- `trace-layout-tool` 的形状与 run 40817305419 中 arm64 的失败相同（目标未执行、命中 0、`hit` 类工具错误、外层其他维度正常），但这里布局的理由被保存了下来。`trace-layout-late` 中布局的失败只在收尾中发生，门禁保存的是包含它的最终结果。
+- 这些是构造（存根与接缝）的结果，只证明信息得到保存，不是新的原生机制证据。
+
+**全部门禁行与根层的 P-3**：
+
+- 四个平台的每一条门禁行（99、99、111、92 条）都带 `inner`；其中目标的记录与该行的结论、launches、work 及故障用例的清理一致；所有门禁都通过。
+- 两个 macOS 作业的 P-3 根层：
+  - 63/63 confirmed（60 次 normal、3 次 fault-injection）；63 行 `WP25P` 都没有工具失效；清理都以 `verified` 开头；
+  - 每次运行最长 358 ms（arm64 的 `layout.1`）与 305 ms（Intel 的 `k.signal9.1`），合计 7.6 s 与 7.5 s；
+  - 21 个场景族的 R（PID 之外）、N 与 M 与 `eb2317f` 逐项相同；与 `4e690d8` 相比，19 个族相同，`group.*` 只多了 B1 新增的成员读取记录（与 §15.11 相同）；布局的 55 个键相同。
+- Review 101 的 9 个门禁与 5 项直接检查在两个架构上再次通过。
+
+**常规 CI**：`9d45036` 的 run 40847351213（pull_request，attempt 1）8/8 success。最终文档 HEAD 的常规 CI 见 review-resolution §126；它们都不运行原型模块，不是 P-3 的证据。
+
+**对旧证据的影响**：
+
+- run 40817305419 的正式 failure、它的失败记录与未知项不变；不因 `9d45036` 的 success 改写。
+- `eb2317f` 上 B1 ~ B3 的门禁、直接检查与 P-3 的根层场景，按 Review 102 的采纳保留。`9d45036` 与 `eb2317f` 只差观测字段、3 个组合与一个只在新注入名下作用的接缝，它上面的同一组结果是第二次观测，不替代第一次。
+- K1 门禁以前的通过（`4e690d8`、`7f9fda0`、`eb2317f` 的 Intel）在 `exact` 下已隐含布局为 confirmed；`9d45036` 首次在外层的输出中逐项留下这条链。
+
+**证据的限制**（在 §15.9 与 §15.11 之外）：
+
+- 这是一次运行。它的成功不说明那项失败不会再出现，也不说明它的原因；而且 arm64 这次的镜像与失败那次不同，不能对那个镜像作出任何结论。
+- 两个回归的构造都不是原生故障：存根是测试构造的真实工具失败；晚到的关闭失败是接缝在真实关闭之后替换结果。
+- 观测只保存内层打印的 `WP25RESULT`：内层没有打印结果（启动失败、超时被结束）时，仍只有 `inner run: …` 的错误与已解析的部分；工具 stderr 只有理由中的 40 字符；命中仍按整次内层运行计数，只能由站点的文字区分。
+- Review 101 的 N1、N2 没有实现。
+
+**对 G5 的影响**（作者的证据陈述，由独立审查裁定）：
+
+- 本轮增加的：同一固定代码点 `9d45036` 上，arm64 与 x86_64 的 K1 门禁完整链可以逐项追溯并通过；整套诊断四个作业 success。
+- 未改变的：run 40817305419 的失败原因未知；§15.10 所列冻结审查的内容。
+- 作者**不宣布** PR 整体 GO、G5 满足、规范冻结或生产授权；规范的支持声明与“已验证的组合”没有改动。
+
+**状态**：Review 102 的最小观测与补证**待独立审查**（Review 103）。PR #41 不合并，Auto-fix、Auto-merge 关闭。规范第 8 版第二稿未冻结；G5 未满足；生产 WP2.5 未授权；WP2.5 与 M2 未验收。
