@@ -234,6 +234,19 @@ type unixTree struct {
 var errGroupGone = errors.New("the group leader is reaped: no more signals to the group")
 
 func startTree(s *scen, cmd *exec.Cmd) *unixTree {
+	t := startGroup(s, cmd)
+	obs, err := newExitObserver(t.pid)
+	if err != nil {
+		s.invalidf("exit observer: %v", err)
+	}
+	t.obs = obs
+	s.closer(fmt.Sprintf("the exit observer of %d", t.pid), obs.close)
+	return t
+}
+
+// startGroup starts the check's group without an exit observer: P-3
+// registers its own, or none (p3_darwin_test.go).
+func startGroup(s *scen, cmd *exec.Cmd) *unixTree {
 	if cmd.SysProcAttr == nil {
 		cmd.SysProcAttr = &syscall.SysProcAttr{}
 	}
@@ -245,12 +258,6 @@ func startTree(s *scen, cmd *exec.Cmd) *unixTree {
 		s.invalidf("the main process %d cannot be read", t.pid)
 	}
 	t.start = st.start
-	obs, err := newExitObserver(t.pid)
-	if err != nil {
-		s.invalidf("exit observer: %v", err)
-	}
-	t.obs = obs
-	s.defer_(obs.close)
 	// If the scenario stops early, its group is still its own while the
 	// leader is held: end the group before the leader is reaped.
 	s.defer_(func() {
@@ -260,7 +267,7 @@ func startTree(s *scen, cmd *exec.Cmd) *unixTree {
 		_ = syscall.Kill(-t.pid, syscall.SIGKILL)
 		deadline := time.Now().Add(tKill)
 		for {
-			m, err := t.live()
+			m, err := t.live(deadline)
 			if err != nil {
 				s.flag("observation failed while ending the group %d: %v", t.pid, err)
 				return
@@ -314,8 +321,9 @@ func (t *unixTree) leaderHeld() bool {
 	return pr == present && st.start == t.start && st.ppid == os.Getpid()
 }
 
-// live lists the group's members that are not zombies.
-func (t *unixTree) live() ([]int, error) { return groupLive(t.pid) }
+// live lists the group's members that are not zombies, within the
+// caller's deadline.
+func (t *unixTree) live(deadline time.Time) ([]int, error) { return groupLive(t.pid, deadline) }
 
 // confirm repeats the kill until the group has no live member, within d.
 // A member list that cannot be read is not an empty group: the scenario
@@ -323,7 +331,7 @@ func (t *unixTree) live() ([]int, error) { return groupLive(t.pid) }
 func (t *unixTree) confirm(d time.Duration) bool {
 	deadline := time.Now().Add(d)
 	for {
-		m, err := t.live()
+		m, err := t.live(deadline)
 		if err != nil {
 			t.s.invalidf("observation failed: %v", err)
 		}

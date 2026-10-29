@@ -71,6 +71,20 @@ type gateCase struct {
 	// alsoBecause, when set, must be part of the reason too (Review 096
 	// B1-R): a second failure the run met, kept beside the first.
 	alsoBecause string
+	// exact (P-3, spec §19.12): an invalid run has exactly one reason, its
+	// own cleanup is verified, and the other scenarios of the inner run
+	// (the layout probe it needs) are confirmed.
+	exact bool
+	// reasons and cleanup refine exact (Review 101): the number of reasons
+	// (0: one), and how the inner run's cleanup must begin ("": verified).
+	reasons int
+	cleanup string
+	// hits, when set, is the exact number of the fault's hits (Review 101
+	// B3: each constructed ENOMEM is one).
+	hits int
+	// sees, when set, must be part of what the inner run observed (Review
+	// 101 B2: a file created before a failure is closed by its owner).
+	sees string
 }
 
 type gateResult struct {
@@ -121,6 +135,12 @@ type gateResult struct {
 	Final      string   `json:"final"` // ended, alive, unknown
 	Pass       bool     `json:"pass"`
 	Millis     int64    `json:"ms"`
+	// Inner is every result the inner run printed, its final WP25RESULT
+	// lines in their order (Review 102 N-102-1), whatever the target's
+	// verdict: a scenario it needs (P-3's layout probe) is kept with its
+	// verdict, reason, reasons, cleanup, observation, launches, work and
+	// registrations. It is kept, not judged.
+	Inner []result `json:"inner,omitempty"`
 }
 
 var (
@@ -362,6 +382,46 @@ var gateCases = []gateCase{
 	{id: "p2.unsupported-after-check-once", test: "TestP2/prctl.set0", scenario: "P2.prctl.set0", inject: "p2-unsupported-after-check-once", want: invalid, goos: []string{"linux"}, hit: true, because: "says unsupported but contradicts it"},
 	{id: "p2.self-read-unknown-once", test: "TestP2/prctl.set1", scenario: "P2.prctl.set1", inject: "p2-self-read-unknown-once", want: invalid, goos: []string{"linux"}, hit: true, because: "observation failed: the experiment process's read of its own /proc entry"},
 
+	// P-3 (spec §19.12; plan in docs/wp2.5-prototype.md §15): one read of the
+	// kernel's real answer is rewritten after the call. The candidate decoder
+	// must reject it by the expected rule, for that reason alone, with its
+	// cleanup verified and the layout probe of the same inner run confirmed.
+	// The controls: the healthy runs of the same scenarios.
+	{id: "control.p3-k-exit7", test: "TestP3$/^(layout.1|k.exit7.1)", scenario: "P3.k.exit7.1", want: confirmed, goos: []string{"darwin"}, exact: true},
+	{id: "control.p3-w-exit7", test: "TestP3$/^(layout.1|w.exit7.1)", scenario: "P3.w.exit7.1", want: confirmed, goos: []string{"darwin"}, exact: true},
+	{id: "control.p3-c-exit7", test: "TestP3$/^(layout.1|c.exit7.1)", scenario: "P3.c.exit7.1", want: confirmed, goos: []string{"darwin"}, exact: true},
+	{id: "p3.w-sipid-once", test: "TestP3$/^(layout.1|w.exit7.1)", scenario: "P3.w.exit7.1", inject: "p3-w-sipid-once", want: invalid, goos: []string{"darwin"}, hit: true, exact: true, because: "planned corruption detected by W1"},
+	{id: "p3.w-signo-once", test: "TestP3$/^(layout.1|w.exit7.1)", scenario: "P3.w.exit7.1", inject: "p3-w-signo-once", want: invalid, goos: []string{"darwin"}, hit: true, exact: true, because: "planned corruption detected by W1"},
+	{id: "p3.w-code-once", test: "TestP3$/^(layout.1|w.exit7.1)", scenario: "P3.w.exit7.1", inject: "p3-w-code-once", want: invalid, goos: []string{"darwin"}, hit: true, exact: true, because: "planned corruption detected by W1"},
+	{id: "p3.w-highbyte-once", test: "TestP3$/^(layout.1|w.exit7.1)", scenario: "P3.w.exit7.1", inject: "p3-w-highbyte-once", want: invalid, goos: []string{"darwin"}, hit: true, exact: true, because: "planned corruption detected by W3a"},
+	{id: "p3.w-negative-once", test: "TestP3$/^(layout.1|w.exit7.1)", scenario: "P3.w.exit7.1", inject: "p3-w-negative-once", want: invalid, goos: []string{"darwin"}, hit: true, exact: true, because: "planned corruption detected by W3a"},
+	{id: "p3.w-reread-once", test: "TestP3$/^(layout.1|w.exit7.1)", scenario: "P3.w.exit7.1", inject: "p3-w-reread-once", want: invalid, goos: []string{"darwin"}, hit: true, exact: true, because: "planned corruption detected by W5"},
+	{id: "p3.k-nostatus-once", test: "TestP3$/^(layout.1|k.exit7.1)", scenario: "P3.k.exit7.1", inject: "p3-k-nostatus-once", want: invalid, goos: []string{"darwin"}, hit: true, exact: true, because: "planned corruption detected by K1"},
+	{id: "p3.k-range-once", test: "TestP3$/^(layout.1|k.exit7.1)", scenario: "P3.k.exit7.1", inject: "p3-k-range-once", want: invalid, goos: []string{"darwin"}, hit: true, exact: true, because: "planned corruption detected by K1"},
+	{id: "p3.k-stopped-once", test: "TestP3$/^(layout.1|k.exit7.1)", scenario: "P3.k.exit7.1", inject: "p3-k-stopped-once", want: invalid, goos: []string{"darwin"}, hit: true, exact: true, because: "planned corruption detected by K2"},
+	{id: "p3.c-mismatch-once", test: "TestP3$/^(layout.1|c.exit7.1)", scenario: "P3.c.exit7.1", inject: "p3-c-mismatch-once", want: invalid, goos: []string{"darwin"}, hit: true, exact: true, because: "planned corruption detected by C1"},
+
+	// Review 101: a failure of a real step must stay a tool failure of the
+	// run, whatever else holds, and reach its verdict for that reason, the
+	// injected text named. B1: the real read of the members that the
+	// planned fault acts on fails too, or the read of a run without the
+	// planned fault fails once and the next ones succeed. B2: a close of a
+	// tool step's output file, or of the kqueue observer once the run's
+	// observation is complete, fails after the real close; a file is
+	// created and the next one is not, and the first is closed by its
+	// owner; a failure of the read and of the close in one run, both kept.
+	// B3: 4 ENOMEMs in a row exceed §19.5's 3 retries. The controls: the
+	// planned fault alone, and 3 ENOMEMs that the legal retries absorb.
+	{id: "control.p3-enum-unknown", test: "TestP3$/^(layout.1|group.enum-unknown.1)", scenario: "P3.group.enum-unknown.1", want: confirmed, goos: []string{"darwin"}, exact: true},
+	{id: "control.p3-enum-enomem-retried", test: "TestP3$/^(layout.1|group.zombie-leader.1)", scenario: "P3.group.zombie-leader.1", inject: "p3-enum-enomem-3", want: confirmed, goos: []string{"darwin"}, hit: true, hits: 3, exact: true},
+	{id: "p3.enum-error-once", test: "TestP3$/^(layout.1|group.enum-unknown.1)", scenario: "P3.group.enum-unknown.1", inject: "p3-enum-error-once", want: invalid, goos: []string{"darwin"}, hit: true, hits: 1, exact: true, because: "observation failed: the members of group", alsoBecause: "injected: the read of the members failed"},
+	{id: "p3.enum-error-once-healthy", test: "TestP3$/^(layout.1|group.zombie-leader.1)", scenario: "P3.group.zombie-leader.1", inject: "p3-enum-error-once", want: invalid, goos: []string{"darwin"}, hit: true, hits: 1, exact: true, because: "observation failed: the members of group", alsoBecause: "injected: the read of the members failed"},
+	{id: "p3.enum-enomem-exhausted", test: "TestP3$/^(layout.1|group.zombie-leader.1)", scenario: "P3.group.zombie-leader.1", inject: "p3-enum-enomem-4", want: invalid, goos: []string{"darwin"}, hit: true, hits: 4, exact: true, because: "observation failed: the members of group", alsoBecause: "the 3 retries are used up"},
+	{id: "p3.close-out-once", test: "TestP3$/^(layout.1)", scenario: "P3.layout.1", inject: "p3-close-out-once", want: invalid, goos: []string{"darwin"}, hit: true, hits: 1, exact: true, cleanup: "NOT verified: closing failed", because: "cleanup not verified: closing the output file", alsoBecause: "injected: closing the output file failed"},
+	{id: "p3.close-kq-once", test: "TestP3$/^(layout.1|k.exit7.1)", scenario: "P3.k.exit7.1", inject: "p3-close-kq-once", want: invalid, goos: []string{"darwin"}, hit: true, hits: 1, exact: true, cleanup: "NOT verified: closing failed", because: "cleanup not verified: closing the exit observer", alsoBecause: "injected: closing the kqueue failed"},
+	{id: "p3.create-err-once", test: "TestP3$/^(layout.1)", scenario: "P3.layout.1", inject: "p3-create-err-once", want: invalid, goos: []string{"darwin"}, hit: true, hits: 1, exact: true, cleanup: "no processes", because: "the output files of the tool step", alsoBecause: "injected: the error file could not be created", sees: "created before the failure, closed"},
+	{id: "p3.enum-error-and-close-once", test: "TestP3$/^(layout.1|group.enum-unknown.1)", scenario: "P3.group.enum-unknown.1", inject: "p3-enum-error-and-close-once", want: invalid, goos: []string{"darwin"}, hit: true, hits: 2, exact: true, reasons: 2, cleanup: "NOT verified: closing failed", because: "injected: the read of the members failed", alsoBecause: "injected: closing the kqueue failed"},
+
 	// Review 077 B1-R2-W: the witness itself fails. The outer check must
 	// reject the evidence, whatever the inner run gives.
 	{id: "witness.write-fail", test: "TestPipeSilentHolderReal", scenario: "T1.pipe.silent-holder", inject: "witness-write-fail", hit: true, reject: "witness-raised"},
@@ -463,6 +523,7 @@ func TestInnerLeak(t *testing.T) {
 type innerRun struct {
 	exit    int
 	results map[string]result
+	all     []result // every result line, in the order printed
 	hits    int
 	sites   []string // the site of each hit the inner test process printed
 	seals   []string // the JSON of the WP25WITNESS lines
@@ -524,6 +585,7 @@ func runInner(test, inject string, env []string) innerRun {
 			continue
 		}
 		r.results[res.ID] = res
+		r.all = append(r.all, res)
 	}
 	if err := sc.Err(); err != nil {
 		r.err = err
@@ -532,10 +594,12 @@ func runInner(test, inject string, env []string) innerRun {
 }
 
 // outerFault is an outer-side fault of the tested path, for
-// TestGateCombos; the zero value in TestGate.
+// TestGateCombos, and the environment a combination adds to the inner run;
+// the zero value in TestGate.
 type outerFault struct {
 	name  string   // remedy-error, remedy-unconfirmed, census-error, record-unknown, forge-owner
 	forge survivor // forge-owner: the process a forged creation record names
+	env   []string // more of the inner run's environment (Review 102: a stub tool first on its PATH)
 }
 
 // The tested path's own steps, where a combination check (TestGateCombos)
@@ -679,8 +743,8 @@ func runGate(t *testing.T, c gateCase, f outerFault) gateResult {
 		t.Fatal(err)
 	}
 	defer rw.close()
-	r := runInner(c.test, c.inject, []string{witnessEnv + "=" + wf, injectLogEnv + "=" + il, rw.env()})
-	g := gateResult{ID: c.id, Test: c.test, Inject: c.inject, Want: c.want, Reject: c.reject, InnerExit: r.exit, Hits: r.hits, Sites: r.sites, Total: -1}
+	r := runInner(c.test, c.inject, append([]string{witnessEnv + "=" + wf, injectLogEnv + "=" + il, rw.env()}, f.env...))
+	g := gateResult{ID: c.id, Test: c.test, Inject: c.inject, Want: c.want, Reject: c.reject, InnerExit: r.exit, Hits: r.hits, Sites: r.sites, Total: -1, Inner: r.all}
 	got, ok := r.results[c.scenario]
 	verdictOK := false
 	switch {
@@ -703,6 +767,34 @@ func runGate(t *testing.T, c gateCase, f outerFault) gateResult {
 				verdictOK = false
 				g.Reason = fmt.Sprintf("the reason does not name %q: %s", b, got.Reason)
 				break
+			}
+		}
+		if c.sees != "" && verdictOK && !strings.Contains(got.Observed, c.sees) {
+			verdictOK = false
+			g.Reason = fmt.Sprintf("the inner run did not observe %q: %s", c.sees, got.Observed)
+		}
+		if c.exact && verdictOK {
+			var others []string
+			for id, o := range r.results {
+				if id != c.scenario && o.Verdict != confirmed {
+					others = append(others, id+" "+string(o.Verdict))
+				}
+			}
+			sort.Strings(others)
+			reasons, cleanup := max(c.reasons, 1), c.cleanup
+			if cleanup == "" {
+				cleanup = "verified"
+			}
+			switch {
+			case c.want == invalid && len(got.Invalid) != reasons:
+				verdictOK = false
+				g.Reason = fmt.Sprintf("want exactly %d reasons, got %d: %s", reasons, len(got.Invalid), got.Reason)
+			case !strings.HasPrefix(got.Cleanup, cleanup):
+				verdictOK = false
+				g.Reason = fmt.Sprintf("the inner run's cleanup does not begin %q: %s", cleanup, got.Cleanup)
+			case len(others) > 0:
+				verdictOK = false
+				g.Reason = "other scenarios of the inner run are not confirmed: " + strings.Join(others, ", ")
 			}
 		}
 	}
@@ -869,14 +961,21 @@ func runGate(t *testing.T, c gateCase, f outerFault) gateResult {
 	if c.hit && g.Hits == 0 {
 		g.Problems = append(g.Problems, "hit: the fault never reached its site")
 	}
+	if c.hits > 0 && g.Hits != c.hits {
+		g.Problems = append(g.Problems, fmt.Sprintf("hit: the fault reached its sites %d times, want %d", g.Hits, c.hits))
+	}
 
 	// Registration: each created process is registered by the inner run
 	// (by PID and identity), or within the shortfall it declared. This is
 	// a count, not a match of objects: the shortfall also counts expected
-	// processes that were never created.
+	// processes that were never created. An inner run of two scenarios (P-3's
+	// layout probe and the case's own) registers through both.
 	owned := map[string]bool{}
-	for _, k := range got.Owned {
-		owned[k] = true
+	for _, res := range r.results {
+		for _, k := range res.Owned {
+			owned[k] = true
+		}
+		g.Shortfall += res.Shortfall
 	}
 	for k, w := range created {
 		if !owned[k] {
@@ -884,7 +983,6 @@ func runGate(t *testing.T, c gateCase, f outerFault) gateResult {
 		}
 	}
 	sort.Strings(g.Unowned)
-	g.Shortfall = got.Shortfall
 	if len(g.Unowned) > g.Shortfall {
 		g.Problems = append(g.Problems, fmt.Sprintf("unaccounted: %d created processes not registered by the inner run, %d declared short", len(g.Unowned), g.Shortfall))
 	}

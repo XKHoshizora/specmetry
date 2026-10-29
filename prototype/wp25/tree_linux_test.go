@@ -93,7 +93,9 @@ func processes() (map[int]pinfo, error) {
 	return out, nil
 }
 
-func groupLive(pgid int) ([]int, error) {
+// groupLive lists the group's members that are not zombies. The deadline
+// is macOS's (its enumeration's retries); processes reads /proc once.
+func groupLive(pgid int, _ time.Time) ([]int, error) {
 	ps, err := processes()
 	if err != nil {
 		return nil, err
@@ -137,7 +139,9 @@ func newExitObserver(pid int) (exitObserver, error) {
 	return exitObserver{pid: pid, fd: fd}, nil
 }
 
-func (o exitObserver) close() { _ = unix.Close(o.fd) }
+// close closes the pidfd and gives the close's error; its owner is the
+// scenario (scen.closer), which keeps it (Review 101 B2).
+func (o exitObserver) close() error { return unix.Close(o.fd) }
 
 func (o exitObserver) wait(d time.Duration) (bool, string, error) {
 	deadline := time.Now().Add(d)

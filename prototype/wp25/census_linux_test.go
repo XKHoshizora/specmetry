@@ -9,6 +9,7 @@ import (
 	"os"
 	"strconv"
 	"syscall"
+	"time"
 
 	"golang.org/x/sys/unix"
 )
@@ -16,8 +17,10 @@ import (
 // censusTag lists the live processes of this user, started no earlier
 // than since (the inner run's start ticks), whose environment carries tag.
 // A process that ends during the scan is left out; one whose state or
-// environment cannot be read is an error, never a process left out.
-func censusTag(tag, since string) ([]survivor, error) {
+// environment cannot be read is an error, never a process left out. The
+// deadline is macOS's (its list of processes); reading /proc retries
+// nothing without bound here (allPIDs once, censusOne at most 3 times).
+func censusTag(tag, since string, _ time.Time) ([]survivor, error) {
 	floor, err := strconv.ParseUint(since, 10, 64)
 	if err != nil {
 		return nil, fmt.Errorf("%w: the inner run's start %q", errCensus, since)

@@ -108,9 +108,10 @@ func launchInner(cmd *exec.Cmd, tag string) (*innerProc, error) {
 
 // census lists the processes still alive that carry this check's tag:
 // the inner run's, wherever they were reparented. There is no count of
-// processes created on Unix (total -1).
+// processes created on Unix (total -1). The census is one step of the
+// outer check: its list is read within T_kill (macOS's enumeration).
 func (p *innerProc) census() ([]survivor, int, error) {
-	ss, err := censusTag(p.tag, p.start)
+	ss, err := censusTag(p.tag, p.start, time.Now().Add(tKill))
 	return ss, -1, err
 }
 
@@ -183,8 +184,10 @@ func (p *innerProc) insure(known []survivor) string {
 			alive[v.key()] = v
 		}
 	}
+	// One deadline for the insurance, its censuses included: they share it.
+	deadline := time.Now().Add(10 * time.Second)
 	add := func() error {
-		ss, err := censusTag(p.tag, p.start)
+		ss, err := censusTag(p.tag, p.start, deadline)
 		for _, v := range ss {
 			alive[v.key()] = v
 		}
@@ -197,7 +200,6 @@ func (p *innerProc) insure(known []survivor) string {
 		}
 		return "nothing left"
 	}
-	deadline := time.Now().Add(10 * time.Second)
 	for {
 		var pids []int
 		for _, v := range alive {

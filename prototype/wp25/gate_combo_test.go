@@ -11,12 +11,19 @@ package wp25
 // cleanup ends what is left afterwards. Combinations are counted on
 // WP25COMBO lines, apart from the gate regressions and the scenarios, and
 // a self-check that refused here is never counted as a gate check passed.
+//
+// Review 102 N-102-1: a self-check keeps every result of its inner run.
+// P-3's target needs the layout probe of the same inner run; when the
+// probe fails, the target is not executed and the self-check fails, and
+// its result must still carry the probe's own reason and cleanup. These
+// combinations check what is kept; they judge nothing anew.
 
 import (
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -47,6 +54,28 @@ type comboCase struct {
 	// signal it never; it must still be alive afterwards. The combination
 	// then ends it itself.
 	fixture string
+	// Review 102 N-102-1, checked where keeps is set. inject replaces the
+	// gate regression's inner fault ("" keeps it); stub puts a tool of
+	// that name first on the inner run's PATH, a script that exits 1 (a
+	// real failure, no seam). because must be part of the self-check's
+	// reason; keeps are the inner run's results it must carry, all of them;
+	// sites are the hits it must show, in order (none: no hit); ran says
+	// whether the target launched and worked, or did neither.
+	inject  string
+	stub    string
+	because string
+	keeps   []innerKeep
+	sites   []string
+	ran     bool
+}
+
+// innerKeep is one result of the inner run a self-check must carry: its
+// verdict, its reason naming because, its cleanup beginning cleanup.
+type innerKeep struct {
+	id      string
+	verdict verdict
+	because string
+	cleanup string
 }
 
 type comboResult struct {
@@ -118,6 +147,35 @@ var comboCases = []comboCase{
 		expected: true, tool: "ownership", unexpected: true, remedy: "succeeded", final: "unknown"},
 	{id: "combo.forge-stale", gate: "control.silent-holder", fault: "forge-owner", fixture: "stale",
 		unexpected: true, remedy: "not-needed", final: "ended"},
+	// Review 102 N-102-1 (macOS): the layout probe of the K1 regression's
+	// inner run fails, by a real tool failure (a stub xcrun first on PATH)
+	// with K1's seam armed and never reached, the shape of arm64's failure
+	// in run 40817305419; or only at its end, after its evidence line, by
+	// a close the seam p3-layout-close-late fails there. The self-check
+	// must fail and carry the probe's own reason. The control: the healthy
+	// run of the same scenarios.
+	{id: "combo.trace-layout-tool", gate: "p3.k-nostatus-once", stub: "xcrun",
+		tool: "hit", remedy: "not-needed", final: "ended",
+		because: "not executed: the layout premise does not hold",
+		keeps: []innerKeep{
+			{"P3.layout.1", invalid, "the tool step xcrun-find-clang ended with exit 1", "verified"},
+			{"P3.k.exit7.1", invalid, "not executed: the layout premise does not hold", "no processes"},
+		}},
+	{id: "combo.trace-layout-late", gate: "p3.k-nostatus-once", inject: "p3-layout-close-late",
+		remedy: "not-needed", final: "ended",
+		because: "not executed: the layout premise does not hold",
+		keeps: []innerKeep{
+			{"P3.layout.1", invalid, "closing the seam's late file", "NOT verified: closing failed"},
+			{"P3.k.exit7.1", invalid, "not executed: the layout premise does not hold", "no processes"},
+		},
+		sites: []string{"the seam's late file"}},
+	{id: "combo.trace-healthy", gate: "control.p3-k-exit7", wantPass: true,
+		remedy: "not-needed", final: "ended",
+		keeps: []innerKeep{
+			{"P3.layout.1", confirmed, "", "verified"},
+			{"P3.k.exit7.1", confirmed, "", "verified"},
+		},
+		ran: true},
 }
 
 func TestGateCombos(t *testing.T) {
@@ -148,7 +206,18 @@ func checkCombo(t *testing.T, cc comboCase, c gateCase) {
 	if cc.strict {
 		c.also = nil
 	}
+	if cc.inject != "" {
+		c.inject = cc.inject
+	}
 	f := outerFault{name: cc.fault}
+	if cc.stub != "" {
+		dir := t.TempDir()
+		script := "#!/bin/sh\necho 'stub " + cc.stub + ": exits 1' >&2\nexit 1\n"
+		if err := os.WriteFile(filepath.Join(dir, cc.stub), []byte(script), 0o755); err != nil {
+			t.Fatalf("stub: %v", err)
+		}
+		f.env = []string{"PATH=" + dir + string(os.PathListSeparator) + os.Getenv("PATH")}
+	}
 	var fx *exec.Cmd
 	var fxID survivor
 	signals := func() int { return 0 }
@@ -195,6 +264,9 @@ func checkCombo(t *testing.T, cc comboCase, c gateCase) {
 			why = append(why, fmt.Sprintf("remediation %s and final state %s, want %s and %s", self.Remedy, self.Final, cc.remedy, cc.final))
 		}
 	}
+	if len(cc.keeps) > 0 {
+		why = append(why, traced(cc, self)...)
+	}
 	if fx != nil {
 		// Nothing outside the inner run may be acted on: not handed to an
 		// entry that acts by PID, never signalled, still alive.
@@ -230,6 +302,48 @@ func checkCombo(t *testing.T, cc comboCase, c gateCase) {
 	if !res.Pass {
 		t.Errorf("%s: %s; self-check problems %v", cc.id, res.Reason, self.Problems)
 	}
+}
+
+// traced checks what the self-check kept of its inner run (Review 102
+// N-102-1): its own reason, each result the combination names exactly
+// once and no other, the target's launches and work, the hits and their
+// sites.
+func traced(cc comboCase, g gateResult) (why []string) {
+	if !strings.Contains(g.Reason, cc.because) {
+		why = append(why, fmt.Sprintf("the self-check's reason does not name %q: %s", cc.because, g.Reason))
+	}
+	for _, k := range cc.keeps {
+		var got []result
+		for _, r := range g.Inner {
+			if r.ID == k.id {
+				got = append(got, r)
+			}
+		}
+		switch {
+		case len(got) != 1:
+			why = append(why, fmt.Sprintf("the self-check keeps %d results of %s, want 1", len(got), k.id))
+		case got[0].Verdict != k.verdict || !strings.Contains(got[0].Reason, k.because) || !strings.HasPrefix(got[0].Cleanup, k.cleanup):
+			why = append(why, fmt.Sprintf("the kept result of %s is %s (%s), cleanup %q; want %s naming %q, cleanup beginning %q",
+				k.id, got[0].Verdict, got[0].Reason, got[0].Cleanup, k.verdict, k.because, k.cleanup))
+		}
+	}
+	if len(g.Inner) != len(cc.keeps) {
+		why = append(why, fmt.Sprintf("the self-check keeps %d results of the inner run, want %d", len(g.Inner), len(cc.keeps)))
+	}
+	ran, none := g.Launches > 0 && g.Work > 0, g.Launches == 0 && g.Work == 0
+	if cc.ran && !ran || !cc.ran && !none {
+		why = append(why, fmt.Sprintf("the target launched %d and worked %d, want it run: %v", g.Launches, g.Work, cc.ran))
+	}
+	if len(g.Sites) != len(cc.sites) || g.Hits != len(cc.sites) {
+		why = append(why, fmt.Sprintf("the self-check shows %d hits at %v, want %d at %v", g.Hits, g.Sites, len(cc.sites), cc.sites))
+	} else {
+		for i, s := range cc.sites {
+			if !strings.Contains(g.Sites[i], s) {
+				why = append(why, fmt.Sprintf("hit %d is at %q, want %q", i+1, g.Sites[i], s))
+			}
+		}
+	}
+	return why
 }
 
 func insured(s string) bool { return s == "nothing left" || strings.HasPrefix(s, "ended ") }
