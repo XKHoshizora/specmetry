@@ -8024,3 +8024,118 @@ PR #39 合并之后，按负责人的指令做了只读的冻结前差额整理�
 - 原型 PR 技术 GO，建议合并固定对象；负责人条件授权以 merge commit 合并 PR #41。
 - run 40817305419 的 failure 与布局失效的未知原因保留。
 - 规范是第 8 版第二稿，**未冻结**；G5 整体仍待冻结审查，没有满足；生产实现未授权；WP2.5 与 M2 未验收。
+
+## 128．PR #41 的合并核验；WP2.5 冻结候选稿与审查包（规范第 9 版，待独立的冻结审查）
+
+**一：PR #41 的收尾与合并**（按 §127 的授权一）
+
+- **收尾**：Review 103 原样归档为 `d22b139`；记录 §127、原型文档 §15.13 与状态行为 `ee83482`。只有文档；`git diff 9d45036 ee83482 -- prototype .github` 与 `git diff ab4b7dd ee83482 -- prototype .github` 都为空，没有触发原型诊断；受审的对象没有预期外的变化。
+- **最终 HEAD 的常规 CI**：run 40882725067，pull_request，attempt 1，正式 success（8/8）。
+  - 八个作业都检出合并快照 `e8b4b4d65251db539c9331ffe877e5ab24a6ec3a`：父提交依次为 `dbcd5d4`、`ee83482`，树 `61c952d` 与 HEAD 相同。
+  - Go 测试作业的 SKIP 集合与 `ab4b7dd` 的最终 CI 相同（macOS 7、Ubuntu 15、Windows 10）；没有 FAIL；每个作业 26 个包 ok；Ubuntu 的 8 个 CrossUser 测试 PASS。
+  - 回执写入 PR #41 的描述，没有为回执追加提交。
+- **合并**：
+  - 合并之前，PR 标题中的“not for merge”删去（合并提交的说明取自标题）。
+  - 2026-10-29 13:48:00 UTC，以 merge commit 合并，`--match-head-commit` 锁定 `ee834825ee40646e994ae5d66c47b265f36fca14`。
+  - 合并提交 `03a6f6e1e9dd7e64d58de321b5d8f7cf532b636d`：
+    - 父提交依次为 `dbcd5d4`、`ee83482`；
+    - 树 `61c952d` 与最终 HEAD 相同，`git diff ee83482 03a6f6e` 为空；
+    - `4e690d8`、`eb2317f`、`9d45036`、`ab4b7dd`、`d22b139`、`ee83482` 都是它的祖先。
+  - Auto-fix、Auto-merge 保持关闭。原型 workflow 只在原型分支上触发，master 上没有原型诊断。
+- **master push CI**：run 40885279060，push，attempt 1，正式 success（8/8）。八个作业都取得并检出合并提交 `03a6f6e` 本身（`checkout -B master`）；没有 FAIL；三个 Go 测试作业各 26 个包 ok。没有重跑；若失败本应保留首次结果并停止，没有发生。
+
+**二：冻结审查的准备**（按 §127 的授权二；上面的核验全部成功之后开始）
+
+- **分支与对象**：
+  - 分支 `docs/wp2.5-freeze-candidate`，基于 master `03a6f6e`；
+  - 独立的纯文档 PR，不合并，等待独立的冻结审查（Review 104）与负责人的决定。
+- **规范第 9 版**（冻结候选稿）：新增 §21“冻结候选稿与审查包”。
+  - §21.1 证据清单。
+  - §21.2 G1 ~ G15 与其他事项逐项的分类（F / L / P / N）、证据、限制与建议。
+  - §21.3 D10、D12、D14 ~ D17、实现细化 E1 ~ E9、C-1 ~ C-20 逐项的建议、依据与限定。其中两项不是原样采纳：
+    - C-9 补充原始系统调用入口与 `//go:linkname`、`//go:cgo_import_dynamic` 指令的规则（入口无关，写入 §19.4）；
+    - C-13 修订之后采纳。
+  - §21.4 macOS：已测组合与支持承诺的差额。产品承诺 macOS 13+ 不缩小，15.x 的 Intel 支持不删除；差额 1 ~ 8 按 L 声明。
+  - §21.5 macOS 生产调用入口：推荐入口 E2，附兼容性论证，冻结之前推荐最小的 P-5。
+  - §21.6 负责人待决的 Q-4。
+  - §21.7 冻结的条件与顺序。
+  - §21.8 本版的同步。
+- **同步**：
+  - 本文开头的状态；
+  - §19.4 的 C-9 补充；
+  - §19.5 的 ABI 表标题、支持声明（已验证的组合、静态依据、未验证的范围）、架构一行、P-3 的状态与调用入口的指向；
+  - §20 开头的指向；
+  - acceptance-criteria MVP-EV-32 的验证方式（arm64 与 x86_64 各自执行，使用冻结所选的生产入口）；
+  - 原型文档开头、AGENTS.md、implementation-plan 的状态。
+- **不变**：prd NFR-05、mvp、data-model、`schemas/`、architecture、原型代码与 workflow、生产代码、依赖与迁移；十四项、C-4、D21、Q-1、Q-2 (a)、Q-3 (a)。
+
+**第 9 版补充的静态依据**（只读公开源码，不是动态证据，**没有**运行任何实验）：
+
+- **xnu**（官方仓库 `apple-oss-distributions`）：
+  - 标签经 API 解引用到提交：
+    - `macos-130` → `28fcecaa9a99`，`xnu-8792.41.9` → `5c2921b07a24`；
+    - `macos-135` → `1103a82bbc0c`，`xnu-8796.141.3` → `1b191cb58250`；
+    - `macos-146` → `19f03746a6c6`，`xnu-10063.141.1` → `d8b80295118e`。
+    - 完整的 SHA 见 §21.4。
+  - 核对的行（13.0 / 13.5 / 14.6）：
+    - `syscalls.master:269`；
+    - `kern_exit.c`：exit 的 `p_xhighbits` 与 `exit1`（`:1386` ~ `1387` / `:1435` ~ `1436` / `:1464` ~ `1465`）、kqueue 的通知（`:2440` / `:2488` / `:2542`）、父端的转移（`:2489` ~ `2490` / `:2537` ~ `2538` / `:2591` ~ `2592`）、`wait4`（`:2854` / `:2902` / `:2952`）、waitid 僵尸分支中 `si_status` 的计算与 `p_xhighbits` 的并入（`:3133` ~ `3139` / `:3181` ~ `3187` / `:3231` ~ `3237`；同一分支之前的 `si_signo`、`si_pid` 与 `si_code` 也逐行比较过）；
+    - `kern_event.c` 的 `NOTE_EXITSTATUS` 置位（`:1173` ~ `1174` / `:1167` / `:1217` ~ `1218`）；
+    - `proc_internal.h` 的 `u_int p_xstat` 与 `p_xhighbits`；
+    - `wait.h:125` ~ `147`。
+  - 结果都与 26.5（`xnu-12377.121.6`）的对应位置相同。
+  - 所取文件的 SHA-256：
+
+    | 版本 | 文件 | SHA-256 |
+    |---|---|---|
+    | 13.0 | `kern_exit.c` | `294ba223648225fe01b9d64754f227be6eeb7c046ef67e321c43e6c692dbddb6` |
+    | 13.0 | `kern_event.c` | `9e01c7d327f23141585906e47a549dc482d155d293954c8f31c52ec7f5ad50c4` |
+    | 13.0 | `syscalls.master` | `f802b4b595de726ac96c54a8a41fc4e723c812a7a4e5663c06726a49e198f8dc` |
+    | 13.0 | `proc_internal.h` | `eccbc3c64105e5ab301584171c4a8b200b9b6dc53ba11bdd1066b8be72df0613` |
+    | 13.0 | `kern_sysctl.c` | `439ff959b864c91a978f72b6468399900b73361208a32ad348b6352969ba4435` |
+    | 13.5 | `kern_exit.c` | `16e9f12bcc556be123353136770b1318d5a2b6718c2bf602290a427f18183296` |
+    | 13.5 | `kern_event.c` | `6407f99da240107a731030575246379f2261979211d2d4cfbfa27691427e1e2f` |
+    | 13.5 | `syscalls.master` | `163824910a25029dfc559fabd518ed3d2ec3539d7ff9f157dcd56067e6a6952b` |
+    | 13.5 | `proc_internal.h` | `5b7197c46efc97487db4e718c897777c18d6fb1de64920753e79da4c8f0bb4eb` |
+    | 14.6 | `kern_exit.c` | `637b66ba2592ead59ee43cb74de584a76f043c0a1c93d961a00e4ef04b15b543` |
+    | 14.6 | `kern_event.c` | `f2901b71b1ac688a7f9f42fa6bcafd4b31ad133c21938efd807c2b7f4d04772c` |
+    | 14.6 | `syscalls.master` | `4bc39fcc0aa08f40e367064b947d586937d181ce6dd688683cefbdbe4650fa46` |
+    | 14.6 | `proc_internal.h` | `053d2aa5b9b74ca71934679ff3ba9b8a588803b4e69485edc8fc55c39451193f` |
+    | 13.0 / 13.5 / 14.6 | `wait.h`（三者相同） | `3a5896c72f9b60736234a05016da01cbc9bd62ddf9f4d00bf9a39f988c57c228` |
+    | 26.5 | `kern_exit.c` | `3bf5d40cf482254ec47626108c760e0879fac2e41145bd63566d13f9acab311a` |
+    | 26.5 | `kern_sysctl.c` | `e9afd60d06752d2eaa7fada1316f293c342c3666f54d3c7e94d82d5ab55c851a` |
+    | 26.5 | `subr_xxx.c` | `b2518759950620d6c5964d548c6e1838eb6fa83252a78760c71826edd57c548c` |
+    | 26.5 | `wait.h` | `3a82112a1dc8025e7d3a09cb6d9d39bb60c13018052838d3f8ade1b208f83983` |
+
+  - 26.5 中另读了：
+    - `bsd/kern/kern_sysctl.c:1190`、`:1249` 的 `MIN(p_xstat, USHRT_MAX)`（13.0 为 `:1163`、`:1211`），这是入口 E6 不可行的依据；
+    - `bsd/kern/subr_xxx.c:181` ~ `187` 的 `nosys`；`send_sigsys` 的默认值没有核对。
+  - 没有核对：三个旧版本的 `siginfo_t` 布局、`kinfo_proc`、`filt_procattach`、`proc_find` 与 Libsyscall。
+- **Go 1.27.1**（作者本机的工具链；CI 为 Go 1.27.3，没有逐文件比较）：
+
+  | 文件与位置 | 内容 | SHA-256 |
+  |---|---|---|
+  | `src/cmd/link/internal/ld/macho.go:449` | macOS 的最低版本 13.0.0 | `665c2270cec3df9bc9b77931d7e87e50ad5726da147e8df651cead6230c1ef17` |
+  | `src/runtime/signal_darwin.go:20` | SIGSYS 为 `_SigThrow` | `ec4119fe65a45c77833150bc11107e4a11bf1b062c04cd1c87c9731a01935d9b` |
+  | `src/syscall/syscall_darwin.go:396` ~ `405` | `syscall6` 对 linkname 的容忍（go.dev/issue/67401） | `07eea080aae7b97b37943bb0964594a198c73b8ec35697b2b8912c0323cd129a` |
+  | `src/syscall/zsyscall_darwin_amd64.go:44` | `wait4` 经 libSystem | `b7d5fe4a69c51b0cd8ecab53ae76ff599ac429dadd5fa43c3f5be0c8dda56f8a` |
+  | `src/syscall/asm_darwin_amd64.s` | `SYSCALL` | `f4ac337d025ceafeca0a412a4354afc695528ea5e492b967e34f0ba2bc7c64df` |
+  | `src/syscall/asm_darwin_arm64.s` | `SVC $0x80` | `20a0a3d681ae7801810665cb26b34d762cf82fae21e1883c5a24c7d2b2958e16` |
+  | `src/cmd/compile/internal/noder/noder.go` | `go:cgo_import_dynamic` | `2aa3493281bfced8419994a553606fe074f3dbde6a46cf7a66cff0519cb68e83` |
+
+- **x/sys v0.49.0**（模块缓存）：
+  - `unix/zsyscall_darwin_amd64.go`：`:274` kevent、`:716` kill、`:802` sysctl 都经 libSystem 的跳板；SHA-256 `79b0ff625e3fb74b6ef0f1ab8cf64eb3b68cdadcccf40fef9fa53c4e7e3e4288`。
+  - arm64 的生成文件：`b5427b1b8b0d3e04158a9ee9924ec6869e95fe1187ce907af8dd3e70db2c1916`。
+
+**作者的判断与限制**：
+
+- 入口的推荐与 Q-4 都是作者的建议，由冻结审查与负责人裁定。
+- 依据失效时“可能表现为进程异常退出”是从源码推出的，没有核对 `send_sigsys` 的默认值，也没有实验。
+- 入口 E2 没有构建或运行的证据。
+- 本轮没有新增机制实验、生产实现或非阻塞增强，没有修改原型、workflow、生产代码、依赖、Schema 或迁移。
+
+**状态**：
+
+- PR #41 已合并为 `03a6f6e`，合并核验完成。
+- 冻结候选稿与审查包在独立的文档 PR 中，**待独立的冻结审查**（Review 104），不合并；Q-4 待负责人决定。
+- 规范是第 9 版草案，**未冻结**；G5 未满足；生产实现与 P-5 未授权；WP2.5 与 M2 未验收。
