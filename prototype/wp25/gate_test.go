@@ -135,6 +135,12 @@ type gateResult struct {
 	Final      string   `json:"final"` // ended, alive, unknown
 	Pass       bool     `json:"pass"`
 	Millis     int64    `json:"ms"`
+	// Inner is every result the inner run printed, its final WP25RESULT
+	// lines in their order (Review 102 N-102-1), whatever the target's
+	// verdict: a scenario it needs (P-3's layout probe) is kept with its
+	// verdict, reason, reasons, cleanup, observation, launches, work and
+	// registrations. It is kept, not judged.
+	Inner []result `json:"inner,omitempty"`
 }
 
 var (
@@ -517,6 +523,7 @@ func TestInnerLeak(t *testing.T) {
 type innerRun struct {
 	exit    int
 	results map[string]result
+	all     []result // every result line, in the order printed
 	hits    int
 	sites   []string // the site of each hit the inner test process printed
 	seals   []string // the JSON of the WP25WITNESS lines
@@ -578,6 +585,7 @@ func runInner(test, inject string, env []string) innerRun {
 			continue
 		}
 		r.results[res.ID] = res
+		r.all = append(r.all, res)
 	}
 	if err := sc.Err(); err != nil {
 		r.err = err
@@ -586,10 +594,12 @@ func runInner(test, inject string, env []string) innerRun {
 }
 
 // outerFault is an outer-side fault of the tested path, for
-// TestGateCombos; the zero value in TestGate.
+// TestGateCombos, and the environment a combination adds to the inner run;
+// the zero value in TestGate.
 type outerFault struct {
 	name  string   // remedy-error, remedy-unconfirmed, census-error, record-unknown, forge-owner
 	forge survivor // forge-owner: the process a forged creation record names
+	env   []string // more of the inner run's environment (Review 102: a stub tool first on its PATH)
 }
 
 // The tested path's own steps, where a combination check (TestGateCombos)
@@ -733,8 +743,8 @@ func runGate(t *testing.T, c gateCase, f outerFault) gateResult {
 		t.Fatal(err)
 	}
 	defer rw.close()
-	r := runInner(c.test, c.inject, []string{witnessEnv + "=" + wf, injectLogEnv + "=" + il, rw.env()})
-	g := gateResult{ID: c.id, Test: c.test, Inject: c.inject, Want: c.want, Reject: c.reject, InnerExit: r.exit, Hits: r.hits, Sites: r.sites, Total: -1}
+	r := runInner(c.test, c.inject, append([]string{witnessEnv + "=" + wf, injectLogEnv + "=" + il, rw.env()}, f.env...))
+	g := gateResult{ID: c.id, Test: c.test, Inject: c.inject, Want: c.want, Reject: c.reject, InnerExit: r.exit, Hits: r.hits, Sites: r.sites, Total: -1, Inner: r.all}
 	got, ok := r.results[c.scenario]
 	verdictOK := false
 	switch {

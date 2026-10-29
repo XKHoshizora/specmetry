@@ -178,6 +178,7 @@ func runP3(t *testing.T, c p3Case, n int) {
 	}
 	r.seamFor(c.name, n)
 	r.closeFault()
+	r.lateClose(c.name, n)
 	c.run(r)
 }
 
@@ -585,6 +586,29 @@ func createErr(path string) (*os.File, error) {
 		return nil, errors.New("injected: the error file could not be created (no call made)")
 	}
 	return os.Create(path)
+}
+
+// lateClose is the seam p3-layout-close-late of Review 102's regression
+// (gate_combo_test.go), in an inner run's first layout probe only: the
+// probe holds one more file, os.DevNull, left to its end, where the
+// scenario's closer makes the real close and the seam replaces its result
+// by an injected error. The failure comes after the run's evidence line
+// (its T), in its final result only.
+func (r *p3Run) lateClose(name string, n int) {
+	if os.Getenv(innerEnv) == "" || !injected("p3-layout-close-late") || name != "layout" || n != 1 {
+		return
+	}
+	f, err := os.Open(os.DevNull)
+	if err != nil {
+		r.s.invalidf("the seam's late file %s: %v", os.DevNull, err)
+	}
+	r.s.closer("the seam's late file "+os.DevNull, func() error {
+		err := f.Close()
+		if err == nil && injectOnce("p3-layout-close-late", "P-3 the real close of the seam's late file "+os.DevNull+", at the layout probe's end, was made; its result is replaced by an injected error", os.Getpid()) {
+			return errors.New("injected: closing the late file failed at the end (the real close was made)")
+		}
+		return err
+	})
 }
 
 // corruption judges a gate regression's run by the decoder's answer
