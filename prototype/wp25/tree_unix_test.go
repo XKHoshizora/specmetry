@@ -240,7 +240,7 @@ func startTree(s *scen, cmd *exec.Cmd) *unixTree {
 		s.invalidf("exit observer: %v", err)
 	}
 	t.obs = obs
-	s.defer_(obs.close)
+	s.closer(fmt.Sprintf("the exit observer of %d", t.pid), obs.close)
 	return t
 }
 

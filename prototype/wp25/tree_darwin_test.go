@@ -70,19 +70,33 @@ func groupLive(pgid int, deadline time.Time) ([]int, error) {
 // (enum_check_darwin_test.go) replaces; the real one otherwise.
 var sysctlRaw = unix.SysctlRaw
 
-// kinfoProcs reads a kinfo_proc list (sysctl kern.proc.*). It is x/sys's
-// SysctlKinfoProcSlice, its loop unchanged, through the seams: ENOMEM, the
-// table having grown between the size and the read, is tried again.
-func kinfoProcs(_ time.Time, name string, args ...int) ([]unix.KinfoProc, error) {
-	for {
+// enumRetries is §19.5's enumeration budget: ENOMEM is retried at most 3
+// times.
+const enumRetries = 3
+
+// kinfoProcs reads a kinfo_proc list (sysctl kern.proc.*) within §19.5's
+// enumeration budget (Review 101 B3). ENOMEM, the table having grown
+// between the size and the read, is retried at most enumRetries times,
+// and only while the caller's deadline has not passed: the deadline is the
+// caller's, so the retries share it, none gets a budget of its own. ENOMEM
+// past either, or any other error, is an error: unknown, never an empty
+// list. x/sys's SysctlKinfoProcSlice retries ENOMEM in a loop of its own,
+// without bound, so it is not used. The first call is always made, and
+// its answer kept, even past the deadline: no call has a time limit of its
+// own, and this is no real-time guarantee (§19.5).
+func kinfoProcs(deadline time.Time, name string, args ...int) ([]unix.KinfoProc, error) {
+	for retry := 0; ; retry++ {
 		b, err := enumCall(name, args)
-		if errors.Is(err, unix.ENOMEM) {
-			continue
-		}
-		if err != nil {
+		switch {
+		case err == nil:
+			return kinfoOf(b)
+		case !errors.Is(err, unix.ENOMEM):
 			return nil, err
+		case retry == enumRetries:
+			return nil, fmt.Errorf("%s: %w, %d times: the %d retries are used up", name, err, retry+1, enumRetries)
+		case !time.Now().Before(deadline):
+			return nil, fmt.Errorf("%s: %w at the deadline, after %d retries", name, err, retry)
 		}
-		return kinfoOf(b)
 	}
 }
 
@@ -139,19 +153,27 @@ func newExitObserver(pid int) (exitObserver, error) {
 		if st, pr := procInfo(pid); errors.Is(err, unix.ESRCH) && pr == present && st.zombie {
 			s.early = true
 		} else {
-			_ = unix.Close(kq)
-			return exitObserver{}, fmt.Errorf("kevent register: %w", err)
+			// This call owns the kqueue until it returns one: it closes it,
+			// and a close that fails is part of the error (Review 101 B2).
+			err = fmt.Errorf("kevent register: %w", err)
+			if cerr := unix.Close(kq); cerr != nil {
+				err = errors.Join(err, fmt.Errorf("closing the kqueue after it: %w", cerr))
+			}
+			return exitObserver{}, err
 		}
 	}
 	return exitObserver{s: s}, nil
 }
 
-func (o exitObserver) close() {
+// close closes the kqueue and gives the close's error. Its owner is the
+// scenario (scen.closer), which closes it once and keeps the error
+// (Review 101 B2).
+func (o exitObserver) close() error {
 	err := unix.Close(o.s.kq)
 	if h := p3Seam.close; h != nil {
 		err = h(err)
 	}
-	_ = err
+	return err
 }
 
 // wait observes the exit within d. An event, or an early exit's status,
@@ -338,12 +360,14 @@ func decodeW2(a, b wRaw, pid int) (exitInfo, error) {
 	return e, nil
 }
 
-// kqWaitRaw waits at most d for one event on kq, retrying EINTR within
-// what is left of d; ok is false when none came.
+// kqWaitRaw waits at most d for one event on kq; ok is false when none
+// came. EINTR is retried within what is left of d, never past it (Review
+// 101 B3): an EINTR at or after the deadline ends the wait as a failure,
+// not as a wait that saw no event.
 func kqWaitRaw(kq int, d time.Duration) (kRaw, bool, error) {
 	deadline := time.Now().Add(d)
 	evs := make([]unix.Kevent_t, 1)
-	for {
+	for intr := 1; ; intr++ {
 		left := time.Until(deadline)
 		if left < 0 {
 			left = 0
@@ -351,7 +375,10 @@ func kqWaitRaw(kq int, d time.Duration) (kRaw, bool, error) {
 		ts := unix.NsecToTimespec(left.Nanoseconds())
 		n, err := keventCall(kq, nil, evs, &ts)
 		if errors.Is(err, unix.EINTR) {
-			continue
+			if time.Now().Before(deadline) {
+				continue
+			}
+			return kRaw{}, false, fmt.Errorf("kevent: interrupted (EINTR) %d times, the last at the wait's deadline", intr)
 		}
 		if err != nil {
 			return kRaw{}, false, err

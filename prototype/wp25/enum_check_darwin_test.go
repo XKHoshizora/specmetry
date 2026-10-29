@@ -218,28 +218,29 @@ func TestEnumChain(t *testing.T) {
 }
 
 // kevFake replaces keventCall: its n-th call (from 1) waits, then gives
-// step(n); once stopped, every call answers no event at once. It keeps
-// the timeouts it was given: the first, and whether a later one grew.
+// step(n); once stopped, every call answers no event at once. It keeps the
+// latest end that a call's timeout reached, measured from the first call:
+// a retry given more than what is left of the wait reaches past the
+// wait's own end.
 type kevFake struct {
 	mu    sync.Mutex
 	calls int
 	stop  bool
-	first time.Duration
-	prev  time.Duration
-	grew  bool
+	start time.Time
+	reach time.Duration
 	step  func(n int) (time.Duration, int, error)
 }
 
 func (f *kevFake) call(_ int, _, evs []unix.Kevent_t, ts *unix.Timespec) (int, error) {
 	f.mu.Lock()
 	f.calls++
-	n, stop, left := f.calls, f.stop, time.Duration(ts.Nano())
+	n, stop := f.calls, f.stop
 	if n == 1 {
-		f.first = left
-	} else if left > f.prev {
-		f.grew = true
+		f.start = time.Now()
 	}
-	f.prev = left
+	if r := time.Since(f.start) + time.Duration(ts.Nano()); r > f.reach {
+		f.reach = r
+	}
 	f.mu.Unlock()
 	if stop {
 		return 0, nil
@@ -303,7 +304,7 @@ func TestKqWaitDeadline(t *testing.T) {
 			var err error
 			took, returned := bounded(t, c.wait+time.Second, f.halt, func() { _, ok, err = kqWaitRaw(-1, c.wait) })
 			f.mu.Lock()
-			calls, first, grew := f.calls, f.first, f.grew
+			calls, reach := f.calls, f.reach
 			f.mu.Unlock()
 			if !returned {
 				t.Fatalf("still waiting %v past its deadline, after %d calls: the EINTR retries are not bounded", took-c.wait, calls)
@@ -311,8 +312,11 @@ func TestKqWaitDeadline(t *testing.T) {
 			if c.calls > 0 && calls != c.calls {
 				t.Errorf("%d calls, want %d", calls, c.calls)
 			}
-			if first > c.wait || grew {
-				t.Errorf("a retry was given more than what was left of the wait (first %v of %v, grew %v)", first, c.wait, grew)
+			// The calls' own timeouts reach no later than the wait's end (5 ms
+			// for the clock between the two readings; a retry given the whole
+			// wait again reaches at least 10 ms past it in these cases).
+			if reach > c.wait+5*time.Millisecond {
+				t.Errorf("a retry was given more than what was left of the wait: its timeout reached %v, the wait is %v", reach, c.wait)
 			}
 			switch {
 			case c.errHas != "" && (err == nil || !strings.Contains(err.Error(), c.errHas)):

@@ -44,8 +44,14 @@ func p1Inner(s *scen, h *host, variant string) p1Run {
 		}
 		r.start = st.start
 		obs, err := newExitObserver(r.PID)
+		// The scenario owns the observer from here (Review 101 B2): an early
+		// end of the callback still closes it, once, and keeps the error.
+		closeObs := func() error { return nil }
+		if err == nil {
+			closeObs = s.closer(fmt.Sprintf("the exit observer of %d", r.PID), obs.close)
+		}
 		if err == nil && injectOnceAt("p1-observer-and-clear-fail-once", "p1-observer-and-clear-fail-once/observer", "p1Inner.observer", r.PID) {
-			obs.close() // the real observer was made: this callback ends without it
+			closeObs() // the real observer was made: this callback ends without it
 			err = errors.New("injected: the exit observer could not be made")
 		}
 		if err != nil {
@@ -63,7 +69,7 @@ func p1Inner(s *scen, h *host, variant string) p1Run {
 				s.flag("observation failed: %v", zerr)
 			}
 			if !zombie {
-				obs.close()
+				closeObs()
 				s.invalidf("load not established: the main process was not seen exited within 5 s")
 			}
 			r.Facts = append(r.Facts, "fixture: the main process had exited (an unreaped zombie, same start time) before the observation")
@@ -110,7 +116,7 @@ func p1Inner(s *scen, h *host, variant string) p1Run {
 			}
 			time.Sleep(5 * time.Millisecond)
 		}
-		obs.close()
+		closeObs()
 		if failed || !confirmed {
 			// F1 (spec §19.3): no Wait, the observer closed, the process
 			// handed to the inventory with the host disabled (Q-1).

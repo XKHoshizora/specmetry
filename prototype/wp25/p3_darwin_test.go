@@ -30,6 +30,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"os/exec"
@@ -139,6 +140,7 @@ type p3Read struct {
 	What string `json:"what"`
 	W    *wRaw  `json:"waitid,omitempty"`
 	K    *kRaw  `json:"kevent,omitempty"`
+	Live string `json:"live,omitempty"` // a read of the members: the PIDs not zombies
 	Err  string `json:"error,omitempty"`
 }
 
@@ -612,7 +614,7 @@ func (r *p3Run) observer(tr *unixTree) exitObserver {
 		r.ev.R = append(r.ev.R, p3Read{What: "kevent registration", Err: err.Error()})
 		r.s.invalidf("observation failed: the kqueue registration: %v", err)
 	}
-	r.s.defer_(obs.close)
+	r.s.closer(fmt.Sprintf("the exit observer of %d", tr.pid), obs.close)
 	return obs
 }
 
@@ -914,11 +916,13 @@ func p3Group(fail bool) func(*p3Run) {
 				s.flag("the planned fault hit %d times, want 1", r.hits)
 			}
 			r.predict("the candidate's answer when the members cannot be read", "not confirmed: the member list is unknown", resp)
-			if !tr.confirm(tKill) {
-				s.flag("cleanup: the group %d could not be confirmed empty after the planned fault", tr.pid)
-			}
 		} else {
 			r.predict("the candidate confirms the group's end", "confirmed", resp)
+		}
+		// Not confirmed, by the planned fault or by a read that failed: the
+		// group is ended before the leader is reaped.
+		if resp != "confirmed" && !tr.confirm(tKill) {
+			s.flag("cleanup: the group %d could not be confirmed empty after the candidate did not confirm its end", tr.pid)
 		}
 		r.predict("the leader still unreaped after the group's end", true, tr.zombieLeader())
 		if !tr.reap(time.Second) {
@@ -931,32 +935,47 @@ func p3Group(fail bool) func(*p3Run) {
 
 // confirmEnd is the candidate's confirmation of a group's end (§19.5's
 // enumeration rule): a member list that cannot be read is unknown, and
-// unknown is no end; only ENOMEM would be retried. With fail, the first
-// read is made and its answer replaced by an injected error, recorded as
-// the planned fault's hit. A real read that fails is a tool failure.
+// unknown is no end; only ENOMEM is retried, within the budget
+// (kinfoProcs). Each read's own result is kept first, apart from what the
+// candidate makes of it (Review 101 B1): R records it, and a real read
+// that fails is a tool failure, whatever follows. With fail, the planned
+// fault then replaces the candidate's input of the first read by an
+// injected error, recorded as its hit; it never replaces, overwrites or
+// excuses the read's own result.
 func (r *p3Run) confirmEnd(tr *unixTree, fail bool) string {
 	deadline := time.Now().Add(tKill)
-	for first := true; ; first = false {
-		if first {
+	for n := 1; ; n++ {
+		if n == 1 {
 			p3Seam.enum = r.enumFault(tr.pid)
 		}
 		m, err := groupLive(tr.pid, deadline)
 		p3Seam.enum = nil
-		switch {
-		case fail && first:
-			r.hits++
-			r.ev.F = append(r.ev.F, fmt.Sprintf("planned fault: the read of kern.proc.pgrp %d was made (%d live members, error %v); its answer is replaced by an injected error", tr.pid, len(m), err))
-			err = errors.New("injected: the member list could not be read")
-		case err != nil:
+		rd := p3Read{What: fmt.Sprintf("kern.proc.pgrp %d, read %d", tr.pid, n), Live: fmt.Sprint(m)}
+		if err != nil {
+			rd.Live, rd.Err = "", err.Error()
 			r.s.flag("observation failed: the members of group %d: %v", tr.pid, err)
 		}
+		in := err // the candidate's input
+		if fail && n == 1 {
+			r.hits++
+			r.ev.F = append(r.ev.F, fmt.Sprintf("planned fault: the read of kern.proc.pgrp %d was made (its result is in R); the candidate's input is replaced by an injected error", tr.pid))
+			in = errors.New("injected: the member list could not be read")
+		}
+		end := ""
 		switch {
-		case err != nil:
-			return "not confirmed: the member list is unknown"
+		case in != nil:
+			end = "not confirmed: the member list is unknown"
 		case len(m) == 0:
-			return "confirmed"
+			end = "confirmed"
 		case time.Now().After(deadline):
-			return "not confirmed: members alive at the deadline"
+			end = "not confirmed: members alive at the deadline"
+		}
+		// R keeps the first read, every read that failed, and the last.
+		if n == 1 || err != nil || end != "" {
+			r.ev.R = append(r.ev.R, rd)
+		}
+		if end != "" {
+			return end
 		}
 		_ = tr.kill()
 		time.Sleep(5 * time.Millisecond)
@@ -1185,55 +1204,78 @@ func (r *p3Run) tool(step string, limit time.Duration, name string, args ...stri
 // fails stops the run as invalid.
 func (r *p3Run) toolRaw(step string, limit time.Duration, name string, args ...string) []byte {
 	s := r.s
-	d := limit
-	if left := p3Inner - time.Since(r.began); left < d {
-		d = left
+	// One deadline for the whole step, fixed before it begins (Review 101
+	// B3): the files, the start and the wait all come out of it.
+	began := time.Now()
+	end := began.Add(limit)
+	if e := r.obsEnd(); e.Before(end) {
+		end = e
 	}
-	if dl, ok := r.t.Deadline(); ok {
-		if left := time.Until(dl) - p3Margin; left < d {
-			d = left
-		}
-	}
-	if d <= 0 {
+	if !began.Before(end) {
 		s.invalidf("not executed: no time left for the tool step %s", step)
 	}
+	// Each file is the scenario's from the moment it exists (Review 101
+	// B2). The parent closes its copies once the child has them; a file
+	// made before a failure is closed at once; a close that fails is a tool
+	// failure, kept.
 	outPath, errPath := filepath.Join(r.dir, step+".out"), filepath.Join(r.dir, step+".err")
-	stdout, err1 := os.Create(outPath)
-	stderr, err2 := createErr(errPath)
-	if err1 != nil || err2 != nil {
-		s.invalidf("the output files of the tool step %s: %v, %v", step, err1, err2)
+	stdout, err := os.Create(outPath)
+	if err != nil {
+		s.invalidf("the output files of the tool step %s: %v", step, err)
 	}
+	closeStdout := s.closer("the output file "+filepath.Base(outPath), func() error { return closeOut(stdout, step) })
+	stderr, err := createErr(errPath)
+	if err != nil {
+		if closeStdout() == nil {
+			s.note("the output file %s, created before the failure, closed", filepath.Base(outPath))
+		}
+		s.invalidf("the output files of the tool step %s: %v", step, err)
+	}
+	closeStderr := s.closer("the output file "+filepath.Base(errPath), stderr.Close)
 	cmd := exec.Command(name, args...)
 	cmd.Env = append(os.Environ(), r.tag)
 	cmd.Dir = r.dir
 	cmd.Stdout, cmd.Stderr = stdout, stderr
-	err := start(cmd)
-	_ = closeOut(stdout, step)
-	_ = stderr.Close()
+	err = start(cmd)
+	closeStdout()
+	closeStderr()
 	if err != nil {
 		s.invalidf("the tool step %s did not start: %v", step, err)
 	}
 	s.launched(1)
 	c := childOf(cmd)
 	s.own(c)
-	ended := c.reap(d)
+	ended := c.reap(time.Until(end))
 	if !ended {
 		c.stop()
-		s.flag("the tool step %s did not end within %v", step, d.Round(time.Millisecond))
+		s.flag("the tool step %s did not end within %v", step, end.Sub(began).Round(time.Millisecond))
 	}
 	r.census(step)
 	if !ended {
 		s.t.FailNow()
 	}
 	if ws, _ := cmd.ProcessState.Sys().(syscall.WaitStatus); !ws.Exited() || ws.ExitStatus() != 0 {
-		eb, _ := os.ReadFile(errPath)
+		eb, _ := r.readBack(errPath)
 		s.invalidf("the tool step %s ended with %s: %s", step, waitStatus(ws), clip(strings.TrimSpace(string(eb))))
 	}
-	b, err := os.ReadFile(outPath)
+	b, err := r.readBack(outPath)
 	if err != nil {
 		s.invalidf("the output of the tool step %s: %v", step, err)
 	}
 	return b
+}
+
+// readBack reads a tool step's file. Its handle is the scenario's while it
+// is open (Review 101 B2): os.ReadFile would drop the close's error.
+func (r *p3Run) readBack(path string) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	closeF := r.s.closer("the file "+filepath.Base(path)+" read back", f.Close)
+	b, err := io.ReadAll(f)
+	closeF()
+	return b, err
 }
 
 // census lists this run's tool processes still alive by their tag: Clang's

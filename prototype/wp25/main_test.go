@@ -169,6 +169,7 @@ type scen struct {
 	goid       uint64        // the test goroutine
 	mu         sync.Mutex    // the scenario may be used from several goroutines
 	cleanLimit time.Duration // the end's own limit, if any: over it, the run is invalid
+	closeFail  []string      // what the scenario owned and could not close (closer)
 }
 
 // begin starts a scenario; the caller defers done. needLaunch and
@@ -225,6 +226,29 @@ func (s *scen) adopt(r s6Result) s6Result {
 		s.flag("observation failed: stopping the read of %s: %v", name, err)
 	}
 	return r
+}
+
+// closer makes the scenario the owner of one thing to close from the
+// moment it exists (Review 101 B2). The returned func closes it once,
+// whoever calls it first, the owner's code or the scenario's end, and
+// gives that close's error. The scenario keeps the error as a failure of
+// the run, whatever follows, and its cleanup is then not verified. A
+// close that failed is never made again: what it left is not known, and
+// the descriptor may name another file by then.
+func (s *scen) closer(what string, close func() error) func() error {
+	var once sync.Once
+	var err error
+	f := func() error {
+		once.Do(func() {
+			if err = close(); err != nil {
+				s.flag("cleanup not verified: closing %s failed: %v", what, err)
+				s.locked(func() { s.closeFail = append(s.closeFail, what) })
+			}
+		})
+		return err
+	}
+	s.defer_(func() { f() })
+	return f
 }
 
 func (s *scen) launched(n int)  { s.locked(func() { s.r.Launches += n }) }
@@ -296,6 +320,11 @@ func (s *scen) done() {
 		s.after[i]()
 	}
 	s.r.Cleanup = s.cleanup()
+	// A handle whose close failed is not known to be released (Review 101
+	// B2): the processes' end does not verify it.
+	if len(s.closeFail) > 0 {
+		s.r.Cleanup = "NOT verified: closing failed (" + strings.Join(s.closeFail, ", ") + "); " + s.r.Cleanup
+	}
 	// What the output steps handed on ends once its reads return, at the
 	// latest when the processes holding the write ends are gone, which the
 	// cleanup has just confirmed (Review 081 B1).
