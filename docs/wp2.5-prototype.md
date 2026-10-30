@@ -49,6 +49,11 @@
 > - **2026-10-30**（review-resolution §135）：Review 109 为技术 NO-GO：B1-R 的主要修订成立，残余 B1-R-S 是发信号与回收共用锁的持有边界及其与截止查询的关系；N-108-1、N-108-2 关闭。§16 的第四稿在同一 PR 中只修订 B1-R-S：写定控制锁与状态锁的范围、Wait 任务与请求任务的加锁、发布、解锁与外部调用的顺序、查询的规则，并同步所有权表、提前出口与时间线。第四稿**待定向复审**，不合并；P-5 的执行未授权，本文的原型代码没有改动。
 > - **2026-10-30**（review-resolution §136）：[Review 110](reviews/codex-review-110.md) 对第四稿（`35ecd79`）为**文档技术 GO**：B1-R-S 关闭，B1-R 在计划规格层面整体收口，没有新的 BLOCKER；计划具备供负责人单独授权实现和执行的条件。负责人条件授权以 merge commit 合并 PR #43，并条件授权在其合并核验全部成功之后另开 test-only 原型 PR 按 §16 第四稿实现并执行 P-5。计划通过不代表协议已实现或动态验证；§16 的技术内容没有改动。
 > - **2026-10-30**（review-resolution §137、§138）：PR #43 合并为 `021c956`，合并核验完成。P-5 在分支 `test/wp2.5-prototype-p5`（PR #44）中实施，计划先于代码登记（§16.14、§16.15）。固定代码点 `0213fb7` 的诊断 run 41055799521 为 **failure**：两个 macOS 架构的原生 39/39 confirmed、接缝门禁 2/2、模型 10/10、布局 3/3，唯一的 T 是 `P5.static.symbols`（§16.16），终判 invalid（T），**交负责人决定**，不重跑；PR #44 不合并。
+> - **2026-10-30**（review-resolution §139）：[Review 111](reviews/codex-review-111.md) 对 PR #44 的实现为**技术 NO-GO**，有两项阻塞：
+>   - B1：正常 EOF 的路径没有关闭门禁的父端读端；
+>   - B2：新清理链会遗失必要的观察失败。
+>
+>   首次诊断仍为 failure / invalid（T）；N1 ~ N3 为非阻塞项。负责人只授权纯文档的修订准备：§16.17 写定 B1、B2 的最小修复与回归，以及符号检查的第二版（§16.4 的方法修订），**待独立审查**。实现、workflow 与新的诊断都未授权，本文的原型代码没有改动。
 > - 这**不是**规范冻结：草案为第 7 版，待独立审查和冻结；14 项产品选择、D21、Q-1 与 Q-2 已决定，技术候选仍待审查。T1 ~ T6 按 Review 075 的裁定只得到**局部支持**（§11；草案 §17.5 的 G1 ~ G15 与 §19）。
 > - 原型成功**不是**生产验收：生产 Check Runner、迁移 0009、CLI 接线都没有授权，WP2.5 没有实现或验收，M2 没有整体验收。
 > - 本文中的“候选规格”都待审查；其中涉及可见行为的（例如 C-4、C-7、C-10）依赖对应的产品选择（§9、§10）。C-4 的产品语义与 C-7（D20 (i)）已于 2026-10-25 决定，其技术部分仍待审查。本文不新增接受风险，也不批准任何保证调整。
@@ -4184,6 +4189,18 @@ R2 也说明 `done` 的报告文件检查是第二道防线：即使没有核验
 
 这些静态检查每个作业 1 次，计入“静态”证据，不计入原生的 confirmed。
 
+**方法的版本**（Review 111 之后补记；上表本身不改）：
+
+- 上表是**第一版**：受审于 `35ecd79`，固定代码点 `0213fb7` 的诊断使用它。
+  - 那一次 `P5.static.symbols` 为 T，终判 invalid（T），见 §16.16。
+  - 这一结果不回改，也不按第二版重判。
+- **第二版**见 §16.17.4：
+  - 修订 `settings` 与 `symbols` 的写法；
+  - 新增 `P5.static.method`、`P5.static.artifact` 与 `P5.static.binding`；
+  - 以 `_waitid` 的每符号绑定记录取代“`nm -m` 显示来自 libSystem”这一条件。
+
+  第二版只是计划，待独立审查。它只适用于获得授权之后的新固定代码点。
+
 ### 16.5 原生场景、受控对象与预测（每个场景 3 次）
 
 - **身份前提**：每个场景的被读对象，都是本进程以 `startGroup` 启动、在自己进程组中的直接子进程。读取之前，`r.zombie` 确认它是本进程未回收的僵尸，且启动时间相符（3 s 内）；不成立为 T。
@@ -4864,3 +4881,465 @@ r 为 `int32(r1)`。下面五种形式互斥，并且覆盖全部组合：
 - 本次 P-5 **不是完整的通过**：终判为 invalid（T），唯一的 T 是 `P5.static.symbols`，原因是检查脚本的缺陷与 `nm -m` 输出没有库归属这两处；原生、接缝、模型与其余静态检查在两个架构上都按预测成立。
 - 作者不宣布 G5、H1 或 P-5 满足，也不据此推断入口 E2 的符号与库的归属已经验证。
 - 需要负责人决定（作者的建议见 review-resolution §138）：是否授权修正 `P5.static.symbols` 的检查（去掉 `pipefail` 下 `grep -q` 的提前退出，并重新确定“来自 libSystem”的证据形式，例如增加取得二进制标志与加载命令的步骤），以及是否在新的固定代码点取得一次新的诊断。修正之前不推送任何原型或 workflow 的改动。
+
+### 16.17 Review 111 之后的修订准备：B1、B2 的最小修复与回归，符号检查的第二版（计划，待审）
+
+#### 16.17.1 授权、依据与固定的身份
+
+- **授权**：负责人 2026-10-30 采纳 Review 111（review-resolution §139）。本轮只授权纯文档的修订准备。
+  - 不授权修改实现或 workflow，不授权取得新的诊断。
+  - 本节通过审查，不代表 B1、B2 已在实现中关闭。
+- **固定的起点**：
+
+  | 项 | 值 |
+  |---|---|
+  | PR | #44（不合并） |
+  | HEAD | `067526760e07be3da1d054c3da1939b39bf331dc` |
+  | base | `021c956c33a65cc17ad050bda34883df355adcd0` |
+  | 树 | `1ef9f0bb70269b9c501dcc1b37ed6443f94d1c77` |
+  | 取证代码点 | `0213fb706e29130110af7ad8971dd8bbd94dd1d4`（树 `b097f99421c58ae8c3eaba8ad82bdea8e1e8f624`） |
+
+  本轮的提交只改文档；`prototype/` 与 `.github/` 相对 `0213fb7` 没有变化。
+- **依据**：
+  - Review 111 §4（B1）、§5（B2）、§7（符号检查）、§8（N1 ~ N3）；
+  - 本节之前的 §16.4、§16.7 ~ §16.9（第四稿）、§16.15 与 §16.16。
+- **首次结果不变**：固定代码点 `0213fb7` 的诊断 run 41055799521 仍为 failure，终判 invalid（T）。§16.16 的局部证据及其限制保留原样，不回改。
+- **不变的部分**：
+  - 39 次原生、3 次布局与两个门禁，以及它们的预测与判定；
+  - 预算（D、角色 B 与 B′ 的截止）、调用次数、角色 C、`exact`、归属规则；
+  - Q-3 (a)、Q-4 (a)、H4 / H6 的限制声明与支持承诺。
+
+  本节新增的检查与回归另列，不计入上面任何一项。
+
+#### 16.17.2 B1：父端读端的关闭
+
+**问题**（Review 111 §4，源码位置为 `0213fb7`）：
+
+- `p5Launch` 创建管道（`p5gate_darwin_test.go:89`），把读端交给复制任务（`:150`）。复制任务读到 EOF 后返回，不关闭读端（`p5proto_test.go:297` ~ `307`）。
+- 门禁只在复制任务到 w 仍未结束时，才启动停止任务（`p5gate_darwin_test.go:219` ~ `226`）。那里的一次快照，结果也被丢弃（`:224`）。
+- 正常 EOF 的路径上没有任何关闭，也没有关闭错误的消费；模型对照却手工关闭了读端（`p5proto_check_test.go:266`）。
+- §16.8 第四稿的 w 一行只写了“复制任务未结束时”启动停止任务。本节补正：每一条出口都关闭读端。
+
+**修复**：
+
+1. **唯一的关闭责任**：
+   - 读端由 `p5Inner` 持有（新字段），不再只是门禁的局部变量。
+   - 关闭只经 `p5Inner` 的唯一停止任务：
+     - 方法 `closeRead()` 在停止任务已存在时，返回已有的任务；
+     - 否则新建停止任务（完成信号、状态锁、结果字段），先登记到 `p5Inner`，再启动。
+   - 持有者依次使用 `p5Inner`（§16.8 的持有原则），所以读端至多关闭一次。
+   - 停止任务只调用一次 `Close`，额外记录调用次数与开始、结束的时刻，供回归核对。
+2. **每条出口的关闭**：
+
+   | 出口 | 关闭由谁、何时 | 截止 | 结果的消费 |
+   |---|---|---|---|
+   | `os.Executable`、`os.Pipe` 或 `Cmd.Start` 失败（还没有复制任务） | `p5Launch` 同步关闭已创建的端（现状，不变） | — | 关闭错误记为 `inner:` 的 T；没有要移交的 |
+   | 复制任务在 w 之前读到 EOF | 门禁看到复制任务完成之后，调用 `closeRead()` | 以 `until(w)` 查询停止任务 | 见下面第 3 条 |
+   | 复制任务在 w 之前因读错误返回 | 同上；读错误照旧记 T（`inner: reading the output failed`） | 同上 | 同上 |
+   | 复制任务到 w 仍未结束 | 门禁在 w 调用 `closeRead()`（现状） | 对复制任务与停止任务各做一次不等待的查询（现状） | 同上 |
+   | 启动身份读取失败 | 照常走上面三行之一（§16.8 的提前出口，不变） | 同上 | 同上 |
+   | 移交给最终收尾 | 停止任务已在门禁中启动；万一没有，最终收尾先调用 `closeRead()` | `until(D + 30 s)` | 见下面第 4 条 |
+
+   门禁在 w 的查询之后**总是**调用一次 `closeRead()`，不论复制任务是否完成。所以 Start 成功之后的每一条路径，都有一个已登记的停止任务。
+3. **门禁先消费关闭结果，再判定**：消费在复制与停止的查询之后、`parseInner` / `verdictOf` / `finishGate` 之前。
+   - 停止任务已完成且没有错误：记“已关闭”。
+   - 停止任务已完成但有错误：记问题 `inner: closing the read end failed: <错误>`。
+     - `inner` 属于 `toolClasses`，任何预期的拒绝都不豁免它；
+     - 这一问题持续到终判，之后的成功不清除。
+   - 停止任务未完成：
+     - 记问题 `inner: the read end's close did not return by d_i + 10 s`；
+     - 它满足现有的移交条件（`k2.Stop == "pending"`），随 `p5Inner` 移交。
+   - **晚到的结果**：判定之后、移交之前停止任务才完成的，结果记入门禁行的 `p5` 记录，不改变已经成立的 T。晚到的成功也不恢复结论。
+4. **最终收尾**：对移交项的停止任务以 `until(D + 30 s)` 查询。
+   - 到截止仍未返回的，记入该项的 `unknown`；返回了错误的，同样记入 `unknown`（释放没有确认）。
+   - 两者都计入 `final_T`。现在被丢弃的错误（`p5_darwin_test.go:765`）改为消费。
+5. **锁**：
+   - 停止任务在不持有任何锁时调用 `Close`，之后只在自己的状态锁内写入结果；
+   - 持有者只经 `until` 与快照读取，不取控制锁。
+6. **截止**：只用既有的 w 与 D + 30 s。不新增期限，不改变预算。
+7. **记录**（§16.11 的补充）：门禁行的 `p5` 增加 `read_close`：
+   - 关闭从何而起：EOF 之后、读错误之后或 w；
+   - 是否完成；
+   - 错误；
+   - 调用次数。
+8. **不变的部分**：
+   - 五个事件与复制任务；
+   - 写端由门禁同步关闭（§16.8）；
+   - 移交的规则；
+   - §16.8 所有权表中“读端 r”一行：内容不变，现在在 EOF 的路径上也兑现。
+
+**回归**：
+
+- **R-B1-1 真实接线的正常 EOF 关闭**：两个既有的 P-5 门禁（`p5.eintr-once`、`control.p5-w-exit7`）增加必要条件，不增加运行。
+  - 条件：停止任务恰好启动一次，在门禁看到复制任务完成之后启动，在 w 之前返回且没有错误，结果在判定之前被消费。
+  - 核对的依据是停止任务自己记录的调用次数与时刻，不是门禁的叙述。
+  - 任何一条不成立时，记 `inner:` 的问题，门禁失败。
+  - 在 `0213fb7` 的代码上这些条件不成立（EOF 的路径上没有关闭）。这是按源码推出的回归方向，本轮没有执行。
+- **R-B1-2 关闭返回错误的拒绝**：新增一个 P-5 组合 `p5combo.close-error`。它是一次真实的 `runP5Gate` 运行，内层与 `control.p5-w-exit7` 相同。
+  - **接缝**：外层的接缝只作用于这一次运行的停止任务。
+    - 先执行真实的 `Close`。它返回 nil 时，把结果换成 `injected: the read end's close failed (after the real close)`，只换一次，命中记入停止任务的状态。
+    - 真实的 `Close` 本身失败时，保留真实的错误，不替换；这时组合不成立。
+  - **预期**（全部成立才通过）：
+    - 接缝命中 1 次；
+    - 门禁 `Pass` 为 false，问题恰好一条：`inner: closing the read end failed: injected: …`（`ToolErrors` 1，`Unexpected` 0）；
+    - 内层的判定成立：目标 confirmed、`calls` 2，布局 `calls` 0，内层退出 0；
+    - 补救 not-needed，Final ended，保险清理 nothing left；
+    - `read_close` 为已完成并带注入的错误；没有移交项。
+  - **记录**：
+    - 记为 `WP25COMBO` 行：`id` 为 `p5combo.close-error`，`gate` 为 `control.p5-w-exit7`，`fault` 为 `close-error`；
+    - 计入组合（macOS 由 16 增为 17），不计为门禁的通过。
+  - **位置**：在 `TestP5` 中、两个门禁之后，按角色 B′ 准入（D − s ≥ 60 s），截止的推导不变。因截止而未执行时记为未执行，P-5 不算完整（失败关闭）。
+- **R-B1-3 模型**：只作补充，不代替上面两项。
+  - `TestP5ProtoCopyStop` 改为经 `p5Inner.closeRead()` 关闭，不再手工 `Close`；
+  - 新增 `TestP5ProtoCloseOnce`：调用两次 `closeRead()` 得到同一个任务，关闭函数只被调用一次；
+  - 按 §16.17.5 做命中握手、释放与完成核对。
+
+#### 16.17.3 B2：新清理链的错误
+
+**问题**（Review 111 §5，源码位置为 `0213fb7`）：
+
+- `p5EndProven`（`p5_darwin_test.go:821` ~ `857`）的问题：
+  - 初始读取为 unknown 的对象被跳过（`:824` ~ `827`），这次读取失败没有记录；
+  - 每一轮重新建立 `rerr`（`:838`）：一轮读取失败之后，下一轮的成功会把它覆盖；
+  - 动作之前 `procInfo`、`tagged` 的失败被布尔条件吞掉；
+  - `kill` 的错误被忽略（`:841`）；
+  - 普查的错误只在没有读取错误时返回（`:852`）。
+- `p5Remediate`（`p5gate_darwin_test.go:547` ~ `568`）有同样的问题：动作之前的检查失败被吞掉，`outerSignal` 的错误被忽略（`:550`）。
+- 结果：保险清理的说明、门禁的问题与最终收尾的 `final_T`，都可能漏掉实际发生过的工具失败。
+
+**范围**：
+
+- 改的只有本轮新增的 `p5EndProven`、`p5Remediate`，以及它们的直接调用者：`runP5Gate` 中补救与保险清理的消费、`p5Insure`、`p5FinalCleanup`。
+- 不改旧机制：
+  - `innerProc.insure`（`witness_unix_test.go:180` 起）、`outerSignal`、`recordAlive`、`censusTag`、`procInfo`、`tagged`；
+  - P-3 的清理与 `runGate`。
+
+**每一次读取的分类**：对已记录的身份 v =（pid，启动时刻），以 `procInfo` 读取一次：
+
+| 读数 | 条件 | 含义 | 动作的资格 | 错误 |
+|---|---|---|---|---|
+| 可靠 absent | `procInfo` 为 absent | v 已结束 | 无 | — |
+| 身份变化 | present，启动时刻不同 | v 已结束，PID 已被另一个进程使用 | 永不对它动作 | — |
+| 僵尸 | present，同一身份，僵尸 | v 不再运行（与 `recordAlive` 的规则相同） | 无 | — |
+| 仍存活 | present，同一身份，不是僵尸 | v 仍在运行 | 只有同一步的标记检查成立之后 | — |
+| unknown | `procInfo` 为 unknown | 不知道 | 无 | 持续保存 |
+
+**动作之前的标记检查**：
+
+- 新的辅助函数直接读取 `environOf`（旧的 `tagged` 不变）：
+  - 读到本轮的标记：可以动作；
+  - 读取成功但没有标记：不动作，记错误（已证明属于本轮的进程不再带有标记，属于矛盾）；
+  - 读取失败：立即重读身份。可靠结束（absent、身份变化或僵尸）时，记为“读取期间结束”，不动作，不记错误；否则记错误，不动作。
+- 读取失败后的重读，与已审的 `censusTag` 规则相同（`census_darwin_test.go:41` ~ `51`）。它在同一步内给这次失败分类，不是“后来的结束清除先前的失败”。
+
+**终止请求**（`kill(pid, SIGKILL)`）：
+
+- 返回 0：只是请求，不是结束的证明。
+- `ESRCH`：允许的竞争（检查之后、发信号之前已结束），记为说明，不记错误。结束仍只由之后的读取确认。
+- 其他 errno：工具失败，持续保存。
+
+**责任集合与轮询**：
+
+- **进入集合**：
+  - 已知的对象都进入，除非初始读取已可靠结束；
+  - 初始读取为 unknown 的，以 unknown 进入，并保存这次失败；
+  - 普查证明属于本轮的对象进入；普查的错误同样保存。
+- **unknown 的限制**：unknown 永不增加对象，也不授予动作。动作要求同一步内身份仍存活、标记成立。
+- **每一轮**，对集合中的每个对象读取一次：
+  - 仍存活：做标记检查，然后发出终止请求；
+  - 已结束：移出集合，保留它的分类；
+  - unknown：留在集合中，保存错误。
+- **结束条件**：集合中既没有存活也没有 unknown 的对象，或者到截止。到截止时，存活与 unknown 的对象连同最后的分类一起返回，供移交。
+- **错误**：整个调用共用一个累积器（`p5Errs`：按文字去重、计数），不按轮重置。只要发生过错误就返回，即使所有对象最终都已结束。
+- **结果分开保存**：
+  - 结束的知识：每个对象的分类，到截止仍存活、仍 unknown 的；
+  - 实验的有效性：累积的错误。
+- **截止与间隔**：都不变。补救与保险清理为 min(当前 + 10 s, d_g)，最终收尾为 D + 30 s，轮询间隔 20 ms。
+- **`p5Remediate`**：同一套规则，没有普查。每一轮对存活的对象做动作之前的检查与终止请求；返回仍存活的、unknown 的与累积的错误。
+
+**错误怎样被消费**：
+
+- **保险判定**（`p5Insure`）：
+  - 内层退出未确认、仍有存活或 unknown 的对象、或者累积的错误非空（即使对象都已结束）时，说明都以 `FAILED:` 开头，并附上错误；
+  - 只有没有任何错误时，才是 `ended n` 或 `nothing left`；
+  - 存活与 unknown 的对象都移交。
+- **门禁不可豁免的问题**（`runP5Gate`）：
+  - 补救的错误：补救 failed，记下 `RemedyErr`，问题 `still-alive: the remediation could not confirm its end: …`，Final unknown（现有的分支）；
+  - 补救之后仍为 unknown 的对象：问题 `still-alive: …`（列出身份），Final unknown；
+  - 保险清理 `FAILED`：问题 `insurance: not confirmed by d_g: …`，并重新判定（现有的分支）；
+  - Final 为 ended 而保险清理不是 nothing left：矛盾的问题（现有的分支）。
+
+  `still-alive`、`insurance` 都属于 `toolClasses`，预期的拒绝不豁免它们。
+- **最终汇总**（`p5FinalCleanup`）：
+  - 错误记入该项的 `unknown`（`the processes of the round: …`）；存活与 unknown 的对象记入 `processes` 与 `unknown`；
+  - `unknown` 非零时，`final_T` 为 true，`t.Errorf` 使 P-5 为 T；
+  - 结果见 `WP25P5FINAL` 与 `WP25P5` 的 `final_T`。
+- **可测的写法**：上面几处消费提为小函数，调用者直接使用它们，供回归核对：
+  - 保险清理的说明；
+  - 保险清理之后的判定；
+  - 补救的结局；
+  - 最终收尾中进程的部分。
+
+  除 B2 的规则之外，行为不变。
+
+**代码的位置**：
+
+- 判定逻辑写成平台无关的代码（构建约束 `darwin || wp25p5local`，同 §16.15 的补充 1）：每次读取的分类、错误的累积、动作的资格、轮询与说明的生成。
+- 它经一组操作取得读数：读取身份、读取标记、普查、发信号。darwin 绑定真实的函数。
+- 回归的接缝包在真实的读取外面：真实的读取照样进行，只把它的答案换一次。
+
+**回归**：
+
+- **R-B2-1 模型**（本机与 darwin，假对象）：
+  1. 轮询的读取 unknown 一次，下一轮为 absent：错误保留，没有遗留，结束 1 个。
+  2. 初始读取 unknown，下一轮仍存活：对象留在集合中；只在恢复的那一次读取之后动作（终止请求 1 次）；之后结束；错误保留。
+  3. 身份仍存活而标记读取失败一次，重读仍存活：那一步不动作，错误保留；下一步动作。
+  4. 标记读取失败，重读为 absent：不记错误（`censusTag` 的规则）。
+  5. `kill` 返回 `ESRCH`：只记说明，不记错误；返回 `EPERM`：记错误。
+  6. 到截止仍为 unknown：作为 unknown 返回、移交，错误保留。
+
+  每一项都核对命中：假对象记录每一次调用，注入的失败恰好命中一次，而且在预期的那一步。
+- **R-B2-2 darwin 的真实进程**（直接检查，不用 D）：
+  - **受控的子进程**：经既有的启动入口 `start`（`TestStartPoints` 不增加例外）启动一个直接子进程 `helper("exit-after", …, "60000", "0")`，环境带本检查的标记，读取它的身份。
+  - **保险清理一侧**：以接缝把这个子进程第一次轮询读取的答案换成 unknown（真实的读取照样进行）。预期：
+    - 接缝命中 1 次；
+    - 子进程被终止：本检查自己持有它，以 `Cmd.Wait` 回收，状态为信号 9，独立确认清理链确实动作了；
+    - 结果：没有遗留，结束 1 个，错误中有注入的文字。
+  - **调用者的消费**：把这个结果交给上面提出的小函数：
+    - 保险清理的说明以 `FAILED` 开头并带上这段文字；
+    - 对一个原本通过的门禁结果做保险清理之后的判定：`Pass` 为 false，恰好一条 `insurance:` 的工具问题；
+    - 最终收尾中进程的部分给出 `unknown` ≥ 1（会使 `final_T` 为 true）。
+  - **补救一侧**：把动作之前的身份读取换成 unknown 一次。预期：
+    - 补救在下一轮动作，子进程结束；
+    - 错误保留；
+    - 补救的结局：failed、`still-alive:` 的问题、Final unknown。
+  - **归类**：这些是回归，另列，不计入四类证据、布局、39 次或门禁。
+
+#### 16.17.4 符号检查的第二版（§16.4 的方法修订）
+
+**第一版的结果说明了什么**（§16.16）：
+
+- 原始输出中，有跳板与未定义的 `_waitid`（`go tool nm` 的 `U _waitid`，`nm -m` 的 `(undefined) external _waitid`）。
+- 第一版记为 T 有两处原因：
+  1. `pipefail` 下的提前退出；
+  2. `nm -m` 没有给出库的归属。
+- 它既不证明 `_waitid` 来自错误的库，也不证明来自 libSystem（Review 111 §7.2）。
+
+**固定的依据**（公开源码，不声称与运行器上的工具或 dyld 是同一构建）：
+
+| 来源 | 位置 | 内容 |
+|---|---|---|
+| Go 1.27.3 `src/cmd/link/internal/ld/macho.go`（`2aae1000`，SHA-256 `665c2270cec3df9bc9b77931d7e87e50ad5726da147e8df651cead6230c1ef17`，与 §16.2 相同） | `:326` ~ `333` | 内部链接的头标志：`MH_NOUNDEFS`（没有未定义符号时）、`MH_PIE` 与 `MH_DYLDLINK`（PIE 且内部链接时），**没有** `MH_TWOLEVEL` |
+| 同上 | `:806` ~ `818` | `LC_DYLD_INFO_ONLY`：rebase 与 bind；weak、lazy、export 都为 0 |
+| 同上 | `:833` ~ `840` | 每个动态库一条 `LC_LOAD_DYLIB`，按 `dylib` 列表的顺序 |
+| 同上 | `:1093` ~ `1097` | 动态导入的 nlist：`N_EXT`，`n_desc` 为 0 |
+| 同上 | `:1428` ~ `1486` | bind 记录：库 ordinal 为该库在列表中的位置加 1；找不到库时为 `BIND_SPECIAL_DYLIB_FLAT_LOOKUP` |
+| cctools `e0d56624`（Review 111 §7.2） | `misc/nm.c:1804` ~ `1821` | `nm -m` 只在 `MH_TWOLEVEL` 且 `n_desc` 的库 ordinal 非零等条件下打印 `(from …)` |
+| dyld-1378（`fd8d0c4d52320ebf64db34f3cb280310d905c5ae`）`common/MachOAnalyzer.cpp`（SHA-256 `1ca57bff3e391f2a74c20cf0f6bb84eeb1bfdcb195f51483e176b7c06968d9dd`） | `:1269` ~ `1273` | `MH_TWOLEVEL` 只用于由 nlist 的 `n_desc` 取得 ordinal 的路径：没有它时为扁平查找 |
+| 同上 | `:1415` ~ `1480` | opcode 形式的 bind：ordinal 直接取自 `BIND_OPCODE_SET_DYLIB_ORDINAL_*` 或特殊值 |
+| dyld-1378 `dyld/Loader.cpp`（SHA-256 `82de7dbe69cfd805927b7b416b5af4bffc7e1e571ef9a31cb6056f747400a9a2`） | `:2853` ~ `2858` | ordinal 为正时，目标是第 ordinal − 1 个依赖库 |
+| 同上 | `:2866` 起 | 只有 `BIND_SPECIAL_DYLIB_FLAT_LOOKUP` 才按加载顺序扁平查找 |
+| 同上 | `:3109` ~ `3113`、`:3445` ~ `3446` | 在目标库中查找导出（staticLink），并沿 re-export 的依赖继续 |
+
+由此：
+
+- 对 Go 内部链接的产物，`nm -m` 不能显示归属：没有 `MH_TWOLEVEL`，`n_desc` 为 0。所以缺少 `(from libSystem)`，不说明归属错误。
+- 产物中真正的每符号绑定表示，是 `LC_DYLD_INFO_ONLY` 的 bind 记录及其库 ordinal。按上面的 dyld 源码，ordinal 为正时直接指向对应的 `LC_LOAD_DYLIB`，与 `MH_TWOLEVEL` 无关。
+- 这些是固定公开源码的推演。运行器上 dyld 与工具的实际构建可能不同，列为限制，不升级为运行时的证明。
+
+**脚本的规则**（所有静态检查，替换第一版的管道写法）：
+
+- **执行**：每个工具执行一次，输出（stdout 与 stderr）完整写入 `$RUNNER_TEMP/p5static/` 下自己的文件，并独立取得退出状态。
+  - 写法为 `if cmd >file 2>&1; then s=0; else s=$?; fi`；
+  - `-e` 既不使脚本中止，也不吞掉状态。
+- **匹配**：只对文件进行，例如 `grep -c -E -e PATTERN -- FILE`，同样以 `if … then … else … fi` 取得状态：
+  - 0 为匹配（并取得行数）；
+  - 1 为未匹配；
+  - ≥ 2 为匹配器失败。
+
+  不把输出经管道交给会提前退出的匹配器。不用 `|| true`，不忽略 SIGPIPE，不去掉失败的传播。
+- **打印**：打印摘要时可以容忍“没有匹配”，但判定只用真实的退出状态与匹配结果。
+- **类别**：每项结论都写明类别，并与类别一起打印为 `WP25P5STATIC <ID> v2 <结论>`：
+  - `ok`；
+  - `T(tool)`：工具失败，附命令与退出状态；
+  - `T(unmatched)`；
+  - `T(matcher)`：附 grep 的状态；
+  - `T(parser)`：解析器失败；
+  - `T(contradiction)`；
+  - `T(attribution)`。
+
+**第二版的检查**（两个 macOS 作业，在 `prototype/wp25` 下，带 `CGO_ENABLED=0`）：
+
+| ID | 工具与输入 | 判定 | 不成立时 |
+|---|---|---|---|
+| `P5.static.toolchain`、`vet`、`build` | 与第一版相同 | 与第一版相同 | 与第一版相同（toolchain 不成立时不继续） |
+| `P5.static.method`（新） | 本步骤自己的执行与匹配函数，作业的 `bash -e -o pipefail` | 下面的对照 M1 ~ M5 都得到预期的类别 | T（方法本身不可信）；其余检查照样执行并记录 |
+| `P5.static.artifact`（新） | 产物 `$RUNNER_TEMP/wp25.test` 的大小（`stat -f %z`）、`shasum -a 256`、`go tool buildid`；`xcrun --find otool`、`xcrun --find nm` 及这两个文件的 `shasum -a 256`；`xcodebuild -version` | 每条命令退出 0，输出非空；大小、SHA-256、build ID 与两个工具的路径各为单一的值 | T(tool) 或 T(parser) |
+| `P5.static.settings`（第二版） | `go version -m "$bin"` | 退出 0；文件中恰有一行匹配 `^[[:space:]]*build[[:space:]]+CGO_ENABLED=0$` | T |
+| `P5.static.symbols`（第二版，范围收窄为跳板与未定义导入的存在） | `go tool nm "$bin"` | 退出 0；至少一行的名字含 `e2waitid.libc_waitid_trampoline`；恰有一行匹配 `^[[:space:]]+U _waitid$` | T |
+| `P5.static.binding`（新） | 解码器 `p5bind`（见下）；`otool -h`、`otool -hv`、`otool -l`、`otool -L`、`nm -m`，都对 `"$bin"` | 下面的规则 A1 ~ A9 全部成立 | T，附类别 |
+| `P5.static.entry`、`load` | 不变 | 不变 | 不变 |
+
+**解码器 `p5bind`**（新的 test-only 目录 `prototype/wp25/p5bind`）：
+
+- **组成**：
+  - `package main`，只用 Go 1.27.3 的标准库（`debug/macho`、`encoding/binary`、`crypto/sha256`），平台无关，不新增依赖；
+  - 模型测试 `bind_test.go` 带构建约束 `darwin || wp25p5local`。所以 Ubuntu、Windows 作业只编译这个包，不运行它的测试；这是对 §16.10 “只随工具链的固定而变”的唯一补充。
+- **执行**：静态步骤先以 `go build -o "$RUNNER_TEMP/p5bind" ./p5bind` 构建（失败为 T(tool)），再运行。
+  - 参数：产物路径、预期的架构、shell 记录的大小与 SHA-256，以及 otool 与 `nm -m` 的输出文件；
+  - 输出：一行 `WP25P5BIND` JSON，以及人可读的行；
+  - 退出状态：0 为 ok，1 为 T（附类别），其他为用法错误（T(tool)）。
+- **解码器的身份**：固定代码点上的源码，加上 `go1.27.3`；输出中带格式版本 `p5bind/1`。
+
+**规则 A1 ~ A9**（全部在解码器中，依据 `<mach-o/loader.h>` 的定义与上面的固定源码）：
+
+- **A1 产物的身份**：解码器对自己读到的字节计算大小与 SHA-256，须与 `P5.static.artifact` 的记录相同；不同为 T(contradiction)。
+- **A2 格式**：须为单一架构（不是 fat）、64 位、`MH_EXECUTE`，CPU 与预期的架构相符（arm64 / x86_64）；否则为 T(parser)。头标志原样记录（十六进制与名字），其中 `MH_TWOLEVEL` 只记录，不作判定（依据见上面 dyld 的源码）。
+- **A3 加载命令**：
+  - 库加载命令按出现的顺序编号，从 1 开始，即库 ordinal；它们都须是 `LC_LOAD_DYLIB`。出现 `LC_LOAD_WEAK_DYLIB`、`LC_REEXPORT_DYLIB`、`LC_LAZY_LOAD_DYLIB`、`LC_LOAD_UPWARD_DYLIB` 或不认识的库加载命令，为 T(parser)（未知的表示）。
+  - `LC_DYLD_INFO` 或 `LC_DYLD_INFO_ONLY` 恰有一条；`LC_DYLD_CHAINED_FIXUPS` 不得出现（出现即未知的表示，T）；`LC_SYMTAB` 与 `LC_DYSYMTAB` 各恰有一条。缺少或重复为 T(parser)。
+- **A4 bind 流的解码**：完整解码 bind、weak_bind、lazy_bind 三段（大小可以为 0；须在文件与 `__LINKEDIT` 的范围之内）。
+  - 识别的 opcode：
+    - `SET_DYLIB_ORDINAL_IMM`、`SET_DYLIB_ORDINAL_ULEB`、`SET_DYLIB_SPECIAL_IMM`（符号扩展）；
+    - `SET_SYMBOL_TRAILING_FLAGS_IMM`（之后的 C 字符串）、`SET_TYPE_IMM`、`SET_ADDEND_SLEB`、`SET_SEGMENT_AND_OFFSET_ULEB`、`ADD_ADDR_ULEB`；
+    - `DO_BIND`、`DO_BIND_ADD_ADDR_ULEB`、`DO_BIND_ADD_ADDR_IMM_SCALED`、`DO_BIND_ULEB_TIMES_SKIPPING_ULEB`、`DONE`。
+  - bind 与 weak_bind 在第一个 `DONE` 结束；lazy_bind 中 `DONE` 分隔条目。
+  - `THREADED` 为未知的表示（T）。
+  - 下列情形都为 T(parser)：不认识的 opcode；ULEB / SLEB / 字符串被截断或溢出；段号越界；`DO_BIND` 之前没有设置符号或 ordinal。
+  - 每个 `DO_BIND` 得到一条记录：所在的流、段与节、地址、ordinal、符号、标志、类型、加数。
+- **A5 唯一匹配**：
+  - bind 与 lazy_bind 中，符号恰为 `_waitid` 的记录恰有一条；
+  - weak_bind 中没有 `_waitid`；
+  - 没有其他以 `_waitid` 开头的符号（例如 `_waitid$NOCANCEL`）；
+  - 没有为“缺失”，多于一条为“不唯一”，都是 T(attribution)。
+- **A6 归属**：这一条记录须满足：
+  - 类型为 `BIND_TYPE_POINTER`，没有 `WEAK_IMPORT` 与 `NON_WEAK_DEFINITION` 标志，加数为 0；
+  - ordinal 为正，且不大于库加载命令的条数；
+  - 它所指的加载命令是 `LC_LOAD_DYLIB`，路径恰为 `/usr/lib/libSystem.B.dylib`；并且只有一条加载命令是这个路径。
+
+  不成立的情形：
+  - ordinal 为特殊值：0（本镜像）、−1（主程序）、−2（扁平 / 动态查找）、−3（弱定义合并）或其他。这时归属没有建立，为 T(attribution)。
+  - ordinal 越界：T(parser)。
+  - 路径不同或重复：T(attribution)。
+- **A7 绑定的位置**：记录的地址须落在某个段的某个节之内，记录段名与节名；否则为 T(contradiction)。跳板的 `JMP` 指令与这个位置的对应不做反汇编核对，列为限制。
+- **A8 符号表**：恰有一个未定义的外部 nlist 名为 `_waitid`，记录它的 `n_desc`（只记录：没有 `MH_TWOLEVEL` 时不携带归属）。没有或多于一个为 T(contradiction)。
+- **A9 与 Apple 工具的对照**（每个工具的输出文件都已独立取得退出状态；非零为 T(tool)）：
+  - `otool -h`：取唯一的数值行，其中的 `filetype` 为 2，CPU 与 flags 与解码器相同；
+  - `otool -hv`：只原样记录，但须退出 0；
+  - `otool -l`：
+    - 取 `cmd LC_*` 的顺序；
+    - 库加载命令块的 `name <路径> (offset N)`；
+    - `LC_DYLD_INFO(_ONLY)` 块的 `bind_off`、`bind_size`、`weak_bind_off`、`weak_bind_size`、`lazy_bind_off`、`lazy_bind_size`；
+
+    它们须与解码器相同；
+  - `otool -L`：第一行（文件名）之后，每行一个路径；路径的顺序须与解码器的库加载命令相同；
+  - `nm -m`：名字为 `_waitid` 的行恰有一行，为 `(undefined) external _waitid`，其后可以没有，也可以是 ` (from libSystem)`。出现别的 `(from …)`、没有这一行或多于一行，为 T(contradiction)。
+
+  无法识别的行或块为 T(parser)，不同为 T(contradiction)。这些工具只作对照：“存在 libSystem 依赖”（`otool -L`）不替代 A5、A6。
+
+**允许的 re-export 关系**：
+
+- 静态的归属止于 `/usr/lib/libSystem.B.dylib`。
+- 按 dyld-1378 的 `Loader.cpp:3109` ~ `3113` 与 `:3445` ~ `3446`，dyld 在 libSystem 的导出中查找，并沿它 re-export 的子库继续（例如 `/usr/lib/system/` 下的库）。所以定义可以位于 libSystem 再导出的子库中。这是允许的关系。
+- 子库是哪一个，不在静态检查中观察：libSystem 在 dyld 的共享缓存中，磁盘上没有它的文件。
+- 运行时的镜像或地址观察是另一种办法，须另行明确所测的对象并另获授权（Review 111 §7.3）。本计划不包括。
+
+**方法的对照**（在同一步骤中、真实检查之前执行；用同一组执行与匹配函数）：
+
+| 对照 | 构造 | 预期的类别 |
+|---|---|---|
+| M1 大输出匹配 | 生成 200 000 行的文件，匹配行在第 1 行与最后一行；另一份只在第 1 行 | 匹配，行数分别为 2 与 1；没有 `Broken pipe` |
+| M2 工具非零退出 | 一个 shell 函数，输出含匹配的文字，然后以状态 3 返回 | T(tool)，即使文件匹配 |
+| M3 未匹配 | 工具退出 0，输出不含匹配 | T(unmatched) |
+| M4 匹配器失败 | 匹配一个不存在的文件 | T(matcher)（grep 状态 ≥ 2） |
+| M5 解码器的失败出口 | 以 `prototype/wp25/go.sum` 作为产物运行 `p5bind` | 退出 1，T(parser) |
+
+任何一项得不到预期的类别，`P5.static.method` 为 T。
+
+**解码器的模型对照**（`bind_test.go`，以代码构造最小的 Mach-O 映像）：
+
+- 正例：一条 `LC_LOAD_DYLIB /usr/lib/libSystem.B.dylib`，一条 `_waitid` 的 bind，ordinal 1，得 ok。
+- 反例，各得规定的类别：
+  - ordinal 为特殊值：−2、0、−1、−3；
+  - ordinal 2 越界；
+  - 路径为 `/usr/lib/libSystem.dylib`；同一路径两条；目标为 `LC_LOAD_WEAK_DYLIB`；
+  - 带 `WEAK_IMPORT`；加数非零；
+  - 两条记录（bind 与 lazy_bind 各一）；没有记录；`_waitid$NOCANCEL`；weak_bind 中有 `_waitid`；
+  - `THREADED`；opcode `0xE0`；被截断的 ULEB；
+  - 带 `LC_DYLD_CHAINED_FIXUPS`；fat 文件；
+  - 符号表没有未定义的 `_waitid`；
+  - `otool -l` 的路径不同；`otool -h` 的 flags 不同；`nm -m` 为 `(from libFoo)`。
+- **作者的本机核对**（实施时，不是诊断的证据）：在交叉构建的两个架构的测试二进制上运行解码器。本机没有 macOS，otool 与 `nm -m` 的对照不能在本机执行。
+
+**版本的关系**：
+
+- 第一版（§16.4 的原表）与它在 `0213fb7` 上的 T，保持原样。
+- 第二版只适用于获得授权之后的新固定代码点。记录带 `v2`，`WP25P5` 汇总的静态一项随之增加新的 ID（只打印；N3 见 §16.17.6）。
+- `P5.static.symbols` 沿用 ID，但第二版只判定跳板与未定义导入的存在；归属由 `P5.static.binding` 判定。
+
+**由固定源码推出的预测**（只是预测，不用于判定；实际产物与它不同时，按上面的规则判定）：
+
+- 头标志没有 `MH_TWOLEVEL`，有 `MH_DYLDLINK` 与 `MH_PIE`；
+- 库加载命令都是 `LC_LOAD_DYLIB`，其中有 `/usr/lib/libSystem.B.dylib`；
+- `_waitid` 的 bind 记录恰有一条，ordinal 为 libSystem 的位置，标志 0，类型为指针，加数 0，位于数据段的节中；
+- 符号表中未定义的 `_waitid` 的 `n_desc` 为 0；
+- `nm -m` 为 `(undefined) external _waitid`，没有 `from`。
+
+**限制**：
+
+- 静态检查读取的是 `go test -c` 的产物；实际执行的测试二进制由 `go test` 另行构建。第二版记录前者的大小、SHA-256 与 build ID，不与后者比较（N1）。
+- 运行器上的 dyld 与工具不声称与上面的公开源码相同。
+- libSystem 内部 re-export 的解析与跳板指令的反汇编，都不在范围之内。
+
+#### 16.17.5 新回归复用模型时的命中握手、释放与完成核对
+
+适用于 §16.17.2、§16.17.3 中新增的模型检查与直接检查（Review 111 N2 的建议只用于新增的检查）：
+
+- **命中握手**：会阻塞或注入失败的假对象，在进入时经通道发出信号，或记录调用的序列。检查先以截止等到这个信号，或核对调用的序列，再断言阻塞或失败的状态；不以 `Sleep` 代替。
+- **释放**：阻塞的假对象都有一个释放闸门，在 `t.Cleanup` 中关闭，所以失败的出口也会释放。
+- **完成核对**：检查启动的每个任务，在检查返回之前以截止等它的完成信号，未完成即失败。直接检查自己启动的子进程，由它自己回收，并核对回收的状态。
+
+既有的 `TestP5ProtoRequestHung`、`TestP5ProtoRequestSerial` 不在本次修复中改动，N2 不因此关闭。
+
+#### 16.17.6 Review 111 的非阻塞项（只登记，不关闭）
+
+| 项 | 内容 | 本计划的处理 |
+|---|---|---|
+| N1 | 静态检查的产物 `$RUNNER_TEMP/wp25.test` 与实际执行的测试二进制不是同一个文件；只有相同的源码、版本、`CGO_ENABLED`、架构与构建元数据，没有字节哈希或 build ID 的相等证明 | 保留这条限制。第二版记录静态产物的大小、SHA-256 与 build ID，不把“同源码、同设置”写成同一个文件；不为统一文件而减少验证 |
+| N2 | `TestP5ProtoRequestHung` 没有确定的命中握手；`TestP5ProtoRequestSerial` 的假 Wait 循环没有释放到完成；若干失败出口没有统一的释放 | 新增的检查按 §16.17.5；既有的两项不改，N2 保持未关闭 |
+| N3 | `p5StaticFile` 忽略 Scanner 与 Close 的错误，容许覆盖与未知项；`p5Summary` 只打印、不裁定 | 不改。第二版只把新 ID 加入打印的列表；有效性仍由 workflow 的真实状态与 `failed` 标记决定。以后若要用这个文件决定有效性，须先收紧解析与错误传播 |
+
+#### 16.17.7 实施的顺序与待负责人决定的事项
+
+**实施的顺序**（获得授权之后）：
+
+1. 先提交登记：授权、本计划的提交 SHA、实现起点。
+2. 再写代码：
+   - B1、B2 的修复与回归；
+   - 第二版的静态步骤与 `p5bind`；
+   - 本机可以做的核对：
+     - 模型检查（标签 `wp25p5local`）；
+     - 解码器在交叉构建产物上的运行；
+     - Windows 与 WSL Linux 的全量。
+3. 推送一次，头提交即为新的固定代码点。
+
+**待负责人决定**：
+
+- **授权实现**：B1、B2 的修复与回归，第二版的符号检查，以及 workflow 的相应改动。
+- **推送即诊断**：workflow 在本分支上、改动原型或 workflow 的推送即运行（§16.10，没有手动触发）。所以代码的推送本身就是一次诊断，实现与诊断的授权不能分开推送。可选的做法：
+  - (i) 一并授权实现与一次诊断（作者推荐）；
+  - (ii) 先在不在触发列表中的分支上提交代码供审查，之后再授权推送到本分支取得诊断。这改变的是取证的流程，须负责人明确。
+- **回归先行**：是否先以只含回归的代码点取得一次诊断，确认回归在 darwin 上按预测失败。
+  - 作者建议不另取：B1、B2 由源码证明，回归方向按源码推出；
+  - 另取则多一次诊断。
+
+#### 16.17.8 新诊断（如获授权）的停止条件
+
+- §16.12 的停止条件照旧适用。
+- 另加以下情形，出现时按计划记录与收尾，然后报告，交负责人决定：
+  - 第二版的任何静态检查为 T（包括 `P5.static.method` 的对照）；
+  - R-B1-1、R-B1-2 或 R-B2 的任何一项不成立；
+  - `p5combo.close-error` 因截止而未执行；
+  - 最终收尾中，读端的关闭未返回或返回错误。
+
+不扩大预算、更换入口、减少次数或放宽判定，不重跑。
