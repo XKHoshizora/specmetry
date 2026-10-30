@@ -48,6 +48,7 @@
 > - **2026-10-30**（review-resolution §134）：Review 108 为技术 NO-GO：准入冲突的修复成立，B1 整体仍有残余 B1-R；Review 107 的 N1、N2 在计划规格层面收口。§16 的第三稿在同一 PR 中最小修订：撤回由 `WaitDelay` 推出的返回上界；分开终止请求、可靠观察退出、`Cmd.Wait` 完成、管道关闭与复制任务结束；写定截止、发信号的规则、提前出口与所有权表；重写时间线二。第三稿**待定向复审**，不合并；P-5 的执行未授权，本文的原型代码没有改动。
 > - **2026-10-30**（review-resolution §135）：Review 109 为技术 NO-GO：B1-R 的主要修订成立，残余 B1-R-S 是发信号与回收共用锁的持有边界及其与截止查询的关系；N-108-1、N-108-2 关闭。§16 的第四稿在同一 PR 中只修订 B1-R-S：写定控制锁与状态锁的范围、Wait 任务与请求任务的加锁、发布、解锁与外部调用的顺序、查询的规则，并同步所有权表、提前出口与时间线。第四稿**待定向复审**，不合并；P-5 的执行未授权，本文的原型代码没有改动。
 > - **2026-10-30**（review-resolution §136）：[Review 110](reviews/codex-review-110.md) 对第四稿（`35ecd79`）为**文档技术 GO**：B1-R-S 关闭，B1-R 在计划规格层面整体收口，没有新的 BLOCKER；计划具备供负责人单独授权实现和执行的条件。负责人条件授权以 merge commit 合并 PR #43，并条件授权在其合并核验全部成功之后另开 test-only 原型 PR 按 §16 第四稿实现并执行 P-5。计划通过不代表协议已实现或动态验证；§16 的技术内容没有改动。
+> - **2026-10-30**（review-resolution §137、§138）：PR #43 合并为 `021c956`，合并核验完成。P-5 在分支 `test/wp2.5-prototype-p5`（PR #44）中实施，计划先于代码登记（§16.14、§16.15）。固定代码点 `0213fb7` 的诊断 run 41055799521 为 **failure**：两个 macOS 架构的原生 39/39 confirmed、接缝门禁 2/2、模型 10/10、布局 3/3，唯一的 T 是 `P5.static.symbols`（§16.16），终判 invalid（T），**交负责人决定**，不重跑；PR #44 不合并。
 > - 这**不是**规范冻结：草案为第 7 版，待独立审查和冻结；14 项产品选择、D21、Q-1 与 Q-2 已决定，技术候选仍待审查。T1 ~ T6 按 Review 075 的裁定只得到**局部支持**（§11；草案 §17.5 的 G1 ~ G15 与 §19）。
 > - 原型成功**不是**生产验收：生产 Check Runner、迁移 0009、CLI 接线都没有授权，WP2.5 没有实现或验收，M2 没有整体验收。
 > - 本文中的“候选规格”都待审查；其中涉及可见行为的（例如 C-4、C-7、C-10）依赖对应的产品选择（§9、§10）。C-4 的产品语义与 C-7（D20 (i)）已于 2026-10-25 决定，其技术部分仍待审查。本文不新增接受风险，也不批准任何保证调整。
@@ -4801,3 +4802,65 @@ r 为 `int32(r1)`。下面五种形式互斥，并且覆盖全部组合：
   - 补救与保险清理是 P-5 自己的（`p5Remediate`、`p5Insure`）：截止为 min(当前 + 10 s, d_g)，不按 PID 动作内层；保险清理到 d_g 仍未确认时，除了 `runGate` 既有的矛盾规则，另记 `insurance` 的问题（§16.8 的“到 d_g 仍未确认结束时为 T”）。
   - 只有未确认的部分才移交最终收尾（时间线一的“没有移交项”）；最终收尾按移交门禁的标记普查。
   - 内层的 `TestP5` 也注册截止 d_i + 3 s 的最终收尾；内层没有移交项，它只打印 `WP25P5FINAL`。
+
+### 16.16 结果（固定代码点 `0213fb7`，诊断 run 41055799521）：invalid（T），交负责人决定
+
+**身份**：
+
+| 项 | 值 |
+|---|---|
+| 所依赖的计划 | 受审提交 `35ecd7984f4d4624f43b32e2e618c14e0257ee80` 的 §16 第四稿（合并进 master `021c956` 之后技术内容逐字未变，§16.14） |
+| 实现起点 | master `021c956c33a65cc17ad050bda34883df355adcd0` |
+| 登记 | `83854cb`（§16.14）、`aeb0a4c`（§16.15），都在代码提交之前 |
+| 取证代码点 | `0213fb706e29130110af7ad8971dd8bbd94dd1d4`（树 `b097f99421c58ae8c3eaba8ad82bdea8e1e8f624`），一次推送的头提交 |
+| 诊断 | WP2.5 prototype run 41055799521，push，attempt 1，**failure**；没有手动触发，没有重跑 |
+| 实际检出 | 四个作业都检出 `0213fb7`（`checkout -B test/wp2.5-prototype-p5`；`WP25_SHA` 与 `WP25META` 的 `sha` 相同） |
+| 工具链 | 四个作业 `go version go1.27.3`；两个 macOS 作业 `go env`：`go1.27.3`、`0`、`local` |
+| 与最终 PR HEAD 的关系 | 本节与状态的回填只增加文档提交；`prototype/` 与 `.github/` 相对 `0213fb7` 没有变化（PR 回执登记核对的命令与结果） |
+
+**作业的结果**：
+
+| 作业 | 结论 | 说明 |
+|---|---|---|
+| `macos-latest`（arm64） | failure | “Prototype”（`go test`）步骤 success；最后的“P-5 static verdict”失败：`P5.static.symbols` 为 T |
+| `macos-26-intel`（x86_64） | failure | 同上 |
+| `ubuntu-latest` | success | 53 个场景 confirmed，门禁 111/111，组合 13/13（只随工具链的固定而变） |
+| `windows-latest` | success | 53 个场景 confirmed，门禁 92/92，组合 13/13 |
+
+**唯一的 T：`P5.static.symbols`（两个架构相同）**
+
+- 两份输出的原样记录（arm64；x86_64 只有地址不同）：
+  - `go tool nm`：`1001ad580 T _libc_waitid_trampoline`、`U _waitid`、`100424058 R github.com/XKHoshizora/specmetry/prototype/wp25/e2waitid.libc_waitid_trampoline_addr`；
+  - `nm -m`：`0000000100424058 (__DATA_CONST,__rodata) non-external _github.com/…/e2waitid.libc_waitid_trampoline_addr`、`00000001001ad580 (__TEXT,__text) non-external _libc_waitid_trampoline`、`(undefined) external _waitid`。
+- 检查记为 T 的原因有两处，都在检查与预期的写法，不是被测入口给出的反证：
+  1. **检查脚本的缺陷**：步骤以 `bash -e -o pipefail` 运行。条件 `printf '%s\n' "$n1" | grep -q …` 中，`grep -q` 找到第一行就退出，`printf` 写入 `go tool nm` 的大段输出时得到 `Broken pipe`（日志：`printf: write error: Broken pipe`），`pipefail` 使管道的结果为失败，所以第一个条件即为假。作者本机的模拟没有覆盖 `pipefail`。
+  2. **`nm -m` 的输出没有库的归属**：§16.4 预期“`_waitid` 为 `(undefined) external`，来自 libSystem”，检查写作 `(undefined) external _waitid (from libSystem)`；实际输出是 `(undefined) external _waitid`，没有 `(from libSystem)`。所以即使没有第 1 处，第三个条件也不成立。为什么没有库的归属（例如二进制是否为两级命名空间），本次诊断没有取得，原因未知。
+- 按 §16.4，这一项不成立为 T（H1 的符号部分没有按计划取得证据）；按 §16.7 的终判，有任何静态检查不成立即为 invalid（T）。原始输出中可以看到的符号不改变这一判定，也不由作者改判。
+- 这属于 §16.12 的停止条件（构建、链接、符号或加载的证据不成立）。按 Q-4 (a) 与 §136：报告，交负责人决定；不改代码或检查重跑，不放宽判定。
+
+**其余结果**（两个架构分开；四类证据分开计数，不合计；布局另列）：
+
+| 类别 | arm64 | x86_64 |
+|---|---|---|
+| 静态（§16.4，7 项） | 6 项成立：`toolchain`、`vet`、`build`、`settings`（`build CGO_ENABLED=0`）、`entry`（`P5.static.entry` confirmed，`calls` 0）、`load`（`TestP5` 开始运行）；**`symbols` 为 T** | 同左 |
+| 原生（§16.5） | 39/39 confirmed：`calls` 2 的 33 次、`calls` 3 的 6 次；未执行 0 | 39/39 confirmed（同左） |
+| 接缝（§16.6） | `p5.eintr-once` pass：内层 exit 1，命中 1（`P-5 waitid: (0, 0) -> (-1, EINTR)`），目标 invalid、理由恰好一条 `observation failed: waitid 1: interrupted system call`，`evidence` seam、`calls` 1，清理 verified；`control.p5-w-exit7` pass：exit 0，目标 confirmed、`calls` 2 | 同左 |
+| 模型（§16.11） | 10/10 pass：`TestP3Decode`、`TestP3Parse`、`TestP5ProtoUntil`、`TestP5ProtoWaitOrder`、`TestP5ProtoRequestHung`、`TestP5ProtoRequestSerial`、`TestP5ProtoCopyStop`、`TestP5ProtoErrs`、`TestE2Forms`、`TestP5CallsCheck` | 10/10 pass |
+| 布局（前提，另列） | `P5.layout.1` ~ `3` confirmed，`calls` 0；两个门禁内层的 `P5.layout.1` 也 confirmed、`evidence` layout、`calls` 0 | 同左 |
+
+- **真实错误与健康恢复**（`P5.err.*`，每个架构各 3 次）：错误调用都是 X2 并与预测一致——`ECHILD`（10，`waitid(P_PID, 本进程, 0x25)`）与 `EINVAL`（22，`waitid(P_PID, 子进程, 0)`），缓冲区的哨兵仍在；之后的两次健康读取都是 X1，与 `w.exit7` 的预测相同。
+- **门禁内层的协议**（两个架构共四次门禁）：都没有请求任务（内层在 k 之前自行结束，Wait 任务在 W3 记下观察并完成 `Cmd.Wait`），输出完整（复制任务在 w 之前读到 EOF），补救 not-needed，Final ended，保险清理 nothing left，没有移交项；最终收尾（截止 D + 30 s）为 “nothing handed over”。这只是正常路径的执行，挂起、未确认与移交的分支没有在原生运行中出现，只有模型检查覆盖（补充 1）。
+- **期限**：arm64 的 D = S + 180 s（S 12:35:23Z，T 12:45:35Z）；x86_64 同样取 S + 180 s。39 次原生合计约 2.0 s（arm64）与 2.4 s（x86_64），单次最长 213 ms 与 290 ms；门禁 320 ~ 536 ms。都不是入口 E2 的时限保证。
+- **回归**（另列，不计入上表）：P-3 的门禁 22/22 pass，其中 W 与 C 的 7 个门禁与 2 个对照都 pass；`TestP3` 63/63 confirmed，都经入口 E2。WP25SUMMARY：场景 139/139 confirmed，门禁 101/101，组合 16/16。
+
+**限制声明**（§16.11，原样）：
+
+> H4：静态依据是固定的 Go 1.27.3 过滤源码；动态覆盖的是所测的真实错误（`ECHILD`、`EINVAL`）与错误之后的健康恢复；没有动态取样的是健康调用时过滤之前的 errno 是否非零。
+
+> H6：只有接缝证据（消费者的不重试与失败）；真实的 EINTR 穿过跳板没有原生验证。
+
+**结论与待决**：
+
+- 本次 P-5 **不是完整的通过**：终判为 invalid（T），唯一的 T 是 `P5.static.symbols`，原因是检查脚本的缺陷与 `nm -m` 输出没有库归属这两处；原生、接缝、模型与其余静态检查在两个架构上都按预测成立。
+- 作者不宣布 G5、H1 或 P-5 满足，也不据此推断入口 E2 的符号与库的归属已经验证。
+- 需要负责人决定（作者的建议见 review-resolution §138）：是否授权修正 `P5.static.symbols` 的检查（去掉 `pipefail` 下 `grep -q` 的提前退出，并重新确定“来自 libSystem”的证据形式，例如增加取得二进制标志与加载命令的步骤），以及是否在新的固定代码点取得一次新的诊断。修正之前不推送任何原型或 workflow 的改动。

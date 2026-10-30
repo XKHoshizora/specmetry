@@ -8884,3 +8884,54 @@ PR #39 合并之后，按负责人的指令做了只读的冻结前差额整理�
 **范围**：只有文档；§1 ~ §136 与历史审查原文没有改动。
 
 **状态**：PR #43 已合并为 `021c956`，合并核验完成。P-5 的实施已登记，尚无原型代码，尚无诊断。规范是第 9 版草案，**未冻结**；G5 未满足；生产实现未授权；WP2.5 与 M2 未验收。
+
+## 138．P-5 的实施与诊断：invalid（T，`P5.static.symbols`），交负责人决定
+
+**实施**（按 §136 的第二项与 §137 的登记）：
+
+- 分支 `test/wp2.5-prototype-p5`，PR #44（不合并）。提交依次为：登记 `83854cb`（原型文档 §16.14）、写代码时的补充 `aeb0a4c`（§16.15，在代码提交之前）、代码 `0213fb7`。
+- 代码只在 `prototype/wp25` 与诊断 workflow：
+  - `e2waitid` 子包与两个架构的跳板；
+  - `waitidCall` 是入口 E2 唯一的调用者，`readWaitid` 经它，入口 E1 删去；
+  - `TestP5`：静态的入口检查、3 次布局、39 次原生、两个门禁；门禁内层按第四稿的协议启动、等待与移交（W1 ~ W6、R0 ~ R5、两类锁、按绝对截止的查询、最终收尾）；
+  - workflow：固定 `go1.27.3` 与 `GOTOOLCHAIN=local`，两个 macOS 作业 `CGO_ENABLED=0` 与 §16.4 的静态步骤，触发分支增加本分支。
+- 共享代码的改动行为不变（§16.15 的补充 4）。没有新增依赖，没有改生产代码、Schema、迁移或根 `ci.yml`。
+- 推送之前作者在本机完成的核对（不是诊断的证据）：两个 darwin 架构的交叉 vet、构建、构建设置与 `go tool nm` 的符号；静态入口检查的源码遍历（四条断言成立）；协议的模型检查（标签 `wp25p5local`）；Windows 全量（53 个场景 confirmed，门禁 92/92，组合 13/13）；WSL 的 Linux 全量（不带 `-race`；门禁 111/111，组合 13/13）。本机没有 macOS，`pipefail` 下的检查脚本与 Xcode 的 `nm -m` 都没有在本机运行。
+
+**诊断**：代码一次推送，头提交 `0213fb706e29130110af7ad8971dd8bbd94dd1d4` 为固定代码点。WP2.5 prototype run 41055799521，push，attempt 1，**failure**；四个作业都检出 `0213fb7`，工具链都是 `go1.27.3`。没有手动触发，没有重跑。
+
+- `ubuntu-latest`、`windows-latest`：success。
+- `macos-latest`（arm64）、`macos-26-intel`（x86_64）：failure。“Prototype”（`go test`）步骤 success，最后的“P-5 static verdict”失败：**`P5.static.symbols` 为 T**。
+- **T 的原因**（原型文档 §16.16）：
+  1. 检查脚本以 `pipefail` 运行，`printf … | grep -q …` 中 `grep -q` 提前退出，`printf` 得到 `Broken pipe`，第一个条件即为假；
+  2. §16.4 预期 `nm -m` 显示 `_waitid` 来自 libSystem，实际输出为 `(undefined) external _waitid`，没有 `(from libSystem)`，原因未知。
+
+  原始输出中有跳板（`e2waitid.libc_waitid_trampoline_addr`、`_libc_waitid_trampoline`）与 `U _waitid`。按 §16.4 与 §16.7，这一项为 T，P-5 的终判为 invalid（T）；作者不改判。
+- **其余**（两个架构相同）：
+  - 静态：`toolchain`、`vet`、`build`、`settings`（`build CGO_ENABLED=0`）、`entry`（confirmed）与 `load` 成立；
+  - 原生 39/39 confirmed（`calls` 2 的 33 次、3 的 6 次），未执行 0；`ECHILD`、`EINVAL` 的真实错误与之后的健康恢复都与预测一致；
+  - 接缝：`p5.eintr-once` 与 `control.p5-w-exit7` 都 pass（命中 1、理由恰好一条、`calls` 1 与 2、清理 verified）；
+  - 模型 10/10 pass；布局 3/3 confirmed（另列）；
+  - 门禁内层都在 k 之前自行结束，没有请求任务，没有移交；最终收尾 “nothing handed over”。挂起与移交的分支只有模型检查覆盖；
+  - 回归：P-3 的门禁 22/22（W / C 门禁与对照都 pass），`TestP3` 63/63 confirmed，都经入口 E2。
+- H4、H6 的限制声明原样写入原型文档 §16.16。
+
+**处理**：
+
+- 按 §16.12 与 §136，这是停止条件（符号的证据不成立）：按计划记录，最终收尾已结束（没有移交项），报告并交负责人决定。没有修改代码或检查，没有重跑，没有扩大预算、更换入口、减少次数或放宽判定。
+- 结果回填只增加文档提交：原型文档 §16.16、本节，以及 AGENTS、实施计划与规范开头的状态。`prototype/` 与 `.github/` 相对 `0213fb7` 没有变化。
+
+**待负责人决定**（作者的建议，不是决定）：
+
+- **推荐 (a)**：授权只修正 `P5.static.symbols` 的检查，然后在新的固定代码点取得一次新的诊断。
+  - 修正的范围：去掉 `pipefail` 下 `grep -q` 的提前退出（例如先把输出写入文件再检查）；重新确定“来自 libSystem”的证据形式，例如增加取得二进制标志与加载命令的步骤（`otool -hv`、`otool -L`），并把取得的输出原样记录。
+  - 第二项改变了 §16.4 的检查办法，建议先经独立审查确认新的证据形式，再推送。原型测试、预测、次数、期限与判定都不变。
+- (b) 不修正，把本次的原始输出交独立审查评价；按 §16.7，本次仍为 invalid（T），这不改变终判。
+- (c) 其他安排。
+
+**范围**：只有文档；§1 ~ §137 与历史审查原文没有改动。
+
+**状态**：
+
+- P-5 已执行一次：固定代码点 `0213fb7`，诊断 run 41055799521 为 failure，终判 invalid（T，`P5.static.symbols`）；**不是完整的通过**。PR #44 保持未合并，Auto-fix 与 Auto-merge 关闭，等待负责人的决定与代码、结果的独立审查。
+- G5 未满足；规范是第 9 版草案，**未冻结**；生产实现未授权；WP2.5 与 M2 未验收。
