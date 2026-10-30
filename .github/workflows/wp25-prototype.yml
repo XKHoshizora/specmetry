@@ -8,11 +8,14 @@ name: WP2.5 prototype
 # the N-096-2 fix, or to the branch of the P-3 experiment, that change the
 # prototype or this workflow; a change of the documents does not run it.
 # P-3 adds the standard Intel image (macos-26-intel) beside macos-latest,
-# so arm64 and x86_64 run the same code point. There is no manual trigger,
-# so no run is repeated blindly, and no run is cancelled.
+# so arm64 and x86_64 run the same code point. P-5 (docs/wp2.5-prototype.md
+# §16.10) runs on the branch of its experiment: the toolchain fixed at
+# go1.27.3 with GOTOOLCHAIN=local on the four jobs, and on the two macOS
+# jobs CGO_ENABLED=0 and the static steps of §16.4. There is no manual
+# trigger, so no run is repeated blindly, and no run is cancelled.
 on:
   push:
-    branches: [proto/wp2.5-prototype, test/wp2.5-prototype-n4-n6, proto/wp2.5-p1-p2-p4, test/wp2.5-prototype-n-096-2, test/wp2.5-prototype-p3]
+    branches: [proto/wp2.5-prototype, test/wp2.5-prototype-n4-n6, proto/wp2.5-p1-p2-p4, test/wp2.5-prototype-n-096-2, test/wp2.5-prototype-p3, test/wp2.5-prototype-p5]
     paths:
       - prototype/wp25/**
       - .github/workflows/wp25-prototype.yml
@@ -33,6 +36,8 @@ jobs:
         os: [ubuntu-latest, macos-latest, macos-26-intel, windows-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
+    env:
+      GOTOOLCHAIN: local
     defaults:
       run:
         shell: bash
@@ -41,7 +46,7 @@ jobs:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-go@v7.0.0
         with:
-          go-version-file: prototype/wp25/go.mod
+          go-version: 1.27.3
           cache-dependency-path: prototype/wp25/go.sum
       - name: Vet
         run: |
@@ -68,10 +73,73 @@ jobs:
           xcrun clang --version
           go env GOARCH GOHOSTARCH
           EOF
+      - name: P-5 static checks
+        # P-5's static steps (docs/wp2.5-prototype.md §16.4) with
+        # CGO_ENABLED=0, each output printed as it is, each conclusion kept
+        # for the WP25P5 line. A toolchain that is not the fixed one stops
+        # the job (a T, nothing else runs); any other check that does not
+        # hold is a T, which fails the job in "P-5 static verdict" after
+        # the tests ran.
+        id: p5static
+        if: runner.os == 'macOS'
+        run: |
+          out="$RUNNER_TEMP/p5-static.txt"
+          : > "$out"
+          export CGO_ENABLED=0
+          failed=0
+          rec() { echo "$1 $2" >> "$out"; echo "WP25P5STATIC $1 $2"; }
+          tfail() { rec "$1" "T: $2"; failed=1; }
+          echo "+ go version"
+          v=$(go version 2>&1) || v="(go version failed: $v)"
+          echo "$v"
+          echo "+ go env GOVERSION CGO_ENABLED GOTOOLCHAIN"
+          e=$(go env GOVERSION CGO_ENABLED GOTOOLCHAIN 2>&1) || e="(go env failed: $e)"
+          echo "$e"
+          if [ "$e" = "$(printf 'go1.27.3\n0\nlocal')" ] && [ "${v#go version go1.27.3 }" != "$v" ]; then
+            rec P5.static.toolchain ok
+          else
+            rec P5.static.toolchain "T: not go1.27.3 with CGO_ENABLED=0 and GOTOOLCHAIN=local"
+            exit 1
+          fi
+          echo "+ go vet ./..."
+          if go vet ./...; then rec P5.static.vet ok; else tfail P5.static.vet "go vet failed"; fi
+          bin="$RUNNER_TEMP/wp25.test"
+          echo "+ go test -c -o \"\$RUNNER_TEMP/wp25.test\" ."
+          if go test -c -o "$bin" .; then rec P5.static.build ok; else tfail P5.static.build "go test -c failed"; fi
+          if [ -f "$bin" ]; then
+            echo "+ go version -m \"\$RUNNER_TEMP/wp25.test\""
+            m=$(go version -m "$bin" 2>&1) && s0=0 || s0=$?
+            echo "$m"
+            if [ "$s0" -eq 0 ] && printf '%s\n' "$m" | grep -qE '^[[:space:]]*build[[:space:]]+CGO_ENABLED=0$'; then
+              rec P5.static.settings ok
+            else
+              tfail P5.static.settings "no build CGO_ENABLED=0 in the binary's settings"
+            fi
+            echo "+ go tool nm \"\$RUNNER_TEMP/wp25.test\" (its lines naming waitid)"
+            n1=$(go tool nm "$bin" 2>&1) && s1=0 || s1=$?
+            printf '%s\n' "$n1" | grep -i waitid || true
+            echo "+ nm -m \"\$RUNNER_TEMP/wp25.test\" (its lines naming waitid)"
+            n2=$(nm -m "$bin" 2>&1) && s2=0 || s2=$?
+            printf '%s\n' "$n2" | grep -i waitid || true
+            if [ "$s1" -eq 0 ] && [ "$s2" -eq 0 ] &&
+              printf '%s\n' "$n1" | grep -q 'e2waitid\.libc_waitid_trampoline' &&
+              printf '%s\n' "$n1" | grep -qE '^[[:space:]]+U _waitid$' &&
+              printf '%s\n' "$n2" | grep -qE '\(undefined\) external _waitid \(from libSystem\)'; then
+              rec P5.static.symbols ok
+            else
+              tfail P5.static.symbols "the trampoline or the dynamic import of waitid from libSystem was not found"
+            fi
+          else
+            tfail P5.static.settings "no test binary"
+            tfail P5.static.symbols "no test binary"
+          fi
+          echo "failed=$failed" >> "$GITHUB_OUTPUT"
       - name: Prototype
         env:
           WP25_SHA: ${{ github.sha }}
+          WP25_P5_STATIC: ${{ runner.temp }}/p5-static.txt
         run: |
+          if [ "$RUNNER_OS" = "macOS" ]; then export CGO_ENABLED=0; fi
           go version
           race=""
           if [ "$RUNNER_OS" = "Linux" ]; then race="-race"; fi
@@ -79,4 +147,9 @@ jobs:
           exit "${PIPESTATUS[0]}"
       - name: Results
         if: always()
-        run: grep -E '^WP25(META|RESULT|SUMMARY) ' "$RUNNER_TEMP/wp25.log" || echo "no result line"
+        run: grep -E '^WP25(META|RESULT|SUMMARY|GATE|P5|P5META|P5FINAL) ' "$RUNNER_TEMP/wp25.log" || echo "no result line"
+      - name: P-5 static verdict
+        # A static check that did not hold fails the job (a T), after the
+        # tests and their results were kept.
+        if: always() && runner.os == 'macOS' && steps.p5static.outcome == 'success'
+        run: test "${{ steps.p5static.outputs.failed }}" = 0

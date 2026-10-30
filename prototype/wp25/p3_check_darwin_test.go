@@ -15,6 +15,7 @@ import (
 )
 
 func TestP3Decode(t *testing.T) {
+	modelCheck(t)
 	const pid = 4242
 	w := func(signo, code, status uint32) wRaw { return wRaw{Signo: signo, Code: code, Pid: pid, Status: status} }
 	for _, c := range []struct {
@@ -122,6 +123,7 @@ func TestP3Decode(t *testing.T) {
 }
 
 func TestP3Parse(t *testing.T) {
+	modelCheck(t)
 	keys := []probeKey{{key: "a", bits: 64}, {key: "b", bits: 16, signed: true}, {key: "c", bits: 32}}
 	got, err := parseProbe([]byte("a=1\nb=-5\nc=4294967295\n"), keys)
 	if err != nil || got["a"] != 1 || got["b"] != -5 || got["c"] != 4294967295 {

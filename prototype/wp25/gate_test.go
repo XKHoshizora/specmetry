@@ -141,6 +141,9 @@ type gateResult struct {
 	// verdict, reason, reasons, cleanup, observation, launches, work and
 	// registrations. It is kept, not judged.
 	Inner []result `json:"inner,omitempty"`
+	// P5 is a P-5 gate's own record (p5gate_darwin_test.go): its deadlines
+	// and its knowledge of the inner run (§16.11); absent elsewhere.
+	P5 any `json:"p5,omitempty"`
 }
 
 var (
@@ -559,7 +562,15 @@ func runInner(test, inject string, env []string) innerRun {
 		r.err = fmt.Errorf("inner run did not end within 180 s")
 	}
 	r.exit = cmd.ProcessState.ExitCode()
-	sc := bufio.NewScanner(bytes.NewReader(out.Bytes()))
+	parseInner(out.Bytes(), &r)
+	return r
+}
+
+// parseInner reads an inner run's output into r: the hits, the seals and
+// the result lines (P-5's gate reads the part it could take safely, the
+// same way).
+func parseInner(b []byte, r *innerRun) {
+	sc := bufio.NewScanner(bytes.NewReader(b))
 	sc.Buffer(make([]byte, 1<<20), 1<<20)
 	for sc.Scan() {
 		line := sc.Text()
@@ -590,7 +601,6 @@ func runInner(test, inject string, env []string) innerRun {
 	if err := sc.Err(); err != nil {
 		r.err = err
 	}
-	return r
 }
 
 // outerFault is an outer-side fault of the tested path, for
@@ -745,59 +755,7 @@ func runGate(t *testing.T, c gateCase, f outerFault) gateResult {
 	defer rw.close()
 	r := runInner(c.test, c.inject, append([]string{witnessEnv + "=" + wf, injectLogEnv + "=" + il, rw.env()}, f.env...))
 	g := gateResult{ID: c.id, Test: c.test, Inject: c.inject, Want: c.want, Reject: c.reject, InnerExit: r.exit, Hits: r.hits, Sites: r.sites, Total: -1, Inner: r.all}
-	got, ok := r.results[c.scenario]
-	verdictOK := false
-	switch {
-	case r.err != nil:
-		g.Reason = "inner run: " + r.err.Error()
-	case !ok:
-		g.Reason = "the inner run gave no result for " + c.scenario
-	default:
-		g.Got, g.Reason, g.Launches, g.Work = got.Verdict, got.Reason, got.Launches, got.Work
-		if c.hit {
-			g.Observed, g.InnerCleanup = got.Observed, got.Cleanup
-		}
-		// A control must be accepted and exit 0; a broken run must be
-		// rejected as invalid and make the diagnostic fail. A mechanism
-		// verified as unavailable is unsupported and exits 0 (N-096-2):
-		// it fails nothing, and is not counted as confirmed.
-		verdictOK = c.want == "" || got.Verdict == c.want && (r.exit == 0) == (c.want == confirmed || c.want == unsupported)
-		for _, b := range []string{c.because, c.alsoBecause} {
-			if b != "" && !strings.Contains(got.Reason, b) {
-				verdictOK = false
-				g.Reason = fmt.Sprintf("the reason does not name %q: %s", b, got.Reason)
-				break
-			}
-		}
-		if c.sees != "" && verdictOK && !strings.Contains(got.Observed, c.sees) {
-			verdictOK = false
-			g.Reason = fmt.Sprintf("the inner run did not observe %q: %s", c.sees, got.Observed)
-		}
-		if c.exact && verdictOK {
-			var others []string
-			for id, o := range r.results {
-				if id != c.scenario && o.Verdict != confirmed {
-					others = append(others, id+" "+string(o.Verdict))
-				}
-			}
-			sort.Strings(others)
-			reasons, cleanup := max(c.reasons, 1), c.cleanup
-			if cleanup == "" {
-				cleanup = "verified"
-			}
-			switch {
-			case c.want == invalid && len(got.Invalid) != reasons:
-				verdictOK = false
-				g.Reason = fmt.Sprintf("want exactly %d reasons, got %d: %s", reasons, len(got.Invalid), got.Reason)
-			case !strings.HasPrefix(got.Cleanup, cleanup):
-				verdictOK = false
-				g.Reason = fmt.Sprintf("the inner run's cleanup does not begin %q: %s", cleanup, got.Cleanup)
-			case len(others) > 0:
-				verdictOK = false
-				g.Reason = "other scenarios of the inner run are not confirmed: " + strings.Join(others, ", ")
-			}
-		}
-	}
+	verdictOK := verdictOf(c, r, &g)
 	if r.proc == nil {
 		g.Problems = append(g.Problems, "inner: the inner run could not be started: "+fmt.Sprint(r.err))
 		g.Remedy, g.Final = "not-run", "unknown"
@@ -997,6 +955,67 @@ func runGate(t *testing.T, c gateCase, f outerFault) gateResult {
 		judge(c, &g, verdictOK)
 	}
 	return g
+}
+
+// verdictOf judges the inner run's verdict for c, the first of judge's
+// dimensions: its result for the scenario, its exit, the reasons it must
+// name and, for exact, its other scenarios, reasons and cleanup. It fills
+// g's fields of the inner result and its reason.
+func verdictOf(c gateCase, r innerRun, g *gateResult) bool {
+	got, ok := r.results[c.scenario]
+	verdictOK := false
+	switch {
+	case r.err != nil:
+		g.Reason = "inner run: " + r.err.Error()
+	case !ok:
+		g.Reason = "the inner run gave no result for " + c.scenario
+	default:
+		g.Got, g.Reason, g.Launches, g.Work = got.Verdict, got.Reason, got.Launches, got.Work
+		if c.hit {
+			g.Observed, g.InnerCleanup = got.Observed, got.Cleanup
+		}
+		// A control must be accepted and exit 0; a broken run must be
+		// rejected as invalid and make the diagnostic fail. A mechanism
+		// verified as unavailable is unsupported and exits 0 (N-096-2):
+		// it fails nothing, and is not counted as confirmed.
+		verdictOK = c.want == "" || got.Verdict == c.want && (r.exit == 0) == (c.want == confirmed || c.want == unsupported)
+		for _, b := range []string{c.because, c.alsoBecause} {
+			if b != "" && !strings.Contains(got.Reason, b) {
+				verdictOK = false
+				g.Reason = fmt.Sprintf("the reason does not name %q: %s", b, got.Reason)
+				break
+			}
+		}
+		if c.sees != "" && verdictOK && !strings.Contains(got.Observed, c.sees) {
+			verdictOK = false
+			g.Reason = fmt.Sprintf("the inner run did not observe %q: %s", c.sees, got.Observed)
+		}
+		if c.exact && verdictOK {
+			var others []string
+			for id, o := range r.results {
+				if id != c.scenario && o.Verdict != confirmed {
+					others = append(others, id+" "+string(o.Verdict))
+				}
+			}
+			sort.Strings(others)
+			reasons, cleanup := max(c.reasons, 1), c.cleanup
+			if cleanup == "" {
+				cleanup = "verified"
+			}
+			switch {
+			case c.want == invalid && len(got.Invalid) != reasons:
+				verdictOK = false
+				g.Reason = fmt.Sprintf("want exactly %d reasons, got %d: %s", reasons, len(got.Invalid), got.Reason)
+			case !strings.HasPrefix(got.Cleanup, cleanup):
+				verdictOK = false
+				g.Reason = fmt.Sprintf("the inner run's cleanup does not begin %q: %s", cleanup, got.Cleanup)
+			case len(others) > 0:
+				verdictOK = false
+				g.Reason = "other scenarios of the inner run are not confirmed: " + strings.Join(others, ", ")
+			}
+		}
+	}
+	return verdictOK
 }
 
 func finishGate(c gateCase, g gateResult, verdictOK bool, begin time.Time) gateResult {

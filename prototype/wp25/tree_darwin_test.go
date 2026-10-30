@@ -4,12 +4,19 @@ package wp25
 
 import (
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"os"
+	"runtime"
 	"strconv"
+	"sync"
+	"sync/atomic"
+	"syscall"
 	"time"
 	"unsafe"
 
+	"github.com/XKHoshizora/specmetry/prototype/wp25/e2waitid"
 	"golang.org/x/sys/unix"
 )
 
@@ -302,15 +309,124 @@ var p3Seam struct {
 // (enum_check_darwin_test.go) replaces; the real one otherwise.
 var keventCall = unix.Kevent
 
-// readWaitid calls waitid(P_PID, pid, WEXITED|WNOWAIT) through the raw
-// system call (E1; x/sys has no darwin wrapper) and returns its fields
-// before any decoding.
+// e2Calls counts the calls of entry E2 in the current P-5 run (§16.11):
+// each run sets it to 0 at its start, waitidCall adds each call, and the
+// run reads it after its end.
+var e2Calls atomic.Int64
+
+// e2Call is one call of entry E2 kept whole (§16.7): its arguments, r and
+// the errno, the buffer's raw bytes and whether the sentinel is still
+// there, its form, and, once the consumer knows what it expected, its one
+// class and reason. A seam's replacement is marked; what is classified is
+// the real call.
+type e2Call struct {
+	N        int    `json:"n"`
+	Args     string `json:"args"`
+	R        int32  `json:"r"`
+	Errno    int    `json:"errno"`
+	ErrText  string `json:"errno_text,omitempty"`
+	Raw      string `json:"raw"`
+	Sentinel bool   `json:"sentinel"`
+	Form     string `json:"form"`
+	Seam     string `json:"seam,omitempty"`
+	Class    string `json:"class,omitempty"`
+	Why      string `json:"why,omitempty"`
+}
+
+// e2Log keeps the current P-5 run's calls (on only during one).
+var e2Log struct {
+	sync.Mutex
+	on    bool
+	calls []e2Call
+}
+
+// e2Pattern is the sentinel's byte; si_pid is 0.
+const e2Pattern = 0xa5
+
+// waitidCall is the one caller of entry E2 (§16.3): it writes the sentinel
+// into its own buffer, makes the one call, keeps the buffer alive across
+// it, and counts it. It gives int32(r1), the errno, the buffer and the
+// run's count so far.
+func waitidCall(idtype, id, options uint32) (ret int32, err syscall.Errno, si [siSize]byte, calls int) {
+	for i := range si {
+		si[i] = e2Pattern
+	}
+	binary.LittleEndian.PutUint32(si[wOff[3]:], 0)
+	r1, e := e2waitid.Waitid(idtype, id, unsafe.Pointer(&si[0]), options)
+	runtime.KeepAlive(&si)
+	n := int(e2Calls.Add(1))
+	ret, err = int32(r1), e
+	e2Log.Lock()
+	if e2Log.on {
+		c := e2Call{N: n, Args: fmt.Sprintf("(%d, %d, %#x)", idtype, id, options), R: ret, Errno: int(err),
+			Raw: hex.EncodeToString(si[:]), Sentinel: e2Sentinel(&si), Form: e2Form(ret, err)}
+		if err != 0 {
+			c.ErrText = err.Error()
+		}
+		e2Log.calls = append(e2Log.calls, c)
+	}
+	e2Log.Unlock()
+	return ret, err, si, n
+}
+
+// e2Sentinel says whether the buffer still holds the sentinel.
+func e2Sentinel(si *[siSize]byte) bool {
+	for i, b := range si {
+		if i >= wOff[3] && i < wOff[3]+4 {
+			if b != 0 {
+				return false
+			}
+		} else if b != e2Pattern {
+			return false
+		}
+	}
+	return true
+}
+
+// e2Note sets the class of the current run's last call, or marks it.
+func e2Note(f func(c *e2Call)) {
+	e2Log.Lock()
+	defer e2Log.Unlock()
+	if n := len(e2Log.calls); n > 0 {
+		f(&e2Log.calls[n-1])
+	}
+}
+
+// e2ProtoErr is a result of entry E2 outside its contract (X3 to X5).
+type e2ProtoErr struct {
+	form string
+	r    int32
+	err  syscall.Errno
+}
+
+func (e *e2ProtoErr) Error() string { return e2Protocol(e.form, e.r, e.err) }
+
+// p5Seam is the gate regression's seam p5-eintr-once (§16.6): on in the
+// target run of its inner run only.
+var p5Seam struct{ eintr bool }
+
+// readWaitid calls waitid(P_PID, pid, WEXITED|WNOWAIT) through entry E2
+// (waitidCall) and returns its fields before any decoding. A failed call
+// (X2) gives its errno; a result outside the contract (X3 to X5), an
+// e2ProtoErr. At the seam p5-eintr-once's site the real result is kept
+// first; a real success is then replaced, once, by (-1, EINTR) (§16.6); a
+// real failure is not replaced.
 func readWaitid(pid int) (wRaw, error) {
-	var si [siSize]byte
-	_, _, e := unix.Syscall6(unix.SYS_WAITID, pPID, uintptr(pid), uintptr(unsafe.Pointer(&si[0])),
-		unix.WEXITED|unix.WNOWAIT, 0, 0)
-	if e != 0 {
+	ret, e, si, _ := waitidCall(pPID, uint32(pid), unix.WEXITED|unix.WNOWAIT)
+	form := e2Form(ret, e)
+	if p5Seam.eintr {
+		e2Note(func(c *e2Call) { c.Seam = "the seam's site: the real result" })
+		if form == "X1" && injectOnce("p5-eintr-once", "P-5 waitid: (0, 0) -> (-1, EINTR)", os.Getpid()) {
+			e2Note(func(c *e2Call) { c.Seam = "the seam's site: the real result, replaced by (-1, EINTR)" })
+			ret, e, form = -1, syscall.EINTR, "X2"
+		}
+	}
+	switch form {
+	case "X2":
 		return wRaw{}, e
+	case "X1":
+	default:
+		return wRaw{}, &e2ProtoErr{form, ret, e}
 	}
 	if p3Seam.w != nil {
 		p3Seam.n++

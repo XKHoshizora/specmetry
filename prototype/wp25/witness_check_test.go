@@ -29,6 +29,7 @@ func TestStartPoints(t *testing.T) {
 		"witness_unix_test.go":    "if err := cmd.Start(); err != nil {", // the outer check starts the inner run
 		"witness_windows_test.go": "if err := cmd.Start(); err != nil {", // the same, in its Job
 		"gate_test.go":            "err = cmd.Start() // bypass: allowed in TestStartPoints for this line only",
+		"p5gate_darwin_test.go":   "if err := cmd.Start(); err != nil {", // a P-5 gate starts its inner run (§16.8)
 	}
 	pat := regexp.MustCompile(`\.Start\(\)|\.Run\(\)|\.Output\(\)|\.CombinedOutput\(\)|StartProcess|ForkExec|CreateProcess`)
 	files, err := os.ReadDir(".")
