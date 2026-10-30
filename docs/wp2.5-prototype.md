@@ -4766,3 +4766,38 @@ r 为 `int32(r1)`。下面五种形式互斥，并且覆盖全部组合：
   - 结果回填只增加文档提交，并核对原型与 workflow 相对固定代码点没有变化。
 - **本节在写任何原型代码之前提交**。实施若须偏离 §16，先在 §16.15 登记偏离与理由（在代码提交之前），再改代码。
 - **不授权**：规范冻结、生产实现、G5 整体满足、WP2.5 / M2 的验收。
+
+### 16.15 写代码时登记的补充与偏离（在代码提交之前）
+
+下面各项是写代码时确定的，在代码提交之前登记。它们都不改变 §16.4 ~ §16.12 的预测、次数、期限、角色 C、`exact`、归属规则或判定，也不放宽失败关闭。没有偏离 §16 的技术方案。
+
+- **补充 1：协议核心与本机的模型检查**。
+  - 门禁内层协议的平台无关部分（两类锁、W1 ~ W6、R0 ~ R5、`until`、复制与停止任务、调用形式的分类与调用次数的判定）在 `p5proto_test.go`；darwin 的接线（`procInfo`、`Cmd.Wait`、`syscall.Kill`）在 `p5gate_darwin_test.go`。
+  - 两者带构建约束 `darwin || wp25p5local`：诊断的 macOS 作业照常构建；Ubuntu、Windows 作业不构建，§16.10 的“只随工具链的固定而变”不受影响。标签 `wp25p5local` 只供作者在本机用假对象运行模型检查（`p5proto_check_test.go`），不是诊断的证据。
+  - 模型检查：`TestP5ProtoUntil`、`TestP5ProtoWaitOrder`（W2 先解锁再 W4；W4 阻塞时请求立即取得控制锁并判为“不需要”；快照不等待；失败的读取保留）、`TestP5ProtoRequestHung`（请求停在控制锁内时，查询按截止返回，R0 不另起请求，W2 等锁，`Cmd.Wait` 不开始）、`TestP5ProtoRequestSerial`（请求先登记、后执行）、`TestP5ProtoCopyStop`、`TestP5ProtoErrs`、`TestE2Forms`、`TestP5CallsCheck`。它们与 `TestP3Decode`、`TestP3Parse` 一起登记结论，进入 `WP25P5` 的模型一项。
+- **补充 2：符号检查的写法**（作者在本机用 Go 1.27.1 交叉构建的两个架构的测试二进制上取得，不是 1.27.3 的证据）：
+  - `go tool nm` 中跳板的地址变量为 `github.com/…/e2waitid.libc_waitid_trampoline_addr`（另有静态的 `_libc_waitid_trampoline`），动态导入为 `U _waitid`。检查取“名字含 `e2waitid.libc_waitid_trampoline` 的行”与“`U _waitid` 的行”，即 §16.4 的预期。
+  - Xcode 的 `nm -m` 按 §16.4 取“`(undefined) external _waitid (from libSystem)`”；本机无法预先核对，以作业的输出为准，不成立为 T。
+- **补充 3：静态步骤的落点**（§16.4、§16.10）：
+  - macOS 的两个作业增加一个步骤 `P-5 static checks`：带 `CGO_ENABLED=0`，依次做工具链、vet、`go test -c`、`go version -m`、`go tool nm`、`nm -m`，各自的输出原样进入日志，结论写入一个文件，经 `WP25_P5_STATIC` 交给测试的 `WP25P5` 行。
+  - 工具链不成立时步骤失败，之后的步骤不运行（T，不继续）；其余不成立时记 T，测试照常运行，由最后的步骤 `P-5 static verdict` 使作业失败。
+  - 既有的 `Vet` 步骤不变。
+  - 静态检查的对象是 `go test -c` 的二进制；测试步骤仍按 §16.10 用 `go test`（同一工具链与构建设置），`P5.static.load` 是 `TestP5` 在这个二进制中开始运行。
+- **补充 4：共享代码的改动**（行为不变）：
+  - `gate_test.go`：把内层输出的解析（`parseInner`）与内层判定的一维（`verdictOf`）从 `runInner`、`runGate` 中提出来，P-5 的门禁复用；`gateResult` 增加省略的 `p5` 字段（P-5 门禁自己的记录）。角色 C 的判定与输出不变。
+  - `main_test.go`：`result` 增加省略的 `evidence` 与指针 `calls`；`scen` 增加 P-5 运行的截止 `cap`（结束阶段的有界等待取 min(自身上限, d)）与收尾之后、判定之前执行的 `final`；`TestMain` 在外层调用 `p5Summary`（非 darwin 为空）。其他运行的这些字段为零值，行为不变。
+  - `p3_darwin_test.go`：`p3Run` 增加 `p5`；`admit`、`obsEnd`、`limits`、`layoutPremise`、`zombie` 与 `reap` 的等待只在 `p5` 非空时按 §16.8 的角色走另一分支，P-3 自己的运行不变。证据行增加省略的 `E2`。
+  - `witness_check_test.go`：`TestStartPoints` 允许 P-5 门禁启动内层的那一行。
+- **补充 5：结果与记录的写法**（§16.11）：
+  - 每一次经 E2 的调用记在运行的 `WP25P` 行的 `E2` 中：参数、r、errno（数值与文字）、缓冲区的原始字节、哨兵是否仍在、形式、接缝的标记、分类与原因。
+  - 健康调用的原生反证记为预测“`0 / 0 / X1`”与实际的不符；构造的错误记为预测“`-1 / errno / X2`”与实际的比较；协议失效与接缝站点的真实失败记为 T，持续到终判。
+  - 每个作业另有 `WP25P5META`（工具链、`CGO_ENABLED`、`GOTOOLCHAIN`、S / T / D、构建设置）、`WP25P5FINAL`（最终收尾）与 `WP25P5`（汇总）行；静态步骤打印 `WP25P5STATIC` 行。门禁行增加 `p5`（d_g、d_i、k、w、内层的身份、知识状态、退出、输出与移交的项）。
+- **补充 6：P-5 的布局前提只看 P-5 自己的布局运行**（`p5Layouts`，与 P-3 的列表分开），所以 `TestP3` 的布局结论不进入 P-5 的前提。
+- **补充 7：唯一 Wait 任务的细节**：
+  - W1 的读取间隔为 5 ms，不持有锁；同一文字的读取失败只记一次并计数，不丢失、不清除。
+  - `Cmd.Wait` 返回的 `*exec.ExitError` 是退出状态，不是调用的失败；状态在 W5 由 Wait 任务读取 `cmd.ProcessState` 取得。
+- **补充 8：截止与移交的细节**：
+  - 在 w 启动停止任务之后只做一次不等待的查询；复制任务这时尚未返回的，没有可以安全读取的输出（T），复制任务与停止任务移交。
+  - 补救与保险清理是 P-5 自己的（`p5Remediate`、`p5Insure`）：截止为 min(当前 + 10 s, d_g)，不按 PID 动作内层；保险清理到 d_g 仍未确认时，除了 `runGate` 既有的矛盾规则，另记 `insurance` 的问题（§16.8 的“到 d_g 仍未确认结束时为 T”）。
+  - 只有未确认的部分才移交最终收尾（时间线一的“没有移交项”）；最终收尾按移交门禁的标记普查。
+  - 内层的 `TestP5` 也注册截止 d_i + 3 s 的最终收尾；内层没有移交项，它只打印 `WP25P5FINAL`。
