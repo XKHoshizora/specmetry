@@ -10055,3 +10055,44 @@ macOS 13+、Intel 的支持承诺与已批准的产品决定不变；没有新�
 
 - PR #47 按条件授权以 merge commit 合并。合并核验与 master push CI 的结果，记录在交付回执与第二批的实施登记中。
 - 第二批在上述核验全部成功之后才获授权，另开实现 PR。
+
+## 156．PR #47 的合并与核验；第二批（计划 §4.2）的授权生效与实施登记
+
+**依据**：§155 的决定。
+
+- 条件授权以 merge commit 合并 PR #47。
+- PR #47 的合并核验与 master push CI 全部成功之后，第二批（计划 §4.2）的实施授权生效。
+
+**第一阶段：PR #47 的收尾与合并**：
+
+| 项 | 值 |
+|---|---|
+| 收尾的提交 | `13771e4`：Review 122 原样归档<br>`b43f9cd`：§155 与状态的同步；没有生产代码的变更 |
+| 最终 HEAD | `b43f9cd6dcb5262d78eb0d42f21dbcf0846cd95c`，树 `34715f8d7e3ae5478d6009554039e6aba6bc1e10` |
+| 最终 HEAD 的常规 CI | run 41212877858，`pull_request`，attempt 1，success（8/8）<br>八个作业都检出合并快照 `c1933139c209127b602896acabe62036e49ff9ba`：父提交为 `ad592c3`、`b43f9cd`，树与最终 HEAD 相同<br>SKIP 集合与之前相同（Ubuntu 15、macOS 7、Windows 10），没有 FAIL，每个 Go 测试作业 27 个 ok 包；CrossUser 在单独的 root 步骤中 8 个通过<br>Ubuntu 的 `internal/cli` 为 550.090 s（`go test` 的默认期限 600 s）：本次运行的观测，不是原因的结论，也不改变 M-16<br>回执写入 PR 描述 |
+| 合并 | 2026-11-01，merge commit `47f568066c4e4e18cbf28fff2a01cfdda7d34ee4`，锁定 head `b43f9cd`（`--match-head-commit`）；没有 squash 或 rebase |
+| 合并的核验 | 父提交依次为 `ad592c3`、`b43f9cd`；树 `34715f8` 与最终 HEAD 相同<br>受审的提交 `4d5dabe`（Review 121）、`8523aa0`（Review 122）与收尾的 `13771e4`、`b43f9cd` 都是它的祖先<br>合并提交的说明沿用 PR 的标题，其中的 “(not for merge)” 是合并决定之前的旧状态，以本节为准 |
+| master push CI | run 41214044060，push，attempt 1，success（8/8）<br>八个作业都 `checkout -B master`，`git log -1` 为 `47f5680`<br>SKIP 集合相同，没有 FAIL，每个 Go 测试作业 27 个 ok 包；CrossUser 8 个通过<br>`internal/cli` 的耗时（观测）：Ubuntu 468.049 s、macOS 118.214 s、Windows 349.798 s |
+
+没有重跑，没有手动触发。
+
+**第二批的授权生效**：上述核验与 master push CI 全部成功，第二批（计划 §4.2）的实施授权自此生效。
+
+**实施登记**（本节所在的提交，先于任何代码变更；分支 `feat/wp2.5-batch2`，起点 master `47f5680`）：见 [wp2.5-implementation-plan.md §11](wp2.5-implementation-plan.md)：
+
+- 固定的起点与依据；范围的对应与不做的内容；
+- 包与文件的布局：Runner 的测试在 `internal/checkrun` 中；CLI 只增加一个写入路径的接线测试；
+- 接口：`Prepare`、`Batch`、`Item`、`Interpreter`、`Document`；`baseline.Check.LineBreakProblem`；`gitx.ExecPath`；
+- 读取事务的生命周期；错误的优先级与受控的信息；
+- G1 的安排：置位的生产调用点与资源清单的观察任务在之后的批次接入，本批经测试接缝验证；
+- 固定预期、验证、空批次的写事务、提交顺序与失败出口；
+- 开工之前已知的事项：
+  - 已登记而路径已不存在的 worktree 使解释器不可用（§19.8 的冻结规则；作为待决事项报告，不在实现中变通）；
+  - 受控内存目的端随第 4 批实现，本批第 9 步只识别 `*os.File`；
+  - `gitx` 新增只读的 `ExecPath`；
+  - `factgen/legality` 的差额照旧。
+
+**状态**：
+
+- 第二批的实现在独立的实现 PR 中进行，不合并。
+- 第三批及之后的批次、第二批实现 PR 的合并与 WP2.5 的验收都未授权；M2 未验收。

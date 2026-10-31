@@ -3,7 +3,7 @@
 > 状态：**已审查并采纳**（2026-10-31；审查 120 计划技术 GO；review-resolution §151、§152）。
 >
 > - **第一批**（§4.1）获条件授权：PR #46（本计划）的合并核验与 master push CI 全部成功之后才生效，另开实现 PR。2026-10-31 已生效（§153），实施登记见 §10。审查 121、122 之后在受审范围内技术通过，实现 PR #47 获条件授权以 merge commit 合并（§155）。
-> - **第二批**（§4.2）获条件授权：PR #47 的合并核验与 master push CI 全部成功之后才生效，另开实现 PR，不合并（§155）。
+> - **第二批**（§4.2）获条件授权：PR #47 的合并核验与 master push CI 全部成功之后才生效，另开实现 PR，不合并（§155）。2026-11-01 已生效（§156），实施登记见 §11。
 > - **未授权**：第三批及之后的批次、第二批实现 PR 的合并与 WP2.5 的验收。
 >
 > 本文依据已冻结的 [WP2.5 规范](wp2.5-check-runner.md)（§22），安排生产实现的分批、顺序、接线与验收证据。它不改变冻结的规则，不扩大 MVP 范围；本文本身不授权实施，授权见 review-resolution。各批的开工、合并与 WP2.5 的验收，都由负责人分别决定（§9）。本文不含生产代码，也不修改 Schema、迁移或 workflow。
@@ -606,3 +606,184 @@ Runner 的测试在 `internal/checkrun` 自己的包中，不放进 `internal/cl
 - **测试工具 `factgen/legality` 的一条规则早于 D6、D19、A12**：它要求 `failure_kind = context_changed` 当且仅当上下文确实变化。WP2.5 冻结的 D6、D19、A12 在上下文没有被证明变化时也记为 `context_changed`（规范 §7.2）。例如非 git 项目中的 D19（开始与结束的 HEAD 都为 NULL，开始为 `unknown`），或开始不干净、结束上下文读取失败而 HEAD 相同的 D6，都会被它判为不合法的历史。
   - 第一批不改这个已验收的测试工具；推导对照直接用 `toderive` 与 `derive.Derive`，不经过它。
   - 后续批次若用它检查 Runner 写入的历史，须先提出它的修订，经审查与负责人决定。
+
+## 11. 第二批的实施登记（2026-11-01，写代码之前）
+
+本节在第二批的第一笔代码变更之前单独提交（review-resolution §156）。它只登记实施的安排，不改变冻结的规则。常规的实现细节在这里确定，不再增加一轮计划审查（§155 第 3 项）；实施中发现与冻结规范冲突，或必须扩大范围时，先停下报告。
+
+### 11.1 固定的起点与依据
+
+| 项 | 值 |
+|---|---|
+| 起点 | master `47f568066c4e4e18cbf28fff2a01cfdda7d34ee4`（PR #47 的合并提交），树 `34715f8d7e3ae5478d6009554039e6aba6bc1e10`；master push CI run 41214044060 正式成功（8/8，八个作业都检出 `47f5680`，没有 FAIL，SKIP 集合与之前相同） |
+| 实现分支 | `feat/wp2.5-batch2`，另开实现 PR，不合并 |
+| 冻结规范 | 文档提交 `f99d648`，技术基准 `f2b5c87`：§3、§4.1、§5.2 ~ §5.4、§5.6、§5.7、§7.5、§8.6（规则 5、6，D、E 表）、§9.1、§10.3、§11.1、§11.2、§11.4、§17.3（D10、D15、D16、E1、E3）、§19.1、§19.8、§19.9、§22 |
+| 计划 | 本文 §4.2 |
+| 授权 | review-resolution §155 第 3 项：只授权第二批；第三批及之后的批次、第二批实现 PR 的合并与工作包的验收都未授权 |
+
+### 11.2 范围的对应
+
+| 授权的范围（§155） | 规范 | 实现 |
+|---|---|---|
+| 参数、选择与排序 | §3；§4.1 第 1、5 步；D15、D16、E1 | 命令行的语义检查（第 1 步）；显式 AC 与 `--all` 的选择，按编号排序（第 5 步） |
+| 一致读取 | §3 的“配置的固定时刻”；§4.1 第 3 ~ 5 步；D13 | 一个读取事务固定全部所选的修订、配置与哈希（§11.5） |
+| 执行之前的检查 | §4.1 第 4、6 ~ 9 步；§5.3、§5.4、§5.6、§5.7；§9.1；§19.8、§19.9 | worktree 路径的扫描；D3 / D4；解释器的查找与来源；PD-26、私有临时区、`S`；输出句柄的类型 |
+| D3 / D4 的写入校验 | §5.6、§5.7；data-model §8.3 V-P04 | `propose`、`review`（含 `accepted_with_edits`）与人工编辑的业务路径；不进入共享 Schema |
+| G1 | §4.1 第 2 步；§8.6 规则 6 与 E 表；§19.1 | 宿主对象：禁用状态、原子准入、每项之前的再检查、资源清单的数据结构；置位用受控的测试接缝（§11.7） |
+| 空批次 | §4.1 第 8、10 步；§8.6 D 表；§10.3；D18、E3、D9 | 已登记时零写入；未登记时只登记的写事务 |
+| D10 | §11.4；§17.3 D10；`error.v1` | 只用既有字段，`message` 与 `problem` 为受控文本（§11.6） |
+
+**不做**：
+
+- 不注册 `check run`（方案 (a)），不启动检查进程，也不为探测而运行解释器。
+- 不实现 §4.2 的执行路径：开始与结束的上下文、输入记录、收尾、分类之后的写入与文本输出（第 4 批起）。
+- 不实现受控内存目的端（第 4 批，§11.11 第 2 项），不实现全局闸门与 C-9 lint（第 3 批），不实现平台的进程机制与生产入口 E2。
+- 不改工具链、依赖、workflow、测试预算、维护事项与 `factgen/legality`；不改冻结时保留的证据限制。
+
+### 11.3 包与文件的布局
+
+| 路径 | 内容 |
+|---|---|
+| `internal/checkrun/options.go` | `Options` 与第 1 步的语义检查 |
+| `internal/checkrun/host.go` | 宿主对象（G1）：进程级的唯一实例 |
+| `internal/checkrun/prepare.go` | `Prepare` 与 `Batch`：第 2 ~ 10 步的编排 |
+| `internal/checkrun/selection.go` | 读取事务（第 3 ~ 5 步）、选择与静态规则（第 6 步） |
+| `internal/checkrun/interpreter.go`、`interpreter_unix.go`、`interpreter_windows.go` | 解释器的查找、最终路径与 worktree 排除（第 7 步） |
+| `internal/checkrun/output.go` | 输出句柄的类型（第 9 步） |
+| `internal/checkrun/document.go` | 空批次（第 10 步）与 `check-run.v1` 的文档 |
+| `internal/baseline/record.go` | `Check.LineBreakProblem`：D3、D4 的唯一实现 |
+| `internal/proposal/proposal.go` | `CheckStatic`（`propose`）与 `CheckEditedData`（`review` 的编辑）调用它 |
+| `internal/baseline/apply.go` | `setFields` 调用它：`review`（含 `accepted_with_edits`）与人工编辑写入基准时 |
+| `internal/gitx/gitx.go` | `ExecPath`：用 `gitx` 所用的 git，在它的受控环境中运行 `git --exec-path`（§19.8 第 1 步；§11.11 第 3 项） |
+| `internal/checkrun/*_test.go` | Runner 的测试（独立的包，不放进 `internal/cli`） |
+| `internal/baseline`、`internal/proposal`、`internal/gitx` 的测试 | 规则与写入路径；`ExecPath` |
+| `internal/cli` 的一个测试 | 三条写入路径经 CLI 的接线（MVP-EV-21、CX-29 的“集成”）：只此一个 |
+
+### 11.4 接口
+
+包内导出，第二批没有命令使用它们（方案 (a)）：
+
+| 接口 | 规则 |
+|---|---|
+| `Options{Criteria []string; All bool; Isolation string; JSON bool}` | 命令行解析之后的值：AC 参数按给出的顺序；`--isolation` 省略时为 `off` |
+| `Output{Stdout, Stderr io.Writer}` | `cli.Execute` 收到的原始 Writer（§19.9），不是 `termtext` 包装之后的 |
+| `Prepare(ctx, Options, Output) (*Batch, error)` | 第 1 ~ 10 步，按 §4.1 的顺序；用进程级的宿主对象。任何一步失败都返回 `*apperr.Error`，之前打开的都已关闭，准入已释放 |
+| `Batch` | 已准入的一次调用：项目与 `W`、`W` 的 worktree ID（未登记时为空）、固定的各项（`Item`）、`S`（NULL 为空串）、检查输出的两个目的端；空批次时还有完成的文档 `Document` |
+| `Item` | AC 编号与 ID、固定的 `r`、`ar`、`h` 与检查配置（`baseline.Check` 的副本）、第 7 步选定的解释器 |
+| `Interpreter{Shell, Path, PathPrefix}` | `Path` 为最终路径；`PathPrefix` 只在 Windows 的 `sh` / `bash` 时为 `<R>\usr\bin`（D2 的 PATH 前置在第 6 批使用） |
+| `(*Batch).Recheck() error` | §19.1 规则 3：每一项开始之前在锁下再读禁用状态 |
+| `(*Batch).Close() error` | 关闭私有临时区与数据库，释放准入（`active` 减 1） |
+| `Document`、`RunItem` | `check-run.v1` 的文档与执行项，字段按 Schema；本批只构造空批次的文档（`runs` 为空），并在返回之前校验。由写入的行构造执行项在第 4 批（§4.2 第 6 步） |
+| `baseline.Check.LineBreakProblem() string` | D3、D4：`cmd` 的命令不得含 CR 或 LF；`sh`、`bash` 与省略 `shell` 的命令不得含 CR（含引号之内）；`pwsh`、`powershell` 不在范围内；不规范化 |
+| `gitx.ExecPath(ctx, dir) (string, error)` | `git --exec-path` 的输出，去掉行尾 |
+
+宿主对象不导出类型，生产代码只有一个实例。测试经 `export_test.go` 取得独立的宿主对象与受控的接缝（§11.7、§11.8）；它们不进入生产构建。
+
+### 11.5 读取事务的生命周期
+
+- **开始**：第 3 步打开数据库之后（没有数据库或项目未登记为退出码 4，版本与只读的拒绝按 `DB.WriteTx` 的既有检查先行）。
+- **事务**：一个 `DB.WriteTx`（`BEGIN IMMEDIATE`），只读不写，与 `baseline show` 等既有读取路径相同；不调用 `NextSeq`，不分配 `seq`。
+- **读取的内容**，都在这一个事务中：
+  - 项目（`project.Lookup`）；
+  - `W` 是否已登记与它的 worktree ID；本项目已登记的全部 worktree 的路径（第 7 步的排除）；
+  - 全部 AC 的记录（`baseline.LoadAll`）与保存的 `check_config_hash`；
+  - 有效的交付目标（`scope.ActiveTarget`），第 8 步按它解析 `S`。
+- **结束**：读完即提交（没有写入），把需要的值复制为 Go 的值。之后的第 4 ~ 10 步与之后的批次只使用这些固定的值，不重新读取当前的配置替换它们。
+- **错误的顺序**：读取在一个事务中完成，但拒绝按 §4.1 的步骤顺序判定：先第 4 步的扫描，再第 5 步的选择，再第 6 步的静态规则。读取本身不写入，提前读取不改变任何可观察的结果。
+- **空批次的登记**（第 10 步）是另一个写事务，见 §11.9。
+
+### 11.6 错误的优先级与受控的信息
+
+各步按 §4.1 的顺序，命中第一个失败的步骤即返回；同一步中的多个问题一起列出。`message` 与 `problem` 都是受控文本：不回显命令行参数的值、命令、路径或环境变量的值；AC 编号来自基准。
+
+| 步骤 | 情况 | 错误码 / 退出码 | `details` |
+|---|---|---|---|
+| 1 | 同时给出 AC 与 `--all`，或两者都没有 | `invalid_input` / 2 | — |
+| 1 | `--isolation auto`；其他非 `off`、`required` 的值（D16） | `invalid_input` / 2 | `--isolation` |
+| 2 | `--isolation required` | `environment` / 6 | `--isolation`：`isolation_unavailable` |
+| 2 | 宿主已被禁用（C-4、D21、Q-1） | `environment` / 6 | — ；`message` 按第一次置位的原因，给出清单中仍有的项数 |
+| 3 | 没有数据库或项目未登记 | `not_initialized` / 4 | 既有 |
+| 4 | `W` 未登记，路径或 git 目录命中密钥规则 | `invalid_input` / 2 | `worktree path`、`worktree git directory`（与 `claim` 相同） |
+| 5 | 显式 AC：不存在（含格式不对、其他类型的编号、只在待审提案中）、已退役、手动、没有检查；重复（D15，指向后出现的位置） | `invalid_input` / 2 | `argument <n>`（AC 参数的 1 起位置）逐项 |
+| 6 | D3 / D4 | `invalid_input` / 2 | `<AC 编号>` 逐项 |
+| 7 | 解释器不可用；无法核实位置 | `environment` / 6 | `<AC 编号>`：`shell_unavailable` 与 `shell` 的取值，逐项 |
+| 8 | PD-26；私有临时区；`S` 或空批次的 HEAD 读取失败 | `environment` / 6 | `gitx` 的既有受控信息 |
+| 9 | 检查输出的目的端不是 `*os.File` | `internal` / 1 | `stdout` / `stderr`：“the output cannot carry check output” |
+| 10 | 空批次的登记：确认未提交（D3）/ 结果不确定（D4） | `environment` / 6 | — ；`message` 按 §8.6 D 表 |
+| 10 | 空批次的文档校验失败（C1） | `internal` / 1 | 登记已提交，不回滚 |
+
+- 每个 `message` 都写明这一次没有执行任何检查；退出码 6 不暗示可以安全地重跑（D8）。
+- 第 5 步的 `problem`：不存在、已退役、手动、没有检查各有固定的文本；重复为“repeats argument <m>”。
+- 第 9 步按每个用于检查转发的目的端判定：不带 `--json` 时为原始的 stdout 与 stderr；带 `--json` 时检查的两个流都到原始的 stderr，所以只判定 stderr（stdout 只承载 Specmetry 自己最后的文档）。
+
+### 11.7 G1 的安排
+
+- **宿主对象**：包级的唯一实例，一把互斥锁保护禁用状态（第一次置位的原因）、`active` 与资源清单（§19.1 的表）。
+- **准入**（规则 1）：在锁下读禁用状态并给 `active` 加 1，在同一个临界区内。位置在第 1 步之后、`--isolation required` 之后、任何数据库与 git 的访问之前。
+- **再检查**（规则 3）：`Batch.Recheck` 在锁下读禁用状态；已禁用时为 `environment` / 6，“这个进程在本次调用期间被禁用”。调用点（每一项的第 1 步之前）在第 4 批接入。
+- **置位与资源清单**（规则 2）：宿主对象提供一个原语，在同一个临界区中把项加入资源清单并置位禁用状态；移除清单中的项不改变禁用状态，也没有复位的入口。生产中的调用点（S6 的移交点）在第 4 ~ 6 批接入；本批只经测试接缝调用这一原语。
+- **本批不做**：资源清单中各项的观察任务、“已结束记录”与晚到错误的保存（规则 4、5 的后半）随第 4 批的复制与停止任务实现；本批的拒绝说明只给出清单中仍有的项数。
+
+### 11.8 固定预期与验证
+
+预期直接写在测试中，来自冻结条文，不由被测的实现算出。
+
+- **命令行**（第 1、2 步）：两者都有 / 都没有、`auto`、其他取值为 2；`required` 为 6 且 `isolation_unavailable`；它们都没有数据库与 git 的访问。
+- **G1**：
+  - 置位在准入之前：拒绝；在准入之后：已准入的调用由 `Recheck` 拒绝，新的调用被拒绝；并发的准入与置位（`-race`）：每个调用要么被准入拒绝，要么被准入之后由 `Recheck` 拒绝，`active` 的计数一致。
+  - 资源清单清空之后仍拒绝；被拒绝的调用没有数据库与 git 的访问。
+- **没有访问的证明**（计数的接缝）：git 用记录每次启动的 `PassthroughGit`（进程边界的计数）；数据库用 `Prepare` 唯一打开数据库处的计数接缝，并断言数据目录的文件不变。
+- **选择与排序**：显式 AC 乱序给出、按编号排序（`AC-002-10` 在 `AC-002-9` 之后，`AC-010-1` 在 `AC-002-10` 之后）；D15 的多处重复；不存在、退役、手动、没有检查、其他类型的编号与格式不对的参数一起列出，位置正确；`--all` 排除退役、手动与没有检查的 AC，包括交付范围之外的 AC。
+- **固定配置**：读取事务之后的测试接缝修改数据库中的修订与配置（例如把命令改成含 CR、把 `shell` 改成 `cmd`）：`Batch` 中的值、第 6 步与第 7 步的结果都按固定的值。
+- **D3 / D4**：`cmd` 的 LF、CR、CRLF；`sh`、`bash` 与省略 `shell` 的 CR（含引号之内）；`sh` 的 LF 通过；`pwsh`、`powershell` 不受影响。写入路径：`propose` 的 `add` 与带 `check` 的 `update`；`review` 的接受与 `accepted_with_edits`；人工编辑；不含 `check` 的 `update` 不重新校验已保存的配置；已保存的不符合的配置照常可读（`baseline show`），第 6 步拒绝；人工 `material` 修订之后第 6 步通过。`problem` 中没有命令（canary）。
+- **解释器**：
+  - Unix：`/bin/sh` 的最终路径；PATH 中的空项与相对项（含 `.`）被忽略；不存在的、目录、没有执行权限的候选被跳过；经 PATH 绝对路径、符号链接到达的 worktree 之内的候选被排除，下一个合格的被选中；`cmd`、`powershell` 不可用；已登记 worktree 的最终路径取不到时不可用。
+  - 排除的比较：分隔符边界上的前缀；Windows 与 macOS 不区分大小写，Linux 区分（纯函数，按显式的参数测试三种比较）。
+  - Windows：`git --exec-path` 的布局（`ucrt64`、`mingw64`、`clang64`、`clangarm64`、`mingw32` 与大小写；其他目录、缺少 `msys-2.0.dll`、缺少 `sh.exe`、精简发行没有 `usr\bin`）以夹具目录验证；CI 上的标准安装找到 `C:\Program Files\Git\usr\bin\sh.exe` 与 `bash.exe`；`cmd`、`powershell` 取自系统目录；`pwsh` 不按 `PATHEXT` 扩展；联接与符号链接的排除；短文件名能构造时测试，不能时如实跳过并记录。
+  - 便携版、MinGit 能以夹具构造的部分测试；Scoop 的 shim 不能在 CI 上构造，记为 L（§19.8）。
+- **第 8 步**：不安全的 git（PD-26）为 6，之后没有私有临时区与 `S` 的读取；没有目标、ref 解析不到时 `S` 为 NULL；读取失败为 6。
+- **第 9 步**：`*os.File` 为继承路径；`bytes.Buffer` 与类型为 `*os.File` 的 nil 为 1；`--json` 时只判定 stderr。
+- **空批次**：`W` 已登记时数据库没有任何变化（含 `last_seen_at`）；未登记时只有一条 worktree 的登记、`seq` 加 1；D9 的真与假；注入登记失败（D3）为 6、没有写入；注入提交阶段的失败（D4）为 6、说明可能已登记；PD-26 与 HEAD 的读取失败（D5）为 6、没有登记。
+- **拒绝路径**：比较数据库的全部表与 `seq` 计数，断言没有新行、没有分配 `seq`；只有空批次的登记按 D2 有一条 worktree 与一个 `seq`。
+- **错误的优先级**：相邻步骤的组合各一例（例如项目未登记与错误的参数为 4；密钥路径与错误的参数为扫描的 2；参数错误与 D3 为选择的 2；D3 与解释器不可用为 2；解释器不可用与 PD-26 为解释器的 6；PD-26 与不受支持的目的端为 6；不受支持的目的端与空批次为 1、没有登记）。
+- **错误文档**：每个拒绝都转换为 `error.v1` 并通过校验；没有 canary。
+
+**本地**：`gofmt`、`go vet -tags nowebui ./...`、`GOOS=linux` 与 `GOOS=darwin` 的 vet；`go test -tags nowebui` 改动与依赖的包。本机没有 golangci-lint，由 CI 的 lint 作业运行。
+
+**CI**：三平台的常规 CI 在最终 HEAD 上正式成功，回执写入 PR 描述：实际 checkout、合并快照、FAIL、SKIP 的变化与原因、`internal/checkrun` 等改动包的耗时（与 run 41214044060 比较）。
+
+### 11.9 空批次
+
+- `W` 已登记（读取事务中读到）：不打开写事务，没有任何写入（含 `last_seen_at`），输出已有的 `worktree_id`（D1、E3）。
+- `W` 未登记：一个写事务。事务中先按路径查找：已被并发的调用登记时同样不写，按 D1 输出；否则 `project.EnsureWorktree` 登记并分配 `seq`（D2）。
+- 失败的区分（§8.6 规则 3 的方法）：记下事务的函数体是否已经成功返回。函数体失败为“确认未提交”（D3）；函数体成功之后的错误只能来自提交，为“结果不确定”（D4）。
+- 文档：`worktree_id`、`is_target_snapshot`（D9：命令开始时的 HEAD 与 `S` 比较，用第一批的 `TargetSnapshot`）、`isolation = off`、空的 `runs`；返回之前按 `check-run.v1` 校验，失败为 1（C1），登记已提交、不回滚。文本与 JSON 的写出随命令的接线（第 4、7 批）。
+
+### 11.10 提交顺序与失败出口
+
+**提交顺序**（只在最后推送一个固定代码点）：
+
+1. 本登记与 review-resolution §156（纯文档）；
+2. D3 / D4 的规则与写入路径（`baseline`、`proposal`），与它们的测试；
+3. `gitx.ExecPath` 与它的测试；
+4. 命令行与宿主对象（`options.go`、`host.go`），与它们的测试；
+5. 读取事务、选择、静态规则与 `Prepare` 的编排（第 3 ~ 6 步），与它们的测试；
+6. 解释器（第 7 步），与它的测试；
+7. 第 8 ~ 10 步（git、输出句柄、空批次与文档），与它们的测试；
+8. CLI 的一个写入路径测试。
+
+没有 Schema 与迁移的变化，§3 的契约先行跳过第 1、2 步。
+
+**失败出口**：
+
+- 发现与冻结规范冲突、必须扩大范围，或需要新的产品与兼容政策：停下报告，不带入代码。
+- 本地或 CI 失败：停止报告；不自行重跑 CI，不扩修，不触发原型诊断。
+- CI 上不能构造的布局或平台条件：如实记为 SKIP 或 L，并在回执中列出原因。
+
+### 11.11 开工之前已知的事项
+
+1. **已登记而路径已不存在的 worktree**：§19.8 规定排除的根取不到最终路径时，解释器不可用（退出码 6，“无法核实解释器的位置”）。worktree 的登记不会被删除，所以删除过一个已登记的链接 worktree 的项目，之后每次非空的 `check run` 都会在第 7 步被拒绝。本批按冻结的规则实现并测试；这一后果是否需要调整，属于产品与规范的决定，作为待决事项报告，不在实现中变通。
+2. **受控内存目的端**：第 9 步的识别在本批只有两类：`*os.File` 为继承路径，其他 Writer 在启动之前拒绝。受控目的端的类型与它的规则（§9.1：同步、不阻塞、容量、封闭与所有者入口）随第 4 批的管道路径一起实现，届时加入第三类。在此之前它被拒绝，与 §9.1 对“其他 Writer”的处理一致。
+3. **`gitx.ExecPath`**：§19.8 第 1 步要求用 `gitx` 所用的 git、在它的受控环境中运行 `git --exec-path`；`gitx` 没有现成的调用，本批新增这一只读调用，不改 `gitx` 已验收的语义。
+4. **G1 规则 4、5 的后半**：见 §11.7。
+5. **`factgen/legality`** 的差额照旧（§10.7），本批不使用它。
