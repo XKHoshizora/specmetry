@@ -87,7 +87,7 @@ func (f *finder) accept(candidate string) (string, bool) {
 	if err != nil {
 		return "", false
 	}
-	fi, err := os.Stat(final)
+	fi, err := os.Stat(final) //nolint:gosec // G703: interpreter discovery checks resolved external candidate paths, as spec §5.3 and §19.8 require; this call only reads metadata.
 	if err != nil || !fi.Mode().IsRegular() || !executable(fi) || f.excluded(final) {
 		return "", false
 	}
