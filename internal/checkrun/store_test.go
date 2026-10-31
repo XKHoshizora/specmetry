@@ -256,6 +256,9 @@ func TestWriteFailuresLeaveNothing(t *testing.T) {
 
 // dbdump reads check_runs as stored (WP2.5 spec §10.2), and toderive hands
 // the derive engine the fields it reads; nothing is computed on the way.
+// Both steps must give exactly project A's two rows, by ID, once each
+// (Review 121 N-121-2): a missing, repeated or extra row fails, and each
+// row is compared in full, its NULLs included.
 func TestDumpMapsCheckRuns(t *testing.T) {
 	db := store(t)
 	pass := passRun()
@@ -266,6 +269,9 @@ func TestDumpMapsCheckRuns(t *testing.T) {
 	write(t, db, projectB, project.Where{Git: true, Root: "/r/b", Current: "/r/b", CommonDir: "/r/b/.git", GitDir: "/r/b/.git"},
 		checkrun.Run{CriterionID: critB, CriterionRevision: 1, RequirementRevision: 1, CheckConfigHash: config, Workdir: ".",
 			TreeStateStart: checkrun.Unknown, TreeStateEnd: checkrun.Unknown, Result: checkrun.Pass, ExitCode: code(0), Channel: "human_cli"})
+	if rows[0].ID == rows[1].ID {
+		t.Fatalf("two writes gave one ID %s", rows[0].ID)
+	}
 	var d factgen.Dump
 	if err := db.WriteTx(ctx, func(tx *sql.Tx) error {
 		var err error
@@ -274,38 +280,72 @@ func TestDumpMapsCheckRuns(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if len(d.CheckRuns) != len(rows) {
-		t.Fatalf("dump has %d runs of A, want %d", len(d.CheckRuns), len(rows))
-	}
+
 	p := func(s string) *string { return &s }
 	inputs := `[{"path":"src/a.go","mode":"100644","type":"blob","oid":"` + strings.Repeat("a", 40) + `"}]`
-	want := []factgen.CheckRunRow{
-		{ID: rows[0].ID, Seq: rows[0].Seq, CriterionID: criterion, CriterionRevision: 1, RequirementRevision: 1, CheckConfigHash: config,
+	wantDump := map[string]factgen.CheckRunRow{
+		rows[0].ID: {ID: rows[0].ID, Seq: rows[0].Seq, CriterionID: criterion, CriterionRevision: 1, RequirementRevision: 1, CheckConfigHash: config,
 			InputsJSON: &inputs, WorktreeID: mainA, EvidenceGrade: checkrun.Observed, HeadStart: p(headA), HeadEnd: p(headA),
 			TreeStateStart: checkrun.Clean, TreeStateEnd: checkrun.Clean, Result: checkrun.Pass},
-		{ID: rows[1].ID, Seq: rows[1].Seq, CriterionID: criterion, CriterionRevision: 1, RequirementRevision: 1, CheckConfigHash: config,
+		rows[1].ID: {ID: rows[1].ID, Seq: rows[1].Seq, CriterionID: criterion, CriterionRevision: 1, RequirementRevision: 1, CheckConfigHash: config,
 			WorktreeID: rows[1].WorktreeID, EvidenceGrade: checkrun.Observed, HeadStart: p(headA), TreeStateStart: checkrun.Clean,
 			TreeStateEnd: checkrun.Unknown, Result: checkrun.Error, FailureKind: p(checkrun.ContextChanged)},
 	}
-	byID := map[string]factgen.CheckRunRow{}
-	for _, r := range d.CheckRuns {
-		byID[r.ID] = r
-	}
-	for _, w := range want {
-		if got := byID[w.ID]; !reflect.DeepEqual(got, w) {
-			t.Errorf("dump row:\n%+v\nwant\n%+v", got, w)
+	gotDump := exactlyByID(t, "dump", d.CheckRuns, func(r factgen.CheckRunRow) string { return r.ID }, wantDump)
+	for id, w := range wantDump {
+		if got := gotDump[id]; !reflect.DeepEqual(got, w) {
+			t.Errorf("dump row %s:\n%+v\nwant\n%+v", id, got, w)
 		}
+	}
+	if r := gotDump[rows[1].ID]; r.InputsJSON != nil || r.HeadEnd != nil || r.FailureKind == nil {
+		t.Errorf("dump row %s: inputs_json %v, head_end %v, failure_kind %v; want NULL, NULL, set", rows[1].ID, r.InputsJSON, r.HeadEnd, r.FailureKind)
+	}
+
+	wantFacts := map[string]derive.CheckRun{
+		rows[0].ID: {ID: rows[0].ID, Seq: rows[0].Seq, CriterionID: criterion, CriterionRevision: 1, RequirementRevision: 1,
+			CheckConfigHash: config, Inputs: derive.InputRecord{{Path: "src/a.go", Mode: "100644", Type: "blob", OID: strings.Repeat("a", 40)}},
+			WorktreeID: mainA, EvidenceGrade: derive.Observed, HeadStart: headA, HeadEnd: headA, TreeStateStart: "clean", TreeStateEnd: "clean",
+			Result: "pass"},
+		rows[1].ID: {ID: rows[1].ID, Seq: rows[1].Seq, CriterionID: criterion, CriterionRevision: 1, RequirementRevision: 1,
+			CheckConfigHash: config, WorktreeID: rows[1].WorktreeID, EvidenceGrade: derive.Observed, HeadStart: headA,
+			TreeStateStart: "clean", TreeStateEnd: "unknown", Result: "error", FailureKind: "context_changed"},
 	}
 	facts := toderive.Facts(d)
-	for _, r := range facts.CheckRuns {
-		if r.ID == rows[0].ID {
-			w := derive.CheckRun{ID: rows[0].ID, Seq: rows[0].Seq, CriterionID: criterion, CriterionRevision: 1, RequirementRevision: 1,
-				CheckConfigHash: config, Inputs: derive.InputRecord{{Path: "src/a.go", Mode: "100644", Type: "blob", OID: strings.Repeat("a", 40)}},
-				WorktreeID: mainA, EvidenceGrade: derive.Observed, HeadStart: headA, HeadEnd: headA, TreeStateStart: "clean", TreeStateEnd: "clean",
-				Result: "pass"}
-			if !reflect.DeepEqual(r, w) {
-				t.Errorf("derive input:\n%+v\nwant\n%+v", r, w)
-			}
+	gotFacts := exactlyByID(t, "derive input", facts.CheckRuns, func(r derive.CheckRun) string { return r.ID }, wantFacts)
+	for id, w := range wantFacts {
+		if got := gotFacts[id]; !reflect.DeepEqual(got, w) {
+			t.Errorf("derive input %s:\n%+v\nwant\n%+v", id, got, w)
 		}
 	}
+	// NULL is the engine's zero value: no input record (nil, not empty) and
+	// no head at the end.
+	if r := gotFacts[rows[1].ID]; r.Inputs != nil || r.HeadEnd != "" {
+		t.Errorf("derive input %s: inputs %#v, head_end %q; want nil and empty", rows[1].ID, r.Inputs, r.HeadEnd)
+	}
+}
+
+// exactlyByID indexes rows by ID, failing the test unless the IDs are
+// exactly want's keys, each once: nothing missing, repeated or extra.
+func exactlyByID[R, W any](t *testing.T, what string, rows []R, id func(R) string, want map[string]W) map[string]R {
+	t.Helper()
+	got := map[string]R{}
+	for _, r := range rows {
+		k := id(r)
+		if _, dup := got[k]; dup {
+			t.Errorf("%s: row %s appears more than once", what, k)
+		}
+		if _, ok := want[k]; !ok {
+			t.Errorf("%s: unexpected row %s", what, k)
+		}
+		got[k] = r
+	}
+	for k := range want {
+		if _, ok := got[k]; !ok {
+			t.Errorf("%s: row %s is missing", what, k)
+		}
+	}
+	if len(rows) != len(want) {
+		t.Fatalf("%s: %d rows, want %d", what, len(rows), len(want))
+	}
+	return got
 }
