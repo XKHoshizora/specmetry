@@ -221,7 +221,7 @@ func TestBatchCloseKeepsItsFirstResult(t *testing.T) {
 	if !errors.As(first, &rel) || !slices.Equal(rel.Resources, []string{"the database"}) || !errors.Is(first, injected) {
 		t.Fatalf("the first Close = %v", first)
 	}
-	if second := b.Close(); second != first {
+	if second := b.Close(); second != first { //nolint:errorlint // Intentionally compare identity: Close must return the same cached error instance.
 		t.Fatalf("the second Close = %v, want the first's %v", second, first)
 	}
 	if calls["scratch"] != 1 || calls["database"] != 1 {
