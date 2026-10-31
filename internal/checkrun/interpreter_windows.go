@@ -55,56 +55,57 @@ var gitEnvironments = []string{"mingw64", "ucrt64", "clang64", "clangarm64", "mi
 // from the Git for Windows of the git gitx runs (D2); cmd and powershell
 // from the system directory, not from ComSpec or SystemRoot; pwsh is the
 // first acceptable pwsh.exe on PATH, PATHEXT not applied.
-func (f *finder) find(ctx context.Context, shell string) (Interpreter, bool, error) {
+func (f *finder) find(ctx context.Context, shell string) (Interpreter, bool) {
 	switch shell {
 	case "sh", "bash":
 		return f.gitForWindows(ctx, shell)
 	case "cmd", "powershell":
 		dir, err := windows.GetSystemDirectory()
 		if err != nil {
-			return Interpreter{}, false, nil
+			return Interpreter{}, false
 		}
 		name := `cmd.exe`
 		if shell == "powershell" {
 			name = `WindowsPowerShell\v1.0\powershell.exe`
 		}
 		p, ok := f.accept(filepath.Join(dir, name))
-		return Interpreter{Shell: shell, Path: p}, ok, nil
+		return Interpreter{Shell: shell, Path: p}, ok
 	case "pwsh":
 		p, ok := f.onPath("pwsh.exe")
-		return Interpreter{Shell: shell, Path: p}, ok, nil
+		return Interpreter{Shell: shell, Path: p}, ok
 	}
-	return Interpreter{}, false, nil
+	return Interpreter{}, false
 }
 
 // gitForWindows is spec §19.8 steps 1 to 3: git --exec-path, in gitx's
 // controlled environment, normalized, must be <R>\<env>\libexec\git-core;
 // <R>\usr\bin must hold the interpreter and msys-2.0.dll, the mark of Git
 // for Windows' MSYS runtime, both regular files; and <R> must be outside
-// every root. Anything else is not available.
-func (f *finder) gitForWindows(ctx context.Context, shell string) (Interpreter, bool, error) {
+// every root. Anything else is not available; so is a failed exec path
+// read, a cancelled one too (lookup reports the cancellation).
+func (f *finder) gitForWindows(ctx context.Context, shell string) (Interpreter, bool) {
 	p, err := f.execPath(ctx)
 	if err != nil {
-		return Interpreter{}, false, ctx.Err()
+		return Interpreter{}, false
 	}
 	core, err := finalPath(filepath.FromSlash(p))
 	if err != nil {
-		return Interpreter{}, false, nil
+		return Interpreter{}, false
 	}
 	libexec := filepath.Dir(core)
 	env := filepath.Dir(libexec)
 	root := filepath.Dir(env)
 	if !strings.EqualFold(filepath.Base(core), "git-core") || !strings.EqualFold(filepath.Base(libexec), "libexec") ||
 		!slices.Contains(gitEnvironments, strings.ToLower(filepath.Base(env))) || root == env || f.excluded(root) {
-		return Interpreter{}, false, nil
+		return Interpreter{}, false
 	}
 	bin := filepath.Join(root, "usr", "bin")
 	if _, ok := f.accept(filepath.Join(bin, "msys-2.0.dll")); !ok {
-		return Interpreter{}, false, nil
+		return Interpreter{}, false
 	}
 	exe, ok := f.accept(filepath.Join(bin, shell+".exe"))
 	if !ok {
-		return Interpreter{}, false, nil
+		return Interpreter{}, false
 	}
-	return Interpreter{Shell: shell, Path: exe, PathPrefix: bin}, true, nil
+	return Interpreter{Shell: shell, Path: exe, PathPrefix: bin}, true
 }

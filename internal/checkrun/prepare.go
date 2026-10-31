@@ -138,9 +138,9 @@ func prepare(ctx context.Context, h *host, opts Options, out Output) (_ *Batch, 
 	}
 	// Step 7: the interpreters, outside every registered worktree and W.
 	if len(b.Items) > 0 {
-		roots := f.worktrees
+		roots := slices.Clone(f.worktrees)
 		if b.WorktreeID == "" {
-			roots = append(slices.Clone(roots), b.Where.Current)
+			roots = append(roots, b.Where.Current)
 		}
 		if err := interpreters(ctx, b.Items, newFinder(roots, os.Getenv("PATH"), gitExecPath(b.Where.Current))); err != nil {
 			return nil, err

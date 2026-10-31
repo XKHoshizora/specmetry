@@ -110,14 +110,16 @@ func (f *finder) onPath(name string) (string, bool) {
 }
 
 // lookup returns shell's interpreter, or why there is none (a problem for
-// shell_unavailable, without a path).
+// shell_unavailable, without a path); a cancelled context is an error.
 func (f *finder) lookup(ctx context.Context, shell string) (Interpreter, string, error) {
 	if f.unverified {
 		return Interpreter{}, "where an interpreter is cannot be verified: the path of a worktree of the project cannot be resolved", nil
 	}
-	in, ok, err := f.find(ctx, shell)
-	if err != nil || ok {
-		return in, "", err
+	if in, ok := f.find(ctx, shell); ok {
+		return in, "", nil
+	}
+	if err := ctx.Err(); err != nil {
+		return Interpreter{}, "", err
 	}
 	return Interpreter{}, "no " + shell + " that Specmetry may use is available here", nil
 }

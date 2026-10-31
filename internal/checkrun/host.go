@@ -2,6 +2,7 @@ package checkrun
 
 import (
 	"fmt"
+	"slices"
 	"sync"
 
 	"github.com/XKHoshizora/specmetry/internal/apperr"
@@ -112,13 +113,12 @@ func (h *host) disable(reason string, items ...*held) {
 func (h *host) remove(item *held) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	for i, x := range h.held {
-		if x == item {
-			h.held = append(h.held[:i], h.held[i+1:]...)
-			return true
-		}
+	i := slices.Index(h.held, item)
+	if i < 0 {
+		return false
 	}
-	return false
+	h.held = slices.Delete(h.held, i, i+1)
+	return true
 }
 
 func disabledCause(reason string) string {

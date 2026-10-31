@@ -38,7 +38,7 @@ func Disable(h *Host, reason string, kinds ...string) []*Held {
 	var items []*held
 	for _, k := range kinds {
 		kind := map[string]heldKind{"copy": heldCopy, "stop": heldStop, "process": heldProcess}[k]
-		items = append(items, &held{kind: kind, criterion: "AC-001-1"})
+		items = append(items, &held{kind: kind, call: 1, criterion: "AC-001-1", resource: k})
 	}
 	h.disable(reason, items...)
 	return items
