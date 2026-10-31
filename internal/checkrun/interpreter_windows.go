@@ -2,6 +2,7 @@ package checkrun
 
 import (
 	"context"
+	"errors"
 	"io/fs"
 	"path/filepath"
 	"slices"
@@ -12,7 +13,9 @@ import (
 
 // finalPath is the path GetFinalPathNameByHandle gives the file at p:
 // links and junctions resolved, short names expanded, letter case as
-// stored, without the \\?\ prefix.
+// stored, without the \\?\ prefix. The handle it opens for that is closed
+// before it returns, and that close's result is consumed (Review 123
+// B-123-2): a close that fails returns a *ReleaseError, never the path.
 func finalPath(p string) (string, error) {
 	name, err := windows.UTF16PtrFromString(p)
 	if err != nil {
@@ -24,7 +27,22 @@ func finalPath(p string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer func() { _ = windows.CloseHandle(h) }()
+	final, err := finalName(h)
+	if testHookHandle != nil {
+		testHookHandle(p, h)
+	}
+	if cerr := released("handle", windows.CloseHandle(h)); cerr != nil {
+		return "", errors.Join(&ReleaseError{Resources: []string{"a handle opened to resolve a path"}, Errs: []error{cerr}}, err)
+	}
+	return final, err
+}
+
+// Test hook: testHookHandle runs with finalPath's handle of the path p
+// just before it is closed.
+var testHookHandle func(p string, h windows.Handle)
+
+// finalName reads the final path of the file open as h.
+func finalName(h windows.Handle) (string, error) {
 	// FILE_NAME_NORMALIZED | VOLUME_NAME_DOS, both 0.
 	const flags = 0
 	buf := make([]uint16, windows.MAX_PATH)
@@ -88,7 +106,7 @@ func (f *finder) gitForWindows(ctx context.Context, shell string) (Interpreter, 
 	if err != nil {
 		return Interpreter{}, false
 	}
-	core, err := finalPath(filepath.FromSlash(p))
+	core, err := f.final(filepath.FromSlash(p))
 	if err != nil {
 		return Interpreter{}, false
 	}

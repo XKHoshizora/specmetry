@@ -67,7 +67,7 @@ func (w *workspace) exec(t *testing.T, query string, args ...any) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = db.Close() }()
+	defer closeDB(t, db)
 	if err := db.WriteTx(ctx, func(tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, query, args...)
 		return err
@@ -83,7 +83,7 @@ func (w *workspace) read(t *testing.T, fn func(*sql.Tx) error) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = db.Close() }()
+	defer closeDB(t, db)
 	if err := db.WriteTx(ctx, fn); err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +169,7 @@ func (w *workspace) state(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = db.Close() }()
+	defer closeDB(t, db)
 	var out []string
 	if err := db.WriteTx(ctx, func(tx *sql.Tx) error {
 		var tables []string
@@ -225,7 +225,7 @@ func run(t *testing.T, h *checkrun.Host, opts checkrun.Options) (*checkrun.Batch
 	t.Helper()
 	b, err := checkrun.PrepareWith(ctx, h, opts, terminal)
 	if b != nil {
-		t.Cleanup(func() { _ = b.Close() })
+		t.Cleanup(func() { closeBatch(t, b) })
 	}
 	return b, err
 }
@@ -514,7 +514,7 @@ func TestPrepareNotInitialized(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_ = db.Close()
+	closeDB(t, db)
 	_, err = run(t, h, given("AC-001-1", "AC-001-1"))
 	refused(t, h, err, apperr.ExitNotInitialized)
 }

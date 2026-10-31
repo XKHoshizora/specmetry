@@ -166,7 +166,7 @@ func TestPrepareOutput(t *testing.T) {
 		if b.Stdout != wantOut || b.Stderr != os.Stderr {
 			t.Errorf("%s: the check's output goes to %v and %v", c.name, b.Stdout, b.Stderr)
 		}
-		_ = b.Close()
+		closeBatch(t, b)
 	}
 }
 
@@ -210,7 +210,7 @@ func TestPrepareEmptyBatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	emptyDoc(t, b, wsMain, true)
-	_ = b.Close()
+	closeBatch(t, b)
 	if after := w.state(t); after != before {
 		t.Fatalf("an empty batch of a registered worktree wrote:\n%s\n->\n%s", before, after)
 	}
@@ -231,7 +231,7 @@ func TestPrepareEmptyBatch(t *testing.T) {
 		t.Fatalf("the worktree was not registered: %q", registered)
 	}
 	emptyDoc(t, b, registered, false)
-	_ = b.Close()
+	closeBatch(t, b)
 	after := w.state(t)
 	if without(after, "worktrees", "meta") != without(before, "worktrees", "meta") {
 		t.Fatalf("an empty batch wrote more than the registration:\n%s\n->\n%s", before, after)
@@ -248,7 +248,7 @@ WHERE path = ?`, where.Current)
 		t.Fatal(err)
 	}
 	emptyDoc(t, b, registered, false)
-	_ = b.Close()
+	closeBatch(t, b)
 	if after := w.state(t); after != before {
 		t.Fatalf("the second empty batch wrote:\n%s\n->\n%s", before, after)
 	}
@@ -411,7 +411,7 @@ VALUES ('01JC0000000000000000000W05', ?, ?, ?, 0, 3, 7); UPDATE meta SET seq_cou
 		t.Fatal(err)
 	}
 	emptyDoc(t, b, "01JC0000000000000000000W05", false)
-	_ = b.Close()
+	closeBatch(t, b)
 	got := rowsOf(t, w, `SELECT last_seen_at, (SELECT seq_counter FROM meta), (SELECT count(*) FROM worktrees) FROM worktrees WHERE path = ?`,
 		where.Current)
 	if want := [][]string{{"7", "3", "2"}}; !slices.EqualFunc(got, want, slices.Equal) || after != "reached" {

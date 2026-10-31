@@ -6,7 +6,6 @@ import (
 	"io/fs"
 	"os"
 	"slices"
-	"strings"
 
 	"github.com/XKHoshizora/specmetry/internal/apperr"
 	"github.com/XKHoshizora/specmetry/internal/config"
@@ -42,7 +41,10 @@ type Batch struct {
 	call    int
 	db      *sqlite.DB
 	scratch *gitx.Scratch
-	closed  bool
+	// closed is whether Close was called: tried, not confirmed. closeErr is
+	// its result, nil only when every close confirmed its release.
+	closed   bool
+	closeErr error
 }
 
 // Test hooks: testHookOpen runs where the database is opened, the one
@@ -55,8 +57,10 @@ var (
 
 // Prepare runs, in order, the steps of spec §4.1 that come before the
 // first check, with this process's host. On any failure it returns the
-// error of the first step that failed, every problem of that step listed;
-// nothing has run, nothing is recorded, and what it opened is closed.
+// error of the first step that failed, every problem of that step counted
+// and at most 200 listed; nothing has run and nothing is recorded. What it
+// opened is closed once, and a close that did not confirm its release is
+// noted in that error and kept in its chain (*ReleaseError).
 func Prepare(ctx context.Context, opts Options, out Output) (*Batch, error) {
 	return prepare(ctx, &process, opts, out)
 }
@@ -76,8 +80,7 @@ func prepare(ctx context.Context, h *host, opts Options, out Output) (_ *Batch, 
 	b := &Batch{host: h, call: call}
 	defer func() {
 		if err != nil {
-			_ = b.Close()
-			err = noCheckRun(err)
+			err = failed(err, b.Close())
 		}
 	}()
 
@@ -183,40 +186,34 @@ func prepare(ctx context.Context, h *host, opts Options, out Output) (_ *Batch, 
 	return b, nil
 }
 
-// noCheckRun is err saying that no check was run (D10: what this call
-// recorded, here nothing), also when it is another package's error, which
-// is copied, not changed.
-func noCheckRun(err error) error {
-	const note = "no check was run"
-	e := apperr.From(err)
-	if strings.Contains(e.Message, note) {
-		return e
-	}
-	c := *e
-	c.Message += "; " + note
-	return &c
-}
-
 // Recheck is spec §19.1 rule 3, before each criterion starts: a host
 // disabled since the call was admitted stops it.
 func (b *Batch) Recheck() error { return b.host.recheck() }
 
-// Close closes what the batch opened and ends its call on the host. It
-// may be called again.
+// Close closes what the batch opened, each once, and ends its call on the
+// host. Its result is kept and returned by every call: nil only when every
+// close returned nil, otherwise the same *ReleaseError (Review 123
+// B-123-2). A later call closes nothing; its nil never stands for a first
+// close that failed.
 func (b *Batch) Close() error {
 	if b.closed {
-		return nil
+		return b.closeErr
 	}
 	b.closed = true
-	var errs []error
+	rel := &ReleaseError{}
 	if b.scratch != nil {
-		if err := b.scratch.Close(); err != nil {
-			errs = append(errs, apperr.Wrap(apperr.Environment, err, "cannot close the data directory's tmp directory"))
+		if err := released("scratch", b.scratch.Close()); err != nil {
+			rel.add("the data directory's tmp directory", err)
 		}
 	}
 	if b.db != nil {
-		errs = append(errs, b.db.Close())
+		if err := released("database", b.db.Close()); err != nil {
+			rel.add("the database", err)
+		}
 	}
 	b.host.release()
-	return errors.Join(errs...)
+	if len(rel.Errs) > 0 {
+		b.closeErr = rel
+	}
+	return b.closeErr
 }

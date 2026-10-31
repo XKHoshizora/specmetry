@@ -2,6 +2,7 @@ package checkrun
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -33,18 +34,21 @@ var foldCase = runtime.GOOS == "windows" || runtime.GOOS == "darwin"
 // interpreter is used (G11); when one cannot be resolved, where an
 // interpreter is cannot be verified and none is used. path is the PATH
 // searched; execPath gives the exec path of the git gitx runs (Windows'
-// sh and bash).
+// sh and bash). released holds the first close of finalPath's own that
+// did not confirm its release (Review 123 B-123-2): the lookup then fails,
+// whatever else it found.
 type finder struct {
 	roots      []string
 	unverified bool
 	path       string
 	execPath   func(context.Context) (string, error)
+	released   error
 }
 
 func newFinder(worktrees []string, path string, execPath func(context.Context) (string, error)) *finder {
 	f := &finder{path: path, execPath: execPath}
 	for _, w := range worktrees {
-		root, err := finalPath(w)
+		root, err := f.final(w)
 		if err != nil {
 			f.unverified = true
 			continue
@@ -52,6 +56,18 @@ func newFinder(worktrees []string, path string, execPath func(context.Context) (
 		f.roots = append(f.roots, root)
 	}
 	return f
+}
+
+// final is finalPath, a close of its own that did not confirm its release
+// kept as the lookup's failure; for the caller it is a path not had, so
+// nothing found after it can make the lookup succeed.
+func (f *finder) final(p string) (string, error) {
+	final, err := finalPath(p)
+	var rel *ReleaseError
+	if errors.As(err, &rel) && f.released == nil {
+		f.released = err
+	}
+	return final, err
 }
 
 // excluded reports whether the final path p is inside one of the roots.
@@ -83,7 +99,7 @@ func within(p, root string, fold bool) bool {
 // (executable, on Unix) outside every root; a candidate whose final path
 // cannot be had is skipped.
 func (f *finder) accept(candidate string) (string, bool) {
-	final, err := finalPath(candidate)
+	final, err := f.final(candidate)
 	if err != nil {
 		return "", false
 	}
@@ -110,18 +126,38 @@ func (f *finder) onPath(name string) (string, bool) {
 }
 
 // lookup returns shell's interpreter, or why there is none (a problem for
-// shell_unavailable, without a path); a cancelled context is an error.
+// shell_unavailable, without a path). A cancelled context is an error, and
+// so is a handle of finalPath's own that did not confirm its release: an
+// environment error, never a candidate skipped or a location unverified.
 func (f *finder) lookup(ctx context.Context, shell string) (Interpreter, string, error) {
+	if err := f.releaseFailure(); err != nil {
+		return Interpreter{}, "", err
+	}
 	if f.unverified {
 		return Interpreter{}, "where an interpreter is cannot be verified: the path of a worktree of the project cannot be resolved", nil
 	}
-	if in, ok := f.find(ctx, shell); ok {
+	in, ok := f.find(ctx, shell)
+	if err := f.releaseFailure(); err != nil {
+		return Interpreter{}, "", err
+	}
+	if ok {
 		return in, "", nil
 	}
 	if err := ctx.Err(); err != nil {
 		return Interpreter{}, "", err
 	}
 	return Interpreter{}, "no " + shell + " that Specmetry may use is available here", nil
+}
+
+// releaseFailure is the lookup's failure once a close of finalPath's own
+// did not confirm its release: environment (exit 6), its text controlled,
+// the close's error in its chain.
+func (f *finder) releaseFailure() error {
+	if f.released == nil {
+		return nil
+	}
+	return errors.Join(apperr.New(apperr.Environment,
+		"a handle opened to resolve an interpreter's path closed with an error and is not confirmed released; no check was run"), f.released)
 }
 
 func shellOf(c baseline.Check) string {
@@ -165,8 +201,8 @@ func interpreters(ctx context.Context, items []Item, f *finder) error {
 			shells = append(shells, s)
 		}
 		sort.Strings(shells)
-		return apperr.Newf(apperr.Environment, "an interpreter the checks need is not available (%s); no check was run",
-			strings.Join(shells, ", ")).WithDetails(details...)
+		return refusal(apperr.Environment, "an interpreter the checks need is not available ("+strings.Join(shells, ", ")+"); no check was run",
+			details)
 	}
 	for i := range items {
 		items[i].Interpreter = found[shellOf(items[i].Check)]

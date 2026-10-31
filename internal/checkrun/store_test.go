@@ -45,7 +45,7 @@ func store(t *testing.T) *sqlite.DB {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = db.Close() })
+	t.Cleanup(func() { closeDB(t, db) })
 	exec(t, db, `
 INSERT INTO projects (id, name, git_common_dir, main_worktree_id, stage, settings_json, created_at)
 VALUES (?1, 'a', '/r/a/.git', ?3, 'in_development', '{}', 1), (?2, 'b', '/r/b/.git', ?4, 'in_development', '{}', 1);

@@ -6,7 +6,9 @@ import (
 	"testing"
 
 	"github.com/XKHoshizora/specmetry/internal/apperr"
+	"github.com/XKHoshizora/specmetry/internal/checkrun"
 	"github.com/XKHoshizora/specmetry/internal/contract"
+	"github.com/XKHoshizora/specmetry/internal/store/sqlite"
 )
 
 var validator = sync.OnceValues(contract.New)
@@ -27,4 +29,21 @@ func envelope(t *testing.T, err error) string {
 		t.Fatalf("not an error.v1 document: %v\n%s", verr, b)
 	}
 	return string(b)
+}
+
+// closeBatch closes b and fails the test when a close did not confirm its
+// release (Review 123 B-123-2: a test's own cleanup checks it too).
+func closeBatch(t *testing.T, b *checkrun.Batch) {
+	t.Helper()
+	if err := b.Close(); err != nil {
+		t.Errorf("Batch.Close: %v", err)
+	}
+}
+
+// closeDB closes a test's own database handle and checks the result.
+func closeDB(t *testing.T, db *sqlite.DB) {
+	t.Helper()
+	if err := db.Close(); err != nil {
+		t.Errorf("closing the test's database: %v", err)
+	}
 }

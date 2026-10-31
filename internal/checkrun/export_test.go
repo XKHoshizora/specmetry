@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"testing"
+
+	"github.com/XKHoshizora/specmetry/internal/baseline"
 )
 
 // Test access to the package's unexported parts. None of it is in the
@@ -92,3 +94,21 @@ func OnRegister(t testing.TB, f func(*sql.Tx) error) {
 	testHookRegister = f
 	t.Cleanup(func() { testHookRegister = nil })
 }
+
+// OnRelease adds f's error to each close's own result, by resource
+// ("scratch", "database", "handle"); f never replaces that result.
+func OnRelease(t testing.TB, f func(resource string) error) {
+	testHookRelease = f
+	t.Cleanup(func() { testHookRelease = nil })
+}
+
+// The three refusals Review 123 B-123-1 bounds, called on their own.
+func ChooseIn(criteria []baseline.Record, hashes map[string]string, opts Options) ([]Item, error) {
+	return fixed{criteria: criteria, hashes: hashes}.choose(opts)
+}
+func StaticRules(items []Item) error { return staticRules(items) }
+func Interpreters(ctx context.Context, items []Item, f *Finder) error {
+	return interpreters(ctx, items, f)
+}
+
+const MaxDetails = maxDetails

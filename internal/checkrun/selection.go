@@ -139,8 +139,7 @@ func (f fixed) choose(opts Options) ([]Item, error) {
 			}
 		}
 		if len(problems) > 0 {
-			return nil, apperr.New(apperr.InvalidInput, "the acceptance criteria given cannot all be checked; no check was run").
-				WithDetails(problems...)
+			return nil, refusal(apperr.InvalidInput, "the acceptance criteria given cannot all be checked; no check was run", problems)
 		}
 	}
 	var items []Item
@@ -176,8 +175,8 @@ func staticRules(items []Item) error {
 		}
 	}
 	if len(problems) > 0 {
-		return apperr.New(apperr.InvalidInput,
-			"a check cannot run as it is saved: a person revises it with a material change; no check was run").WithDetails(problems...)
+		return refusal(apperr.InvalidInput,
+			"a check cannot run as it is saved: a person revises it with a material change; no check was run", problems)
 	}
 	return nil
 }

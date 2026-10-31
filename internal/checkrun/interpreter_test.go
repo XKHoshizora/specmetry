@@ -84,7 +84,7 @@ func TestPrepareInterpreters(t *testing.T) {
 	if b.Items[0].Interpreter != b.Items[2].Interpreter {
 		t.Errorf("one shell, two interpreters: %+v, %+v", b.Items[0].Interpreter, b.Items[2].Interpreter)
 	}
-	_ = b.Close()
+	closeBatch(t, b)
 
 	gone := filepath.Join(filepath.Dir(w.repo.Dir), "gone-worktree")
 	w.exec(t, `INSERT INTO worktrees (id, project_id, path, git_dir, is_main, registered_seq, last_seen_at)
