@@ -70,3 +70,18 @@ func AfterRead(t testing.TB, f func()) {
 	testHookAfterRead = f
 	t.Cleanup(func() { testHookAfterRead = nil })
 }
+
+// Finder looks interpreters up as step 7 does, with the worktrees, PATH
+// and exec path a test gives.
+type Finder = finder
+
+func NewFinder(worktrees []string, path string, execPath func(context.Context) (string, error)) *Finder {
+	return newFinder(worktrees, path, execPath)
+}
+
+func Lookup(ctx context.Context, f *Finder, shell string) (Interpreter, string, error) {
+	return f.lookup(ctx, shell)
+}
+
+func Within(p, root string, fold bool) bool { return within(p, root, fold) }
+func FinalPath(p string) (string, error)    { return finalPath(p) }

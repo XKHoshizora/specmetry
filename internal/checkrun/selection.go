@@ -17,7 +17,8 @@ import (
 // Item is one criterion of a batch with what the read transaction fixed
 // for it (spec §3, D13): its revision, its requirement revision, its
 // configuration hash and a copy of its check, which every later step and
-// its run use, whatever the baseline says by then.
+// its run use, whatever the baseline says by then; and the interpreter
+// step 7 chose for it.
 type Item struct {
 	Criterion           string
 	CriterionID         string
@@ -25,6 +26,7 @@ type Item struct {
 	RequirementRevision int
 	CheckConfigHash     string
 	Check               baseline.Check
+	Interpreter         Interpreter
 }
 
 // fixed is what the one read transaction of steps 3 to 5 reads (spec §4.1,

@@ -334,6 +334,10 @@ func TestPrepareSelects(t *testing.T) {
 		t.Fatalf("batch of %s, worktree %s, %+v", b.ProjectID, b.WorktreeID, b.Where)
 	}
 	got := b.Items[1]
+	if got.Interpreter.Shell != "bash" || got.Interpreter.Path == "" {
+		t.Fatalf("AC-001-5's interpreter = %+v", got.Interpreter)
+	}
+	got.Interpreter = checkrun.Interpreter{} // step 7's, tested on its own
 	want := checkrun.Item{Criterion: "AC-001-5", CriterionID: "01JC000000000000000000C008", CriterionRevision: 3, RequirementRevision: 2,
 		CheckConfigHash: stored, Check: *bash}
 	if !reflect.DeepEqual(got, want) {

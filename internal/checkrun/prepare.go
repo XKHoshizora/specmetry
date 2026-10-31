@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io/fs"
 	"os"
+	"slices"
 
 	"github.com/XKHoshizora/specmetry/internal/apperr"
 	"github.com/XKHoshizora/specmetry/internal/config"
@@ -120,6 +121,16 @@ func prepare(ctx context.Context, h *host, opts Options, _ Output) (_ *Batch, er
 	}
 	if err := staticRules(b.Items); err != nil {
 		return nil, err
+	}
+	// Step 7: the interpreters, outside every registered worktree and W.
+	if len(b.Items) > 0 {
+		roots := f.worktrees
+		if b.WorktreeID == "" {
+			roots = append(slices.Clone(roots), b.Where.Current)
+		}
+		if err := interpreters(ctx, b.Items, newFinder(roots, os.Getenv("PATH"), gitExecPath(b.Where.Current))); err != nil {
+			return nil, err
+		}
 	}
 	return b, nil
 }
