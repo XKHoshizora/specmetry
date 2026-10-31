@@ -5997,3 +5997,45 @@ r 为 `int32(r1)`。下面五种形式互斥，并且覆盖全部组合：
   - 结果回填只增加文档提交，写明计划 SHA、新取证代码的 SHA 与树、run 与 attempt、各作业实际检出，以及最终 PR HEAD 与取证点的关系；并核对 `prototype/` 与 `.github/` 相对取证点没有变化。
 - **本节在写任何代码之前提交**。不偏离方案的补充，在代码提交之前登记于 §16.19；实施若须偏离 §16.17 第四稿，先报告负责人，不自行改变方案。
 - **不授权**：合并 PR #44、规范冻结、生产实现、G5 整体满足、WP2.5 / M2 的验收；原实现的 B1、B2 只有在实际修复与独立复审之后才可能关闭，本节不宣布关闭。
+
+### 16.19 写修复代码时登记的补充（在代码提交之前）
+
+下面各项是写代码时确定的，在代码提交之前登记。除了补充 9（负责人另行决定的偏离），它们都不改变 §16.17 第四稿的规则、预测、次数、期限、角色 C、`exact`、归属或判定，也不放宽失败关闭。
+
+- **补充 1：代码的位置**。
+  - B1 的三个小函数（`p5CloseProblem`、`p5HandOver`、`p5FinalRead`）、`p5Inner.closeRead` 与停止任务的两个结果，按 §16.17.2 第 9 条写在 `p5proto_test.go`。另有 R-B1-1 的核对 `p5CloseNormal` 与 `read_close` 的记录。
+  - B2 的清理链（`p5EndChain`）与它的消费函数（`p5InsureAccount`、`p5AfterInsurance`、`p5RemedyOutcome`、`p5FinalProcs`），以及 R-B2-2 的持有者（`p5Holder`：R0 的决策、`chainStep`、正常路径第 3、4 步的 `tail`、收尾函数 `cleanup`）与持有登记 `p5RealHeld`，写在新文件 `p5clean_test.go`。它与 `p5proto_test.go` 同属平台无关的协议核心，构建约束同为 `darwin || wp25p5local`。
+  - darwin 的接线：门禁与组合在 `p5gate_darwin_test.go`，最终收尾与汇总在 `p5_darwin_test.go`，R-B2-2 在新文件 `p5real_darwin_test.go`。
+  - 模型：R-B1-3、R-B1-4 在 `p5proto_check_test.go`（`TestP5ProtoCopyStop` 改经 `closeRead`，新增 `TestP5ProtoCloseOnce`、`TestP5ProtoCloseLate`）；R-B2-1、R-B2-3 在新文件 `p5clean_check_test.go`（`TestP5CleanChain` 七个子项，`TestP5HoldExpiry` 三个对照）。
+  - 真实的 R-B2-2 与 R-B2-3 的模型调用同一组 `p5Holder` 方法；门禁、最终收尾与模型调用同一组消费函数。
+- **补充 2：错误累积器的去重**。清理链轮流读取多个对象，相同的文字不一定相邻。所以 `p5Errs` 增加方法 `note`：按文字在已有的全部项中去重并计数（§16.17.3 的“按文字去重、计数”）。Wait 任务 W1 的 `add`（只合并相邻的相同文字）不变，`TestP5ProtoErrs` 不变。
+- **补充 3：回收的四种状态由 Wait 任务自己的状态推出**。持有者从不取控制锁，所以“已开始回收”取自 W3 在状态锁内的记录。W2 置标记与 W3 记录之间的极短时刻，显示为“Wait 已启动、未开始回收”。这只影响记录的措辞，不影响 PID 动作（只按控制锁内的标记）或有效性的裁定。
+- **补充 4：R-B2-2 两侧的接缝**。两侧的接缝都替换这个子进程在**轮询中第一次读取**的答案（`p5EndChain` 的读取分为进入、轮询与标记读取失败之后的重读三种）。保险清理一侧即“第一次轮询读取”；补救一侧，这次读取就是“动作之前的身份读取”。真实的读取照样进行，它的答案另外记录。
+- **补充 5：R-B2-2 的细节**。
+  - 身份读取要求子进程存在、是本进程的子进程、不是僵尸；否则走身份读取失败的出口（不运行被测链；在决策点按 w_k 复核之后按 R0 请求、启动 Wait）。
+  - 每侧打印一行 `WP25P5REAL`（截止、身份、接缝的命中与真实的答案、链的结果、调用者的消费、收尾之后的知识、回收的状态、到期出口、移交与失败），由本侧的收尾函数在最后打印。
+  - `WP25P5` 增加 `combos`（`p5combo.close-error`）、`real`（两侧）与 `real_held`（持有登记的两种视图，没有移交时为空列表）。这些只打印，不裁定（N3）。
+- **补充 6：最终收尾的记录**。复制任务已返回时，总是记下“the copy returned …”（原先只在有停止任务或有字节时记录）。读端由 `p5FinalRead` 消费。
+- **补充 7：静态步骤的写法**（§16.17.4）。
+  - 步骤仍写在 workflow 中（不另设脚本文件），在作业的 `bash -e -o pipefail` 下运行。命令替换都写在 `if` 的条件中，不用 `|| true`。
+  - **文件名**：otool 的 `-l` 与 `-L` 的输出分别存为 `otool-loads.txt` 与 `otool-libs.txt`。原因：macOS 运行器的文件系统默认不区分大小写，`otool-l.txt` 与 `otool-L.txt` 会是同一个文件。本机演练（NTFS 同样不区分大小写）中，`-L` 的输出覆盖了 `-l`，A9 因此为 T(parser)。这是在推送之前发现并修正的脚本缺陷。
+  - `P5.static.method` 不成立时的类别记为 `T(contradiction)`（对照没有给出预期的类别）。
+  - `p5bind` 的预期架构取自 `go env GOARCH`（`amd64` 写作 `x86_64`）。
+  - `p5bind` 在最后打印一行 `WP25P5BIND-VERDICT <类别> <规则>`，供步骤自己的匹配函数读取，不依赖 JSON 工具。
+  - 各工具的退出状态经参数交给 `p5bind`，A9 的“非零为 T(tool)”在解码器中判定。
+  - 工具的路径、哈希、产物的大小、SHA-256 与 build ID 都写入 `P5.static.artifact` 的结论。
+  - A9 所解析的五份输出完整打印在日志中；`go tool nm` 只打印含 `waitid` 的行（判定只用文件上的匹配）。
+- **补充 8：解码器的写法与规则名**。
+  - 解码器自己按 `<mach-o/loader.h>` 的布局读取头与加载命令（`encoding/binary`），`debug/macho` 只提供常量。
+  - A4 的子规则记为 `A4.v1` ~ `A4.v5`（有效性的五条）、`A4.leb`（ULEB / SLEB）、`A4.arith`（算术）、`A4.expand`（展开的预检）、`A4.stream`（流的语法与未知的表示）。
+  - A3 的“不认识的库加载命令”按保守的写法实现：不在 `<mach-o/loader.h>` 已知列表中的任何加载命令都记为未知的表示（T(parser)），因为无法判断它是否加载库。加载命令的 cmdsize 须为 8 的倍数并落在 sizeofcmds 之内，否则解析失败（T(parser)）。所测的产物只含已知的命令。
+  - `p5bind` 的模型对照是另一个测试二进制，它的结果不进入 `WP25P5` 的模型一项（那里只有根包的模型），而是 `go test` 中 `p5bind` 包自己的结果；它失败时作业失败，属于 §16.17.8 的停止条件。
+- **补充 9：A3 与不映射的 `__DWARF` 段**（偏离，作者先报告，负责人 2026-10-31 决定）：
+  - **发现**：本机交叉构建的两个架构的测试二进制中，`__DWARF` 段的 vmsize 为 0，它的七个节大小不为 0、标志为 `S_ATTR_DEBUG`（`0x02000000`）。本机的 Go 是 1.27.1，但 `src/cmd/link/internal/ld/macho.go` 与固定的 1.27.3 逐字节相同（SHA-256 `665c2270…`，§16.2）：`:753` ~ `757` 把 `__DWARF` 写为不映射的段（`ms.vsize = 0`），`:651` ~ `653` 给它的节加 `S_ATTR_DEBUG`。
+  - **后果**：按 §16.17.4 A3 的字面（每个节须完全落在所属的段内），真实产物在两个架构上都会确定地在 A3 得到 T(parser)，`P5.static.binding` 为 T，新诊断因这一已知原因 invalid（T）。
+  - **负责人的决定**：放过不映射的调试段。
+    - 包含的规则只用于 vmsize 大于 0 的段；
+    - vmsize 为 0 的段，只在它的每个节都带 `S_ATTR_DEBUG` 时接受，否则仍是 A3 的 T(parser)；
+    - 这样的段不能容纳 bind 记录（A4 有效性的第 2 条要求段的 vmsize 至少为 8），所以 A4 ~ A9 不变。
+  - **新增的模型对照**（在基准映像的 `__LINKEDIT` 之前加一个不映射的段）：它的节带 `S_ATTR_DEBUG` 时为 ok；不带时为 T(parser)，规则 A3。`TestBind` 的子项因此由 52 增为 54。
+  - **作者本机的核对**（不是诊断的证据）：用这一写法的解码器，两个架构的产物 A1 ~ A8 都成立：`_waitid` 的 bind 记录恰有一条，ordinal 1（`/usr/lib/libSystem.B.dylib`），位于 `__DATA_CONST,__got`，标志 0、类型为指针、加数 0；符号表中未定义的 `_waitid` 的 `n_desc` 为 0。A9 需要 Apple 的工具，本机不能执行。
