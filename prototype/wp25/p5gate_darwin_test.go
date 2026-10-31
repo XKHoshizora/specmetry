@@ -34,32 +34,40 @@ import (
 	"time"
 )
 
-// p5GateCase is a gate with the target's planned calls (§16.6).
+// p5GateCase is a gate with the target's planned calls (§16.6). fault is
+// an outer seam of one combination's run (§16.17.2 R-B1-2: "close-error");
+// the two gates have none, and only they check R-B1-1.
 type p5GateCase struct {
 	gateCase
 	calls int
+	fault string
 }
 
 // p5Gates are §16.6's gate and its control. TestGate's list is unchanged.
 var p5Gates = []p5GateCase{
-	{gateCase{id: "p5.eintr-once", test: "TestP5$/^(layout.1|w.exit7.1)", scenario: "P5.w.exit7.1", inject: "p5-eintr-once", want: invalid, goos: []string{"darwin"}, hit: true, hits: 1, exact: true, because: "observation failed: waitid 1: interrupted system call"}, 1},
-	{gateCase{id: "control.p5-w-exit7", test: "TestP5$/^(layout.1|w.exit7.1)", scenario: "P5.w.exit7.1", want: confirmed, goos: []string{"darwin"}, exact: true}, 2},
+	{gateCase{id: "p5.eintr-once", test: "TestP5$/^(layout.1|w.exit7.1)", scenario: "P5.w.exit7.1", inject: "p5-eintr-once", want: invalid, goos: []string{"darwin"}, hit: true, hits: 1, exact: true, because: "observation failed: waitid 1: interrupted system call"}, 1, ""},
+	{gateCase{id: "control.p5-w-exit7", test: "TestP5$/^(layout.1|w.exit7.1)", scenario: "P5.w.exit7.1", want: confirmed, goos: []string{"darwin"}, exact: true}, 2, ""},
 }
 
 // p5GateInfo is a P-5 gate's own record (§16.11): its deadlines and its
 // knowledge of the inner run when it returned.
 type p5GateInfo struct {
-	S        string   `json:"s"`
-	Dg       string   `json:"d_g"`
-	Di       string   `json:"d_i"`
-	K        string   `json:"k"`
-	W        string   `json:"w"`
-	Pid      int      `json:"pid,omitempty"`
-	Identity string   `json:"identity,omitempty"` // the inner run's start time, "" if unknown
-	Know     *p5Know  `json:"inner_state,omitempty"`
-	Exit     string   `json:"exit"` // the inner run's exit, or unknown
-	Output   string   `json:"output"`
-	Handed   []string `json:"handed,omitempty"`
+	S        string  `json:"s"`
+	Dg       string  `json:"d_g"`
+	Di       string  `json:"d_i"`
+	K        string  `json:"k"`
+	W        string  `json:"w"`
+	Pid      int     `json:"pid,omitempty"`
+	Identity string  `json:"identity,omitempty"` // the inner run's start time, "" if unknown
+	Know     *p5Know `json:"inner_state,omitempty"`
+	Exit     string  `json:"exit"` // the inner run's exit, or unknown
+	Output   string  `json:"output"`
+	// ReadClose is the read end's close (§16.17.2 item 8).
+	ReadClose *p5ReadClose `json:"read_close,omitempty"`
+	// HandedWhy are the hand-over predicate's reasons, on the snapshot after
+	// the insurance (§16.17.2 item 4); Handed, what was handed on.
+	HandedWhy []string `json:"handed_why,omitempty"`
+	Handed    []string `json:"handed,omitempty"`
 }
 
 // checkP5Gate runs one P-5 gate and records it.
@@ -80,15 +88,17 @@ func checkP5Gate(t *testing.T, c p5GateCase) {
 
 // p5Launch is the start (§16.8, the start steps 2 to 4). It gives the
 // inner run as the gate holds it, nil if there is no child, and the
-// problems met; a closed write end's error is a T, the start goes on.
-func p5Launch(test, inject string, di time.Time, env []string) (*p5Inner, *exec.Cmd, *os.File, []string) {
+// problems met; a closed write end's error is a T, the start goes on. The
+// read end goes into the inner run: only its stop task closes it
+// (§16.17.2).
+func p5Launch(test, inject string, di time.Time, env []string) (*p5Inner, *exec.Cmd, []string) {
 	self, err := os.Executable()
 	if err != nil {
-		return nil, nil, nil, []string{"inner: os.Executable: " + err.Error()}
+		return nil, nil, []string{"inner: os.Executable: " + err.Error()}
 	}
 	rd, wr, err := os.Pipe()
 	if err != nil {
-		return nil, nil, nil, []string{"inner: os.Pipe: " + err.Error()}
+		return nil, nil, []string{"inner: os.Pipe: " + err.Error()}
 	}
 	timeout := int(math.Ceil(time.Until(di).Seconds())) + 5
 	cmd := exec.Command(self, "-test.run", "^"+test+"$", "-test.count=1", "-test.v", fmt.Sprintf("-test.timeout=%ds", timeout))
@@ -104,7 +114,7 @@ func p5Launch(test, inject string, di time.Time, env []string) (*p5Inner, *exec.
 				probs = append(probs, fmt.Sprintf("inner: closing the %s end after the failed start: %v", f.name, cerr))
 			}
 		}
-		return nil, nil, nil, probs
+		return nil, nil, probs
 	}
 	var probs []string
 	// The parent's write end, closed by the gate itself, holding no lock:
@@ -145,10 +155,10 @@ func p5Launch(test, inject string, di time.Time, env []string) (*p5Inner, *exec.
 		kill:  func() error { return syscall.Kill(pid, syscall.SIGKILL) },
 		every: p5Every,
 	}
-	p := &p5Inner{pid: pid, ops: ops, ctl: &p5Ctl{}}
+	p := &p5Inner{pid: pid, ops: ops, ctl: &p5Ctl{}, rd: rd.Close}
 	p.wait = p5StartWait(p.ctl, ops)
 	p.copy = p5StartCopy(rd)
-	return p, cmd, rd, probs
+	return p, cmd, probs
 }
 
 // runP5Gate is one P-5 gate. Its judgment is runGate's: the inner verdict
@@ -183,13 +193,14 @@ func runP5Gate(t *testing.T, c p5GateCase) gateResult {
 	}
 	defer rw.close()
 	tag := witnessEnv + "=" + wf
-	inner, cmd, rd, probs := p5Launch(c.test, c.inject, di, []string{tag, injectLogEnv + "=" + il, rw.env()})
+	inner, cmd, probs := p5Launch(c.test, c.inject, di, []string{tag, injectLogEnv + "=" + il, rw.env()})
 	g.Problems = append(g.Problems, probs...)
 	if inner == nil {
 		g.Reason = "inner run: " + strings.Join(probs, "; ")
 		g.Remedy, g.Final = "not-run", "unknown"
 		return finishGate(c.gateCase, g, false, began)
 	}
+	inner.closeSeam = c.fault == "close-error" // R-B1-2: this run's stop task only
 	info.Pid = inner.pid
 	// Only now the inner run's identity. A read that fails is a T; the
 	// request needs no identity, and is made at once (R0).
@@ -215,14 +226,38 @@ func runP5Gate(t *testing.T, c p5GateCase) gateResult {
 	}
 	ws = inner.wait.until(w)
 	cs := inner.copy.until(w)
+	queried := time.Now() // the copy's query returned: perhaps before w
 	complete := cs.Done
-	if !cs.Done {
-		// The read end's stop, registered and started; one query that does
-		// not wait.
-		inner.stop = p5StartStop(rd.Close)
+	// The read end, closed on every path once the copy's query returned,
+	// whether the copy ended or not (§16.17.2 item 2), by the one stop task.
+	origin := "the query by w"
+	switch {
+	case cs.Done && cs.Err != nil:
+		origin = "a read error"
+	case cs.Done:
+		origin = "EOF"
+	}
+	stop := inner.closeRead(origin)
+	var ss p5StopSnap
+	if cs.Done {
+		ss = stop.until(w)
+	} else {
+		// One query each that does not wait.
 		cs = inner.copy.snap()
-		inner.stop.snap()
+		ss = stop.snap()
 		g.Problems = append(g.Problems, "inner: the output was not complete by d_i + 10 s")
+	}
+	// The close's result, consumed before the verdict (§16.17.2 item 3).
+	if p := p5CloseProblem(ss); p != "" {
+		g.Problems = append(g.Problems, p)
+	}
+	rc := p5ReadCloseOf(ss)
+	rc.Consumed = true
+	info.ReadClose = &rc
+	if c.fault == "" {
+		for _, why := range p5CloseNormal(ss, queried, w) {
+			g.Problems = append(g.Problems, "inner: R-B1-1: "+why)
+		}
 	}
 	if !ws.Done {
 		g.Problems = append(g.Problems, "inner: exit not confirmed by d_i + 10 s; "+p5Requests(inner))
@@ -369,38 +404,21 @@ func runP5Gate(t *testing.T, c p5GateCase) gateResult {
 	}
 	sort.Strings(g.Acted)
 	g.Remedy = "not-needed"
-	var remedyErr error
+	remedyFinal := "ended"
 	innerOpen := !inner.wait.snap().Done
 	if len(act) > 0 || innerAlive || innerOpen {
 		g.Remedy = "not-run"
 		rdl := minTime(time.Now().Add(10*time.Second), dg)
-		still, err := p5Remediate(act, tag, rdl)
-		remedyErr = err
+		res := p5Remediate(act, tag, rdl)
 		if innerOpen {
 			if q := inner.request("gate", "remedy"); q != nil {
 				q.until(rdl)
 			}
 			innerOpen = !inner.wait.until(rdl).Done
 		}
-		for _, v := range still {
-			g.Still = append(g.Still, v.pid)
-		}
-		switch {
-		case err != nil, len(g.Still) > 0, innerOpen:
-			g.Remedy = "failed"
-		default:
-			g.Remedy = "succeeded"
-		}
-		if err != nil {
-			g.RemedyErr = err.Error()
-			g.Problems = append(g.Problems, "still-alive: the remediation could not confirm its end: "+err.Error())
-		}
-		if len(g.Still) > 0 {
-			g.Problems = append(g.Problems, fmt.Sprintf("still-alive: %d processes still alive after the remediation: %v", len(g.Still), g.Still))
-		}
-		if innerOpen {
-			g.Problems = append(g.Problems, "still-alive: the inner run's exit was not confirmed by the remediation's deadline")
-		}
+		out := p5RemedyOutcome(res, innerOpen)
+		g.Remedy, g.RemedyErr, g.Still, remedyFinal = out.Remedy, out.Err, out.Still, out.Final
+		g.Problems = append(g.Problems, out.Problems...)
 	}
 	unknownN := 0
 	for _, st := range state {
@@ -409,9 +427,9 @@ func runP5Gate(t *testing.T, c p5GateCase) gateResult {
 		}
 	}
 	switch {
-	case len(g.Still) > 0:
+	case remedyFinal == "alive":
 		g.Final = "alive"
-	case cerr != nil || unknownN > 0 || remedyErr != nil || len(refused) > 0 || innerOpen:
+	case cerr != nil || unknownN > 0 || remedyFinal == "unknown" || len(refused) > 0:
 		g.Final = "unknown"
 	default:
 		g.Final = "ended"
@@ -460,23 +478,27 @@ func runP5Gate(t *testing.T, c p5GateCase) gateResult {
 	// never makes the gate pass.
 	idl := minTime(time.Now().Add(10*time.Second), dg)
 	left, ins := p5Insure(inner, act, tag, since, idl)
-	g.Insurance = ins
-	switch {
-	case g.Final == "ended" && ins != "nothing left":
-		g.Problems = append(g.Problems, "insurance: the tested path found the round ended, the insurance cleanup did not: "+ins)
-		judge(c.gateCase, &g, verdictOK)
-	case strings.HasPrefix(ins, "FAILED"):
-		g.Problems = append(g.Problems, "insurance: not confirmed by d_g: "+ins)
-		judge(c.gateCase, &g, verdictOK)
-	}
+	p5AfterInsurance(c.gateCase, &g, verdictOK, ins)
 
-	// What is not confirmed is handed on to the final cleanup, whole.
+	// What is not confirmed is handed on to the final cleanup, whole: the
+	// hand-over predicate on a new snapshot (§16.17.2 item 4). A close that
+	// completed after the verdict is recorded as late; it changes no T.
 	k2 := inner.know()
 	info.Know = &k2
-	pending := !k2.WaitDone || !k2.OutputDone || k2.Stop == "pending" || inner.pendingReq() != nil
-	if pending || len(left) > 0 {
+	ss2 := inner.stop.snap()
+	if !rc.Done && ss2.Done {
+		late := p5ReadCloseOf(ss2)
+		info.ReadClose.Late = fmt.Sprintf("completed after the verdict: real %s, reported %s, %s", late.Real, late.Reported, late.Release)
+	}
+	why := p5HandOver(k2.WaitDone, k2.OutputDone, inner.pendingReq() != nil, ss2)
+	info.HandedWhy = why
+	if c.fault == "" && !ss2.Released() {
+		g.Problems = append(g.Problems, "inner: R-B1-1: the inner run is handed on for its read end, its release not confirmed")
+		judge(c.gateCase, &g, verdictOK)
+	}
+	if len(why) > 0 || len(left) > 0 {
 		h := &p5Hand{gate: c.id, tag: tag, since: since, others: left}
-		if pending {
+		if len(why) > 0 {
 			h.inner = inner
 			info.Handed = append(info.Handed, "the inner run: Cmd, Process, its control lock, the Wait task, the copy and stop tasks and the request tasks")
 		}
@@ -541,64 +563,156 @@ func p5Exact(c p5GateCase, r innerRun) string {
 	return ""
 }
 
-// p5Remediate ends this round's proven processes (never the inner run),
-// each only while its identity holds and it carries the tag, and gives the
-// ones still alive at the deadline.
-func p5Remediate(ss []survivor, tag string, deadline time.Time) ([]survivor, error) {
-	for _, v := range ss {
-		if st, pr := procInfo(v.pid); pr == present && st.start == v.start && !st.zombie && tagged(v.pid, tag) {
-			_ = outerSignal(v.pid)
-		}
+// p5ReadReal is a cleanup chain's real read of a recorded identity
+// (§16.17.3's table): procInfo once.
+func p5ReadReal(v survivor, _ string) (string, error) {
+	st, pr := procInfo(v.pid)
+	switch {
+	case pr == unknown:
+		return p5Unknown, fmt.Errorf("process %s: its state cannot be read", v.key())
+	case pr == absent:
+		return p5Absent, nil
+	case st.start != v.start:
+		return p5Changed, nil
+	case st.zombie:
+		return p5Zombie, nil
 	}
-	for {
-		var still []survivor
-		for _, v := range ss {
-			a, err := recordAlive(witnessRec{pid: v.pid, start: v.start})
-			if err != nil {
-				return nil, err
-			}
-			if a {
-				still = append(still, v)
-			}
+	return p5Alive, nil
+}
+
+// p5TagReal reads a process's environment for the tag, environOf directly
+// (tagged keeps its old rule).
+func p5TagReal(tag string) func(int) (bool, error) {
+	return func(pid int) (bool, error) {
+		env, err := environOf(pid)
+		if err != nil {
+			return false, err
 		}
-		if len(still) == 0 || !time.Now().Before(deadline) {
-			return still, nil
-		}
-		time.Sleep(20 * time.Millisecond)
+		return hasToken(env, tag), nil
 	}
 }
 
-// p5Insure is the insurance cleanup of a P-5 gate: insure's rules, within
-// the gate's deadline, the inner run apart: it is never signalled by its
-// PID here, only by a request task (R0), and its end is the Wait task's.
-// It gives what is still alive of the rest, to hand on, and its account.
+// p5EndProvenOps are the real reads and calls of p5EndProven: the census
+// by the round's tag within the call's deadline, kill directly, the inner
+// run skipped.
+func p5EndProvenOps(tag, since string, deadline time.Time, inner *p5Inner) p5CleanOps {
+	ops := p5CleanOps{
+		read:   p5ReadReal,
+		tagged: p5TagReal(tag),
+		census: func() ([]survivor, error) { return censusTag(tag, since, deadline) },
+		kill:   func(pid int) error { return syscall.Kill(pid, syscall.SIGKILL) },
+		now:    time.Now,
+		every:  20 * time.Millisecond,
+	}
+	if inner != nil {
+		ops.skip = func(v survivor) bool { return v.pid == inner.pid }
+	}
+	return ops
+}
+
+// p5EndProven ends what is still alive of a round (§16.17.3): the
+// processes proven its own and what a census of its tag finds, never the
+// inner run itself (only its request tasks signal it); each only while it
+// runs, is proven this round's and carries the tag in the same step.
+func p5EndProven(known []survivor, tag, since string, deadline time.Time, inner *p5Inner) p5CleanResult {
+	return p5EndChain(known, deadline, p5EndProvenOps(tag, since, deadline, inner))
+}
+
+// p5RemediateOps are the remediation's: no census, the outer signal.
+func p5RemediateOps(tag string) p5CleanOps {
+	return p5CleanOps{read: p5ReadReal, tagged: p5TagReal(tag), kill: outerSignal, now: time.Now, every: 20 * time.Millisecond}
+}
+
+// p5Remediate ends this round's proven processes (never the inner run) by
+// the same chain, without a census.
+func p5Remediate(ss []survivor, tag string, deadline time.Time) p5CleanResult {
+	return p5EndChain(ss, deadline, p5RemediateOps(tag))
+}
+
+// p5Insure is the insurance cleanup of a P-5 gate: within the gate's
+// deadline, the inner run apart: it is never signalled by its PID here,
+// only by a request task (R0), and its end is the Wait task's. It gives
+// what is alive or unknown of the rest, to hand on, and its account.
 func p5Insure(inner *p5Inner, known []survivor, tag, since string, deadline time.Time) ([]survivor, string) {
 	if !inner.wait.snap().Done {
 		if q := inner.request("gate", "insurance"); q != nil {
 			q.until(deadline)
 		}
 	}
-	left, found, err := p5EndProven(known, tag, since, deadline, inner)
+	res := p5EndProven(known, tag, since, deadline, inner)
 	innerDone := inner.wait.until(deadline).Done
-	var parts []string
-	if !innerDone {
-		parts = append(parts, "the inner run's exit not confirmed")
-	}
-	if len(left) > 0 {
-		var keys []string
-		for _, v := range left {
-			keys = append(keys, v.key())
-		}
-		parts = append(parts, fmt.Sprintf("%d still alive: %v", len(left), keys))
-	}
-	if err != nil {
-		parts = append(parts, "read or census: "+err.Error())
+	return append(append([]survivor(nil), res.Alive...), res.Unknown...), p5InsureAccount(innerDone, res)
+}
+
+// p5CloseCombo is R-B1-2's combination (§16.17.2): one real run of
+// control.p5-w-exit7's gate, the outer seam on its stop task.
+var p5CloseCombo = p5GateCase{gateCase: p5Gates[1].gateCase, calls: p5Gates[1].calls, fault: "close-error"}
+
+// checkP5CloseCombo runs it and checks every expectation; it is counted
+// among the combinations (WP25COMBO), never as a gate passed.
+func checkP5CloseCombo(t *testing.T) {
+	c := p5CloseCombo
+	g := runP5Gate(t, c)
+	res := comboResult{ID: "p5combo.close-error", Gate: c.id, Fault: c.fault, WantPass: false, Self: g}
+	var why []string
+	info, _ := g.P5.(*p5GateInfo)
+	var rc p5ReadClose
+	if info != nil && info.ReadClose != nil {
+		rc = *info.ReadClose
 	}
 	switch {
-	case len(parts) > 0:
-		return left, "FAILED: " + strings.Join(parts, "; ")
-	case found > 0:
-		return nil, fmt.Sprintf("ended %d", found)
+	case strings.HasPrefix(g.Reason, "not executed"):
+		why = append(why, g.Reason)
+	case !rc.Injected:
+		why = append(why, "the seam on the stop task was not hit (its real close: "+rc.Real+")")
 	}
-	return nil, "nothing left"
+	if g.Pass {
+		why = append(why, "the gate passed")
+	}
+	if len(g.Problems) != 1 || !strings.HasPrefix(g.Problems[0], "inner: closing the read end failed: injected: ") {
+		why = append(why, fmt.Sprintf("problems %q, want exactly the injected close's", g.Problems))
+	}
+	if len(g.ToolErrors) != 1 || len(g.Unexpected) != 0 {
+		why = append(why, fmt.Sprintf("tool errors %d and other problems %d, want 1 and 0", len(g.ToolErrors), len(g.Unexpected)))
+	}
+	lay, tgt := p5InnerResult(g, "P5.layout.1"), p5InnerResult(g, c.scenario)
+	switch {
+	case lay == nil || lay.Calls == nil || *lay.Calls != 0:
+		why = append(why, "the inner layout probe's calls are not 0")
+	case tgt == nil || tgt.Verdict != confirmed || tgt.Calls == nil || *tgt.Calls != 2:
+		why = append(why, "the inner target is not confirmed with 2 calls")
+	case g.InnerExit != 0:
+		why = append(why, fmt.Sprintf("the inner run exited %d", g.InnerExit))
+	}
+	if g.Remedy != "not-needed" || g.Final != "ended" || g.Insurance != "nothing left" {
+		why = append(why, fmt.Sprintf("remediation %s, final %s, insurance %q; want not-needed, ended, nothing left", g.Remedy, g.Final, g.Insurance))
+	}
+	if rc.Real != "nil" || rc.Release != "released" || !strings.HasPrefix(rc.Reported, "injected: ") {
+		why = append(why, fmt.Sprintf("read_close real %s (%s), reported %s; want nil (released) and the injected error", rc.Real, rc.Release, rc.Reported))
+	}
+	if info == nil || len(info.HandedWhy) > 0 || len(info.Handed) > 0 {
+		why = append(why, "something was handed on")
+	}
+	res.Pass, res.Reason = len(why) == 0, strings.Join(why, "; ")
+	b, _ := json.Marshal(res)
+	fmt.Println("WP25COMBO " + string(b))
+	comboMu.Lock()
+	comboResults = append(comboResults, res)
+	comboMu.Unlock()
+	p5.mu.Lock()
+	p5.combos = append(p5.combos, res)
+	p5.mu.Unlock()
+	if !res.Pass {
+		t.Errorf("p5combo.close-error: %s; gate problems %v", res.Reason, g.Problems)
+	}
+}
+
+// p5InnerResult is a result the gate kept of its inner run, nil if none.
+func p5InnerResult(g gateResult, id string) *result {
+	for i := range g.Inner {
+		if g.Inner[i].ID == id {
+			return &g.Inner[i]
+		}
+	}
+	return nil
 }

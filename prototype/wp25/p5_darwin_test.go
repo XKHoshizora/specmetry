@@ -71,9 +71,11 @@ var p5 struct {
 	S, T, D time.Time
 	di      time.Time
 	gates   []gateResult
-	handed  []*p5Hand // what the gates handed on to the final cleanup
-	final   string    // the final cleanup's account
-	finalT  bool      // it left something unconfirmed (a T)
+	combos  []comboResult // R-B1-2's combination (§16.17.2), apart from the gates
+	real    []p5RealRec   // TestP5CleanupReal's sides (§16.17.3 R-B2-2)
+	handed  []*p5Hand     // what the gates handed on to the final cleanup
+	final   string        // the final cleanup's account
+	finalT  bool          // it left something unconfirmed (a T)
 }
 
 // p5Layouts are the verdicts of the P-5 layout probes of this process (P-3
@@ -274,6 +276,8 @@ func TestP5(t *testing.T) {
 		for _, c := range p5Gates {
 			t.Run(c.id, func(t *testing.T) { checkP5Gate(t, c) })
 		}
+		// R-B1-2 (§16.17.2): after the two gates, admitted as role B′.
+		t.Run("p5combo.close-error", checkP5CloseCombo)
 	}
 }
 
@@ -760,10 +764,9 @@ func p5FinalCleanup(t *testing.T, deadline time.Time) {
 			}
 			ws := p.wait.until(deadline)
 			cs := p.copy.until(deadline)
-			stopDone := true
-			if p.stop != nil {
-				stopDone, _ = p.stop.until(deadline)
-			}
+			// The gate started the stop task; were there none, it is started
+			// now (§16.17.2 item 2): never a second close.
+			ss := p.closeRead("the final cleanup").until(deadline)
 			k := p.know()
 			it.Inner = &k
 			if ws.Done {
@@ -776,24 +779,21 @@ func p5FinalCleanup(t *testing.T, deadline time.Time) {
 			}
 			if !cs.Done {
 				it.Unknown = append(it.Unknown, "the copy task has not returned")
-			} else if p.stop != nil || len(cs.Buf) > 0 {
+			} else {
 				it.Outcome = append(it.Outcome, fmt.Sprintf("the copy returned: %d bytes, error %v (not parsed into the gate)", len(cs.Buf), cs.Err))
 			}
-			if !stopDone {
-				it.Unknown = append(it.Unknown, "the stop of the read end has not returned")
+			// The read end's persistent result (§16.17.2 item 5).
+			if out, unk := p5FinalRead(ss); unk != "" {
+				it.Unknown = append(it.Unknown, unk)
+			} else {
+				it.Outcome = append(it.Outcome, out)
 			}
 		}
 		if len(h.others) > 0 || h.tag != "" {
-			left, _, err := p5EndProven(h.others, h.tag, h.since, deadline, h.inner)
-			for _, v := range left {
-				it.Processes = append(it.Processes, v.key())
-			}
-			if err != nil {
-				it.Unknown = append(it.Unknown, "the processes of the round: "+err.Error())
-			}
-			if len(left) > 0 {
-				it.Unknown = append(it.Unknown, fmt.Sprintf("%d processes of the round still alive", len(left)))
-			}
+			res := p5EndProven(h.others, h.tag, h.since, deadline, h.inner)
+			procs, unk := p5FinalProcs(res)
+			it.Processes = append(it.Processes, procs...)
+			it.Unknown = append(it.Unknown, unk...)
 		}
 		unknown += len(it.Unknown)
 		items = append(items, it)
@@ -812,61 +812,18 @@ func p5FinalCleanup(t *testing.T, deadline time.Time) {
 	}
 }
 
-// p5EndProven ends what is still alive of a round: the processes proven
-// its own that still run (by their start time), and what a census of its
-// tag finds, never the inner run itself (only its request tasks signal
-// it), each only while its identity and the tag still hold; then it
-// confirms their end by identity, within deadline. It gives what is still
-// alive, how many it found alive, and a read or census that failed.
-func p5EndProven(known []survivor, tag, since string, deadline time.Time, inner *p5Inner) ([]survivor, int, error) {
-	alive := map[string]survivor{}
-	notInner := func(v survivor) bool { return inner == nil || v.pid != inner.pid }
-	for _, v := range known {
-		if st, pr := procInfo(v.pid); notInner(v) && pr == present && st.start == v.start && !st.zombie {
-			alive[v.key()] = v
-		}
-	}
-	ss, cerr := censusTag(tag, since, deadline)
-	for _, v := range ss {
-		if notInner(v) {
-			alive[v.key()] = v
-		}
-	}
-	found := len(alive)
-	for {
-		var still []survivor
-		var rerr error
-		for _, v := range alive {
-			if st, pr := procInfo(v.pid); pr == present && st.start == v.start && !st.zombie && tagged(v.pid, tag) {
-				_ = syscall.Kill(v.pid, syscall.SIGKILL)
-			}
-			a, err := recordAlive(witnessRec{pid: v.pid, start: v.start})
-			switch {
-			case err != nil:
-				rerr = err
-			case a:
-				still = append(still, v)
-			}
-		}
-		if len(still) == 0 && rerr == nil || !time.Now().Before(deadline) {
-			if rerr == nil {
-				rerr = cerr
-			}
-			return still, found, rerr
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-}
-
 // p5Summary prints this job's WP25P5 line (§16.11), in the outer test
 // process: the toolchain and cgo, the static checks one by one, the native
-// confirmed count against 39, the gates, the model checks, the runs not
-// executed, D, the final cleanup, and the H4 and H6 statements. It decides
-// nothing.
+// confirmed count against 39, the gates, the combination and the real
+// regression (§16.17, counted apart), the model checks, the runs not
+// executed, D, the final cleanup, the held registry, and the H4 and H6
+// statements. It decides nothing (N3).
 func p5Summary() {
 	p5.mu.Lock()
 	ran, roleErr, D, final, finalT := p5.ran, p5.roleErr, p5.D, p5.final, p5.finalT
 	gates := append([]gateResult(nil), p5.gates...)
+	combos := append([]comboResult(nil), p5.combos...)
+	real := append([]p5RealRec(nil), p5.real...)
 	p5.mu.Unlock()
 	static := p5StaticFile()
 	static["P5.static.load"] = map[bool]string{true: "ok: TestP5 began", false: "T: TestP5 did not begin"}[ran]
@@ -907,6 +864,20 @@ func p5Summary() {
 			g[x.ID] = "FAIL: " + x.Reason + "; " + strings.Join(x.Problems, "; ")
 		}
 	}
+	cm := map[string]string{}
+	for _, x := range combos {
+		cm[x.ID] = "pass"
+		if !x.Pass {
+			cm[x.ID] = "FAIL: " + x.Reason
+		}
+	}
+	rm := map[string]string{}
+	for _, x := range real {
+		rm[x.Side] = "pass"
+		if len(x.Fails) > 0 {
+			rm[x.Side] = "FAIL: " + strings.Join(x.Fails, "; ")
+		}
+	}
 	model := map[string]string{}
 	modelMu.Lock()
 	for k, ok := range modelRes {
@@ -920,8 +891,8 @@ func p5Summary() {
 	b, _ := json.Marshal(map[string]any{
 		"toolchain": runtime.Version(), "CGO_ENABLED": envOr("CGO_ENABLED", "(unset)"), "GOTOOLCHAIN": envOr("GOTOOLCHAIN", "(unset)"),
 		"static": static, "native_confirmed": nativeOK, "native_expected": p5Expected, "native": native,
-		"layout": layout, "gates": g, "model": model, "not_executed": notExec, "D": d,
-		"final": final, "final_T": finalT, "H4": p5H4, "H6": p5H6,
+		"layout": layout, "gates": g, "combos": cm, "real": rm, "model": model, "not_executed": notExec, "D": d,
+		"final": final, "final_T": finalT, "real_held": p5RealHeld.view(), "H4": p5H4, "H6": p5H6,
 	})
 	fmt.Println("WP25P5 " + string(b))
 }
@@ -931,7 +902,7 @@ func p5Summary() {
 // there or cannot be read leaves them unknown.
 func p5StaticFile() map[string]string {
 	m := map[string]string{}
-	ids := []string{"P5.static.toolchain", "P5.static.vet", "P5.static.build", "P5.static.settings", "P5.static.symbols"}
+	ids := []string{"P5.static.toolchain", "P5.static.vet", "P5.static.build", "P5.static.method", "P5.static.artifact", "P5.static.settings", "P5.static.symbols", "P5.static.binding"}
 	for _, id := range ids {
 		m[id] = "unknown: no conclusion"
 	}

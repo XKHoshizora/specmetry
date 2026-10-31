@@ -232,38 +232,136 @@ func TestP5ProtoRequestSerial(t *testing.T) {
 }
 
 // The copy ends at EOF with the whole output; stopped, it returns what it
-// read so far with the close's error, and the stop keeps its own.
+// read so far with the close's error, and the stop keeps its own. Both read
+// ends are closed only through the inner run's stop task (R-B1-3).
 func TestP5ProtoCopyStop(t *testing.T) {
 	modelCheck(t)
 	r, w, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
 	}
-	c := p5StartCopy(r)
+	p := &p5Inner{rd: r.Close}
+	p.copy = p5StartCopy(r)
 	if _, err := w.WriteString("WP25RESULT {}\n"); err != nil {
 		t.Fatal(err)
 	}
-	if s := c.until(time.Now().Add(30 * time.Millisecond)); s.Done || s.Buf != nil {
+	if s := p.copy.until(time.Now().Add(30 * time.Millisecond)); s.Done || s.Buf != nil {
 		t.Fatalf("the copy with the write end open: %+v, want not done and no buffer", s)
 	}
-	stop := p5StartStop(r.Close)
-	done, serr := stop.until(time.Now().Add(5 * time.Second))
-	s := c.until(time.Now().Add(5 * time.Second))
-	if !done || serr != nil || !s.Done || string(s.Buf) != "WP25RESULT {}\n" || s.Err == nil {
-		t.Fatalf("stopped: stop %v %v, copy %+v; want the bytes so far and the close's error", done, serr, s)
+	ss := p.closeRead("the query by w").until(time.Now().Add(5 * time.Second))
+	s := p.copy.until(time.Now().Add(5 * time.Second))
+	if !ss.Done || ss.Real != nil || ss.Reported != nil || !ss.Released() || ss.Calls != 1 || !s.Done || string(s.Buf) != "WP25RESULT {}\n" || s.Err == nil {
+		t.Fatalf("stopped: stop %+v, copy %+v; want one close released, the bytes so far and the close's error", ss, s)
 	}
 	_ = w.Close()
 	r2, w2, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
 	}
-	c2 := p5StartCopy(r2)
+	p2 := &p5Inner{rd: r2.Close}
+	p2.copy = p5StartCopy(r2)
 	_, _ = w2.WriteString("a\nb\n")
 	_ = w2.Close()
-	if s := c2.until(time.Now().Add(5 * time.Second)); !s.Done || s.Err != nil || string(s.Buf) != "a\nb\n" {
+	if s := p2.copy.until(time.Now().Add(5 * time.Second)); !s.Done || s.Err != nil || string(s.Buf) != "a\nb\n" {
 		t.Fatalf("to EOF: %+v", s)
 	}
-	_ = r2.Close()
+	if ss := p2.closeRead("EOF").until(time.Now().Add(5 * time.Second)); !ss.Done || !ss.Released() || ss.Calls != 1 || ss.Origin != "EOF" {
+		t.Fatalf("the close after EOF: %+v, want one close, released", ss)
+	}
+}
+
+// R-B1-3: closeRead called twice gives the same task; the close function
+// runs once.
+func TestP5ProtoCloseOnce(t *testing.T) {
+	modelCheck(t)
+	var mu sync.Mutex
+	n := 0
+	p := &p5Inner{rd: func() error {
+		mu.Lock()
+		n++
+		mu.Unlock()
+		return nil
+	}}
+	s1 := p.closeRead("EOF")
+	s2 := p.closeRead("the final cleanup")
+	if s1 != s2 {
+		t.Fatal("a second closeRead started another stop task")
+	}
+	ss := s1.until(time.Now().Add(5 * time.Second))
+	mu.Lock()
+	defer mu.Unlock()
+	if !ss.Done || n != 1 || ss.Calls != 1 || ss.Origin != "EOF" || !ss.Released() {
+		t.Fatalf("the stop task %+v, the close called %d times; want done once, from EOF, released", ss, n)
+	}
+}
+
+// R-B1-4: the close pending at first, then completing; with an error, the
+// duty is handed over and the final cleanup's unknown carries it; with nil
+// (the control), the read end is released, the late success counts in no
+// T. Either way the first query's problem stays, and the close runs once.
+func TestP5ProtoCloseLate(t *testing.T) {
+	modelCheck(t)
+	for _, c := range []struct {
+		name string
+		err  error
+	}{{"error", errors.New("E: the fake close failed")}, {"nil", nil}} {
+		t.Run(c.name, func(t *testing.T) {
+			entered, gate := make(chan struct{}), make(chan struct{})
+			var once sync.Once
+			release := func() { once.Do(func() { close(gate) }) }
+			t.Cleanup(release) // a failed exit releases it too
+			var mu sync.Mutex
+			calls := 0
+			p := &p5Inner{rd: func() error {
+				mu.Lock()
+				calls++
+				mu.Unlock()
+				close(entered)
+				<-gate
+				return c.err
+			}}
+			stop := p.closeRead("EOF")
+			select {
+			case <-entered:
+			case <-time.After(5 * time.Second):
+				t.Fatal("the close never began")
+			}
+			// 1. Pending at a near deadline: the gate's problem.
+			ss := stop.until(time.Now().Add(20 * time.Millisecond))
+			prob := p5CloseProblem(ss)
+			if ss.Done || !strings.Contains(prob, "did not return") {
+				t.Fatalf("pending: %+v, problem %q", ss, prob)
+			}
+			// 2. Released, its completion awaited.
+			release()
+			ss = stop.until(time.Now().Add(5 * time.Second))
+			if !ss.Done {
+				t.Fatal("the close did not complete once released")
+			}
+			// 3 and 4. The new snapshot: the hand-over and the final cleanup.
+			why := p5HandOver(true, true, false, ss)
+			out, unk := p5FinalRead(ss)
+			if c.err != nil {
+				if len(why) != 1 || !strings.Contains(why[0], "read end") || !strings.Contains(unk, "E: the fake close failed") || out != "" {
+					t.Fatalf("a close completed with E: hand over %q, outcome %q, unknown %q; want the read end handed over, E in the unknown", why, out, unk)
+				}
+			} else if len(why) != 0 || out == "" || unk != "" {
+				t.Fatalf("a close completed with nil: hand over %q, outcome %q, unknown %q; want none, a late success", why, out, unk)
+			}
+			if !strings.Contains(prob, "did not return") {
+				t.Fatalf("the first query's problem was lost: %q", prob)
+			}
+			// 5. Once.
+			if p.closeRead("the final cleanup") != stop {
+				t.Fatal("a second closeRead started another stop task")
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			if calls != 1 || ss.Calls != 1 {
+				t.Fatalf("the close was called %d times (task %d), want once", calls, ss.Calls)
+			}
+		})
+	}
 }
 
 func TestP5ProtoErrs(t *testing.T) {

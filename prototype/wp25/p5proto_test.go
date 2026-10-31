@@ -92,6 +92,24 @@ func (e *p5Errs) add(err error) {
 	e.count = append(e.count, 1)
 }
 
+// note is add for a cleanup chain (§16.17.3), which reads several
+// processes in turn: a text is kept once wherever it came before, with its
+// count, so equal texts need not follow each other.
+func (e *p5Errs) note(err error) {
+	if err == nil {
+		return
+	}
+	t := err.Error()
+	for i, x := range e.texts {
+		if x == t {
+			e.count[i]++
+			return
+		}
+	}
+	e.texts = append(e.texts, t)
+	e.count = append(e.count, 1)
+}
+
 // err joins them; nil if there were none.
 func (e p5Errs) err() error {
 	if len(e.texts) == 0 {
@@ -321,34 +339,76 @@ func (c *p5Copy) until(deadline time.Time) p5CopySnap {
 	return c.snap()
 }
 
-// p5Stop is the stop task of the read end: its close, in a task of its own
-// (a close may wait for the copy's read), its error kept.
+// p5Stop is the one stop task of the read end (§16.17.2): its one close,
+// in a task of its own (a close may wait for the copy's read), holding no
+// lock. Its state lock keeps the real close's error apart from the one it
+// reports: they differ only where a regression's seam (R-B1-2) replaces a
+// real nil after the close. Release is known from the real one only.
 type p5Stop struct {
-	done chan struct{}
-	mu   sync.Mutex
-	fin  bool
-	err  error
+	origin string        // what the close followed: EOF, a read error, the query by w, the final cleanup
+	done   chan struct{} // closed once its result is written
+	mu     sync.Mutex    // its state lock: the fields below only
+	calls  int           // Close called: once
+	began  time.Time
+	ended  time.Time
+	fin    bool
+	real   error // what the real Close returned
+	rep    error // what the task reports: real, or the seam's after a real nil
+	inj    bool  // the seam replaced a real nil (its hit)
 }
 
-func p5StartStop(closeRead func() error) *p5Stop {
-	s := &p5Stop{done: make(chan struct{})}
-	go func() {
-		err := closeRead()
-		s.mu.Lock()
-		s.fin, s.err = true, err
-		s.mu.Unlock()
-		close(s.done)
-	}()
-	return s
+// p5StopSnap is a copy of the stop task's fields; none of them means
+// anything without Started.
+type p5StopSnap struct {
+	Started  bool
+	Origin   string
+	Calls    int
+	Began    time.Time
+	Ended    time.Time
+	Done     bool
+	Real     error
+	Reported error
+	Injected bool
 }
 
-func (s *p5Stop) snap() (bool, error) {
+// Released is the release knowledge (§16.17.2 item 1): only a completed
+// close whose real result is nil releases the read end. Not started, not
+// completed, or a real error: release not confirmed. An injected error
+// changes only what is reported.
+func (s p5StopSnap) Released() bool { return s.Started && s.Done && s.Real == nil }
+
+// p5InjectedClose is the R-B1-2 seam's error, after a real close that
+// returned nil.
+var p5InjectedClose = errors.New("injected: the read end's close failed (after the real close)")
+
+func (s *p5Stop) run(closeFn func() error, seam bool) {
+	s.mu.Lock()
+	s.calls++
+	s.began = time.Now()
+	s.mu.Unlock()
+	real := closeFn() // no lock held
+	rep, inj := real, false
+	if seam && real == nil {
+		rep, inj = p5InjectedClose, true
+	}
+	s.mu.Lock()
+	s.fin, s.real, s.rep, s.inj, s.ended = true, real, rep, inj, time.Now()
+	s.mu.Unlock()
+	close(s.done)
+}
+
+// snap copies the fields; a nil task is one never started.
+func (s *p5Stop) snap() p5StopSnap {
+	if s == nil {
+		return p5StopSnap{}
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.fin, s.err
+	return p5StopSnap{Started: true, Origin: s.origin, Calls: s.calls, Began: s.began, Ended: s.ended,
+		Done: s.fin, Real: s.real, Reported: s.rep, Injected: s.inj}
 }
 
-func (s *p5Stop) until(deadline time.Time) (bool, error) {
+func (s *p5Stop) until(deadline time.Time) p5StopSnap {
 	p5Until(s.done, deadline)
 	return s.snap()
 }
@@ -363,9 +423,26 @@ type p5Inner struct {
 	ctl       *p5Ctl
 	wait      *p5Wait
 	copy      *p5Copy
+	rd        func() error // the read end's Close; only the stop task calls it
+	closeSeam bool         // R-B1-2's seam on the stop task, for one combination's run only
 	stop      *p5Stop
 	reqs      []*p5Req // the request tasks, in the order registered
 	notNeeded []string // the steps at which R0 found that none was needed
+}
+
+// closeRead is the only way the read end is closed (§16.17.2 item 1): the
+// stop task already registered, or a new one, registered in the inner run
+// first, then started. The holders use the inner run one after the other,
+// so the read end is closed at most once; origin is kept only by the task
+// that starts.
+func (p *p5Inner) closeRead(origin string) *p5Stop {
+	if p.stop != nil {
+		return p.stop
+	}
+	s := &p5Stop{origin: origin, done: make(chan struct{})}
+	p.stop = s
+	go s.run(p.rd, p.closeSeam)
+	return s
 }
 
 // request is R0, by the holder, holding no lock. A request is not needed
@@ -416,8 +493,10 @@ type p5Know struct {
 	OutputDone bool        `json:"output_done"`
 	OutputLen  int         `json:"output_bytes"`
 	OutputErr  string      `json:"output_error,omitempty"`
-	Stop       string      `json:"stop"` // none, done, pending
-	StopErr    string      `json:"stop_error,omitempty"`
+	Stop       string      `json:"stop"`                 // none, done, pending
+	StopErr    string      `json:"stop_error,omitempty"` // the real close's error
+	StopRep    string      `json:"stop_reported,omitempty"`
+	Release    string      `json:"read_end"` // released, release not confirmed
 }
 
 func (p *p5Inner) know() p5Know {
@@ -445,14 +524,155 @@ func (p *p5Inner) know() p5Know {
 			k.OutputErr = c.Err.Error()
 		}
 	}
-	if p.stop != nil {
-		done, err := p.stop.snap()
-		k.Stop = map[bool]string{true: "done", false: "pending"}[done]
-		if err != nil {
-			k.StopErr = err.Error()
+	s := p.stop.snap()
+	k.Release = p5Release(s)
+	if s.Started {
+		k.Stop = map[bool]string{true: "done", false: "pending"}[s.Done]
+		if s.Real != nil {
+			k.StopErr = s.Real.Error()
+		}
+		if s.Reported != nil && s.Reported != s.Real {
+			k.StopRep = s.Reported.Error()
 		}
 	}
 	return k
+}
+
+func p5Release(s p5StopSnap) string {
+	if s.Released() {
+		return "released"
+	}
+	return "release not confirmed"
+}
+
+// The read end's close, consumed: three small functions (§16.17.2 items 3
+// to 5) that runP5Gate, p5FinalCleanup and the model checks all call.
+
+// p5CloseProblem is the gate's consumption of the close, after the copy's
+// and the stop's queries and before parseInner, verdictOf and finishGate:
+// a completed close reporting nil is closed (""); a reported error, real
+// or injected, or a close that has not returned is an "inner" problem,
+// which no expected rejection excuses and no later success clears.
+func p5CloseProblem(s p5StopSnap) string {
+	switch {
+	case !s.Started:
+		return "inner: the read end has no stop task"
+	case !s.Done:
+		return "inner: the read end's close did not return by d_i + 10 s"
+	case s.Reported != nil:
+		return "inner: closing the read end failed: " + s.Reported.Error()
+	}
+	return ""
+}
+
+// p5HandOver is the hand-over predicate (§16.17.2 item 4), computed on a
+// new snapshot after the insurance: the inner run is handed on whole when
+// any reason holds. A real close error keeps the duty even once the task
+// has completed; only a completed close whose real result is nil
+// discharges the read end.
+func p5HandOver(waitDone, copyDone, reqPending bool, s p5StopSnap) []string {
+	var why []string
+	if !waitDone {
+		why = append(why, "the Wait task has not completed")
+	}
+	if !copyDone {
+		why = append(why, "the copy task has not returned")
+	}
+	if reqPending {
+		why = append(why, "a request task is pending")
+	}
+	if !s.Released() {
+		why = append(why, "the read end's release is not confirmed")
+	}
+	return why
+}
+
+// p5FinalRead is the final cleanup's consumption of the same persistent
+// result (§16.17.2 item 5), on its snapshot at the deadline: one outcome,
+// or one unknown, which counts in final_T.
+func p5FinalRead(s p5StopSnap) (outcome, unknown string) {
+	switch {
+	case !s.Started:
+		return "", "the read end has no stop task"
+	case !s.Done:
+		return "", "the read end's close has not returned"
+	case s.Real != nil:
+		return "", "the read end's close failed, release not confirmed: " + s.Real.Error()
+	case s.Injected:
+		return "the tested injected error " + s.Reported.Error() + "; the real close succeeded", ""
+	}
+	return "the read end's close returned nil (perhaps late); it changes no T a gate already has", ""
+}
+
+// p5ReadClose is the gate's read_close record (§16.17.2 item 8).
+type p5ReadClose struct {
+	Origin   string `json:"origin"`
+	Done     bool   `json:"done"`
+	Real     string `json:"real"`
+	Reported string `json:"reported"`
+	Injected bool   `json:"injected"`
+	Release  string `json:"release"`
+	Calls    int    `json:"calls"`
+	Began    string `json:"began,omitempty"`
+	Ended    string `json:"ended,omitempty"`
+	Consumed bool   `json:"consumed_before_verdict"`
+	// Late is a result that came after the verdict and before the hand-over:
+	// recorded, changing no T already there.
+	Late string `json:"late,omitempty"`
+}
+
+func p5ReadCloseOf(s p5StopSnap) p5ReadClose {
+	rc := p5ReadClose{Origin: s.Origin, Done: s.Done, Real: "nil", Reported: "nil", Injected: s.Injected, Release: p5Release(s), Calls: s.Calls}
+	if !s.Started {
+		rc.Origin = "no stop task"
+	}
+	if !s.Done {
+		rc.Real, rc.Reported = "pending", "pending"
+	}
+	if s.Real != nil {
+		rc.Real = s.Real.Error()
+	}
+	if s.Reported != nil {
+		rc.Reported = s.Reported.Error()
+	}
+	if !s.Began.IsZero() {
+		rc.Began = s.Began.Format(time.RFC3339Nano)
+	}
+	if !s.Ended.IsZero() {
+		rc.Ended = s.Ended.Format(time.RFC3339Nano)
+	}
+	return rc
+}
+
+// p5CloseNormal is R-B1-1 (§16.17.2): the conditions a healthy gate's
+// close must meet, read from the stop task's own record (its calls and its
+// moments), not from the gate's account: one Close, started once the
+// copy's query by w had returned with the copy ended at EOF, completed
+// before w with the real and reported results both nil.
+func p5CloseNormal(s p5StopSnap, queried, w time.Time) []string {
+	var why []string
+	switch {
+	case !s.Started:
+		return []string{"the read end has no stop task"}
+	case s.Calls != 1:
+		why = append(why, fmt.Sprintf("the stop task called Close %d times, not once", s.Calls))
+	}
+	if s.Origin != "EOF" {
+		why = append(why, fmt.Sprintf("the close followed %s, not the copy's EOF", s.Origin))
+	}
+	if s.Began.Before(queried) {
+		why = append(why, "the close began before the copy's query by w returned")
+	}
+	switch {
+	case !s.Done:
+		why = append(why, "the close had not completed")
+	case !s.Ended.Before(w):
+		why = append(why, "the close completed at "+s.Ended.Format(time.RFC3339Nano)+", not before w")
+	}
+	if s.Done && (s.Real != nil || s.Reported != nil) {
+		why = append(why, fmt.Sprintf("the close's real result %v, reported %v; want both nil", s.Real, s.Reported))
+	}
+	return why
 }
 
 // The classification of one call of entry E2 (§16.7).
