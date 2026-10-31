@@ -219,8 +219,8 @@ func TestContextChanged(t *testing.T) {
 		{contextOf("", checkrun.Unknown), contextOf("", checkrun.Unknown), false},
 		{contextOf("", checkrun.Clean), contextOf("", checkrun.Clean), false},
 	} {
-		if got := checkrun.ContextChanged(tc.start, tc.end); got != tc.want {
-			t.Errorf("ContextChanged(%+v, %+v) = %v; want %v", tc.start, tc.end, got, tc.want)
+		if got := checkrun.Changed(tc.start, tc.end); got != tc.want {
+			t.Errorf("Changed(%+v, %+v) = %v; want %v", tc.start, tc.end, got, tc.want)
 		}
 	}
 }

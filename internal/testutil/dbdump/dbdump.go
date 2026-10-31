@@ -4,7 +4,7 @@
 // input"), through factgen/toderive like any other dump. It only maps
 // rows: JSON columns stay text and NULL is nil; it never selects a current
 // record, filters by a cutoff or computes anything. A table that does not
-// exist yet (check_runs and decisions before WP2.5 and WP2.6) has no rows.
+// exist yet (decisions before WP2.6) has no rows.
 package dbdump
 
 import (
@@ -166,6 +166,19 @@ FROM questions WHERE project_id = ?`, func(rs *sql.Rows) error {
 					var r factgen.ClaimRow
 					err := rs.Scan(&r.ID, &r.Seq, &r.BatchID, &r.TargetType, &r.CriterionID, &r.CriterionRevision, &r.Assertion)
 					d.Claims = append(d.Claims, r)
+					return err
+				})
+		},
+		func() error {
+			// Every column the derivation reads, as stored (WP2.5 spec
+			// §10.2): NULL heads, failure kind and input record are nil.
+			return each(`SELECT id, seq, criterion_id, criterion_revision, requirement_revision, check_config_hash, inputs_json, worktree_id,
+    evidence_grade, head_start, head_end, tree_state_start, tree_state_end, result, failure_kind FROM check_runs WHERE project_id = ?`,
+				func(rs *sql.Rows) error {
+					var r factgen.CheckRunRow
+					err := rs.Scan(&r.ID, &r.Seq, &r.CriterionID, &r.CriterionRevision, &r.RequirementRevision, &r.CheckConfigHash, &r.InputsJSON,
+						&r.WorktreeID, &r.EvidenceGrade, &r.HeadStart, &r.HeadEnd, &r.TreeStateStart, &r.TreeStateEnd, &r.Result, &r.FailureKind)
+					d.CheckRuns = append(d.CheckRuns, r)
 					return err
 				})
 		},
