@@ -52,7 +52,7 @@ func (f *fakeProcs) ops(deadline time.Time) p5CleanOps {
 			class := s[f.next("read", v.key(), len(s))]
 			f.log = append(f.log, "read "+at+" "+class)
 			if class == p5Unknown {
-				return class, fmt.Errorf("injected: the read of %s failed", v.key())
+				return class, fmt.Errorf("model: the read of %s failed", v.key())
 			}
 			return class, nil
 		},
@@ -103,7 +103,7 @@ func TestP5CleanChain(t *testing.T) {
 			reads: []string{p5Alive, p5Unknown, p5Absent},
 			log:   []string{"read entry alive", "read round unknown", "read round absent"},
 			check: func(r p5CleanResult) string {
-				if r.Errs == nil || !strings.Contains(r.Errs.Error(), "injected") || len(r.Left) != 0 || len(r.Ended) != 1 || r.Found != 1 || r.Kills != 0 {
+				if r.Errs == nil || len(r.Failures) != 1 || r.Failures[0].Source != "read" || r.Failures[0].Planned || len(r.Left) != 0 || len(r.Ended) != 1 || r.Found != 1 || r.Kills != 0 {
 					return "want the error kept, none left, 1 ended, no kill"
 				}
 				return ""
@@ -119,8 +119,8 @@ func TestP5CleanChain(t *testing.T) {
 			}},
 		{name: "3 the tag read fails once, the identity still alive",
 			reads: []string{p5Alive, p5Alive, p5Alive, p5Alive, p5Absent},
-			tags:  []error{errors.New("injected: the tag read failed"), nil},
-			log:   []string{"read entry alive", "read round alive", "tag injected: the tag read failed", "read recheck alive", "read round alive", "tag <nil>", "kill <nil>", "read round absent"},
+			tags:  []error{errors.New("model: the tag read failed"), nil},
+			log:   []string{"read entry alive", "read round alive", "tag model: the tag read failed", "read recheck alive", "read round alive", "tag <nil>", "kill <nil>", "read round absent"},
 			check: func(r p5CleanResult) string {
 				if r.Errs == nil || !strings.Contains(r.Errs.Error(), "its tag cannot be read") || r.Kills != 1 || len(r.Left) != 0 {
 					return "want no action that step, the error kept, the action the next step"
@@ -129,8 +129,8 @@ func TestP5CleanChain(t *testing.T) {
 			}},
 		{name: "4 the tag read fails, the identity read again absent",
 			reads: []string{p5Alive, p5Alive, p5Absent, p5Absent},
-			tags:  []error{errors.New("injected: the tag read failed")},
-			log:   []string{"read entry alive", "read round alive", "tag injected: the tag read failed", "read recheck absent", "read round absent"},
+			tags:  []error{errors.New("model: the tag read failed")},
+			log:   []string{"read entry alive", "read round alive", "tag model: the tag read failed", "read recheck absent", "read round absent"},
 			check: func(r p5CleanResult) string {
 				if r.Errs != nil || r.Kills != 0 || !strings.Contains(r.Notes, "ended during the read of its tag") || len(r.Left) != 0 {
 					return "want no error (censusTag's rule), no action, the end noted"
@@ -430,4 +430,243 @@ func TestP5HoldExpiry(t *testing.T) {
 			t.Errorf("the cleanup: registry %d, status %q, expired %q; T %q", len(reg.list()), h.status, h.expired, h.fails)
 		}
 	})
+}
+
+// fakeHeld is a holder's fakes for the consumption's checks: each read,
+// wait and kill answers from the test's settings; a kill may block until
+// released (its handshake first), its gate also opened by the test's
+// cleanup.
+type fakeHeld struct {
+	mu        sync.Mutex
+	probeErrs int   // the probe fails this many times first
+	obsErrs   int   // W1's read fails this many times first
+	zombie    bool  // the child is a zombie (W1 and the probe see it)
+	waitErr   error // Cmd.Wait's own error
+	killErr   error
+	killBlock bool
+	entered   chan struct{}
+	gate      chan struct{}
+	release   func()
+}
+
+func newFakeHeld(t *testing.T) *fakeHeld {
+	f := &fakeHeld{entered: make(chan struct{}, 4), gate: make(chan struct{})}
+	var once sync.Once
+	f.release = func() { once.Do(func() { close(f.gate) }) }
+	t.Cleanup(f.release) // a failed exit releases it too
+	return f
+}
+
+func (f *fakeHeld) set(fn func(*fakeHeld)) {
+	f.mu.Lock()
+	fn(f)
+	f.mu.Unlock()
+}
+
+func (f *fakeHeld) ops() p5HolderOps {
+	return p5HolderOps{
+		now: time.Now,
+		probe: func() (bool, error) {
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			if f.probeErrs > 0 {
+				f.probeErrs--
+				return false, errors.New("model: the probe's read failed")
+			}
+			return f.zombie, nil
+		},
+		observe: func() (bool, error) {
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			if f.obsErrs > 0 {
+				f.obsErrs--
+				return false, errors.New("model: W1's read failed")
+			}
+			return f.zombie, nil
+		},
+		wait: func() error {
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			return f.waitErr
+		},
+		state: func() p5Exit { return p5Exit{Status: "signal 9", Code: -1} },
+		kill: func() error {
+			f.mu.Lock()
+			block := f.killBlock
+			f.mu.Unlock()
+			if block {
+				f.entered <- struct{}{}
+				<-f.gate
+			}
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			f.zombie = true
+			return f.killErr
+		},
+		every: time.Millisecond,
+	}
+}
+
+func sources(fs []p5Failure) string {
+	var s []string
+	for _, x := range fs {
+		s = append(s, fmt.Sprintf("%s:%d:%v", x.Source, x.Count, x.Planned))
+	}
+	return strings.Join(s, ",")
+}
+
+// B-116-1's model (§16.21.2): the holder's unified consumption of its
+// probe, W1, Cmd.Wait and request failures; persistent; used by the
+// judgement, the hand-over and the held registry's current view, the
+// knowledge of the reap kept apart.
+func TestP5HoldConsume(t *testing.T) {
+	modelCheck(t)
+	newHolder := func(f *fakeHeld, reg *p5HeldReg, d time.Duration) *p5Holder {
+		base := time.Now()
+		return &p5Holder{side: "model", pid: 4242, cmd: "the fake Cmd", ops: f.ops(), ctl: &p5Ctl{},
+			c: base.Add(10 * time.Second), q: base.Add(10 * time.Second), w: base.Add(10 * time.Second), d: base.Add(d), held: reg}
+	}
+	t.Run("each source, kept", func(t *testing.T) {
+		f := newFakeHeld(t)
+		f.set(func(f *fakeHeld) { f.probeErrs, f.obsErrs, f.killErr = 1, 1, syscall.EPERM })
+		var reg p5HeldReg
+		h := newHolder(f, &reg, 20*time.Second)
+		if !h.chainStep(func() (any, error) { return "the chain's result", nil }) {
+			t.Fatal("the chain did not return")
+		}
+		if h.tail(true) {
+			t.Fatal("the normal path took the expiry exit")
+		}
+		if len(h.reqs) != 1 {
+			t.Fatalf("%d requests, want 1", len(h.reqs))
+		}
+		if q := h.reqs[0].until(time.Now().Add(5 * time.Second)); q.Result != "sent" {
+			t.Fatalf("the request: %+v", q)
+		}
+		if ws := h.wait.until(time.Now().Add(5 * time.Second)); !ws.Done {
+			t.Fatal("the Wait task did not complete")
+		}
+		h.cleanup()
+		got := sources(h.failures())
+		if got != "probe:1:false,wait-observe:1:false,request:1:false" || h.status != "signal 9" || len(reg.list()) != 0 {
+			t.Fatalf("failures %s, reaped %q, handed %d; want the probe, W1 and the request, each once, the reap confirmed apart", got, h.status, len(reg.list()))
+		}
+		// Later successes clear nothing.
+		h.wait.until(time.Now().Add(20 * time.Millisecond))
+		if again := sources(h.failures()); again != got {
+			t.Fatalf("later the failures are %s, were %s", again, got)
+		}
+		ps := p5RealJudge(p5RealSpec{}, p5RealFacts{Chain: &p5CleanResult{Found: 1, Ended: []string{"x"}, Kills: 1}, Holder: h.failures(), Reaped: true, Status: "signal 9"})
+		if c := strings.Join(p5Codes(ps), ","); c != "holder,holder,holder" {
+			t.Fatalf("the judgement's codes %s, want the holder's three", c)
+		}
+	})
+	t.Run("Cmd.Wait's own error", func(t *testing.T) {
+		f := newFakeHeld(t)
+		f.set(func(f *fakeHeld) { f.zombie, f.waitErr = true, errors.New("model: Cmd.Wait failed") })
+		var reg p5HeldReg
+		h := newHolder(f, &reg, 20*time.Second)
+		if !h.chainStep(func() (any, error) { return nil, nil }) || h.tail(true) {
+			t.Fatal("the normal path did not run")
+		}
+		if ws := h.wait.until(time.Now().Add(5 * time.Second)); !ws.Done {
+			t.Fatal("the Wait task did not complete")
+		}
+		if got := sources(h.failures()); got != "wait:1:false" || len(h.reqs) != 0 {
+			t.Fatalf("failures %s, requests %d; want Cmd.Wait's own error only", got, len(h.reqs))
+		}
+	})
+	t.Run("late after the hand-over", func(t *testing.T) {
+		f := newFakeHeld(t)
+		f.set(func(f *fakeHeld) { f.killBlock, f.killErr = true, syscall.EPERM })
+		var reg p5HeldReg
+		h := newHolder(f, &reg, 150*time.Millisecond)
+		if !h.chainStep(func() (any, error) { return nil, nil }) {
+			t.Fatal("the chain did not return")
+		}
+		done := make(chan struct{})
+		go func() { h.cleanup(); close(done) }()
+		select {
+		case <-f.entered: // the request is in its kill
+		case <-time.After(5 * time.Second):
+			t.Fatal("the request never began its kill")
+		}
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Fatal("the cleanup did not return by its deadline")
+		}
+		items := reg.list()
+		if len(items) != 1 || len(items[0].Handed.Failures) != 0 {
+			t.Fatalf("handed %d items; want one, with no failure yet at the hand-over", len(items))
+		}
+		f.release()
+		if q := h.reqs[0].until(time.Now().Add(5 * time.Second)); q.Result != "sent" || q.Err == "" {
+			t.Fatalf("the late request: %+v", q)
+		}
+		if ws := h.wait.until(time.Now().Add(5 * time.Second)); !ws.Done {
+			t.Fatal("the Wait task did not complete")
+		}
+		v := reg.view()
+		if len(v) != 1 || len(v[0].Handed.Failures) != 0 || sources(v[0].Now.Failures) != "request:1:false" || v[0].Now.Reap != p5ReapDone {
+			t.Fatalf("the view: %+v; want the knowledge at the hand-over unchanged, the late request's error in the current snapshot", v)
+		}
+	})
+}
+
+// B-116-2's model (§16.21.3): the chain read's seam over fake real reads,
+// through the real p5EndChain, the judgement and the four callers.
+func TestP5RealJudge(t *testing.T) {
+	modelCheck(t)
+	v := survivor{101, "1700000000.000101"}
+	healthy := p5RealFacts{Reaped: true, Status: "signal 9"}
+	for _, c := range []struct {
+		name  string
+		reads []string
+		hits  int
+		codes string
+	}{
+		{"healthy", []string{p5Alive, p5Alive, p5Alive, p5Zombie}, 1, ""},
+		{"a: the real read at the seam's site failed", []string{p5Alive, p5Unknown, p5Alive, p5Zombie}, 0, "seam-hits,seam-premise,unplanned"},
+		{"b: another read failed after the injection", []string{p5Alive, p5Alive, p5Unknown, p5Alive, p5Zombie}, 1, "unplanned"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			f := newFakeProcs()
+			f.reads[v.key()] = c.reads
+			deadline := time.Now().Add(5 * time.Second)
+			ops := f.ops(deadline)
+			seam := &p5ReadSeam{v: v}
+			ops.read = seam.wrap(ops.read)
+			var res p5CleanResult
+			within(t, 10*time.Second, "the chain", func() { res = p5EndChain([]survivor{v}, deadline, ops) })
+			hits, _, premise := seam.state()
+			facts := healthy
+			facts.Chain, facts.ChainHits, facts.ChainPremise = &res, hits, premise
+			ps := p5RealJudge(p5RealSpec{ChainSeam: 1}, facts)
+			if hits != c.hits || strings.Join(p5Codes(ps), ",") != c.codes {
+				t.Fatalf("hits %d, codes %v (%v); want %d, %q", hits, p5Codes(ps), ps, c.hits, c.codes)
+			}
+			if c.codes == "" {
+				return
+			}
+			// The callers: none accepts, each carries every failure. One
+			// aggregated insurance problem stands for all of them, so its
+			// count says nothing of "only the planned one".
+			acc := p5InsureAccount(true, res)
+			for _, x := range res.Failures {
+				if !strings.Contains(acc, x.Text) {
+					t.Errorf("the account %q does not carry %q", acc, x.Text)
+				}
+			}
+			gc := gateCase{id: "model", want: confirmed}
+			g := gateResult{ID: gc.id, Want: confirmed, Remedy: "not-needed", Final: "ended"}
+			judge(gc, &g, true)
+			p5AfterInsurance(gc, &g, true, acc)
+			out := p5RemedyOutcome(res, false)
+			_, unk := p5FinalProcs(res)
+			if !strings.HasPrefix(acc, "FAILED") || g.Pass || len(g.Problems) != 1 || out.Remedy != "failed" || out.Final != "unknown" || len(unk) == 0 {
+				t.Errorf("the callers: account %q, gate pass %v with %d problems, remediation %s / %s, final unknown %v", acc, g.Pass, len(g.Problems), out.Remedy, out.Final, unk)
+			}
+		})
+	}
 }

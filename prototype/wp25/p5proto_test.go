@@ -73,41 +73,82 @@ type p5Ctl struct {
 
 // p5Errs keeps the errors a task met, in order, each text once with the
 // number of times it came: a read retried every few milliseconds must not
-// grow without end, and a later success clears none.
+// grow without end, and a later success clears none. Each entry keeps its
+// source and whether a regression's seam planned it (§16.21.3): planned
+// and other errors are told apart by their type and source, never by text.
 type p5Errs struct {
 	texts []string
 	count []int
+	src   []string
+	plan  []bool
+}
+
+// p5Planned is the error a regression's seam makes on purpose.
+type p5Planned struct{ what string }
+
+func (e *p5Planned) Error() string { return "injected: " + e.what }
+
+func planned(err error) bool {
+	var p *p5Planned
+	return errors.As(err, &p)
+}
+
+func (e *p5Errs) push(src string, err error) {
+	e.texts = append(e.texts, err.Error())
+	e.count = append(e.count, 1)
+	e.src = append(e.src, src)
+	e.plan = append(e.plan, planned(err))
 }
 
 func (e *p5Errs) add(err error) {
 	if err == nil {
 		return
 	}
-	t := err.Error()
-	if n := len(e.texts); n > 0 && e.texts[n-1] == t {
+	if n := len(e.texts); n > 0 && e.texts[n-1] == err.Error() && e.plan[n-1] == planned(err) {
 		e.count[n-1]++
 		return
 	}
-	e.texts = append(e.texts, t)
-	e.count = append(e.count, 1)
+	e.push("", err)
 }
 
 // note is add for a cleanup chain (§16.17.3), which reads several
-// processes in turn: a text is kept once wherever it came before, with its
-// count, so equal texts need not follow each other.
-func (e *p5Errs) note(err error) {
+// processes in turn: an entry is kept once by its source, text and kind
+// wherever it came before, with its count, so equal ones need not follow
+// each other.
+func (e *p5Errs) note(src string, err error) {
 	if err == nil {
 		return
 	}
-	t := err.Error()
 	for i, x := range e.texts {
-		if x == t {
+		if x == err.Error() && e.src[i] == src && e.plan[i] == planned(err) {
 			e.count[i]++
 			return
 		}
 	}
-	e.texts = append(e.texts, t)
-	e.count = append(e.count, 1)
+	e.push(src, err)
+}
+
+// p5Failure is one entry of a tool failure: its source, its text, how
+// many times it came, and whether a seam planned it.
+type p5Failure struct {
+	Source  string `json:"source"`
+	Site    string `json:"site,omitempty"`
+	Text    string `json:"text"`
+	Count   int    `json:"count"`
+	Planned bool   `json:"planned,omitempty"`
+}
+
+// entries gives the entries; src, when not empty, names those without one.
+func (e p5Errs) entries(src string) []p5Failure {
+	var out []p5Failure
+	for i, t := range e.texts {
+		s := e.src[i]
+		if s == "" {
+			s = src
+		}
+		out = append(out, p5Failure{Source: s, Text: t, Count: e.count[i], Planned: e.plan[i]})
+	}
+	return out
 }
 
 // err joins them; nil if there were none.
@@ -169,6 +210,7 @@ type p5WaitSnap struct {
 	Exit    p5Exit
 	WaitErr error
 	Errs    error
+	Fails   []p5Failure // W1's failed reads, as entries (source wait-observe)
 }
 
 // p5StartWait starts the Wait task. It is started once, right after the
@@ -220,7 +262,7 @@ func (w *p5Wait) run(ctl *p5Ctl, ops p5Ops) {
 func (w *p5Wait) snap() p5WaitSnap {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	s := p5WaitSnap{Seen: w.seen, Done: w.fin, Errs: w.errs.err()}
+	s := p5WaitSnap{Seen: w.seen, Done: w.fin, Errs: w.errs.err(), Fails: w.errs.entries("wait-observe")}
 	if w.fin {
 		s.Exit, s.WaitErr = w.exit, w.werr
 	}

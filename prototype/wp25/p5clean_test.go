@@ -69,16 +69,19 @@ type p5CleanOps struct {
 
 // p5CleanResult keeps the knowledge of the ends apart from the validity.
 type p5CleanResult struct {
-	Found   int        `json:"found"`             // in the set at the start: alive or unknown
-	Ended   []string   `json:"ended,omitempty"`   // "key: class", in the order they ended
-	Alive   []survivor `json:"-"`                 // alive at the deadline
-	Unknown []survivor `json:"-"`                 // unknown at the deadline
-	Kills   int        `json:"kills"`             // kill returned 0: requests, not ends
-	Notes   string     `json:"notes,omitempty"`   // ESRCH, an end during a tag read: no errors
-	Errs    error      `json:"-"`                 // every failure of the call, kept to its end
-	Left    []string   `json:"left,omitempty"`    // Alive and Unknown, for the record
-	ErrText string     `json:"errors,omitempty"`  // Errs, for the record
-	Classes []string   `json:"classes,omitempty"` // every read's class in order: "key at: class"
+	Found   int        `json:"found"`            // in the set at the start: alive or unknown
+	Ended   []string   `json:"ended,omitempty"`  // "key: class", in the order they ended
+	Alive   []survivor `json:"-"`                // alive at the deadline
+	Unknown []survivor `json:"-"`                // unknown at the deadline
+	Kills   int        `json:"kills"`            // kill returned 0: requests, not ends
+	Notes   string     `json:"notes,omitempty"`  // ESRCH, an end during a tag read: no errors
+	Errs    error      `json:"-"`                // every failure of the call, kept to its end
+	Left    []string   `json:"left,omitempty"`   // Alive and Unknown, for the record
+	ErrText string     `json:"errors,omitempty"` // Errs, for the record
+	// Failures are the same failures as entries, each with its source
+	// (read, tag, kill, census) and whether a seam planned it (§16.21.3).
+	Failures []p5Failure `json:"failures,omitempty"`
+	Classes  []string    `json:"classes,omitempty"` // every read's class in order: "key at: class"
 }
 
 // p5EndChain is the cleanup chain (§16.17.3). The set: each known process
@@ -113,7 +116,7 @@ func p5EndChain(known []survivor, deadline time.Time, ops p5CleanOps) p5CleanRes
 		}
 		switch class, err := read(v, "entry"); {
 		case class == p5Unknown:
-			errs.note(err)
+			errs.note("read", err)
 			enter(v)
 		case !p5Ended(class):
 			enter(v)
@@ -121,7 +124,7 @@ func p5EndChain(known []survivor, deadline time.Time, ops p5CleanOps) p5CleanRes
 	}
 	if ops.census != nil {
 		ss, err := ops.census()
-		errs.note(err)
+		errs.note("census", err)
 		for _, v := range ss {
 			enter(v)
 		}
@@ -138,21 +141,21 @@ func p5EndChain(known []survivor, deadline time.Time, ops p5CleanOps) p5CleanRes
 				res.Ended = append(res.Ended, key+": "+class)
 				continue
 			case class == p5Unknown:
-				errs.note(err)
+				errs.note("read", err)
 				unknown = append(unknown, v)
 			default:
 				alive = append(alive, v)
 				act, note, err := p5TagCheck(v, ops, read)
-				notes.note(note)
-				errs.note(err)
+				notes.note("", note)
+				errs.note("tag", err)
 				if act {
 					switch err := ops.kill(v.pid); {
 					case err == nil:
 						res.Kills++
 					case errors.Is(err, syscall.ESRCH):
-						notes.note(fmt.Errorf("process %s: kill gave ESRCH: it ended after the check; its end is still read", key))
+						notes.note("", fmt.Errorf("process %s: kill gave ESRCH: it ended after the check; its end is still read", key))
 					default:
-						errs.note(fmt.Errorf("process %s: kill(%d, SIGKILL) failed: %w", key, v.pid, err))
+						errs.note("kill", fmt.Errorf("process %s: kill(%d, SIGKILL) failed: %w", key, v.pid, err))
 					}
 				}
 			}
@@ -167,6 +170,7 @@ func p5EndChain(known []survivor, deadline time.Time, ops p5CleanOps) p5CleanRes
 			if res.Errs != nil {
 				res.ErrText = res.Errs.Error()
 			}
+			res.Failures = errs.entries("")
 			if n := notes.err(); n != nil {
 				res.Notes = n.Error()
 			}
@@ -381,21 +385,46 @@ type p5Holder struct {
 	held       *p5HeldReg
 	entered    bool
 	fails      []string // what made the side fail, in order
-	reported   int      // how many of fails the side has reported
 	expired    []string // the decision points where the expiry exit was taken
 	handed     *p5HeldItem
-	status     string // the reaped status, once confirmed by the cleanup
+	status     string      // the reaped status, once confirmed by the cleanup
+	probes     []p5Failure // its own probe's failures, appended, never cleared
 }
+
+// probeFailed keeps a failure of the holder's own probe (§16.21.2).
+func (h *p5Holder) probeFailed(site string, err error) {
+	h.probes = append(h.probes, p5Failure{Source: "probe", Site: site, Text: err.Error(), Count: 1, Planned: planned(err)})
+}
+
+// p5HolderFailures is the holder's one consumption of its tool failures
+// (§16.21.2), from its own record and its tasks' snapshots: its probe's
+// failures, the Wait task's failed reads (W1, kept by the task), Cmd.Wait's
+// own error (an exit status is no error of it), and each completed request
+// task's raw error. Each source only grows: no later success clears an
+// entry. The side's judgement, the hand-over's knowledge and the held
+// registry's current view all use it; the knowledge of the reap is kept
+// apart from it.
+func p5HolderFailures(probes []p5Failure, wait *p5Wait, reqs []*p5Req) []p5Failure {
+	out := append([]p5Failure(nil), probes...)
+	if wait != nil {
+		s := wait.snap()
+		out = append(out, s.Fails...)
+		if s.Done && s.WaitErr != nil {
+			out = append(out, p5Failure{Source: "wait", Text: s.WaitErr.Error(), Count: 1, Planned: planned(s.WaitErr)})
+		}
+	}
+	for _, q := range reqs {
+		if r := q.snap(); r.Err != "" {
+			out = append(out, p5Failure{Source: "request", Site: r.Holder + "/" + r.Step, Text: r.Err, Count: 1})
+		}
+	}
+	return out
+}
+
+func (h *p5Holder) failures() []p5Failure { return p5HolderFailures(h.probes, h.wait, h.reqs) }
 
 func (h *p5Holder) fail(format string, args ...any) {
 	h.fails = append(h.fails, fmt.Sprintf(format, args...))
-}
-
-// unreported gives the failures not yet reported, and marks them reported.
-func (h *p5Holder) unreported() []string {
-	out := h.fails[h.reported:]
-	h.reported = len(h.fails)
-	return out
 }
 
 // decide is a decision point: the clock read again now and compared with
@@ -481,6 +510,7 @@ func (h *p5Holder) tail(probeFirst bool) bool {
 	if probeFirst {
 		switch zombie, err := h.ops.probe(); {
 		case err != nil:
+			h.probeFailed("normal", err)
 			h.fail("the child's state after the chain is unknown (%v): the chain did not end it", err)
 		case !zombie:
 			h.fail("the child still runs after the chain: the chain did not end it")
@@ -540,7 +570,11 @@ func (h *p5Holder) cleanup() {
 	// if it is not a reliable zombie and none is pending, then the Wait,
 	// each a decision point.
 	if h.wait == nil {
-		if zombie, err := h.ops.probe(); err != nil || !zombie {
+		zombie, err := h.ops.probe()
+		if err != nil {
+			h.probeFailed("cleanup", err)
+		}
+		if err != nil || !zombie {
 			if _, expired := h.request("cleanup", h.d); expired {
 				h.cleanupExpire("a new request")
 				return
@@ -556,7 +590,8 @@ func (h *p5Holder) cleanup() {
 	for _, q := range h.reqs {
 		q.until(h.d)
 	}
-	// 5. All confirmed.
+	// 5. All confirmed: the knowledge of the reap only; the tools' validity
+	// is the judgement's, from failures().
 	if ws.Done && h.pendingReq() == nil {
 		h.status = ws.Exit.Status
 		return
@@ -598,7 +633,8 @@ func (h *p5Holder) unconfirmed() []string {
 // handOver hands the side's unconfirmed duties to the held registry: its
 // Cmd, pid and tasks, with the knowledge at that moment, fixed.
 func (h *p5Holder) handOver(reason string) {
-	it := &p5HeldItem{Side: h.side, Pid: h.pid, cmd: h.cmd, Reason: reason, chain: h.chain, reqs: append([]*p5Req(nil), h.reqs...), wait: h.wait, Handed: h.know()}
+	it := &p5HeldItem{Side: h.side, Pid: h.pid, cmd: h.cmd, Reason: reason, chain: h.chain, reqs: append([]*p5Req(nil), h.reqs...), wait: h.wait,
+		probes: append([]p5Failure(nil), h.probes...), Handed: h.know()}
 	h.held.add(it)
 	h.handed = it
 }
@@ -621,14 +657,17 @@ type p5HeldKnow struct {
 	Chain    string      `json:"chain"` // not started, pending, returned
 	ChainErr string      `json:"chain_error,omitempty"`
 	Requests []p5ReqSnap `json:"requests"`
+	// Failures is the unified consumption at that moment (§16.21.2).
+	Failures []p5Failure `json:"failures,omitempty"`
 }
 
 func (k p5HeldKnow) line() string {
 	return fmt.Sprintf("reap: %s; chain: %s; requests: %d", k.Reap, k.Chain, len(k.Requests))
 }
 
-func p5Knowledge(chain *p5Task, reqs []*p5Req, wait *p5Wait) p5HeldKnow {
-	k := p5HeldKnow{At: time.Now().Format(time.RFC3339Nano), Reap: p5ReapNone, Chain: "not started", Requests: []p5ReqSnap{}}
+func p5Knowledge(chain *p5Task, reqs []*p5Req, wait *p5Wait, probes []p5Failure) p5HeldKnow {
+	k := p5HeldKnow{At: time.Now().Format(time.RFC3339Nano), Reap: p5ReapNone, Chain: "not started", Requests: []p5ReqSnap{},
+		Failures: p5HolderFailures(probes, wait, reqs)}
 	if wait != nil {
 		s := wait.snap()
 		switch {
@@ -655,7 +694,7 @@ func p5Knowledge(chain *p5Task, reqs []*p5Req, wait *p5Wait) p5HeldKnow {
 	return k
 }
 
-func (h *p5Holder) know() p5HeldKnow { return p5Knowledge(h.chain, h.reqs, h.wait) }
+func (h *p5Holder) know() p5HeldKnow { return p5Knowledge(h.chain, h.reqs, h.wait, h.probes) }
 
 // p5HeldItem is one side handed to the registry: it keeps the references
 // to the side's Cmd and tasks until the test process ends. Its knowledge
@@ -669,6 +708,7 @@ type p5HeldItem struct {
 	chain  *p5Task
 	reqs   []*p5Req
 	wait   *p5Wait
+	probes []p5Failure
 }
 
 // p5HeldReg is the held registry: its lock guards only the list (no task
@@ -711,8 +751,184 @@ type p5HeldView struct {
 func (r *p5HeldReg) view() []p5HeldView {
 	out := []p5HeldView{}
 	for _, it := range r.list() {
-		out = append(out, p5HeldView{it.Side, it.Pid, it.Reason, it.Handed, p5Knowledge(it.chain, it.reqs, it.wait)})
+		out = append(out, p5HeldView{it.Side, it.Pid, it.Reason, it.Handed, p5Knowledge(it.chain, it.reqs, it.wait, it.probes)})
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Side < out[j].Side })
 	return out
+}
+
+// p5ReadSeam is the real regression's seam on a chain's read
+// (§16.21.3): the real read happens first and is kept; only when it gave
+// alive without an error is its answer replaced, once, by an unknown with
+// a planned error. Otherwise nothing is replaced: the real result goes on
+// as it is, a real failure stays unplanned, and the premise's failure is
+// kept. The chain runs in its own task; the side reads the seam after.
+type p5ReadSeam struct {
+	mu      sync.Mutex
+	v       survivor
+	hits    int
+	real    string // the real read the seam met at its site
+	premise string // why the premise failed, "" while it holds
+}
+
+func (s *p5ReadSeam) wrap(read func(survivor, string) (string, error)) func(survivor, string) (string, error) {
+	return func(v survivor, at string) (string, error) {
+		class, err := read(v, at)
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if v != s.v || at != "round" || s.hits > 0 || s.real != "" {
+			return class, err
+		}
+		s.real = class
+		if err != nil {
+			s.real += " (" + err.Error() + ")"
+		}
+		if err != nil || class != p5Alive {
+			s.premise = "the real read at the seam's site gave " + s.real + ", not alive: nothing replaced"
+			return class, err
+		}
+		s.hits++
+		return p5Unknown, &p5Planned{"the first round's read of " + v.key() + " answered unknown"}
+	}
+}
+
+func (s *p5ReadSeam) state() (hits int, real, premise string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.hits, s.real, s.premise
+}
+
+// p5ObserveSeam is the seam on the Wait task's W1 read (§16.21.2): the
+// real read happens first; only when it succeeded is its answer replaced,
+// once, by a planned error. A real failure is never replaced.
+type p5ObserveSeam struct {
+	mu      sync.Mutex
+	hits    int
+	real    string
+	premise string
+}
+
+func (s *p5ObserveSeam) wrap(observe func() (bool, error)) func() (bool, error) {
+	return func() (bool, error) {
+		z, err := observe()
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if s.hits > 0 || s.real != "" {
+			return z, err
+		}
+		s.real = fmt.Sprintf("zombie %v", z)
+		if err != nil {
+			s.real = "failed (" + err.Error() + ")"
+			s.premise = "the real W1 read at the seam's site failed: nothing replaced"
+			return z, err
+		}
+		s.hits++
+		return false, &p5Planned{"the Wait task's first read failed"}
+	}
+}
+
+func (s *p5ObserveSeam) state() (hits int, real, premise string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.hits, s.real, s.premise
+}
+
+// p5RealSpec is what a side of the real regression plans: how many times
+// each seam is to be hit.
+type p5RealSpec struct {
+	ChainSeam int // the chain's read seam: 1, or 0 for none
+	WaitSeam  int // the W1 seam: 1, or 0 for none
+}
+
+// p5RealFacts are what a side found, each from its own record.
+type p5RealFacts struct {
+	Chain        *p5CleanResult // nil: the chain did not return
+	ChainHits    int
+	ChainPremise string
+	WaitHits     int
+	WaitPremise  string
+	Holder       []p5Failure // the holder's unified consumption
+	Protocol     []string    // the holder's own T: not executed, not returned, expiry, unconfirmed
+	Reaped       bool
+	Status       string
+	Requests     int
+}
+
+// p5Problem is one reason a side does not hold, with its code.
+type p5Problem struct {
+	Code   string `json:"code"`
+	Detail string `json:"detail"`
+}
+
+// p5RealJudge is a side's judgement (§16.21.3), the same for the real
+// regression and the model checks. Planned failures are known by their
+// type and source only, and must match the seam's hits; every unplanned
+// failure of the chain, and every failure of the holder itself (planned
+// or not), is a problem. Neither a text, nor a count of aggregated
+// problems, nor the final success stands for "only the expected error".
+func p5RealJudge(spec p5RealSpec, f p5RealFacts) []p5Problem {
+	var out []p5Problem
+	add := func(code, format string, args ...any) {
+		out = append(out, p5Problem{code, fmt.Sprintf(format, args...)})
+	}
+	for _, x := range f.Protocol {
+		add("protocol", "%s", x)
+	}
+	if f.ChainPremise != "" {
+		add("seam-premise", "the chain's seam: %s", f.ChainPremise)
+	}
+	if f.WaitPremise != "" {
+		add("seam-premise", "the W1 seam: %s", f.WaitPremise)
+	}
+	if f.ChainHits != spec.ChainSeam {
+		add("seam-hits", "the chain's seam was hit %d times, planned %d", f.ChainHits, spec.ChainSeam)
+	}
+	if f.WaitHits != spec.WaitSeam {
+		add("seam-hits", "the W1 seam was hit %d times, planned %d", f.WaitHits, spec.WaitSeam)
+	}
+	if f.Chain == nil {
+		add("chain", "the chain gave no result")
+	} else {
+		plannedN := 0
+		for _, x := range f.Chain.Failures {
+			if x.Planned {
+				plannedN += x.Count
+				continue
+			}
+			add("unplanned", "the chain's %s failure (%d times): %s", x.Source, x.Count, x.Text)
+		}
+		if plannedN != f.ChainHits {
+			add("planned-unmatched", "the chain kept %d planned failures, the seam made %d", plannedN, f.ChainHits)
+		}
+		if c := f.Chain; c.Found != 1 || len(c.Ended) != 1 || len(c.Left) != 0 || c.Kills < 1 {
+			add("chain", "found %d, ended %v, left %v, kills %d; want 1 found, 1 ended, none left, a kill", c.Found, c.Ended, c.Left, c.Kills)
+		}
+	}
+	holderPlanned := 0
+	for _, x := range f.Holder {
+		if x.Planned {
+			holderPlanned += x.Count
+		}
+		add("holder", "the holder's %s failure%s (%d times, planned %v): %s", x.Source, map[bool]string{true: " at " + x.Site, false: ""}[x.Site != ""], x.Count, x.Planned, x.Text)
+	}
+	if holderPlanned != f.WaitHits {
+		add("planned-unmatched", "the holder kept %d planned failures, the W1 seam made %d", holderPlanned, f.WaitHits)
+	}
+	if !f.Reaped || f.Status != "signal 9" {
+		add("reap", "reaped %v as %q; want signal 9", f.Reaped, f.Status)
+	}
+	if f.Requests != 0 {
+		add("requests", "the holder made %d termination requests: signal 9 proves nothing of the chain then", f.Requests)
+	}
+	return out
+}
+
+// p5Codes are the problems' codes, sorted.
+func p5Codes(ps []p5Problem) []string {
+	var cs []string
+	for _, p := range ps {
+		cs = append(cs, p.Code)
+	}
+	sort.Strings(cs)
+	return cs
 }

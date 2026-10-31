@@ -88,6 +88,9 @@ jobs:
         # step's failed flag, which nothing clears, and which fails the job
         # in "P-5 static verdict" after the tests ran. Each conclusion is
         # printed as "WP25P5STATIC <ID> v2 <class>" and kept for WP25P5.
+        # After Review 116 (§16.21.4): the architecture query's own exit
+        # status is consumed where it runs (P5.static.arch), and M6 checks
+        # that call site.
         id: p5static
         if: runner.os == 'macOS'
         run: |
@@ -155,6 +158,23 @@ jobs:
             v=""
             if v=$(cat -- "$1"); then :; else v=""; fi
           }
+          # query_arch NAME CMD...: the architecture query (§16.21.4), the
+          # one function of the real call site and of M6. Its own status is
+          # consumed here, at once: a non-zero exit is a T(tool) whatever
+          # it printed; its output is checked apart. Sets arch and archT
+          # ("" while it holds).
+          query_arch() {
+            run "$sd/$1.txt" "${@:2}"
+            archT=""
+            if [ "$s" -ne 0 ]; then archT="T(tool): go env GOARCH exited $s"; fi
+            value "$sd/$1.txt"
+            case "$v" in
+              arm64) arch=arm64 ;;
+              amd64) arch=x86_64 ;;
+              *) arch="unknown($v)" ;;
+            esac
+            if one "$sd/$1.txt" '^(arm64|amd64)$'; then :; elif [ -z "$archT" ]; then archT="T(parser): GOARCH printed $v"; fi
+          }
 
           # The tools, found once.
           if GO=$(command -v go) && [ -x "$GO" ]; then :; else GO=""; fi
@@ -180,13 +200,9 @@ jobs:
             exit 1
           fi
           rec P5.static.toolchain ok
-          run "$sd/goarch.txt" "$GO" env GOARCH
-          value "$sd/goarch.txt"
-          case "$v" in
-            arm64) arch=arm64 ;;
-            amd64) arch=x86_64 ;;
-            *) arch="unknown($v)" ;;
-          esac
+          # P5.static.arch: a T here stays in failed, whatever follows.
+          query_arch goarch "$GO" env GOARCH
+          if [ -n "$archT" ]; then rec P5.static.arch "$archT"; else rec P5.static.arch "ok: $arch"; fi
 
           # P5.static.vet and P5.static.build, then the decoder's build.
           run "$sd/vet.txt" "$GO" vet ./...
@@ -262,6 +278,27 @@ jobs:
             m5="no decoder"
           fi
           if [ "$m5" = ok ]; then echo "M5 ok: T(parser) at A2"; else mfail="$mfail M5($m5)"; fi
+          # M6: the architecture query's own call site, with legal output
+          # and a non-zero exit, in a subshell with its own failed flag and
+          # file; a success and an ok follow. The T must stay.
+          m6go() {
+            echo arm64
+            return 1
+          }
+          if m6=$(
+            out="$sd/m6-static.txt"
+            : > "$out"
+            failed=0
+            query_arch m6arch m6go env GOARCH
+            if [ -n "$archT" ]; then rec P5.static.arch "$archT"; else rec P5.static.arch "ok: $arch"; fi
+            run "$sd/m6-after.txt" true
+            rec P5.static.after ok
+            echo "M6RESULT $failed $arch ${archT%%:*}"
+          ); then :; else m6="the subshell exited $?"; fi
+          printf '%s\n' "$m6"
+          m6=${m6##*$'\n'}
+          match "$sd/m6-static.txt" '^P5\.static\.arch v2 T\(tool\): go env GOARCH exited 1$'
+          if [ "$m6" = "M6RESULT 1 arm64 T(tool)" ] && [ "$m" -eq 0 ] && [ "$n" = 1 ]; then echo "M6 ok: T(tool) kept after a success"; else mfail="$mfail M6($m6, grep $m/$n)"; fi
           if [ -z "$mfail" ]; then
             rec P5.static.method ok
           else

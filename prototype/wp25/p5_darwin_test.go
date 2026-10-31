@@ -72,7 +72,7 @@ var p5 struct {
 	di      time.Time
 	gates   []gateResult
 	combos  []comboResult // R-B1-2's combination (§16.17.2), apart from the gates
-	real    []p5RealRec   // TestP5CleanupReal's sides (§16.17.3 R-B2-2)
+	real    []p5RealRec   // the real regression's sides (§16.17.3 R-B2-2, §16.21)
 	handed  []*p5Hand     // what the gates handed on to the final cleanup
 	final   string        // the final cleanup's account
 	finalT  bool          // it left something unconfirmed (a T)
@@ -874,8 +874,8 @@ func p5Summary() {
 	rm := map[string]string{}
 	for _, x := range real {
 		rm[x.Side] = "pass"
-		if len(x.Fails) > 0 {
-			rm[x.Side] = "FAIL: " + strings.Join(x.Fails, "; ")
+		if !x.Pass {
+			rm[x.Side] = "FAIL: " + x.Reason
 		}
 	}
 	model := map[string]string{}
@@ -902,7 +902,7 @@ func p5Summary() {
 // there or cannot be read leaves them unknown.
 func p5StaticFile() map[string]string {
 	m := map[string]string{}
-	ids := []string{"P5.static.toolchain", "P5.static.vet", "P5.static.build", "P5.static.method", "P5.static.artifact", "P5.static.settings", "P5.static.symbols", "P5.static.binding"}
+	ids := []string{"P5.static.toolchain", "P5.static.vet", "P5.static.build", "P5.static.arch", "P5.static.method", "P5.static.artifact", "P5.static.settings", "P5.static.symbols", "P5.static.binding"}
 	for _, id := range ids {
 		m[id] = "unknown: no conclusion"
 	}

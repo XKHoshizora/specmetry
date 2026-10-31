@@ -290,7 +290,7 @@ func replace(i int, old, new string) func(*[5]tool) {
 
 func TestBind(t *testing.T) {
 	two := func(m *mimg) { m.dylibs, m.paths = []uint32{lcLoadDylib, lcLoadDylib}, []string{libSystem, libSystem} }
-	cases := []struct {
+	type bindCase struct {
 		name  string
 		mod   func(*mimg)
 		edit  func(*[5]tool)
@@ -298,7 +298,8 @@ func TestBind(t *testing.T) {
 		rule  string
 		addr  uint64 // ok: the target's address
 		total int    // ok: the records expanded
-	}{
+	}
+	cases := []bindCase{
 		// The positive cases.
 		{name: "base X=0x00", class: "ok", addr: 0x100004000, total: 1},
 		{name: "the last whole pointer X=0x38", mod: func(m *mimg) { m.bind = stream(0x38) }, class: "ok", addr: 0x100004038, total: 1},
@@ -400,6 +401,13 @@ func TestBind(t *testing.T) {
 		}, class: tParser, rule: "A3"},
 		// The tools' status and the identity.
 		{name: "a tool exited 1", edit: func(ts *[5]tool) { ts[4].Status = 1 }, class: tTool, rule: "A9"},
+	}
+	// N-116-1 (§16.21.5): the segment's seven ends. vmsize 0x40, its one
+	// section over all of it; X = 0x39 to 0x3f leaves 7 to 1 bytes, no
+	// whole pointer: each the earliest at A4's second rule.
+	for x := uint64(0x39); x <= 0x3f; x++ {
+		cases = append(cases, bindCase{name: fmt.Sprintf("the segment's end X=%#x, %d bytes left", x, 0x40-x),
+			mod: func(m *mimg) { m.bind = stream(x) }, class: tParser, rule: "A4.v2"})
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
