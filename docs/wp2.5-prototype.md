@@ -73,6 +73,7 @@
 >
 >   负责人只授权第四稿的纯文档定向修订：写定新任务的准入与统一的到期出口，并完成 N-114-1 ~ 3 的精化，**待定向复审**。原实现的 B1、B2 不关闭；首次诊断保持 failure / invalid（T）。代码修复与新的诊断都未授权，本文的原型代码没有改动。
 > - **2026-10-31**（review-resolution §143）：[Review 115](reviews/codex-review-115.md) 对 §16.17 第四稿（`cd0d4f7`）为**计划技术 GO**：B-P112-3-R/D 关闭，B-P112-3-R、B-P112-3 在计划层面整体收口，N-114-1 ~ 3 关闭，没有新的 BLOCKER。负责人授权按第四稿实施固定范围的修复，选择流程 (i)（实现完成之后一次推送、一次诊断），不另取回归先行的诊断，不授权合并。实施在写代码之前登记（§16.18）。原实现的 B1、B2 仍待实际修复与独立复审；首次诊断保持 failure / invalid（T）。
+> - **2026-10-31**（review-resolution §144）：修复按第四稿实施。负责人在实施中决定了 A3 对不映射调试段的处理（§16.19 补充 9）。固定代码点 `b5e6e49` 的诊断 run 41162340129 四个作业 **success**：两个架构的静态第二版全部 ok（`_waitid` 绑定到 libSystem，与预测相同），原生 39/39，接缝门禁 2/2，模型 14/14，布局 3/3，组合 `p5combo.close-error` 与 `TestP5CleanupReal` 两侧 pass，`p5bind` 的模型 54/54，最终收尾 “nothing handed over”（§16.20）。**待独立复审**；作者不宣布 B1、B2 关闭或 G5 满足。
 > - 这**不是**规范冻结：草案为第 7 版，待独立审查和冻结；14 项产品选择、D21、Q-1 与 Q-2 已决定，技术候选仍待审查。T1 ~ T6 按 Review 075 的裁定只得到**局部支持**（§11；草案 §17.5 的 G1 ~ G15 与 §19）。
 > - 原型成功**不是**生产验收：生产 Check Runner、迁移 0009、CLI 接线都没有授权，WP2.5 没有实现或验收，M2 没有整体验收。
 > - 本文中的“候选规格”都待审查；其中涉及可见行为的（例如 C-4、C-7、C-10）依赖对应的产品选择（§9、§10）。C-4 的产品语义与 C-7（D20 (i)）已于 2026-10-25 决定，其技术部分仍待审查。本文不新增接受风险，也不批准任何保证调整。
@@ -6039,3 +6040,111 @@ r 为 `int32(r1)`。下面五种形式互斥，并且覆盖全部组合：
     - 这样的段不能容纳 bind 记录（A4 有效性的第 2 条要求段的 vmsize 至少为 8），所以 A4 ~ A9 不变。
   - **新增的模型对照**（在基准映像的 `__LINKEDIT` 之前加一个不映射的段）：它的节带 `S_ATTR_DEBUG` 时为 ok；不带时为 T(parser)，规则 A3。`TestBind` 的子项因此由 52 增为 54。
   - **作者本机的核对**（不是诊断的证据）：用这一写法的解码器，两个架构的产物 A1 ~ A8 都成立：`_waitid` 的 bind 记录恰有一条，ordinal 1（`/usr/lib/libSystem.B.dylib`），位于 `__DATA_CONST,__got`，标志 0、类型为指针、加数 0；符号表中未定义的 `_waitid` 的 `n_desc` 为 0。A9 需要 Apple 的工具，本机不能执行。
+
+### 16.20 结果（固定代码点 `b5e6e49`，诊断 run 41162340129）：四个作业 success，交独立复审
+
+**身份**：
+
+| 项 | 值 |
+|---|---|
+| 所依赖的计划 | §16.17 第四稿，受审提交 `cd0d4f7a7a5243e1ee1cbe24cde327db7fd30af8`（Review 115 的对象） |
+| 登记 | `d82c542`（§16.18）、`e5743f0`（§16.19，含负责人对 A3 的决定），都在代码提交之前 |
+| 实施起点 | PR #44 的 `cd0d4f7`；之上依次为 `5e6169c`（Review 115 的归档）、`d82c542`、`e5743f0` |
+| 取证代码点 | `b5e6e4916ba34162674eeed82e63aef80ba2bea8`（树 `c848031c00d3ce092e0c85ca8ff21927a6e7a2e7`），一次推送的头提交 |
+| 诊断 | WP2.5 prototype run 41162340129，push，attempt 1，**success**；没有手动触发，没有重跑 |
+| 实际检出 | 四个作业都 `checkout -B test/wp2.5-prototype-p5`，`git log -1` 为 `b5e6e49…`；`WP25META` 的 `sha` 相同 |
+| 工具链 | 四个作业 `go version go1.27.3`；两个 macOS 作业 `go env`：`go1.27.3`、`0`、`local`；构建设置 `CGO_ENABLED=0` |
+| macOS | arm64：macOS 26.6.2（25G83），`hw.machine` arm64，`proc_translated` 0；x86_64：macOS 26.6.1（25G76），`hw.machine` x86_64，`proc_translated` 不存在（原生 Intel）；两者 Xcode 26.6（17F113） |
+| 与最终 PR HEAD 的关系 | 本节与状态的回填只增加文档提交；`prototype/` 与 `.github/` 相对 `b5e6e49` 没有变化（PR 回执登记核对的命令与结果） |
+
+**作业的结果**（所有步骤都为 success，包括 macOS 的“P-5 static verdict”，`failed=0`）：
+
+| 作业 | 结论 | 说明 |
+|---|---|---|
+| `macos-latest`（arm64） | success | 静态第二版全部 ok；`TestP5` 与新增的检查全部按预测成立 |
+| `macos-26-intel`（x86_64） | success | 同上 |
+| `ubuntu-latest` | success | 53 个场景 confirmed，门禁 111/111，组合 13/13（与首次诊断相同）；`p5bind` 只编译 |
+| `windows-latest` | success | 53 个场景 confirmed，门禁 92/92，组合 13/13（与首次诊断相同）；`p5bind` 只编译 |
+
+**静态（第二版，§16.17.4；两个架构分开）**：
+
+| 检查 | arm64 | x86_64 |
+|---|---|---|
+| `toolchain`、`vet`、`build` | ok | ok |
+| `method`（M1 ~ M5） | ok：M1 为 0/2 与 0/1，M2 为 T(tool)，M3 为 T(unmatched)，M4 为 T(matcher)，M5 为 T(parser) A2 | 同左 |
+| `artifact` | ok：7839890 字节，SHA-256 `dbdddb92fd5d4ca3fc9daecacb48c5b9638bb53563ef3f59d710726bbc04385f`，build ID `dL1r_sS34Kb5fEsLU8vm/BnOaWgtVic_K_PFWIGmo/5YWGwGtiiOn2QZhpTUTx/MAd_OVRLVwUpZPRmJN3a` | ok：8348768 字节，SHA-256 `7219c17e4b1593e1555d083fe59e5aa6e204f17d19cf2d97a1cde044f1d2e269`，build ID `CbzP3E4TVI30qDzuX9_8/uSlnHr-PSxI0W3KZz9e8/Cr4rFqOBP00XjOVbN1aN/d3vpE_NAnkj8Hz2sqlkQ` |
+| 工具的身份 | `go` `/Users/runner/hostedtoolcache/go/1.27.3/arm64/bin/go`（SHA-256 `aa355b07…aafb`）；otool、nm 在 `/Applications/Xcode_26.6.app/…/XcodeDefault.xctoolchain/usr/bin/`（`2ad84277…e9b7`、`24f26348…3b92`） | `go` `…/1.27.3/x64/bin/go`（`f62e44b5…3d36`）；otool、nm 同左，哈希相同 |
+| `settings` | ok：恰有一行 `build CGO_ENABLED=0` | 同左 |
+| `symbols` | ok：`_libc_waitid_trampoline` 与 `e2waitid.libc_waitid_trampoline_addr`；恰有一行 `U _waitid` | 同左 |
+| `binding`（A1 ~ A9） | ok | ok |
+| `entry`、`load` | confirmed、ok | 同左 |
+
+**`binding` 的所见**（`p5bind/1`，go1.27.3；与 §16.17.4 由固定源码推出的预测都相同）：
+
+- 头标志 `0x00200004`：`MH_DYLDLINK`、`MH_PIE`，**没有** `MH_TWOLEVEL`。
+- 加载命令：arm64 16 条（含 `LC_MAIN`、`LC_CODE_SIGNATURE`），x86_64 15 条（含 `LC_UNIXTHREAD`，没有代码签名）；库加载命令都是 `LC_LOAD_DYLIB`：ordinal 1 `/usr/lib/libSystem.B.dylib`，ordinal 2 `/usr/lib/libresolv.9.dylib`；`LC_DYLD_INFO_ONLY` 的 weak 与 lazy 流为 0。
+- bind 记录展开之后 arm64 89 条、x86_64 86 条；以 `_waitid` 开头的恰有一条：`_waitid`，ordinal 1（libSystem），`__DATA_CONST,__got`（偏移 `0x84bf0` / `0x84eb8`），标志 0，类型为指针，加数 0，`DO_BIND`。
+- 符号表中未定义的外部 `_waitid` 恰有一个，`n_desc` 为 0。
+- `__DWARF` 段 vmsize 为 0，七个节都带 `S_ATTR_DEBUG`：按 §16.19 补充 9 接受。
+- Apple 工具的输出都符合 A9 的语法并与解码器相同：`otool -h` 的数值行为 ` 0xfeedfacf 16777228          0  0x00           2    16       2576 0x00200004`（x86_64：`16777223 3 … 15 2720`）；`otool -L` 两行，版本 0.0.0；`nm -m` 为 `(undefined) external _waitid`，没有 `(from …)`；五个工具都退出 0。
+
+**原生、接缝、模型与布局**（四类证据分开计数，不合计；布局另列）：
+
+| 类别 | arm64 | x86_64 |
+|---|---|---|
+| 原生（§16.5） | 39/39 confirmed：`calls` 2 的 33 次、`calls` 3 的 6 次；未执行 0；单次最长 229 ms，合计约 2.2 s | 39/39 confirmed（同左）；最长 215 ms，合计约 2.3 s |
+| 接缝（§16.6） | `p5.eintr-once` pass（内层 exit 1，命中 1，目标 invalid、理由恰好一条，`calls` 1）；`control.p5-w-exit7` pass（exit 0，目标 confirmed、`calls` 2） | 同左 |
+| 模型 | 14/14 pass：原有 10 项（`TestP5ProtoCopyStop` 改经 `closeRead`），新增 `TestP5ProtoCloseOnce`、`TestP5ProtoCloseLate`、`TestP5CleanChain`、`TestP5HoldExpiry` | 14/14 pass |
+| 布局（前提，另列） | `P5.layout.1` ~ `3` confirmed，`calls` 0；门禁与组合内层的 `P5.layout.1` 也 confirmed、`calls` 0 | 同左 |
+
+- **R-B1-1**（两个门禁的必要条件）：两个架构的两个门禁，`read_close` 都是：起于 EOF，`Close` 1 次，开始于复制任务的查询返回之后，在 w 之前完成，真实与报告的结果都为 nil，已释放，判定之前已消费；没有 `inner: R-B1-1` 的问题，没有移交项。
+- **门禁内层的协议**：都没有请求任务，输出完整，补救 not-needed，Final ended，保险清理 nothing left。
+
+**新增的检查**（另列，不计入上面四类、布局、39 次或门禁）：
+
+| 检查 | arm64 | x86_64 |
+|---|---|---|
+| 组合 `p5combo.close-error`（R-B1-2） | pass：门禁 `Pass` 为 false，问题恰好一条 `inner: closing the read end failed: injected: …`（工具错误 1，其他 0）；内层目标 confirmed、`calls` 2，布局 `calls` 0，内层 exit 0；补救 not-needed，Final ended，保险清理 nothing left；`read_close` 真实结果 nil（已释放）、报告的结果为注入的错误、是否注入为是；没有移交项 | 同左 |
+| `TestP5CleanupReal`（R-B2-2） | 两侧 pass，见下 | 两侧 pass |
+| `p5bind` 的模型对照 | `TestBind` 54/54、`TestBindIdentity` pass（另一个测试二进制，`ok …/p5bind`） | 同左 |
+| 方法的自检 | M1 ~ M5 都给出预期的类别（`P5.static.method` ok） | 同左 |
+
+- 组合：macOS 由 16 增为 17，17/17 pass。
+- **R-B2-2 的两侧**（两个架构相同）：
+  - 每侧一个受控的子进程（`exit-after 60000 0`，带本侧的标记），只执行一次；
+  - 接缝命中 1 次（被替换的真实读取为 alive）；链的读取依次为：进入 alive → 第一轮 unknown（接缝）→ 第二轮 alive，标记成立之后 `kill` 一次 → 第三轮 zombie；结束 1 个，没有遗留，注入的错误保留；
+  - 持有者的终止请求 0 次，唯一 Wait 回收的状态为 signal 9；收尾确认（回收的状态为已可靠回收），没有走到期出口，没有移交，`real_held` 为空；
+  - 保险清理一侧的消费：说明以 `FAILED` 开头并带注入的文字；对一个原本通过的门禁结果做保险清理之后的判定，`Pass` 为 false、恰好一条 `insurance:` 的问题；最终收尾的进程部分给出 1 条 unknown；
+  - 补救一侧的消费：failed，`still-alive:` 的问题，Final unknown。
+- **最终收尾**：两个架构都为 “nothing handed over”，`final_T` 为 false。
+
+**回归**（另列）：P-3 的 `TestP3` 63/63 confirmed、P-3 的门禁 22/22 pass，都经入口 E2；WP25SUMMARY：场景 139/139 confirmed，门禁 101/101，组合 17/17。
+
+**作者本机的核对**（实施时，不是诊断的证据；本机 Go 1.27.1）：
+
+- Windows 全量：53 个场景 confirmed，门禁 92/92，组合 13/13。
+- WSL Linux 全量（不带 `-race`）：53 个场景中 52 confirmed、1 个 unsupported（`T5.adapter.pwsh-argv`：WSL 中没有 pwsh），门禁 111/111，组合 13/13。
+- 模型（`wp25p5local`）在 Windows 与 Linux 上全部通过；`p5bind` 的模型 54/54。
+- 两个架构的交叉构建产物：解码器的 A1 ~ A8 成立（A9 需要 Apple 的工具）。
+- 静态步骤的脚本在 WSL 中以假的 go、xcrun、otool、nm、stat 与 xcodebuild 演练（Apple 工具的输出由作者按语法生成，只验证脚本的执行与匹配）。
+- 推送之前由此发现的两处：解码器在交叉构建产物上的运行发现了 A3 与 `__DWARF` 的偏离（§16.19 补充 9，负责人决定）；脚本的演练发现了 otool 输出文件名只差大小写的缺陷（补充 7，已修正）。
+
+**限制**：
+
+- N1：静态检查的产物是 `go test -c` 的 `$RUNNER_TEMP/wp25.test`，记录了它的大小、SHA-256 与 build ID；实际执行的测试二进制由 `go test` 另行构建，不声称是同一个文件。
+- 运行器上的 dyld、otool 与 nm 不声称与固定的公开源码同一构建；libSystem 内部 re-export 的解析与跳板指令的反汇编不在范围之内。
+- R-B2-2 在真实子进程上只走了正常路径（没有到期出口、没有移交）；到期出口、移交与持续持有只由模型（R-B2-3、R-B1-4）覆盖，不是原生调度延迟或系统调用挂起的动态复现。门禁内层的挂起、未确认与移交分支同样只有模型覆盖。
+- 首次诊断 run 41055799521（`0213fb7`）保持 failure / invalid（T），不回改，也不按第二版重判；那次诊断与历史上的未知保持原样。
+- Review 111 的 N2、N3 保持原范围：既有的两项模型检查不改；`WP25P5` 只打印、不裁定。
+
+**限制声明**（§16.11，原样）：
+
+> H4：静态依据是固定的 Go 1.27.3 过滤源码；动态覆盖的是所测的真实错误（`ECHILD`、`EINVAL`）与错误之后的健康恢复；没有动态取样的是健康调用时过滤之前的 errno 是否非零。
+
+> H6：只有接缝证据（消费者的不重试与失败）；真实的 EINTR 穿过跳板没有原生验证。
+
+**结论与待决**：
+
+- 本次诊断中，§16.17 第四稿与 §16.19 规定的各项在两个架构上都按预测成立；没有出现 §16.12、§16.17.8 的停止条件。
+- 作者**不宣布** Review 111 的 B1、B2 关闭，也不宣布 G5、H1 或 P-5 满足：修复与新结果须经独立复审。
+- PR #44 保持未合并，Auto-fix 与 Auto-merge 关闭；规范未冻结；生产实现未授权；WP2.5 与 M2 未验收。
