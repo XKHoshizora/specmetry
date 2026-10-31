@@ -173,6 +173,24 @@ func ObjectFormat(ctx context.Context, worktree string) (string, error) {
 	return "", apperr.New(apperr.Environment, "cannot tell the object format of the repository")
 }
 
+// ExecPath returns the exec path of the git gitx runs (git --exec-path),
+// run in dir in gitx's controlled environment, so that no GIT_EXEC_PATH of
+// the caller's applies: on Windows, where Git for Windows' sh is found
+// from it (WP2.5 spec §19.8). It reads no repository; the path is returned
+// as git prints it, without the line end. An empty answer is an
+// environment error.
+func ExecPath(ctx context.Context, dir string) (string, error) {
+	out, err := run(ctx, dir, "--exec-path")
+	if err != nil {
+		return "", err
+	}
+	p := strings.TrimRight(string(out), "\r\n")
+	if p == "" || strings.ContainsAny(p, "\r\n") {
+		return "", apperr.New(apperr.Environment, "git --exec-path printed no single path")
+	}
+	return p, nil
+}
+
 // HeadBranch returns the full name of the branch checked out in worktree,
 // such as refs/heads/main, or "" when its HEAD is detached. A branch
 // without commits yet is still returned.

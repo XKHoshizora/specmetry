@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"strings"
 	"testing"
 
 	"github.com/XKHoshizora/specmetry/internal/baseline"
@@ -220,5 +221,47 @@ func TestCheckConfigHash(t *testing.T) {
 	sum = sha256.Sum256([]byte(`{"command":"make","inputs":[],"shell":null,"workdir":"."}`))
 	if got := baseline.CheckConfigHash(none); got != hex.EncodeToString(sum[:]) {
 		t.Fatalf("CheckConfigHash without shell and inputs = %s", got)
+	}
+}
+
+// WP2.5 D3 and D4 (spec §5.6, §5.7; MVP-EV-21, CX-29): a cmd command holds
+// no CR or LF; an sh or bash command, or one with no shell (sh, D1), holds
+// no CR, quoted or not, and takes LF line breaks; pwsh and powershell
+// commands are not concerned. The problem never quotes the command.
+func TestLineBreakProblem(t *testing.T) {
+	shell := func(s string) *string { return &s }
+	const canary = "CANARY-7f3a"
+	cases := []struct {
+		shell   *string
+		command string
+		refused bool
+	}{
+		{shell("cmd"), "echo one", false},
+		{shell("cmd"), "echo one\necho " + canary, true},
+		{shell("cmd"), "echo one\recho two", true},
+		{shell("cmd"), "echo one\r\necho two", true},
+		{shell("cmd"), "echo one & echo two", false},
+		{nil, "echo one\necho two", false},
+		{nil, "echo one\r\necho " + canary, true},
+		{nil, "echo 'one\r'", true},
+		{shell("sh"), "echo one\necho two", false},
+		{shell("sh"), "echo \"one\rtwo\"", true},
+		{shell("bash"), "echo one\necho two", false},
+		{shell("bash"), "echo one\r", true},
+		{shell("pwsh"), "echo one\r\necho two", false},
+		{shell("powershell"), "echo one\r\necho two", false},
+	}
+	for _, c := range cases {
+		name := "no shell"
+		if c.shell != nil {
+			name = *c.shell
+		}
+		p := baseline.Check{Command: c.command, Shell: c.shell, Workdir: "."}.LineBreakProblem()
+		if (p != "") != c.refused {
+			t.Errorf("%s %q: problem %q, refused want %v", name, c.command, p, c.refused)
+		}
+		if strings.Contains(p, canary) || strings.Contains(p, "echo") {
+			t.Errorf("%s: the problem quotes the command: %q", name, p)
+		}
 	}
 }

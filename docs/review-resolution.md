@@ -10055,3 +10055,121 @@ macOS 13+、Intel 的支持承诺与已批准的产品决定不变；没有新�
 
 - PR #47 按条件授权以 merge commit 合并。合并核验与 master push CI 的结果，记录在交付回执与第二批的实施登记中。
 - 第二批在上述核验全部成功之后才获授权，另开实现 PR。
+
+## 156．PR #47 的合并与核验；第二批（计划 §4.2）的授权生效与实施登记
+
+**依据**：§155 的决定。
+
+- 条件授权以 merge commit 合并 PR #47。
+- PR #47 的合并核验与 master push CI 全部成功之后，第二批（计划 §4.2）的实施授权生效。
+
+**第一阶段：PR #47 的收尾与合并**：
+
+| 项 | 值 |
+|---|---|
+| 收尾的提交 | `13771e4`：Review 122 原样归档<br>`b43f9cd`：§155 与状态的同步；没有生产代码的变更 |
+| 最终 HEAD | `b43f9cd6dcb5262d78eb0d42f21dbcf0846cd95c`，树 `34715f8d7e3ae5478d6009554039e6aba6bc1e10` |
+| 最终 HEAD 的常规 CI | run 41212877858，`pull_request`，attempt 1，success（8/8）<br>八个作业都检出合并快照 `c1933139c209127b602896acabe62036e49ff9ba`：父提交为 `ad592c3`、`b43f9cd`，树与最终 HEAD 相同<br>SKIP 集合与之前相同（Ubuntu 15、macOS 7、Windows 10），没有 FAIL，每个 Go 测试作业 27 个 ok 包；CrossUser 在单独的 root 步骤中 8 个通过<br>Ubuntu 的 `internal/cli` 为 550.090 s（`go test` 的默认期限 600 s）：本次运行的观测，不是原因的结论，也不改变 M-16<br>回执写入 PR 描述 |
+| 合并 | 2026-11-01，merge commit `47f568066c4e4e18cbf28fff2a01cfdda7d34ee4`，锁定 head `b43f9cd`（`--match-head-commit`）；没有 squash 或 rebase |
+| 合并的核验 | 父提交依次为 `ad592c3`、`b43f9cd`；树 `34715f8` 与最终 HEAD 相同<br>受审的提交 `4d5dabe`（Review 121）、`8523aa0`（Review 122）与收尾的 `13771e4`、`b43f9cd` 都是它的祖先<br>合并提交的说明沿用 PR 的标题，其中的 “(not for merge)” 是合并决定之前的旧状态，以本节为准 |
+| master push CI | run 41214044060，push，attempt 1，success（8/8）<br>八个作业都 `checkout -B master`，`git log -1` 为 `47f5680`<br>SKIP 集合相同，没有 FAIL，每个 Go 测试作业 27 个 ok 包；CrossUser 8 个通过<br>`internal/cli` 的耗时（观测）：Ubuntu 468.049 s、macOS 118.214 s、Windows 349.798 s |
+
+没有重跑，没有手动触发。
+
+**第二批的授权生效**：上述核验与 master push CI 全部成功，第二批（计划 §4.2）的实施授权自此生效。
+
+**实施登记**（本节所在的提交，先于任何代码变更；分支 `feat/wp2.5-batch2`，起点 master `47f5680`）：见 [wp2.5-implementation-plan.md §11](wp2.5-implementation-plan.md)：
+
+- 固定的起点与依据；范围的对应与不做的内容；
+- 包与文件的布局：Runner 的测试在 `internal/checkrun` 中；CLI 只增加一个写入路径的接线测试；
+- 接口：`Prepare`、`Batch`、`Item`、`Interpreter`、`Document`；`baseline.Check.LineBreakProblem`；`gitx.ExecPath`；
+- 读取事务的生命周期；错误的优先级与受控的信息；
+- G1 的安排：置位的生产调用点与资源清单的观察任务在之后的批次接入，本批经测试接缝验证；
+- 固定预期、验证、空批次的写事务、提交顺序与失败出口；
+- 开工之前已知的事项：
+  - 已登记而路径已不存在的 worktree 使解释器不可用（§19.8 的冻结规则；作为待决事项报告，不在实现中变通）；
+  - 受控内存目的端随第 4 批实现，本批第 9 步只识别 `*os.File`；
+  - `gitx` 新增只读的 `ExecPath`；
+  - `factgen/legality` 的差额照旧。
+
+**状态**：
+
+- 第二批的实现在独立的实现 PR 中进行，不合并。
+- 第三批及之后的批次、第二批实现 PR 的合并与 WP2.5 的验收都未授权；M2 未验收。
+
+## 157．PR #48 的首次常规 CI 为 failure（lint）；定向收尾的授权
+
+**对象**：PR #48（第二批的实现），HEAD `501612da21ee8410b3b7a0914c9a161622db4126`，树 `157dbb18cda9a12c4a6647702ca1b31f0f242608`，base `47f568066c4e4e18cbf28fff2a01cfdda7d34ee4`。
+
+**首次常规 CI**：run 41219007149，`pull_request`，attempt 1，**failure（7/8）**；没有重跑，回执保留在 PR 描述中。
+
+- 八个作业都检出合并快照 `f3765c4a39eef0ad7d015849f738a7dddbc594e9`：父提交为 `47f5680`、`501612d`，树与 HEAD 相同。
+- 失败的是 Go lint（job 124589462772，golangci-lint v2.14.0）：一项 gosec G703（基于污点分析的路径穿越），在 `internal/checkrun/interpreter.go` 的 `finder.accept` 中的 `os.Stat(final)`。
+- 其余七个作业成功：三平台 Go 测试没有 FAIL，SKIP 集合与之前相同（Ubuntu 15、macOS 7、Windows 10），新增与改动的测试在各自适用的平台上都实际 PASS；三个构建作业与 Web 成功。
+- 按登记的失败出口（计划 §11.10）停止报告：没有重跑，没有修复，没有原型诊断。
+
+**负责人的决定**（2026-11-01）：只授权对 PR #48 的定向收尾，不授权合并。
+
+1. 只在 `os.Stat(final)` 那一行加 `//nolint:gosec`，英文理由写明 G703：解释器的查找按规范 §5.3、§19.8 检查解析之后的外部候选路径，这一调用只读取元数据。不改变路径处理、候选选择或 worktree 排除；不修改 `.golangci.yml`，不全局排除 G703。
+2. 同步 data-model §8.3 中 D3/D4 的实施状态：写入路径的校验与执行前校验已在本批实现，待独立审查；公开的 `check run` 尚未注册。只更新状态，不改变规则，不宣称已验收。
+3. **已删除的 worktree 导致持续拒绝**（计划 §11.11 第 1 项）：保持当前的实现与测试。它作为待决的冻结之后的规范修订保留；不自行跳过不存在的根，也不记为已接受的 L。
+4. 对新的 HEAD 完成适用的检查与一次完整的常规 CI。run 41219007149 的首次失败回执保留，新的运行单独登记，不重跑旧运行。新的 CI 再失败就停止报告，不扩修。
+5. 不为注释本身追加测试；不修改工具链、依赖、workflow、预算或其他生产行为。
+
+**状态**：
+
+- PR #48 不合并；Auto-fix、Auto-merge 保持关闭。
+- 第三批及之后的批次与 WP2.5 的验收都未授权；M2 未验收。
+
+## 158．Review 123：第二批实现技术 NO-GO（B-123-1、B-123-2）；定向修复的授权与登记
+
+**审查对象**：PR #48，HEAD `1a2eda18ba137ba31cb796ce22ad90c415a027db`，树 `4d1cae71587fa378d58b388bec2ac6a6645cbd67`，base `47f568066c4e4e18cbf28fff2a01cfdda7d34ee4`；最终常规 CI run 41224740139 的合并快照为 `4a0b6a0`。
+
+**原文**：[codex-review-123.md](reviews/codex-review-123.md)，原样单独归档于 `4b05c81`：26619 字节，SHA-256 `e713eebaffa18ce5d0e59e07ca1391998084f71f0b98692d6b98374c063459da`；源文件、暂存区与提交 blob `cf57fbc` 一致。
+
+**结论**：固定对象技术 NO-GO，暂不建议合并。授权、实施登记与大部分接线符合批次边界；最终 CI 8/8 success，但没有覆盖下面两个错误分支。
+
+- **B-123-1**：显式 AC 的选择拒绝、D3 / D4 的拒绝与解释器不可用这三个入口不限制 `details` 的数量。201 个问题即产生 201 项，违反 `error.v1` 的 `maxItems: 200`。审查者在隔离副本中对三个入口各以 200 / 201 个问题验证：200 通过，201 契约失败。
+- **B-123-2**：`Prepare` 失败的收尾丢弃了 `Batch.Close` 的结果，第二次 `Close` 返回 nil；Windows 的 `finalPath` 忽略自己句柄的 `CloseHandle` 结果；测试的清理也忽略关闭结果。这是确定的控制流，不是复现的原生泄漏。
+- **N-123-1**：已登记的空批次“不打开写事务”应精化为“不再打开登记写事务，固定读取事务不写入”。
+- **Q-WORKTREE**：已删除的登记 worktree 导致的拒绝符合现行冻结规则；待负责人决定，不是本批的阻塞，也不是已接受的 L。
+- **证据的分层**：审查者本机的部分定向测试在夹具准备时被权限拒绝（`mklink /J`、`git init` 写配置），没有进入目标断言，不计为通过；相应的动态证据来自 CI。
+
+**负责人的决定**（2026-11-01）：
+
+1. 采纳 Review 123 的技术结论。
+2. 只授权修复 B-123-1、B-123-2 及对应的回归，并处理 N-123-1；不授权合并或后续批次。
+3. **B-123-1**：在本批统一的错误构造边界处理三个入口；继续检查全部参数与所选 AC；按原顺序保留至多 200 条真实 `details`，超过时以受控 `message` 写明总数与省略数；保留展示项的真实位置与对应、原步骤与退出码；不改 Schema 的上限，不全局改写 `apperr`。三个入口各验证 199 / 200 / 201，并验证问题只在第 201 项时仍拒绝。
+4. **B-123-2**：覆盖 `Prepare` 失败的收尾、`Batch.Close` 与 Windows `finalPath` 的句柄；保存第一次关闭结果，原步骤错误与关闭错误同时保留，清理说明用受控文本；保持原步骤的优先级与退出码，不新增 C-4 / D21 的禁用条件；区分“已尝试关闭”与“确认释放”；不重复执行底层关闭；写明释放未确认时的责任与结果的保存位置；Windows 句柄关闭失败不能返回成功，也不能当作普通候选缺失跳过；检查最终的错误信封；清理说明与数量限制组合之后仍完整、合法。补实际编排的故障接缝与健康对照；测试自己的清理检查关闭结果；注入的证据如实标注。
+5. **N-123-1**：精化文字，不新增 `ReadTx`。
+6. 已删除 worktree 的规范问题维持原规则，不记为已接受的 L；`factgen/legality`、维护事项、工具链、依赖、workflow 与预算不顺带修改。
+7. 完成适用的定向测试与新固定 HEAD 的一次完整常规 CI；不重跑旧运行，不触发原型诊断；失败则停止报告，不扩修。
+
+**本轮的实施登记**（本节所在的提交，先于代码修复）：见 [wp2.5-implementation-plan.md §11.12](wp2.5-implementation-plan.md)：修复方式、错误的组合、关闭结果的保存与责任、测试接缝与回归预期；§11.9 已按 N-123-1 精化。
+
+**状态**：
+
+- B-123-1、B-123-2 是否关闭，由 Review 124 裁定。
+- PR #48 不合并；Auto-fix、Auto-merge 关闭。第三批及之后的批次与 WP2.5 的验收都未授权；M2 未验收。
+
+## 159．PR #48 修复之后的常规 CI 为 failure（测试中的 errorlint）；最小 lint 收尾的授权
+
+**对象**：PR #48，HEAD `6e5747e4c6d592fe70cf683b15bf09482872b3b7`，树 `1f073432d143b031e283b4e8a462a27f6d200d01`，base `47f568066c4e4e18cbf28fff2a01cfdda7d34ee4`（§158 的修复提交）。
+
+**常规 CI**：run 41228654793，`pull_request`，attempt 1，**failure（7/8）**；没有重跑，回执保留在 PR 描述中。
+
+- 八个作业都检出合并快照 `74eb8883f16b57b697a9c9984ff7b3e48be7a8b4`：父提交为 `47f5680`、`6e5747e`，树与 HEAD 相同。
+- 失败的是 Go lint（job 124618024905，golangci-lint v2.14.0）：一项 errorlint，在 `internal/checkrun/release_test.go` 的 `TestBatchCloseKeepsItsFirstResult` 中 `second != first` 的比较。生产代码没有发现。
+- 其余七个作业成功：三平台 Go 测试没有 FAIL，SKIP 集合与之前相同（Ubuntu 15、macOS 7、Windows 10）；§158 的新增测试在各自适用的平台上都实际 PASS。
+- 按 §158 的失败出口停止报告：没有重跑，没有修复。
+
+**负责人的决定**（2026-11-01）：只授权最小的 lint 收尾，不授权合并。
+
+1. 在 `TestBatchCloseKeepsItsFirstResult` 的直接比较行加局部豁免 `//nolint:errorlint // Intentionally compare identity: Close must return the same cached error instance.`；保留 `second != first`，不改成 `errors.Is`，也不改为只比较 `errors.As` 取得的内部指针。
+2. 不修改生产代码、其他断言或 lint 配置，不新增测试。
+3. 完成适用的检查，在新的固定 HEAD 上取得一次完整的常规 CI。旧运行不重跑，首次失败的回执保留，新运行单独登记；再次失败则停止报告，不扩修。
+
+**状态**：
+
+- 完成之后暂停，交 Review 124；B-123-1、B-123-2 是否关闭仍由独立复审裁定。
+- PR #48 不合并；Auto-fix、Auto-merge 关闭。第三批及之后的批次与 WP2.5 的验收都未授权；M2 未验收。

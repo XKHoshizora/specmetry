@@ -262,6 +262,28 @@ func CheckConfigHash(c Check) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// LineBreakProblem is what WP2.5 D3 and D4 refuse in c's command, or "".
+// cmd runs only the first line of a command, without a word, so a cmd
+// command holds no CR or LF (D3); an sh or bash command, or one with no
+// shell, which runs as sh (D1), holds no CR, quoted or not (D4). Nothing is
+// normalized: that would change the saved command and its hash. pwsh and
+// powershell commands are not concerned. Every path that writes a check
+// applies it to the check it writes (V-P04), and check run to a saved one
+// before it runs anything; a saved check stays readable as it is.
+func (c Check) LineBreakProblem() string {
+	shell := "sh"
+	if c.Shell != nil {
+		shell = *c.Shell
+	}
+	switch {
+	case shell == "cmd" && strings.ContainsAny(c.Command, "\r\n"):
+		return "has a line break (CR or LF): cmd runs only the first line of a command, so the command of a cmd check is one line"
+	case (shell == "sh" || shell == "bash") && strings.Contains(c.Command, "\r"):
+		return "has a carriage return (CR), quoted or not: the command of an sh or bash check, or one with no shell, takes LF line breaks only"
+	}
+	return ""
+}
+
 // jcsString writes s as RFC 8785 serializes a string: quote and backslash
 // escaped, control characters as \b \t \n \f \r or \u00xx, everything else
 // as it is.

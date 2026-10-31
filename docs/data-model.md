@@ -1246,7 +1246,7 @@ M0 的 CI 会校验这两者（WP0.4）。凡是需要数据库状态才能判�
 | V-P01 | 严格符合 schema；`origin = human_edit` 只允许来自人工编辑通道（交互式终端中的 `propose --apply`、Dashboard 编辑），Agent 通道使用它会被拒绝（退出码 3） | 拒绝 |
 | V-P02 | `base_version` 等于当前基准版本；每个 `target_revision` 等于目标当前的 revision | 过期 |
 | V-P03 | `ref` 在提案内唯一；`target`、`requirement`、`goal`、`about` 指向 `active` 编号或本提案内的 `ref`；同一 `target` 至多出现一次 | 拒绝 |
-| V-P04 | 自动化 AC 的 `check` 必须有 `rationale`；`workdir` 和 `inputs` 规范化后不得越出仓库根；`timeout_sec` 在 1–3600 之间。**命令中的换行**（WP2.5 D3、D4，2026-10-25 产品决定；**待实施**：在 WP2.5 的实现中加入，此前现有代码不执行）：`shell = cmd` 的 `command` 不得含 CR 或 LF；`sh`、`bash` 或省略 `shell` 的 `command` 不得含 CR（LF 允许）；不规范化。只校验本次写入的 `check`（`add` 的 `check`，或 `update` 中给出的 `check`）；已保存的不符合的配置保持可读、不改写，`check run` 在执行前拒绝（退出码 2）。这一规则不写成共用的 `checkSpec` schema 约束，因为读取模型（`baseline-show.v1`）复用它 | 拒绝 |
+| V-P04 | 自动化 AC 的 `check` 必须有 `rationale`；`workdir` 和 `inputs` 规范化后不得越出仓库根；`timeout_sec` 在 1–3600 之间。**命令中的换行**（WP2.5 D3、D4，2026-10-25 产品决定；**实施状态**：写入路径的校验与 `check run` 的执行前校验已在 WP2.5 第二批（PR #48）实现，待独立审查；公开的 `check run` 命令尚未注册）：`shell = cmd` 的 `command` 不得含 CR 或 LF；`sh`、`bash` 或省略 `shell` 的 `command` 不得含 CR（LF 允许）；不规范化。只校验本次写入的 `check`（`add` 的 `check`，或 `update` 中给出的 `check`）；已保存的不符合的配置保持可读、不改写，`check run` 在执行前拒绝（退出码 2）。这一规则不写成共用的 `checkSpec` schema 约束，因为读取模型（`baseline-show.v1`）复用它 | 拒绝 |
 | V-P05 | `check.command` 及所有文本字段都不能命中密钥规则；所有文本字段都不能包含代码围栏；标题只能有一行 | 拒绝 |
 | V-P06 | `sources[].source` 是已登记且未移除的来源；`excerpt` ≤ 500 字符 | 拒绝 |
 | V-P07 | 片段校验结果：`verified` / `not_found` / `source_missing` / `not_checkable` | 标记 |
