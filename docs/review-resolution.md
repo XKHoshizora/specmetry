@@ -10151,3 +10151,25 @@ macOS 13+、Intel 的支持承诺与已批准的产品决定不变；没有新�
 
 - B-123-1、B-123-2 是否关闭，由 Review 124 裁定。
 - PR #48 不合并；Auto-fix、Auto-merge 关闭。第三批及之后的批次与 WP2.5 的验收都未授权；M2 未验收。
+
+## 159．PR #48 修复之后的常规 CI 为 failure（测试中的 errorlint）；最小 lint 收尾的授权
+
+**对象**：PR #48，HEAD `6e5747e4c6d592fe70cf683b15bf09482872b3b7`，树 `1f073432d143b031e283b4e8a462a27f6d200d01`，base `47f568066c4e4e18cbf28fff2a01cfdda7d34ee4`（§158 的修复提交）。
+
+**常规 CI**：run 41228654793，`pull_request`，attempt 1，**failure（7/8）**；没有重跑，回执保留在 PR 描述中。
+
+- 八个作业都检出合并快照 `74eb8883f16b57b697a9c9984ff7b3e48be7a8b4`：父提交为 `47f5680`、`6e5747e`，树与 HEAD 相同。
+- 失败的是 Go lint（job 124618024905，golangci-lint v2.14.0）：一项 errorlint，在 `internal/checkrun/release_test.go` 的 `TestBatchCloseKeepsItsFirstResult` 中 `second != first` 的比较。生产代码没有发现。
+- 其余七个作业成功：三平台 Go 测试没有 FAIL，SKIP 集合与之前相同（Ubuntu 15、macOS 7、Windows 10）；§158 的新增测试在各自适用的平台上都实际 PASS。
+- 按 §158 的失败出口停止报告：没有重跑，没有修复。
+
+**负责人的决定**（2026-11-01）：只授权最小的 lint 收尾，不授权合并。
+
+1. 在 `TestBatchCloseKeepsItsFirstResult` 的直接比较行加局部豁免 `//nolint:errorlint // Intentionally compare identity: Close must return the same cached error instance.`；保留 `second != first`，不改成 `errors.Is`，也不改为只比较 `errors.As` 取得的内部指针。
+2. 不修改生产代码、其他断言或 lint 配置，不新增测试。
+3. 完成适用的检查，在新的固定 HEAD 上取得一次完整的常规 CI。旧运行不重跑，首次失败的回执保留，新运行单独登记；再次失败则停止报告，不扩修。
+
+**状态**：
+
+- 完成之后暂停，交 Review 124；B-123-1、B-123-2 是否关闭仍由独立复审裁定。
+- PR #48 不合并；Auto-fix、Auto-merge 关闭。第三批及之后的批次与 WP2.5 的验收都未授权；M2 未验收。
