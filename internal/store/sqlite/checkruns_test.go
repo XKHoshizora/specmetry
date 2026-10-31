@@ -13,8 +13,10 @@ type sqlNull struct{}
 
 // runRow is a check_runs row for the constraint tests. Each field left
 // zero takes the default of a lawful observed pass of criterion in
-// project A: clean at both ends on one HEAD, exit code 0.
+// project A: clean at both ends on one HEAD, exit code 0. nullID writes the
+// row with a NULL id.
 type runRow struct {
+	nullID                                                   bool
 	id, project, criterion, worktree, hash, grade, isolation string
 	treeStart, treeEnd, result, channel                      string
 	inputs, backend, fallback, headStart, headEnd, kind      any
@@ -40,11 +42,15 @@ func insertRunWith(verb string, r runRow) func(tx *sql.Tx) error {
 		}
 		return v
 	}
+	var id any = r.id
+	if r.nullID {
+		id = nil
+	}
 	return stmt(verb+` INTO check_runs (id, seq, project_id, criterion_id, criterion_revision, requirement_revision, check_config_hash,
     inputs_json, worktree_id, workdir, evidence_grade, isolation_mode, isolation_backend, isolation_fallback_reason, head_start, head_end,
     tree_state_start, tree_state_end, result, failure_kind, exit_code, duration_ms, triggered_channel, session_id, started_at, finished_at)
 VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, '.', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 1793444000000, 1793444008421)`,
-		r.id, r.seq, or(r.project, projectA), or(r.criterion, criterion), value(r.revision, 1), or(r.hash, shaA), value(r.inputs, nil),
+		id, r.seq, or(r.project, projectA), or(r.criterion, criterion), value(r.revision, 1), or(r.hash, shaA), value(r.inputs, nil),
 		or(r.worktree, worktreeA), or(r.grade, "observed"), or(r.isolation, "off"), value(r.backend, nil), value(r.fallback, nil),
 		value(r.headStart, runHead), value(r.headEnd, runHead), or(r.treeStart, "clean"), or(r.treeEnd, "clean"), or(r.result, "pass"),
 		value(r.kind, nil), value(r.code, 0), r.duration, or(r.channel, "agent_cli"))
@@ -185,7 +191,13 @@ VALUES (?, ?, 'AC-001-1', 'active', 1, 1, 'extracted', 1, 1, 1, ?, 1, 'in B', 'm
 	} {
 		refused(c.name, c.why, insertRun(next(c.r)))
 	}
+	// N-121-1: the PRIMARY KEY of a rowid table allows NULL and length(NULL)
+	// passes its CHECK, so id is NOT NULL. The row is lawful in every other
+	// column and foreign key; the same row with an ID is accepted.
 	first := next(runRow{})
+	withoutID := first
+	withoutID.nullID = true
+	refused("a NULL ID", "NOT NULL constraint failed: check_runs.id", insertRun(withoutID))
 	ok("a run", insertRun(first))
 	refused("a second run with its seq", unique, insertRun(runRow{id: ids.next(), seq: first.seq}))
 	refused("a second run with its ID", unique, insertRun(runRow{id: first.id, seq: 999}))
@@ -250,8 +262,9 @@ ON CONFLICT (id) DO UPDATE SET workdir = 'changed'`, first.id, projectA, criteri
 // WP2.5 Review 120 §4.1: SQLite passes a CHECK whose expression is NULL,
 // so a CHECK written with = alone lets a pass with a NULL exit code
 // through; 0009 writes every nullable comparison with IS / IS NOT, which
-// is never NULL. The first half pins the SQLite behaviour the second half
-// relies on.
+// is never NULL. Likewise a TEXT PRIMARY KEY takes NULL (Review 121
+// N-121-1), so 0009 makes id NOT NULL. The first half pins the SQLite
+// behaviour the second half relies on.
 func TestCheckRunsNullCannotSlipThrough(t *testing.T) {
 	db, _ := open(t, testutil.TempHome(t), Options{})
 	var eqNull, isZero, isNotZero, inNull int
@@ -269,7 +282,15 @@ func TestCheckRunsNullCannotSlipThrough(t *testing.T) {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO naive (result, exit_code) VALUES ('pass', NULL)`); err != nil {
 			t.Errorf("the naive CHECK refused a NULL exit code: %v", err)
 		}
-		_, err := tx.ExecContext(ctx, `DROP TABLE naive`)
+		// N-121-1: a TEXT PRIMARY KEY of a rowid table, with a length CHECK,
+		// takes a NULL key.
+		if _, err := tx.ExecContext(ctx, `CREATE TEMP TABLE naive_key (id TEXT PRIMARY KEY CHECK (length(id) = 26))`); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO naive_key (id) VALUES (NULL)`); err != nil {
+			t.Errorf("a TEXT PRIMARY KEY refused NULL: %v", err)
+		}
+		_, err := tx.ExecContext(ctx, `DROP TABLE naive; DROP TABLE naive_key`)
 		return err
 	})
 	if err != nil {

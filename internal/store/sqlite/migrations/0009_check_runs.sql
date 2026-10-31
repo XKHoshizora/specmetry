@@ -11,9 +11,11 @@
 -- The CHECKs are the second line of defence for §6.2 and D14. A CHECK
 -- passes when its expression is NULL, so every test below on a nullable
 -- column uses IS / IS NOT, never = or IN alone, and a NULL can never let
--- an inconsistent row through.
+-- an inconsistent row through. For the same reason id is NOT NULL: the
+-- PRIMARY KEY of a rowid table allows NULL, and length(NULL) passes its
+-- CHECK (Review 121 N-121-1).
 CREATE TABLE check_runs (
-    id                        TEXT    PRIMARY KEY CHECK (length(id) = 26),
+    id                        TEXT    NOT NULL PRIMARY KEY CHECK (length(id) = 26),
     seq                       INTEGER NOT NULL UNIQUE,
     project_id                TEXT    NOT NULL REFERENCES projects (id) DEFERRABLE INITIALLY DEFERRED,
     criterion_id              TEXT    NOT NULL CHECK (length(criterion_id) = 26),
