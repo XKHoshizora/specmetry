@@ -368,3 +368,53 @@ func TestRunItemShape(t *testing.T) {
 		t.Fatalf("%v\n%s", err, raw)
 	}
 }
+
+// WP2.5 spec §4.1: step 7 is judged before step 8, so an interpreter that
+// cannot be used refuses the batch (shell_unavailable) before a git that
+// would fetch is.
+func TestPrepareInterpretersBeforePD26(t *testing.T) {
+	w := newWorkspace(t)
+	w.criteria(t, ac{key: "AC-001-1", check: sh("echo one")})
+	w.exec(t, `INSERT INTO worktrees (id, project_id, path, git_dir, is_main, registered_seq, last_seen_at)
+VALUES ('01JC0000000000000000000W03', ?, ?, NULL, 0, 3, 1)`, wsProject, filepath.Join(t.TempDir(), "gone"))
+	gitDir, env, _ := testutil.PassthroughGit(t, testutil.PassWithoutNoLazyFetch)
+	for _, kv := range env {
+		k, v, _ := strings.Cut(kv, "=")
+		t.Setenv(k, v)
+	}
+	t.Setenv("PATH", gitDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	h := checkrun.NewHost()
+	_, err := run(t, h, all())
+	if doc := refused(t, h, err, apperr.ExitEnvironment, "AC-001-1"); !strings.Contains(doc, "shell_unavailable") {
+		t.Fatalf("not step 7's refusal: %s", doc)
+	}
+}
+
+// WP2.5 spec §10.3, §8.6 D1: W registered by another call between the
+// read and the empty batch's registration is not registered again;
+// nothing is written and its worktree is given.
+func TestPrepareEmptyBatchRegisteredMeanwhile(t *testing.T) {
+	w := newWorkspace(t)
+	where := w.linked(t)
+	checkrun.AfterRead(t, func() {
+		w.exec(t, `INSERT INTO worktrees (id, project_id, path, git_dir, is_main, registered_seq, last_seen_at)
+VALUES ('01JC0000000000000000000W05', ?, ?, ?, 0, 3, 7); UPDATE meta SET seq_counter = 3 WHERE id = 1`,
+			wsProject, where.Current, where.GitDir)
+	})
+	var after string
+	checkrun.OnRegister(t, func(*sql.Tx) error {
+		after = "reached"
+		return nil
+	})
+	b, err := run(t, checkrun.NewHost(), all())
+	if err != nil {
+		t.Fatal(err)
+	}
+	emptyDoc(t, b, "01JC0000000000000000000W05", false)
+	_ = b.Close()
+	got := rowsOf(t, w, `SELECT last_seen_at, (SELECT seq_counter FROM meta), (SELECT count(*) FROM worktrees) FROM worktrees WHERE path = ?`,
+		where.Current)
+	if want := [][]string{{"7", "3", "2"}}; !slices.EqualFunc(got, want, slices.Equal) || after != "reached" {
+		t.Fatalf("worktree %v (want %v), registration transaction %q", got, want, after)
+	}
+}

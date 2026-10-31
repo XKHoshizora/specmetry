@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"slices"
+	"strings"
 
 	"github.com/XKHoshizora/specmetry/internal/apperr"
 	"github.com/XKHoshizora/specmetry/internal/config"
@@ -76,6 +77,7 @@ func prepare(ctx context.Context, h *host, opts Options, out Output) (_ *Batch, 
 	defer func() {
 		if err != nil {
 			_ = b.Close()
+			err = noCheckRun(err)
 		}
 	}()
 
@@ -179,6 +181,20 @@ func prepare(ctx context.Context, h *host, opts Options, out Output) (_ *Batch, 
 		}
 	}
 	return b, nil
+}
+
+// noCheckRun is err saying that no check was run (D10: what this call
+// recorded, here nothing), also when it is another package's error, which
+// is copied, not changed.
+func noCheckRun(err error) error {
+	const note = "no check was run"
+	e := apperr.From(err)
+	if strings.Contains(e.Message, note) {
+		return e
+	}
+	c := *e
+	c.Message += "; " + note
+	return &c
 }
 
 // Recheck is spec §19.1 rule 3, before each criterion starts: a host

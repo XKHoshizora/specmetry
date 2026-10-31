@@ -237,8 +237,8 @@ func given(keys ...string) checkrun.Options {
 }
 
 // refused checks a refusal: its exit code, its details' pointers in order,
-// an error.v1 document, and a host left with no call admitted. It returns
-// the document.
+// a message that says no check was run, an error.v1 document, and a host
+// left with no call admitted. It returns the document.
 func refused(t *testing.T, h *checkrun.Host, err error, exit int, pointers ...string) string {
 	t.Helper()
 	if got := apperr.ExitCode(err); got != exit {
@@ -253,6 +253,9 @@ func refused(t *testing.T, h *checkrun.Host, err error, exit int, pointers ...st
 	}
 	if _, active, _ := checkrun.State(h); active != 0 {
 		t.Fatalf("%d calls still admitted after a refusal", active)
+	}
+	if !strings.Contains(apperr.From(err).Message, "no check was run") {
+		t.Fatalf("the message does not say that no check was run: %q", apperr.From(err).Message)
 	}
 	return envelope(t, err)
 }
