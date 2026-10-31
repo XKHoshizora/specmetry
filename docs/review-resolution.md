@@ -9921,3 +9921,40 @@ macOS 13+、Intel 的支持承诺与已批准的产品决定不变；没有新�
 - PR #46 按条件授权，以 merge commit 合并；合并核验与 master push CI 的结果，在交付回执与第一批的实施登记中记录。
 - 第一批（计划 §4.1）在上述核验全部成功之后才获授权，另开实现 PR。
 - 后续批次、实现 PR 的合并与 WP2.5 的验收都未授权；M2 未验收。
+
+## 153．PR #46 的合并与核验；第一批（计划 §4.1）的授权生效与实施登记
+
+**依据**：§152 的决定。
+
+- 条件授权以 merge commit 合并 PR #46。
+- PR #46 的合并核验与 master push CI 全部成功之后，第一批（计划 §4.1）的实施授权生效。
+
+**第一阶段：计划收尾与合并**：
+
+| 项 | 值 |
+|---|---|
+| 收尾的提交 | `7108e85`：Review 120 原样归档<br>`c9b4c43`：§152 与计划的精化 |
+| 最终 HEAD | `c9b4c432f2b7d5e71164e9deea6052052bf2f203`，树 `7195eda32a9ef35eb6510c8a17be1157d91e9739` |
+| 最终 HEAD 的常规 CI | run 41194799490，`pull_request`，attempt 1，success（8/8）<br>八个作业都检出合并快照 `36df227cb27a63686b2157364c3f41a3fb027b9a`：父提交为 `1d3f456`、`c9b4c43`，树与最终 HEAD 相同<br>SKIP 集合与之前相同（Ubuntu 15、macOS 7、Windows 10），没有 FAIL，每个 Go 测试作业 26 个 ok 包；CrossUser 在单独的 root 步骤中 8 个通过<br>回执写入 PR 描述 |
+| 合并 | 2026-10-31，merge commit `ad592c33306828e96b59f6e7be77dc4af8995bd9`，锁定 head `c9b4c43`（`--match-head-commit`）；没有 squash 或 rebase |
+| 合并的核验 | 父提交依次为 `1d3f456`、`c9b4c43`；树 `7195eda` 与最终 HEAD 相同<br>受审与收尾的提交 `c1c30e0`、`7108e85`、`c9b4c43` 都是它的祖先<br>相对 `1d3f456` 只有五个文档文件变化 |
+| master push CI | run 41195787296，push，attempt 1，success（8/8）<br>八个作业都 `checkout -B master`，`git log -1` 为 `ad592c3`<br>SKIP 集合相同，没有 FAIL，每个 Go 测试作业 26 个 ok 包；CrossUser 8 个通过 |
+
+没有重跑，没有手动触发。
+
+**第一批的授权生效**：上述核验与 master push CI 全部成功，第一批（计划 §4.1）的实施授权自此生效。
+
+**实施登记**（本节所在的提交，先于任何生产变更；分支 `feat/wp2.5-batch1`，起点 master `ad592c3`）：见 [wp2.5-implementation-plan.md §10](wp2.5-implementation-plan.md)：
+
+- 固定的起点与依据；
+- 交付范围与不做的内容；
+- 包与文件的布局：新的生产包 `internal/checkrun`，Runner 的测试在这个包中；
+- 接口的安排：不改 `internal/domain/derive`，Runner 另行实现 §7.4 的公式，再与推导引擎对照；
+- `min_binary_version` 不设置及其理由；
+- 提交顺序与验证清单；
+- 开工之前已知的事项：测试工具 `factgen/legality` 的一条规则早于 D6、D19、A12（§10.7），第一批不改它。
+
+**状态**：
+
+- 第一批的实现在独立的实现 PR 中进行，不合并。
+- 后续批次、实现 PR 的合并与 WP2.5 的验收都未授权；M2 未验收。
