@@ -20,6 +20,7 @@
     "runs": {
       "type": "array",
       "items": {
+        "description": "One recorded run. Its result, failure_kind and exit_code agree (WP2.5 D14): pass has no failure kind and exit code 0; fail is nonzero_exit with a nonzero exit code, or null for a Unix signal; error is timeout, spawn_error, input_missing, context_changed, or not_found (read only). timeout, spawn_error and input_missing have no exit code, and the last two a duration of 0; context_changed may carry any exit code, 0 included, and never qualifies. A qualifying run has a head_start and a clean start. An error run can qualify, and no exit code is bounded.",
         "type": "object",
         "additionalProperties": false,
         "required": [
@@ -56,7 +57,16 @@
             "enum": [null, "backend_unavailable", "readonly_not_enforced", "materialization_mismatch"]
           },
           "qualifying": { "type": "boolean" }
-        }
+        },
+        "allOf": [
+          { "if": { "properties": { "result": { "const": "pass" } } }, "then": { "properties": { "failure_kind": { "const": null }, "exit_code": { "const": 0 } } } },
+          { "if": { "properties": { "result": { "const": "fail" } } }, "then": { "properties": { "failure_kind": { "const": "nonzero_exit" }, "exit_code": { "not": { "const": 0 } } } } },
+          { "if": { "properties": { "result": { "const": "error" } } }, "then": { "properties": { "failure_kind": { "enum": ["timeout", "spawn_error", "input_missing", "context_changed", "not_found"] } } } },
+          { "if": { "properties": { "failure_kind": { "enum": ["timeout", "spawn_error", "input_missing"] } } }, "then": { "properties": { "exit_code": { "const": null } } } },
+          { "if": { "properties": { "failure_kind": { "enum": ["spawn_error", "input_missing"] } } }, "then": { "properties": { "duration_ms": { "const": 0 } } } },
+          { "if": { "properties": { "failure_kind": { "const": "context_changed" } } }, "then": { "properties": { "qualifying": { "const": false } } } },
+          { "if": { "properties": { "qualifying": { "const": true } } }, "then": { "properties": { "head_start": { "type": "string" }, "tree_state_start": { "const": "clean" } } } }
+        ]
       }
     }
   }

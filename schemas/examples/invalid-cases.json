@@ -190,6 +190,24 @@
     { "id": "SCH-187", "schema": "claim-receipt.v1", "base": "valid/claim-receipt.sync.json", "patch": [{ "op": "replace", "path": "/kind", "value": "import" }], "why": "an unknown batch kind" },
     { "id": "SCH-188", "schema": "claim-receipt.v1", "base": "valid/claim-receipt.sync.json", "patch": [{ "op": "replace", "path": "/schema", "value": "specmetry.claims/v1" }], "why": "the input's schema name" },
     { "id": "SCH-189", "schema": "claim-receipt.v1", "base": "valid/claim-receipt.sync.json", "patch": [{ "op": "replace", "path": "/claims/0/target", "value": "REQ-002" }], "why": "a target that is not a criterion" },
-    { "id": "SCH-190", "schema": "claim-receipt.v1", "base": "valid/claim-receipt.sync.json", "patch": [{ "op": "add", "path": "/claims/0/verified", "value": true}], "why": "no field claims verification" }
+    { "id": "SCH-190", "schema": "claim-receipt.v1", "base": "valid/claim-receipt.sync.json", "patch": [{ "op": "add", "path": "/claims/0/verified", "value": true}], "why": "no field claims verification" },
+    { "id": "SCH-191", "schema": "check-run.v1", "base": "valid/check-run.results.json", "patch": [{ "op": "replace", "path": "/runs/0/failure_kind", "value": "nonzero_exit" }], "why": "D14: pass has no failure kind" },
+    { "id": "SCH-192", "schema": "check-run.v1", "base": "valid/check-run.results.json", "patch": [{ "op": "replace", "path": "/runs/0/exit_code", "value": 1 }], "why": "D14: pass has exit code 0" },
+    { "id": "SCH-193", "schema": "check-run.v1", "base": "valid/check-run.results.json", "patch": [{ "op": "replace", "path": "/runs/0/exit_code", "value": null }], "why": "D14: pass has exit code 0, not null" },
+    { "id": "SCH-194", "schema": "check-run.v1", "base": "valid/check-run.results.json", "patch": [{ "op": "replace", "path": "/runs/0/failure_kind", "value": "timeout" }], "why": "D14, Review 089: pass + timeout + exit_code 0" },
+    { "id": "SCH-195", "schema": "check-run.v1", "base": "valid/check-run.results.json", "patch": [{ "op": "replace", "path": "/runs/2/failure_kind", "value": null }], "why": "D14: fail is nonzero_exit" },
+    { "id": "SCH-196", "schema": "check-run.v1", "base": "valid/check-run.results.json", "patch": [{ "op": "replace", "path": "/runs/3/failure_kind", "value": "timeout" }], "why": "D14: fail is nonzero_exit, not a timeout" },
+    { "id": "SCH-197", "schema": "check-run.v1", "base": "valid/check-run.results.json", "patch": [{ "op": "replace", "path": "/runs/2/exit_code", "value": 0 }], "why": "D14: fail has an exit code that is not 0" },
+    { "id": "SCH-198", "schema": "check-run.v1", "base": "valid/check-run.results.json", "patch": [{ "op": "replace", "path": "/runs/4/failure_kind", "value": null }], "why": "D14: error has a failure kind" },
+    { "id": "SCH-199", "schema": "check-run.v1", "base": "valid/check-run.results.json", "patch": [{ "op": "replace", "path": "/runs/7/failure_kind", "value": "nonzero_exit" }], "why": "D14: error is not nonzero_exit" },
+    { "id": "SCH-200", "schema": "check-run.v1", "base": "valid/check-run.json", "patch": [{ "op": "replace", "path": "/runs/1/exit_code", "value": 0 }], "why": "D14: timeout has no exit code" },
+    { "id": "SCH-201", "schema": "check-run.v1", "base": "valid/check-run.results.json", "patch": [{ "op": "replace", "path": "/runs/4/exit_code", "value": 1 }], "why": "D14: spawn_error has no exit code" },
+    { "id": "SCH-202", "schema": "check-run.v1", "base": "valid/check-run.results.json", "patch": [{ "op": "replace", "path": "/runs/5/exit_code", "value": 0 }], "why": "D14: input_missing has no exit code" },
+    { "id": "SCH-203", "schema": "check-run.v1", "base": "valid/check-run.results.json", "patch": [{ "op": "replace", "path": "/runs/4/duration_ms", "value": 5 }], "why": "D14: spawn_error started no process, so 0 ms" },
+    { "id": "SCH-204", "schema": "check-run.v1", "base": "valid/check-run.results.json", "patch": [{ "op": "replace", "path": "/runs/5/duration_ms", "value": 1 }], "why": "D14: input_missing started no process, so 0 ms" },
+    { "id": "SCH-205", "schema": "check-run.v1", "base": "valid/check-run.results.json", "patch": [{ "op": "replace", "path": "/runs/6/qualifying", "value": true }], "why": "D14: context_changed never qualifies" },
+    { "id": "SCH-206", "schema": "check-run.v1", "base": "valid/check-run.results.json", "patch": [{ "op": "replace", "path": "/runs/0/head_start", "value": null }], "why": "D14: a qualifying run has a head_start" },
+    { "id": "SCH-207", "schema": "check-run.v1", "base": "valid/check-run.results.json", "patch": [{ "op": "replace", "path": "/runs/0/tree_state_start", "value": "dirty" }], "why": "D14: a qualifying run starts clean" },
+    { "id": "SCH-208", "schema": "check-run.v1", "base": "valid/check-run.results.json", "patch": [{ "op": "replace", "path": "/runs/2/tree_state_start", "value": "unknown" }], "why": "D14: a qualifying run starts clean, not unknown" }
   ]
 }

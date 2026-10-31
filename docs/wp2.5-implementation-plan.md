@@ -2,8 +2,9 @@
 
 > 状态：**已审查并采纳**（2026-10-31；审查 120 计划技术 GO；review-resolution §151、§152）。
 >
-> - **第一批**（§4.1）获条件授权：PR #46（本计划）的合并核验与 master push CI 全部成功之后才生效，另开实现 PR。
-> - **未授权**：后续批次、实现 PR 的合并与 WP2.5 的验收。
+> - **第一批**（§4.1）获条件授权：PR #46（本计划）的合并核验与 master push CI 全部成功之后才生效，另开实现 PR。2026-10-31 已生效（§153），实施登记见 §10。审查 121、122 之后在受审范围内技术通过，实现 PR #47 获条件授权以 merge commit 合并（§155）。
+> - **第二批**（§4.2）获条件授权：PR #47 的合并核验与 master push CI 全部成功之后才生效，另开实现 PR，不合并（§155）。
+> - **未授权**：第三批及之后的批次、第二批实现 PR 的合并与 WP2.5 的验收。
 >
 > 本文依据已冻结的 [WP2.5 规范](wp2.5-check-runner.md)（§22），安排生产实现的分批、顺序、接线与验收证据。它不改变冻结的规则，不扩大 MVP 范围；本文本身不授权实施，授权见 review-resolution。各批的开工、合并与 WP2.5 的验收，都由负责人分别决定（§9）。本文不含生产代码，也不修改 Schema、迁移或 workflow。
 
@@ -493,3 +494,115 @@ flowchart LR
 | 7 | 验收的时点与证据包 | 第 7 批合并之后，由负责人按 §7 的证据包另行决定 | WP2.5 验收之前 |
 
 本计划没有提出新的产品选择、支持范围或信息保留的变化，也没有改变冻结的规则。若实施中某项会改变冻结的规则，或需要新的产品或兼容政策，须先报告。
+
+## 10. 第一批的实施登记（2026-10-31，写代码之前）
+
+本节在第一笔生产变更之前单独提交（review-resolution §153）。它只登记实施的安排，不改变冻结的规则；实施中发现需要改变冻结规则，或需要新的产品或兼容政策时，先停下报告。
+
+### 10.1 固定的起点与依据
+
+| 项 | 值 |
+|---|---|
+| 起点 | master `ad592c33306828e96b59f6e7be77dc4af8995bd9`（PR #46 的合并提交），树 `7195eda32a9ef35eb6510c8a17be1157d91e9739`；master push CI run 41195787296 正式成功（8/8，八个作业都检出 `ad592c3`，没有 FAIL，SKIP 集合与之前相同） |
+| 实现分支 | `feat/wp2.5-batch1`，另开实现 PR，不合并 |
+| 冻结规范 | 文档提交 `f99d648`，技术基准 `f2b5c87`：§6.2、§7.2、§7.4、§10、§11.2、§11.3、§19.10、§22.4 |
+| 计划 | 本文 §4.1（随 PR #46 合并） |
+| 审查的限定 | Review 120 §4 |
+| 授权 | review-resolution §152：只授权 §4.1；后续批次、实现 PR 的合并与工作包的验收都未授权 |
+
+### 10.2 交付范围
+
+只有 §4.1 的四项：
+
+1. **D14 契约与示例**：
+   - `check-run.v1` 中执行项的条件约束；
+   - 合法与非法示例，每条约束都有固定预期；
+   - 保留 `context_changed` 带退出码 0、信号的 `fail` 带 NULL，以及历史 `not_found` 的读取兼容；
+   - 不加全局的 `maximum=255`，不因 `error` 自动判为不合格。
+2. **迁移 0009**：
+   - 按冻结的完整设计（规范 §10.1）实现列、CHECK、同项目外键、`seq` 与只追加的触发器；
+   - 新写入排除 `not_found`；
+   - CHECK 中可为 NULL 的列一律用 `IS` / `IS NOT` 比较，并用测试固定 SQLite 的 NULL 行为，使未知值不能让非法行通过；
+   - 覆盖升级、项目隔离、只追加与约束的拒绝；
+   - `min_binary_version` 的判断见 §10.5。
+3. **存储与映射**：
+   - 在 `DB.WriteTx` 的事务中，依次做首次 worktree 登记、分配 `seq`、写入 `check_runs`；
+   - `dbdump` 显式查询与映射，保留原始事实；
+   - 记录绑定开始时的修订，之后基准改变不拒绝写入；
+   - 验证首次登记失败、事实写入失败与事务回滚时的行与 `seq`。
+4. **纯函数与必要的测试**：
+   - 分类、上下文变化、真值表、时间与可靠的退出码、D19 / A6 / A12、`qualifying`、D9；
+   - 测试先行，预期直接来自冻结条文与合法的事件序列；
+   - 再与已验收的推导行为对照，不以共用同一实现相互证明；
+   - 不改变 WP2.1、WP2.2 已验收的语义。
+
+**不做**：
+
+- 不注册 `check run`，不接入检查进程、全局闸门、平台管理或生产入口 E2。
+- 不实现第 2 批的读快照等接口。
+- 不改工具链、依赖、workflow、测试预算或维护事项。
+
+### 10.3 包与文件的布局
+
+| 路径 | 内容 |
+|---|---|
+| `schemas/check-run.v1.schema.json` | 执行项的 D14 条件约束：`allOf` 中七个 `if/then` |
+| `schemas/examples/valid/check-run.results.json` | 新的合法示例：每类结果，含 `context_changed` 带退出码 0、信号的 `fail`、合格的 `error` 与不合格的 `pass` |
+| `schemas/examples/invalid-cases.json` | 追加 SCH-191 ~ SCH-208：D14 每条约束的反例，含 Review 089 的 `pass + timeout + exit_code 0` |
+| `internal/contract/checkrun_d14_test.go` | 每条约束与每个允许边界的固定预期；拒绝时核对出错的字段 |
+| `internal/store/sqlite/migrations/0009_check_runs.sql` | 表、CHECK、同项目外键、索引与只追加的触发器 |
+| `internal/store/sqlite/checkruns_test.go` | 约束与 NULL、项目隔离、只追加、清理与升级 |
+| `internal/checkrun/`（新的生产包） | 分类、上下文变化、时间与退出码、合格判定、D9 汇总、写入 |
+| `internal/checkrun/*_test.go` | 纯函数的固定预期测试（先于实现提交）；存储测试；与推导引擎的对照 |
+| `internal/testutil/dbdump/dbdump.go` | `check_runs` 的显式查询与映射 |
+
+Runner 的测试在 `internal/checkrun` 自己的包中，不放进 `internal/cli`（§9 的决定 6）。这不表示 M-16 已解决。
+
+### 10.4 接口的安排
+
+包内导出，第一批没有命令使用它们：
+
+| 接口 | 规则 |
+|---|---|
+| `Classify(Observation) (Outcome, error)` | §6.2 的优先级（含 0a、0b、A12），命中行的 `exit_code`（§10.1），记录的结束上下文（§7.1、§10.1） |
+| `ContextChanged(start, end Context) bool` | §7.2 |
+| `Timing(Events) (Times, error)` | §10.1 的时间字段：按启动的分类（正常启动、恢复异常、没有进程）决定 |
+| `Qualifying(...)`、`Row.Qualifying()` | §7.4 |
+| `TargetSnapshot(s, heads, commandHead) bool` | §11.2 的 D9 |
+| `Write(ctx, tx, projectID, where, Run) (Row, error)` | §10.3：同一事务中的首次登记与写入，读回写入的行 |
+
+- 没有合法事件序列能产生的观察（例如没有进程却有退出状态、D19 却读了结束上下文），返回 `ErrObservation`：它是调用方的缺陷，不是检查的结果。
+- 不改 `internal/domain/derive`：`qualifying` 仍未导出。Runner 按 §7.4 的条文另行实现同一公式，再经 `derive.Derive` 输出的 `RunView.Qualifying` 与 `SnapshotRun` 对照。两个实现不共用代码。
+
+### 10.5 `min_binary_version`
+
+不设置，理由：
+
+- 0009 只新增一张表，不改变已有表的结构或语义。
+- 只认识 v8 的旧程序遇到 v9 的数据库，已由打开时的 schema 版本检查拒绝（`guardVersion`，退出码 6）。
+- development §5 只在迁移需要旧程序拒绝打开、而 schema 版本检查不够时设置；0002 ~ 0008 也都没有设置。
+
+迁移测试固定：升级之后 `min_binary_version` 仍为空；只认识 v8 的程序打开 v9 的数据库被拒绝，文件不变。
+
+### 10.6 提交顺序与验证清单
+
+**提交顺序**（只在最后推送一个固定代码点）：
+
+1. 本登记（纯文档）；
+2. Schema 与示例，以及契约的固定预期测试；
+3. 迁移 0009 与迁移测试；
+4. 纯函数的固定预期测试：先于实现提交，这一提交中 `internal/checkrun` 尚不能编译；
+5. 纯函数的实现、写入与 `dbdump` 的映射；
+6. 集成验证：存储测试与推导对照。
+
+**验证清单**：
+
+- 本地：`go test -tags nowebui ./...`、`go vet -tags nowebui ./...`、`gofmt`。本机没有 golangci-lint，lint 由 CI 的 lint 作业运行。
+- 三平台的常规 CI 在最终 HEAD 上正式成功，回执写入 PR 描述：实际 checkout、合并快照、FAIL、SKIP 的变化、新增包 `internal/checkrun` 在三个平台上的耗时。
+- 失败时停止报告，不自行重跑 CI，不触发原型诊断。
+
+### 10.7 开工之前已知的事项
+
+- **测试工具 `factgen/legality` 的一条规则早于 D6、D19、A12**：它要求 `failure_kind = context_changed` 当且仅当上下文确实变化。WP2.5 冻结的 D6、D19、A12 在上下文没有被证明变化时也记为 `context_changed`（规范 §7.2）。例如非 git 项目中的 D19（开始与结束的 HEAD 都为 NULL，开始为 `unknown`），或开始不干净、结束上下文读取失败而 HEAD 相同的 D6，都会被它判为不合法的历史。
+  - 第一批不改这个已验收的测试工具；推导对照直接用 `toderive` 与 `derive.Derive`，不经过它。
+  - 后续批次若用它检查 Runner 写入的历史，须先提出它的修订，经审查与负责人决定。
