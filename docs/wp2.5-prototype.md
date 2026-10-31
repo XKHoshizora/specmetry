@@ -75,6 +75,7 @@
 > - **2026-10-31**（review-resolution §143）：[Review 115](reviews/codex-review-115.md) 对 §16.17 第四稿（`cd0d4f7`）为**计划技术 GO**：B-P112-3-R/D 关闭，B-P112-3-R、B-P112-3 在计划层面整体收口，N-114-1 ~ 3 关闭，没有新的 BLOCKER。负责人授权按第四稿实施固定范围的修复，选择流程 (i)（实现完成之后一次推送、一次诊断），不另取回归先行的诊断，不授权合并。实施在写代码之前登记（§16.18）。原实现的 B1、B2 仍待实际修复与独立复审；首次诊断保持 failure / invalid（T）。
 > - **2026-10-31**（review-resolution §144）：修复按第四稿实施。负责人在实施中决定了 A3 对不映射调试段的处理（§16.19 补充 9）。固定代码点 `b5e6e49` 的诊断 run 41162340129 四个作业 **success**：两个架构的静态第二版全部 ok（`_waitid` 绑定到 libSystem，与预测相同），原生 39/39，接缝门禁 2/2，模型 14/14，布局 3/3，组合 `p5combo.close-error` 与 `TestP5CleanupReal` 两侧 pass，`p5bind` 的模型 54/54，最终收尾 “nothing handed over”（§16.20）。**待独立复审**；作者不宣布 B1、B2 关闭或 G5 满足。
 > - **2026-10-31**（review-resolution §145）：[Review 116](reviews/codex-review-116.md) 对 PR #44（HEAD `3b45ef5`，代码点 `b5e6e49`）为**技术 NO-GO**：原 B1、B2 按报告的限定关闭；新增 B-116-1（持有者没有消费 Wait、probe 与请求的错误）、B-116-2（注入可掩盖真实错误，回归的断言过宽）、B-116-3（`go env GOARCH` 的非零退出可被丢弃）；N-116-1（段尾七例未落入 fixture）非阻塞。负责人授权定向修复、适用回归与一次新固定代码点的诊断，不授权合并。实施与验证在写代码之前登记（§16.21）。run 41162340129 的正式 success 保持，按 Review 116 的限定采证。
+> - **2026-10-31**（review-resolution §146）：定向修复已实施（写代码时的补充见 §16.22，没有偏离）。固定代码点 `f9e9222` 的诊断 run 41168764902 四个作业 **success**：`TestP5CleanupRealWait` 的判定按预期以唯一的 `holder` 问题拒绝（W1 命中 1，回收 signal 9），`TestP5CleanupReal` 两侧没有问题，`P5.static.arch` ok、M1 ~ M6 成立，模型 16/16，`p5bind` 61/61，其余与上一次相同（§16.23）。**待独立复审**；作者不宣布 B-116-1 ~ 3 关闭或 G5 满足。
 > - 这**不是**规范冻结：草案为第 7 版，待独立审查和冻结；14 项产品选择、D21、Q-1 与 Q-2 已决定，技术候选仍待审查。T1 ~ T6 按 Review 075 的裁定只得到**局部支持**（§11；草案 §17.5 的 G1 ~ G15 与 §19）。
 > - 原型成功**不是**生产验收：生产 Check Runner、迁移 0009、CLI 接线都没有授权，WP2.5 没有实现或验收，M2 没有整体验收。
 > - 本文中的“候选规格”都待审查；其中涉及可见行为的（例如 C-4、C-7、C-10）依赖对应的产品选择（§9、§10）。C-4 的产品语义与 C-7（D20 (i)）已于 2026-10-25 决定，其技术部分仍待审查。本文不新增接受风险，也不批准任何保证调整。
@@ -6297,3 +6298,83 @@ r 为 `int32(r1)`。下面五种形式互斥，并且覆盖全部组合：
 - **补充 7：记录**。`WP25P5REAL` 每侧增加：计划（各接缝的次数）、预期的问题代码、两个接缝各自的记录（命中、真实读取的答案、前提不成立的原因）、持有者的失败、判定的问题、结论与理由。`WP25P5` 的 `real` 按结论打印。
 - **补充 8：静态步骤**。查询函数 `query_arch` 与其他函数放在一起；`P5.static.arch` 紧接在 `P5.static.toolchain` 之后记录。M6 在命令替换的子 shell 中运行（自己的 `failed` 与结论文件），子 shell 的输出完整打印到日志。
 - **补充 9：段尾七例**。`TestBind` 的表改为具名类型 `bindCase`，七例由一个循环追加（X = `0x39` ~ `0x3f`）。
+
+### 16.23 结果（固定代码点 `f9e9222`，诊断 run 41168764902）：四个作业 success，交独立复审
+
+**身份**：
+
+| 项 | 值 |
+|---|---|
+| 所依赖的登记 | §16.21（`5eb05cd`，写代码之前推送）与 §16.22（`4936b72`，代码提交之前） |
+| 实施起点 | PR #44 的 `3b45ef5`；之上依次为 `92b81df`（Review 116 的归档）、`5eb05cd`、`4936b72` |
+| 取证代码点 | `f9e92222da2452114417a4ba80e88fb70298afb0`（树 `ec0fce6b1c96d00bdf574ec1d15a82b62f4a797c`），一次推送的头提交 |
+| 诊断 | WP2.5 prototype run 41168764902，push，attempt 1，**success**；没有手动触发，没有重跑 |
+| 实际检出 | 四个作业的 `git log -1` 与 `WP25META` 的 `sha` 都是 `f9e9222…` |
+| 工具链 | 四个作业 `go1.27.3`；两个 macOS 作业 `go env`：`go1.27.3`、`0`、`local` |
+| macOS | arm64：macOS 26.6.2（25G83）；x86_64：macOS 26.6.1（25G76）；Xcode 26.6 |
+| 代码点的常规 CI | run 41168767682，`pull_request`，attempt 1，success（8/8） |
+| 与最终 PR HEAD 的关系 | 本节与状态的回填只增加文档提交；`prototype/` 与 `.github/` 相对 `f9e9222` 没有变化 |
+
+**作业的结果**（所有步骤 success，包括 macOS 的“P-5 static verdict”，`failed` 为 0）：
+
+| 作业 | 结论 | 说明 |
+|---|---|---|
+| `macos-latest`（arm64） | success | 静态全部 ok；`TestP5`、真实回归、模型与 `p5bind` 都按预测成立 |
+| `macos-26-intel`（x86_64） | success | 同上 |
+| `ubuntu-latest` | success | 53 个场景 confirmed，门禁 111/111，组合 13/13（与前两次相同）；`p5bind` 只编译 |
+| `windows-latest` | success | 53 个场景 confirmed，门禁 92/92，组合 13/13（与前两次相同）；`p5bind` 只编译 |
+
+**本轮各项**（两个架构相同）：
+
+| 项 | 证据类别 | 结果 |
+|---|---|---|
+| B-116-1 真实回归 `TestP5CleanupRealWait/wait-observe` | 真实子进程上的接缝 | pass：W1 的接缝命中 1（被替换的真实读取为 zombie、没有错误）；被测链结束子进程（发现 1，结束 1，kill 1，没有链的失败）；回收为 signal 9，持有者请求 0 次，没有到期出口或移交；持有者的失败恰有一项（`wait-observe`，计划的，计数 1）；判定以唯一的 `holder` 问题拒绝。负向自检按预期成立 |
+| B-116-1 / B-116-2 健康对照 `TestP5CleanupReal` 两侧 | 真实子进程 | pass：链的接缝命中 1，前提成立（真实读取为 alive）；链的失败恰有一项（来源 `read`，计划的）；持有者没有失败；判定没有问题；回收为 signal 9，请求 0 次；调用者的四项核对成立 |
+| B-116-1 模型 `TestP5HoldConsume` | 模型 | pass（3 个子项） |
+| B-116-2 模型 `TestP5RealJudge` | 模型 | pass（健康、(a)、(b) 3 个子项；(a) 的代码为 `seam-hits`、`seam-premise`、`unplanned`，(b) 为 `unplanned`） |
+| B-116-3 `P5.static.arch` | 静态 | ok：arm64 为 `arm64`，x86_64 为 `x86_64`；查询的退出状态为 0 |
+| B-116-3 方法自检 M6 | 方法的自检 | ok：合法输出 `arm64` 加退出 1 得到 T(tool)；之后的成功与 `ok` 没有恢复（子 shell 的 `failed` 为 1） |
+| N-116-1 段尾七例 | 解码器的模型 | 7/7 在 A4.v2 失败；`TestBind` 61/61 |
+
+- **说明**：M6 在子 shell 中运行，它自己的两条结论（`WP25P5STATIC P5.static.arch v2 T(tool): go env GOARCH exited 1` 与 `WP25P5STATIC P5.static.after v2 ok`）随子 shell 的输出完整打印在日志中，位置在 `P5.static.build` 与 `P5.static.method` 之间，之后紧接 `M6RESULT 1 arm64 T(tool)` 与 `M6 ok`。它们只属于对照：写入的是子 shell 自己的结论文件；真实的结论文件中 `P5.static.arch` 为 ok，`WP25P5` 汇总同样为 ok，真实步骤的 `failed` 为 0。读日志时须按位置区分，这是本次输出的写法所致，不改变判定。
+
+**既有的各项**（两个架构相同；各类分开计数，不合计；布局另列）：
+
+- **静态**：toolchain、arch、vet、build、method（M1 ~ M6）、artifact、settings、symbols、binding（A1 ~ A9）都为 ok；entry confirmed；load ok。
+  - 产物：arm64 7911234 字节，SHA-256 `f59c1462db95713745ef4c4788f0fe4e29a6b9b5a3132c06917e412c84b9076f`，build ID `H-f5tsYg-pOSTE4U8c-N/iQj0ur8NV3rKaJUMdWT4/xGkW_-8NwR7bBj-LLI0t/Q7ZrtitiuKUqXQ1uTdYw`；x86_64 8423680 字节，`a3e47f2046d4d34de751b143b63aab343f449b59129a80b621eb9a93dbc4aa3c`，`rGDoe5APrXHBptIebVtz/-aZsyjFX6k9RJAA0mNlL/g3JK1126m4cs4LoONxey/jTE5nWZh6TSnZBwBTVn1`。工具的路径与哈希与上一次相同。
+  - 绑定：头标志 `MH_DYLDLINK|MH_PIE`，没有 `MH_TWOLEVEL`；库为 libSystem.B（ordinal 1）与 libresolv.9；bind 记录 89 / 86 条；`_waitid` 恰有一条，ordinal 1，`__DATA_CONST,__got`，标志 0、指针、加数 0；`n_desc` 0；`__DWARF` vmsize 0、7 个调试节（按 §16.19 补充 9 接受）；`nm -m` 为 `(undefined) external _waitid`。
+- **原生**：39/39 confirmed（`calls` 2 的 33 次、3 的 6 次）。
+- **接缝**：两个门禁 pass；R-B1-1 成立（读端在 EOF 之后关闭 1 次，两个结果为 nil，已释放，没有移交）。
+- **模型**：16/16 pass（上一次的 14 项加 `TestP5HoldConsume`、`TestP5RealJudge`）。
+- **布局**：3/3 confirmed。
+- **组合**：`p5combo.close-error` pass，组合 17/17。
+- **最终收尾**：“nothing handed over”，`final_T` 为 false；`real_held` 为空。
+- **回归**：P-3 63/63、P-3 门禁 22/22；WP25SUMMARY：场景 139/139，门禁 101/101，组合 17/17。
+
+**作者本机的核对**（Go 1.27.1，不是诊断的证据）：
+
+- 四个目标的 vet（Windows、Linux、darwin arm64 与 amd64，带与不带 `wp25p5local`）与 `gofmt`。
+- 模型（`wp25p5local`）在 Windows 与 Linux 上全部通过，含新增的两项；`p5bind` 的模型 61/61。
+- 交叉构建的 darwin arm64 产物：解码器的 A1 ~ A8 成立。
+- 静态步骤的脚本在 WSL 中以假工具演练：健康时 `P5.static.arch` ok、`failed` 为 0；假的 `go env GOARCH` 输出 `arm64` 而退出 1 时，`P5.static.arch` 为 T(tool)，之后的工具全部成功，`failed` 仍为 1；两种情形 M1 ~ M6 都给出预期的类别。Apple 工具的输出由作者按语法生成，只验证脚本。
+- Windows 全量：53 个场景 confirmed，门禁 92/92，组合 13/13。
+- WSL Linux 全量（不带 `-race`）：52 confirmed 加 1 个 unsupported（`T5.adapter.pwsh-argv`，WSL 中没有 pwsh），门禁 111/111，组合 13/13。
+
+**限制**：
+
+- 新的真实回归只覆盖 W1 的一次失败；probe、`Cmd.Wait` 自己的错误、请求的错误与移交之后的晚到结果，只由模型 `TestP5HoldConsume` 覆盖。B-116-2 的两个对照只有模型（假的真实读取），不是原生读取失败的动态复现。
+- 真实子进程只走了正常路径；到期出口与移交只有模型覆盖。
+- 运行器上的 dyld 与工具不声称与固定的公开源码同一构建；静态产物与实际执行的测试二进制不是同一个文件（N1）。
+- 首次诊断 run 41055799521 保持 failure / invalid（T）；run 41162340129 的正式 success 保持，按 Review 116 §8 的限定采证；历史上的未知保留。
+
+**限制声明**（§16.11，原样）：
+
+> H4：静态依据是固定的 Go 1.27.3 过滤源码；动态覆盖的是所测的真实错误（`ECHILD`、`EINVAL`）与错误之后的健康恢复；没有动态取样的是健康调用时过滤之前的 errno 是否非零。
+
+> H6：只有接缝证据（消费者的不重试与失败）；真实的 EINTR 穿过跳板没有原生验证。
+
+**结论与待决**：
+
+- 本次诊断中，§16.21、§16.22 规定的各项在两个架构上都按预测成立，没有出现停止条件。
+- 作者**不宣布** B-116-1 ~ 3 关闭，也不宣布 G5、H1 或 P-5 满足：修复与新结果须经独立复审。
+- PR #44 保持未合并，Auto-fix 与 Auto-merge 关闭；规范未冻结；生产实现未授权；WP2.5 与 M2 未验收。
