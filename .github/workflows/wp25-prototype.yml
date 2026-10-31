@@ -8,11 +8,15 @@ name: WP2.5 prototype
 # the N-096-2 fix, or to the branch of the P-3 experiment, that change the
 # prototype or this workflow; a change of the documents does not run it.
 # P-3 adds the standard Intel image (macos-26-intel) beside macos-latest,
-# so arm64 and x86_64 run the same code point. There is no manual trigger,
-# so no run is repeated blindly, and no run is cancelled.
+# so arm64 and x86_64 run the same code point. P-5 (docs/wp2.5-prototype.md
+# §16.10) runs on the branch of its experiment: the toolchain fixed at
+# go1.27.3 with GOTOOLCHAIN=local on the four jobs, and on the two macOS
+# jobs CGO_ENABLED=0 and the static steps (the second version, §16.17.4).
+# There is no manual trigger, so no run is repeated blindly, and no run is
+# cancelled.
 on:
   push:
-    branches: [proto/wp2.5-prototype, test/wp2.5-prototype-n4-n6, proto/wp2.5-p1-p2-p4, test/wp2.5-prototype-n-096-2, test/wp2.5-prototype-p3]
+    branches: [proto/wp2.5-prototype, test/wp2.5-prototype-n4-n6, proto/wp2.5-p1-p2-p4, test/wp2.5-prototype-n-096-2, test/wp2.5-prototype-p3, test/wp2.5-prototype-p5]
     paths:
       - prototype/wp25/**
       - .github/workflows/wp25-prototype.yml
@@ -33,6 +37,8 @@ jobs:
         os: [ubuntu-latest, macos-latest, macos-26-intel, windows-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
+    env:
+      GOTOOLCHAIN: local
     defaults:
       run:
         shell: bash
@@ -41,7 +47,7 @@ jobs:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-go@v7.0.0
         with:
-          go-version-file: prototype/wp25/go.mod
+          go-version: 1.27.3
           cache-dependency-path: prototype/wp25/go.sum
       - name: Vet
         run: |
@@ -68,10 +74,340 @@ jobs:
           xcrun clang --version
           go env GOARCH GOHOSTARCH
           EOF
+      - name: P-5 static checks
+        # P-5's static steps, the second version (docs/wp2.5-prototype.md
+        # §16.17.4; the first, §16.4's, stays with its T at 0213fb7), with
+        # CGO_ENABLED=0. Each tool runs once, its stdout and stderr whole in
+        # a file of its own under $RUNNER_TEMP/p5static, its status taken by
+        # itself; every match is grep -c on a file, its status taken in an
+        # if; nothing is piped into a matcher that stops early, nothing is
+        # excused with || true. go, otool and nm are found once and run by
+        # their recorded absolute paths. The method controls M1 to M5 run
+        # first, with the same functions. A toolchain that is not the fixed
+        # one stops the job (a T, nothing else runs); any other T sets the
+        # step's failed flag, which nothing clears, and which fails the job
+        # in "P-5 static verdict" after the tests ran. Each conclusion is
+        # printed as "WP25P5STATIC <ID> v2 <class>" and kept for WP25P5.
+        # After Review 116 (§16.21.4): the architecture query's own exit
+        # status is consumed where it runs (P5.static.arch), and M6 checks
+        # that call site.
+        id: p5static
+        if: runner.os == 'macOS'
+        run: |
+          out="$RUNNER_TEMP/p5-static.txt"
+          sd="$RUNNER_TEMP/p5static"
+          mkdir -p "$sd"
+          : > "$out"
+          export CGO_ENABLED=0
+          failed=0
+          # rec ID CONCLUSION: printed and kept; any T sets failed for good.
+          rec() {
+            echo "$1 v2 $2" >> "$out"
+            echo "WP25P5STATIC $1 v2 $2"
+            case "$2" in
+              ok*) ;;
+              *) failed=1 ;;
+            esac
+          }
+          # run FILE CMD...: one execution, stdout and stderr whole in FILE,
+          # its own status in $s. The file names differ by more than case:
+          # the runner's file system ignores case.
+          run() {
+            f=$1
+            shift
+            echo "+ $* > $f"
+            if "$@" > "$f" 2>&1; then s=0; else s=$?; fi
+            echo "(exit $s)"
+          }
+          # show FILE: a file printed as it is; a summary may not print, a
+          # verdict never rests on it.
+          show() {
+            if cat -- "$1"; then :; else echo "(cannot print $1)"; fi
+          }
+          # match FILE PATTERN: grep -c on the file only; $m is 0 (matched,
+          # $n lines), 1 (no line) or >= 2 (the matcher failed); its stderr
+          # in $sd/grep.err.
+          match() {
+            if n=$(grep -c -E -e "$2" -- "$1" 2> "$sd/grep.err"); then m=0; else m=$?; fi
+            n=${n:-0}
+          }
+          # cls WANT: one class from $s, $m and $n; WANT is "1+" (a line at
+          # least) or the exact number of lines.
+          cls() {
+            if [ "$s" -ne 0 ]; then
+              c="T(tool)"
+            elif [ "$m" -ge 2 ]; then
+              c="T(matcher)"
+            elif [ "$m" -eq 1 ]; then
+              c="T(unmatched)"
+            elif [ "$1" = "1+" ] || [ "$n" = "$1" ]; then
+              c=ok
+            else
+              c="T(unmatched)"
+            fi
+          }
+          # one FILE PATTERN: the file is one line, and it matches.
+          one() {
+            match "$1" '^'
+            lines=$n
+            lm=$m
+            match "$1" "$2"
+            [ "$lm" -eq 0 ] && [ "$lines" = 1 ] && [ "$m" -eq 0 ] && [ "$n" = 1 ]
+          }
+          value() {
+            v=""
+            if v=$(cat -- "$1"); then :; else v=""; fi
+          }
+          # query_arch NAME CMD...: the architecture query (§16.21.4), the
+          # one function of the real call site and of M6. Its own status is
+          # consumed here, at once: a non-zero exit is a T(tool) whatever
+          # it printed; its output is checked apart. Sets arch and archT
+          # ("" while it holds).
+          query_arch() {
+            run "$sd/$1.txt" "${@:2}"
+            archT=""
+            if [ "$s" -ne 0 ]; then archT="T(tool): go env GOARCH exited $s"; fi
+            value "$sd/$1.txt"
+            case "$v" in
+              arm64) arch=arm64 ;;
+              amd64) arch=x86_64 ;;
+              *) arch="unknown($v)" ;;
+            esac
+            if one "$sd/$1.txt" '^(arm64|amd64)$'; then :; elif [ -z "$archT" ]; then archT="T(parser): GOARCH printed $v"; fi
+          }
+
+          # The tools, found once.
+          if GO=$(command -v go) && [ -x "$GO" ]; then :; else GO=""; fi
+          if OTOOL=$(xcrun --find otool 2> "$sd/xcrun-otool.err") && [ -x "$OTOOL" ]; then :; else OTOOL=""; fi
+          if NM=$(xcrun --find nm 2> "$sd/xcrun-nm.err") && [ -x "$NM" ]; then :; else NM=""; fi
+          echo "go: $GO; otool: $OTOOL; nm: $NM"
+
+          # P5.static.toolchain: not the fixed one stops the job.
+          tc=1
+          if [ -n "$GO" ]; then
+            run "$sd/go-version.txt" "$GO" version
+            s1=$s
+            run "$sd/go-env.txt" "$GO" env GOVERSION CGO_ENABLED GOTOOLCHAIN
+            s2=$s
+            show "$sd/go-version.txt"
+            show "$sd/go-env.txt"
+            match "$sd/go-version.txt" '^go version go1\.27\.3 '
+            value "$sd/go-env.txt"
+            if [ "$s1" -eq 0 ] && [ "$s2" -eq 0 ] && [ "$m" -eq 0 ] && [ "$n" = 1 ] && [ "$v" = "$(printf 'go1.27.3\n0\nlocal')" ]; then tc=0; fi
+          fi
+          if [ "$tc" -ne 0 ]; then
+            rec P5.static.toolchain "T(tool): not go1.27.3 with CGO_ENABLED=0 and GOTOOLCHAIN=local, or no go"
+            exit 1
+          fi
+          rec P5.static.toolchain ok
+          # P5.static.arch: a T here stays in failed, whatever follows.
+          query_arch goarch "$GO" env GOARCH
+          if [ -n "$archT" ]; then rec P5.static.arch "$archT"; else rec P5.static.arch "ok: $arch"; fi
+
+          # P5.static.vet and P5.static.build, then the decoder's build.
+          run "$sd/vet.txt" "$GO" vet ./...
+          show "$sd/vet.txt"
+          if [ "$s" -eq 0 ]; then rec P5.static.vet ok; else rec P5.static.vet "T(tool): go vet exited $s"; fi
+          bin="$RUNNER_TEMP/wp25.test"
+          run "$sd/build.txt" "$GO" test -c -o "$bin" .
+          show "$sd/build.txt"
+          if [ "$s" -eq 0 ] && [ -f "$bin" ]; then rec P5.static.build ok; else rec P5.static.build "T(tool): go test -c exited $s"; fi
+          p5bind="$RUNNER_TEMP/p5bind"
+          run "$sd/p5bind-build.txt" "$GO" build -o "$p5bind" ./p5bind
+          bs=$s
+          show "$sd/p5bind-build.txt"
+
+          # P5.static.method: M1 to M5, the functions above on known inputs.
+          mfail=""
+          if awk 'BEGIN { print "P5M1 MATCH"; for (i = 2; i < 200000; i++) print "line " i; print "P5M1 MATCH" }' > "$sd/m1a.txt" &&
+            awk 'BEGIN { print "P5M1 MATCH"; for (i = 2; i <= 200000; i++) print "line " i }' > "$sd/m1b.txt"; then
+            match "$sd/m1a.txt" '^P5M1 MATCH$'
+            a="$m/$n"
+            if [ -s "$sd/grep.err" ]; then a="$a+stderr"; fi
+            match "$sd/m1b.txt" '^P5M1 MATCH$'
+            b="$m/$n"
+            if [ -s "$sd/grep.err" ]; then b="$b+stderr"; fi
+            if [ "$a" = "0/2" ] && [ "$b" = "0/1" ]; then echo "M1 ok: $a, $b"; else mfail="$mfail M1($a,$b)"; fi
+          else
+            mfail="$mfail M1(awk failed)"
+          fi
+          m2() {
+            echo "P5M2 MATCH"
+            return 3
+          }
+          run "$sd/m2.txt" m2
+          match "$sd/m2.txt" '^P5M2 MATCH$'
+          cls 1
+          if [ "$c" = "T(tool)" ]; then echo "M2 ok: $c"; else mfail="$mfail M2($c)"; fi
+          m3() { echo "another line"; }
+          run "$sd/m3.txt" m3
+          match "$sd/m3.txt" '^P5M3 MATCH$'
+          cls 1
+          if [ "$c" = "T(unmatched)" ]; then echo "M3 ok: $c"; else mfail="$mfail M3($c)"; fi
+          s=0
+          match "$sd/no-such-file" '^x$'
+          cls 1
+          if [ "$c" = "T(matcher)" ]; then echo "M4 ok: $c (grep $m)"; else mfail="$mfail M4($c)"; fi
+          m5=""
+          if [ "$bs" -eq 0 ]; then
+            run "$sd/m5-size.txt" stat -f %z go.sum
+            zs=$s
+            run "$sd/m5-sha.txt" shasum -a 256 go.sum
+            hs=$s
+            value "$sd/m5-size.txt"
+            gsz=$v
+            value "$sd/m5-sha.txt"
+            gsh=${v%% *}
+            if [ "$zs" -eq 0 ] && [ "$hs" -eq 0 ]; then
+              run "$sd/m5.txt" "$p5bind" -bin "$PWD/go.sum" -arch "$arch" -size "$gsz" -sha256 "$gsh" \
+                -otool-h /dev/null -otool-h-status 0 -otool-hv /dev/null -otool-hv-status 0 -otool-l /dev/null -otool-l-status 0 \
+                -otool-L /dev/null -otool-L-status 0 -nm-m /dev/null -nm-m-status 0
+              show "$sd/m5.txt"
+              if [ "$s" -eq 1 ]; then
+                s=0
+                match "$sd/m5.txt" '^WP25P5BIND-VERDICT T\(parser\) A2$'
+                cls 1
+                m5=$c
+              else
+                m5="exit $s"
+              fi
+            else
+              m5="its size or hash failed"
+            fi
+          else
+            m5="no decoder"
+          fi
+          if [ "$m5" = ok ]; then echo "M5 ok: T(parser) at A2"; else mfail="$mfail M5($m5)"; fi
+          # M6: the architecture query's own call site, with legal output
+          # and a non-zero exit, in a subshell with its own failed flag and
+          # file; a success and an ok follow. The T must stay.
+          m6go() {
+            echo arm64
+            return 1
+          }
+          if m6=$(
+            out="$sd/m6-static.txt"
+            : > "$out"
+            failed=0
+            query_arch m6arch m6go env GOARCH
+            if [ -n "$archT" ]; then rec P5.static.arch "$archT"; else rec P5.static.arch "ok: $arch"; fi
+            run "$sd/m6-after.txt" true
+            rec P5.static.after ok
+            echo "M6RESULT $failed $arch ${archT%%:*}"
+          ); then :; else m6="the subshell exited $?"; fi
+          printf '%s\n' "$m6"
+          m6=${m6##*$'\n'}
+          match "$sd/m6-static.txt" '^P5\.static\.arch v2 T\(tool\): go env GOARCH exited 1$'
+          if [ "$m6" = "M6RESULT 1 arm64 T(tool)" ] && [ "$m" -eq 0 ] && [ "$n" = 1 ]; then echo "M6 ok: T(tool) kept after a success"; else mfail="$mfail M6($m6, grep $m/$n)"; fi
+          if [ -z "$mfail" ]; then
+            rec P5.static.method ok
+          else
+            rec P5.static.method "T(contradiction): the method's controls did not give their classes:$mfail"
+          fi
+
+          # P5.static.artifact: the binary's size, SHA-256 and build ID; the
+          # three tools' paths and hashes; Xcode.
+          afail=""
+          bsz=""
+          bsh=""
+          art=""
+          run "$sd/size.txt" stat -f %z "$bin"
+          if [ "$s" -eq 0 ] && one "$sd/size.txt" '^[0-9]+$'; then value "$sd/size.txt"; bsz=$v; else afail="$afail size(exit $s)"; fi
+          run "$sd/sha.txt" shasum -a 256 "$bin"
+          if [ "$s" -eq 0 ] && one "$sd/sha.txt" '^[0-9a-f]{64}  '; then value "$sd/sha.txt"; bsh=${v%% *}; else afail="$afail sha256(exit $s)"; fi
+          run "$sd/buildid.txt" "$GO" tool buildid "$bin"
+          if [ "$s" -eq 0 ] && one "$sd/buildid.txt" '.'; then value "$sd/buildid.txt"; art="$art buildid $v;"; else afail="$afail buildid(exit $s)"; fi
+          for t in "go=$GO" "otool=$OTOOL" "nm=$NM"; do
+            name=${t%%=*}
+            path=${t#*=}
+            if [ -z "$path" ] || [ ! -x "$path" ]; then
+              afail="$afail $name(no executable path)"
+              continue
+            fi
+            run "$sd/sha-$name.txt" shasum -a 256 "$path"
+            if [ "$s" -eq 0 ] && one "$sd/sha-$name.txt" '^[0-9a-f]{64}  '; then value "$sd/sha-$name.txt"; art="$art $name $path ${v%% *};"; else afail="$afail $name-sha256(exit $s)"; fi
+          done
+          run "$sd/xcodebuild.txt" xcodebuild -version
+          show "$sd/xcodebuild.txt"
+          match "$sd/xcodebuild.txt" '.'
+          if [ "$s" -ne 0 ] || [ "$m" -ne 0 ]; then afail="$afail xcodebuild(exit $s)"; fi
+          if [ -z "$afail" ]; then
+            rec P5.static.artifact "ok: size $bsz, sha256 $bsh;$art"
+          else
+            rec P5.static.artifact "T(tool): not recorded:$afail"
+          fi
+
+          # P5.static.settings: exactly one build CGO_ENABLED=0.
+          run "$sd/version-m.txt" "$GO" version -m "$bin"
+          show "$sd/version-m.txt"
+          match "$sd/version-m.txt" '^[[:space:]]*build[[:space:]]+CGO_ENABLED=0$'
+          cls 1
+          rec P5.static.settings "$c"
+
+          # P5.static.symbols: the trampoline and one undefined import of
+          # _waitid (the binding is P5.static.binding's).
+          run "$sd/nm-go.txt" "$GO" tool nm "$bin"
+          ns=$s
+          echo "(its lines naming waitid:)"
+          if grep -i -e waitid -- "$sd/nm-go.txt"; then :; else echo "(none, or grep failed)"; fi
+          s=$ns
+          match "$sd/nm-go.txt" 'e2waitid\.libc_waitid_trampoline'
+          cls 1+
+          c1=$c
+          match "$sd/nm-go.txt" '^[[:space:]]+U _waitid$'
+          cls 1
+          c2=$c
+          if [ "$c1" = ok ] && [ "$c2" = ok ]; then rec P5.static.symbols ok; elif [ "$c1" != ok ]; then rec P5.static.symbols "$c1: the trampoline"; else rec P5.static.symbols "$c2: the undefined _waitid"; fi
+
+          # P5.static.binding: the decoder (A1 to A9) with Apple's tools.
+          if [ "$bs" -ne 0 ]; then
+            rec P5.static.binding "T(tool): go build ./p5bind exited $bs"
+          elif [ -z "$OTOOL" ] || [ -z "$NM" ]; then
+            rec P5.static.binding "T(tool): otool or nm not found"
+          elif [ -z "$bsz" ] || [ -z "$bsh" ]; then
+            rec P5.static.binding "T(tool): the binary's size or hash was not recorded"
+          else
+            run "$sd/otool-h.txt" "$OTOOL" -h "$bin"
+            s_h=$s
+            run "$sd/otool-hv.txt" "$OTOOL" -hv "$bin"
+            s_hv=$s
+            run "$sd/otool-loads.txt" "$OTOOL" -l "$bin"
+            s_l=$s
+            run "$sd/otool-libs.txt" "$OTOOL" -L "$bin"
+            s_L=$s
+            run "$sd/nm-m.txt" "$NM" -m "$bin"
+            s_m=$s
+            for x in otool-h otool-hv otool-loads otool-libs nm-m; do
+              echo "----- $x (whole)"
+              show "$sd/$x.txt"
+            done
+            run "$sd/p5bind.txt" "$p5bind" -bin "$bin" -arch "$arch" -size "$bsz" -sha256 "$bsh" \
+              -otool-h "$sd/otool-h.txt" -otool-h-status "$s_h" -otool-hv "$sd/otool-hv.txt" -otool-hv-status "$s_hv" \
+              -otool-l "$sd/otool-loads.txt" -otool-l-status "$s_l" -otool-L "$sd/otool-libs.txt" -otool-L-status "$s_L" \
+              -nm-m "$sd/nm-m.txt" -nm-m-status "$s_m"
+            ps=$s
+            show "$sd/p5bind.txt"
+            v=""
+            if v=$(grep -E -e '^WP25P5BIND-VERDICT ' -- "$sd/p5bind.txt"); then :; else v=""; fi
+            case "$ps" in
+              0)
+                if [ "$v" = "WP25P5BIND-VERDICT ok -" ]; then rec P5.static.binding ok; else rec P5.static.binding "T(parser): p5bind exited 0 without its ok verdict"; fi
+                ;;
+              1)
+                if [ -n "$v" ]; then rec P5.static.binding "${v#WP25P5BIND-VERDICT }"; else rec P5.static.binding "T(tool): p5bind exited 1 without a verdict"; fi
+                ;;
+              *)
+                rec P5.static.binding "T(tool): p5bind exited $ps"
+                ;;
+            esac
+          fi
+          echo "failed=$failed" >> "$GITHUB_OUTPUT"
       - name: Prototype
         env:
           WP25_SHA: ${{ github.sha }}
+          WP25_P5_STATIC: ${{ runner.temp }}/p5-static.txt
         run: |
+          if [ "$RUNNER_OS" = "macOS" ]; then export CGO_ENABLED=0; fi
           go version
           race=""
           if [ "$RUNNER_OS" = "Linux" ]; then race="-race"; fi
@@ -79,4 +415,9 @@ jobs:
           exit "${PIPESTATUS[0]}"
       - name: Results
         if: always()
-        run: grep -E '^WP25(META|RESULT|SUMMARY) ' "$RUNNER_TEMP/wp25.log" || echo "no result line"
+        run: grep -E '^WP25(META|RESULT|SUMMARY|GATE|P5|P5META|P5FINAL) ' "$RUNNER_TEMP/wp25.log" || echo "no result line"
+      - name: P-5 static verdict
+        # A static check that did not hold fails the job (a T), after the
+        # tests and their results were kept.
+        if: always() && runner.os == 'macOS' && steps.p5static.outcome == 'success'
+        run: test "${{ steps.p5static.outputs.failed }}" = 0

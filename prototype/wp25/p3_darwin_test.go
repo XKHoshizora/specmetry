@@ -122,6 +122,9 @@ type p3Run struct {
 	tag   string    // its tools carry this in their environment
 	since string    // and start no earlier than this
 	ev    p3Evidence
+	// p5 is a P-5 run's role and deadline (docs/wp2.5-prototype.md §16.8);
+	// nil for P-3's own runs, which it leaves as they were.
+	p5 *p5Ctx
 }
 
 // p3Evidence is what a run prints on its WP25P line, before its end. The
@@ -129,6 +132,7 @@ type p3Run struct {
 type p3Evidence struct {
 	E      map[string]string `json:"E"`
 	R      []p3Read          `json:"R,omitempty"`
+	E2     []e2Call          `json:"E2,omitempty"` // P-5: every call of entry E2, whole
 	Layout map[string]int64  `json:"R_layout,omitempty"`
 	N      []string          `json:"N,omitempty"`
 	M      []string          `json:"M,omitempty"`
@@ -186,6 +190,10 @@ func runP3(t *testing.T, c p3Case, n int) {
 // to go test's deadline for this run and one run's cleanup; otherwise it
 // is not executed, which is invalid.
 func (r *p3Run) admit() {
+	if r.p5 != nil {
+		r.p5.admit(r.s)
+		return
+	}
 	if ok, left := p3Budget.allow(); !ok {
 		r.s.invalidf("not executed: the total budget of P-3 has %v left, less than one run's %v", left.Round(time.Second), p3Budget.per)
 	}
@@ -203,6 +211,13 @@ func (r *p3Run) limits() {
 	if r.outer.IsZero() {
 		r.outer = end
 	}
+	if r.p5 != nil && r.p5.role == "B" {
+		// Role B: an observation of 6 s; the checks and the end before d.
+		if d := r.outer.Sub(r.began); d > p5InnerObs {
+			r.s.flag("the observation took %v, over its %v", d.Round(time.Millisecond), p5InnerObs)
+		}
+		return
+	}
 	if d := r.outer.Sub(r.began); d > p3Inner {
 		r.s.flag("the observation took %v, over its %v", d.Round(time.Millisecond), p3Inner)
 	}
@@ -214,11 +229,25 @@ func (r *p3Run) limits() {
 // obsEnd is the end of the run's observation (§19.12): p3Inner from its
 // start, and no later than go test's deadline less p3Margin.
 func (r *p3Run) obsEnd() time.Time {
+	if r.p5 != nil {
+		return r.p5.obsEnd(r.began)
+	}
 	end := r.began.Add(p3Inner)
 	if dl, ok := r.t.Deadline(); ok && dl.Add(-p3Margin).Before(end) {
 		end = dl.Add(-p3Margin)
 	}
 	return end
+}
+
+// capped is d, but for a P-5 run no longer than what is left to its
+// deadline (§16.8: each bounded wait takes min(its limit, d)).
+func (r *p3Run) capped(d time.Duration) time.Duration {
+	if r.p5 != nil {
+		if left := time.Until(r.p5.d); left < d {
+			return max(left, 0)
+		}
+	}
+	return d
 }
 
 // mark ends the observation.
@@ -307,6 +336,9 @@ func (r *p3Run) environment() {
 func (r *p3Run) layoutPremise() {
 	p3LayoutMu.Lock()
 	vs := append([]verdict(nil), p3Layouts...)
+	if r.p5 != nil {
+		vs = append([]verdict(nil), p5Layouts...) // P-5's own probes only
+	}
 	p3LayoutMu.Unlock()
 	count := map[verdict]int{}
 	for _, v := range vs {
@@ -676,7 +708,7 @@ func (r *p3Run) readW(pid int, what string) wRaw {
 // unreaped child and a zombie, with the start time it had: the identity
 // premise of every read of it (a tool failure otherwise).
 func (r *p3Run) zombie(tr *unixTree) {
-	deadline := time.Now().Add(3 * time.Second)
+	deadline := time.Now().Add(r.capped(3 * time.Second))
 	for {
 		st, pr := procInfo(tr.pid)
 		switch {
@@ -697,10 +729,10 @@ func (r *p3Run) zombie(tr *unixTree) {
 // its status as Go reads it (wait4, 8 bits).
 func (r *p3Run) reap(tr *unixTree, cmd *exec.Cmd, want string) {
 	r.predict("an unreaped zombie before the reap", true, tr.zombieLeader())
-	if !tr.confirm(tKill) {
+	if !tr.confirm(r.capped(tKill)) {
 		r.s.flag("cleanup: the group %d could not be confirmed empty before the reap", tr.pid)
 	}
-	if !tr.reap(time.Second) {
+	if !tr.reap(r.capped(time.Second)) {
 		r.s.invalidf("cleanup: the leader %d was not reaped within 1 s", tr.pid)
 	}
 	ws, _ := cmd.ProcessState.Sys().(syscall.WaitStatus)

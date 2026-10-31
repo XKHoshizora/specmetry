@@ -70,6 +70,9 @@ func TestMain(m *testing.M) {
 		tamperWitness() // a gate regression's fault of the witness file, if any
 		printSeal()
 	}
+	if os.Getenv(innerEnv) == "" {
+		p5Summary() // P-5's line of this job (darwin), none elsewhere
+	}
 	os.Exit(summarize(code))
 }
 
@@ -119,6 +122,11 @@ type result struct {
 	// Invalid lists every reason the run cannot count, each on its own (a
 	// P-3 gate check needs exactly one, spec §19.12).
 	Invalid []string `json:"invalid,omitempty"`
+	// P-5 (docs/wp2.5-prototype.md §16.11): the class of evidence (static,
+	// layout, native, seam), absent elsewhere; and the run's calls of entry
+	// E2, read after its end, a pointer so that absent is not 0.
+	Evidence string `json:"evidence,omitempty"`
+	Calls    *int   `json:"calls,omitempty"`
 }
 
 var (
@@ -170,6 +178,21 @@ type scen struct {
 	mu         sync.Mutex    // the scenario may be used from several goroutines
 	cleanLimit time.Duration // the end's own limit, if any: over it, the run is invalid
 	closeFail  []string      // what the scenario owned and could not close (closer)
+	// A P-5 run's own deadline d (§16.8): the end's bounded waits take
+	// min(their limit, d). Zero elsewhere.
+	cap time.Time
+	// final, if set, runs at the end once the cleanup is checked and before
+	// the verdict (a P-5 run's calls and its deadline, §16.7, §16.8).
+	final func()
+}
+
+// until is now plus d, but no later than the run's own deadline, if any.
+func (s *scen) until(d time.Duration) time.Time {
+	t := time.Now().Add(d)
+	if !s.cap.IsZero() && s.cap.Before(t) {
+		return s.cap
+	}
+	return t
 }
 
 // begin starts a scenario; the caller defers done. needLaunch and
@@ -332,7 +355,7 @@ func (s *scen) done() {
 	// run returned or while still running, fails the observation, and
 	// nothing after it clears that (Review 082 B1-Ra).
 	var unended []string
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := s.until(5 * time.Second)
 	for _, l := range s.left {
 		ended, err := l.until(deadline)
 		if err != nil {
@@ -380,6 +403,9 @@ func (s *scen) done() {
 	if d := time.Since(ending); s.cleanLimit > 0 && d > s.cleanLimit {
 		s.invalid = append(s.invalid, fmt.Sprintf("cleanup not verified in time: the end took %v, over its %v", d.Round(time.Millisecond), s.cleanLimit))
 	}
+	if s.final != nil {
+		s.final()
+	}
 	s.r.Invalid = append([]string(nil), s.invalid...)
 	switch {
 	case len(s.invalid) > 0:
@@ -426,7 +452,7 @@ func (s *scen) cleanup() string {
 			p.stop()
 		}
 	}
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := s.until(5 * time.Second)
 	for {
 		var left []string
 		for _, p := range s.procs {
