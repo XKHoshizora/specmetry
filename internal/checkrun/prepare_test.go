@@ -76,6 +76,19 @@ func (w *workspace) exec(t *testing.T, query string, args ...any) {
 	}
 }
 
+// read runs fn in a transaction of the workspace's database.
+func (w *workspace) read(t *testing.T, fn func(*sql.Tx) error) {
+	t.Helper()
+	db, _, err := sqlite.Open(ctx, w.home, sqlite.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	if err := db.WriteTx(ctx, fn); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // ac is a criterion to add: active and automated, at revision 1 of itself
 // and its requirement, unless it says otherwise; hash, when set, is stored
 // instead of the check's own.

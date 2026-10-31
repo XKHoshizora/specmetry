@@ -2,6 +2,7 @@ package checkrun
 
 import (
 	"context"
+	"database/sql"
 	"testing"
 )
 
@@ -85,3 +86,9 @@ func Lookup(ctx context.Context, f *Finder, shell string) (Interpreter, string, 
 
 func Within(p, root string, fold bool) bool { return within(p, root, fold) }
 func FinalPath(p string) (string, error)    { return finalPath(p) }
+
+// OnRegister runs f in the empty batch's registration transaction.
+func OnRegister(t testing.TB, f func(*sql.Tx) error) {
+	testHookRegister = f
+	t.Cleanup(func() { testHookRegister = nil })
+}

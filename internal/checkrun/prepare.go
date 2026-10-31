@@ -10,6 +10,7 @@ import (
 	"github.com/XKHoshizora/specmetry/internal/apperr"
 	"github.com/XKHoshizora/specmetry/internal/config"
 	"github.com/XKHoshizora/specmetry/internal/datadir"
+	"github.com/XKHoshizora/specmetry/internal/gitx"
 	"github.com/XKHoshizora/specmetry/internal/project"
 	"github.com/XKHoshizora/specmetry/internal/secrets"
 	"github.com/XKHoshizora/specmetry/internal/store/sqlite"
@@ -17,19 +18,30 @@ import (
 
 // Batch is an admitted check run once every step before its first check
 // has passed (spec §4.1): the project and W, W's worktree if it is
-// registered, and the criteria to run in their order with what was fixed
-// for them. Nothing has run and nothing is recorded; the caller closes it.
+// registered, the criteria to run in their order with what was fixed for
+// them, the delivery target's snapshot S and where the checks' output
+// goes. No check has run and none is recorded; the caller closes it. An
+// empty batch (--all with nothing to run) is complete: its document is
+// made, W registered if it was not.
 type Batch struct {
 	ProjectID string
 	Where     project.Where
 	// WorktreeID is W's registered worktree, "" while W is not registered.
 	WorktreeID string
 	Items      []Item
+	// Snapshot is S, the commit the active target's ref resolves to (D9),
+	// "" when there is none.
+	Snapshot string
+	// Stdout and Stderr are what a check's output goes to: inherited.
+	Stdout, Stderr *os.File
+	// Document is an empty batch's result; nil otherwise.
+	Document *Document
 
-	host   *host
-	call   int
-	db     *sqlite.DB
-	closed bool
+	host    *host
+	call    int
+	db      *sqlite.DB
+	scratch *gitx.Scratch
+	closed  bool
 }
 
 // Test hooks: testHookOpen runs where the database is opened, the one
@@ -48,7 +60,7 @@ func Prepare(ctx context.Context, opts Options, out Output) (*Batch, error) {
 	return prepare(ctx, &process, opts, out)
 }
 
-func prepare(ctx context.Context, h *host, opts Options, _ Output) (_ *Batch, err error) {
+func prepare(ctx context.Context, h *host, opts Options, out Output) (_ *Batch, err error) {
 	// Step 1, then step 2: refusals before any database, git or process.
 	if err := opts.check(); err != nil {
 		return nil, err
@@ -132,6 +144,40 @@ func prepare(ctx context.Context, h *host, opts Options, _ Output) (_ *Batch, er
 			return nil, err
 		}
 	}
+	// Step 8: a git project's checks before the first run, in this order:
+	// PD-26 before any command that reads an object, the private area,
+	// then S (a target with no commit is no S, not an error) and, for an
+	// empty batch, HEAD at the command's start.
+	head := ""
+	if b.Where.Git {
+		if err := gitx.CheckObjectReads(ctx); err != nil {
+			return nil, err
+		}
+		if b.scratch, err = gitx.NewScratch(dir); err != nil {
+			return nil, err
+		}
+		if f.target != nil {
+			if b.Snapshot, err = gitx.CommitOf(ctx, b.Where.Root, f.target.Ref); err != nil {
+				return nil, err
+			}
+		}
+		if len(b.Items) == 0 {
+			if head, err = gitx.CommitOf(ctx, b.Where.Current, "HEAD"); err != nil {
+				return nil, err
+			}
+		}
+	}
+	// Step 9.
+	if b.Stdout, b.Stderr, err = streams(out, opts.JSON); err != nil {
+		return nil, err
+	}
+	// Step 10: an empty batch registers W alone if it must, and is done. A
+	// batch with checks registers W in its first run's transaction.
+	if len(b.Items) == 0 {
+		if b.Document, err = b.emptyBatch(ctx, head); err != nil {
+			return nil, err
+		}
+	}
 	return b, nil
 }
 
@@ -146,10 +192,15 @@ func (b *Batch) Close() error {
 		return nil
 	}
 	b.closed = true
-	var err error
+	var errs []error
+	if b.scratch != nil {
+		if err := b.scratch.Close(); err != nil {
+			errs = append(errs, apperr.Wrap(apperr.Environment, err, "cannot close the data directory's tmp directory"))
+		}
+	}
 	if b.db != nil {
-		err = b.db.Close()
+		errs = append(errs, b.db.Close())
 	}
 	b.host.release()
-	return err
+	return errors.Join(errs...)
 }
