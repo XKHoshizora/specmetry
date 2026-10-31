@@ -1,5 +1,10 @@
 package checkrun
 
+import (
+	"context"
+	"testing"
+)
+
 // Test access to the package's unexported parts. None of it is in the
 // production build.
 
@@ -46,4 +51,22 @@ func State(h *Host) (disabled string, active, held int) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.disabled, h.active, len(h.held)
+}
+
+// PrepareWith is Prepare with a test's own host.
+func PrepareWith(ctx context.Context, h *Host, opts Options, out Output) (*Batch, error) {
+	return prepare(ctx, h, opts, out)
+}
+
+// OnOpen counts where Prepare opens the database (the counting seam of
+// spec §19.1's "no database access").
+func OnOpen(t testing.TB, f func()) {
+	testHookOpen = f
+	t.Cleanup(func() { testHookOpen = nil })
+}
+
+// AfterRead runs f once Prepare's read transaction has ended.
+func AfterRead(t testing.TB, f func()) {
+	testHookAfterRead = f
+	t.Cleanup(func() { testHookAfterRead = nil })
 }
