@@ -4,7 +4,7 @@
 >
 > - **第一批**（§4.1）获条件授权：PR #46（本计划）的合并核验与 master push CI 全部成功之后才生效，另开实现 PR。2026-10-31 已生效（§153），实施登记见 §10。审查 121、122 之后在受审范围内技术通过，实现 PR #47 获条件授权以 merge commit 合并（§155）。
 > - **第二批**（§4.2）获条件授权：PR #47 的合并核验与 master push CI 全部成功之后才生效，另开实现 PR，不合并（§155）。2026-11-01 已生效（§156），实施登记见 §11。审查 123 ~ 125 之后在受审范围内技术通过，实现 PR #48 获条件授权以 merge commit 合并（§161）。
-> - **第三批**（§4.3）只获具体设计准备的条件授权：PR #48 的合并核验与 master push CI 全部成功之后才生效，另开纯文档 PR，不合并（§161）。
+> - **第三批**（§4.3）只获具体设计准备的条件授权：PR #48 的合并核验与 master push CI 全部成功之后才生效，另开纯文档 PR，不合并（§161）。2026-11-01 已生效（§162），具体设计见 §12，待独立审查。
 > - **未授权**：第三批的实现、第四批及之后的批次与 WP2.5 的验收。
 >
 > 本文依据已冻结的 [WP2.5 规范](wp2.5-check-runner.md)（§22），安排生产实现的分批、顺序、接线与验收证据。它不改变冻结的规则，不扩大 MVP 范围；本文本身不授权实施，授权见 review-resolution。各批的开工、合并与 WP2.5 的验收，都由负责人分别决定（§9）。本文不含生产代码，也不修改 Schema、迁移或 workflow。
@@ -881,3 +881,340 @@ Runner 的测试在 `internal/checkrun` 自己的包中，不放进 `internal/cl
 - **保留的回归**：`TestFinalPathConsumesItsClose`（原生、注入与两者并存，真实结果不被注入覆盖）、`TestLookupFailsOnACloseFailure`（原生：第一个候选的关闭失败而下一个健康，根的关闭失败）、`TestPrepareHandleCloseFailure` 与 Windows 的查找测试。
 - **证据类别**：E1、E2 由 `OnRelease` 追加在每次关闭自己的结果（nil）上，是注入的证据；不新增原生的故障实验。
 - **局限**：“同次读取的错误也在链中”没有动态构造，只由代码的读取与保存方式保证；不新增读取错误的接缝。
+
+## 12. 第三批的具体设计（2026-11-01，设计准备，待独立审查）
+
+本节固定计划 §4.3 的具体设计（review-resolution §161 第 3 项、§162），供实施与审查使用。**它不授权第三批的实现**：实现须在本设计经独立审查之后另行授权。本节不改变冻结的规则；凡是超出冻结条文字面的具体化，都在 §12.11 单独列出，待审查与负责人决定。
+
+### 12.1 固定的起点与依据
+
+| 项 | 值 |
+|---|---|
+| 起点 | master 合并提交 `53fe5195fe0a4efe0e7b974f43d990e6e9c09ad8`（PR #48；父提交 `47f5680`、`3b53afc`；树 `2891c97`），master push CI 已核验（§162） |
+| 规则 | 冻结规范 §19.4（G4：闸门、git 的先后、取消、自锁、C-9）、§8.2（排他区间的三个条件）、§8.4（排队中取消）、§19.3（F1 之后释放排他租约）、§21.3 与 §22.2 中 C-8、C-9、C-10 的采纳与限定、§22.5 的保留限制 |
+| 计划 | §4.3（范围与验收）；§8（工具链、依赖与预算）；§9 的决定 2（`check run` 到第 7 批才注册）与决定 5（C-9 优先不新增依赖） |
+| 现有代码（只读核对） | 生产代码中启动或回收子进程的入口只有三处：`internal/gitx/gitx.go` 的 `commandIO`（全部 git；生产为 `cmd.Run()`，测试接缝为 `Start` / 钩子 / `Wait`）、`internal/cli/doctor.go` 的 `gitCheck`（`exec.Command("git", "--version").Output()`）、`internal/datadir/acl_darwin.go` 的 `listACLs`（`exec.Command("/bin/ls", …).Output()`，只在 darwin）。与信号有关的只有 `cmd/specmetry/main.go` 的 `signal.NotifyContext(ctx, os.Interrupt)`。其余进程调用都在 `_test.go` 与 `internal/testutil` 中 |
+| 依赖 | `go.mod` 不变；不新增依赖（§12.8 的方案只用标准库与 `go` 命令） |
+
+### 12.2 范围
+
+**第三批实现**（经授权之后）：
+
+- 新的闸门包 `internal/procgate`：进程中唯一的共享 / 排他租约，写者优先，等待可取消，自锁标记，C-10 的检查。
+- 三个生产入口改为经闸门启动与回收：`gitx`、doctor、macOS 的 ACL 检查。只改接线，不改它们已验收的语义。
+- C-9 两类规则的静态检查（`internal/testutil/c9lint`）与它的导入者测试；仓库的生产代码通过它。
+
+**不在第三批**（与第四批及之后的接口边界）：
+
+- 排他区间内的平台动作：Linux 的基线读取、能力探测（G6）、subreaper 的设置与清除、pidfd、`waitid`、清扫（第 4 批）；macOS 的 `waitid` 入口 E2 与它的包（第 5 批）；Windows 的 Job 与挂起启动（第 6 批）。第三批只给出它们的位置与接口的扩展点（§12.4 的 `Interval`）。
+- 执行核心：`Execute`、开始与结束上下文的 git、输入记录、收尾协议、记录与输出（第 4 批）。“git 的先后”（开始上下文的 git 在排他租约之前回收，结束上下文的 git 在释放之后运行）在第 4 批的执行路径中接线；第三批提供自锁标记，使排他期间的 git 失败即暴露。
+- 公开的 `check run` 命令（第 7 批）；检查进程的启动。
+- 工具链、依赖、workflow 与预算的变更。
+
+### 12.3 包与依赖方向
+
+```mermaid
+flowchart BT
+    procgate["internal/procgate（叶子：标准库与 internal/apperr）"]
+    gitx["internal/gitx"] --> procgate
+    datadir["internal/datadir（ACL 检查，darwin）"] --> procgate
+    cli["internal/cli（doctor）"] --> procgate
+    checkrun["internal/checkrun（第 4 批起：Exclusive）"] --> procgate
+    c9lint["internal/testutil/c9lint（只在测试中运行；不在生产构建与 C-9 的范围内）"]
+```
+
+- **`internal/procgate`** 是叶子包：只导入标准库（`context`、`errors`、`os/exec`、`os/signal`、`sync`、`syscall`）与 `internal/apperr`。它不导入 `gitx`、`datadir` 或任何业务包，所以 `datadir`（被 `gitx` 与存储层导入）也可以导入它，不形成环。
+- **唯一的实例**：包级的未导出变量 `global`，导出的函数都作用于它；包外不能构造实例。包内测试经 `export_test.go` 构造独立实例检验语义，不改变全局实例。
+- **平台层的位置**（第 4 ~ 6 批）：启动与回收检查进程的平台动作都属于闸门（C-9 第一类只允许闸门包使用这些能力），放在 `internal/procgate` 中按 GOOS 分开的文件里；若某批需要子包，由该批的设计列入第一类白名单并经审查。macOS 的 `waitid` 入口放在 `internal/procgate/e2waitid`（C-9 第二类白名单中唯一的包，第 5 批加入）。
+- **`internal/testutil/c9lint`**：规则的分析器。它自己要运行 `go list`（启动子进程）并导入 `go/parser`、`go/types`，所以放在规范定义的 C-9 范围之外（“生产包，不含 `_test.go` 与 `internal/testutil`”），也不进入生产构建。
+
+### 12.4 接口
+
+```go
+package procgate
+
+// Run starts cmd under a shared lease and returns once cmd is reaped:
+// cmd.Run() when started is nil; otherwise cmd.Start(), started(), and
+// cmd.Wait(). ctx bounds only the wait for the lease and carries the
+// self-lock mark; whether cmd is killed on cancellation is cmd's own
+// (exec.CommandContext). The lease is released after Wait returns, or
+// at once when Start fails.
+func Run(ctx context.Context, cmd *exec.Cmd, started func()) error
+
+// Output is Run with cmd.Output().
+func Output(ctx context.Context, cmd *exec.Cmd) ([]byte, error)
+
+// Exclusive runs fn under the exclusive lease (spec §19.4): it waits
+// until no shared lease is held, keeps new shared requests out while
+// it waits, checks C-10, and calls fn with ctx marked as the holder's.
+func Exclusive(ctx context.Context, fn func(ctx context.Context, iv *Interval) error) error
+
+// Interval is the exclusive interval fn runs in. Batch 3 gives it no
+// methods; batches 4 to 6 add the platform actions (baseline, probe,
+// subreaper, starting and reaping the check) as its methods.
+type Interval struct{ /* unexported */ }
+
+// State is a read-only snapshot, for tests and diagnostics; nothing
+// decides on it.
+func State() Snapshot
+
+type Snapshot struct {
+	SharedHeld, SharedWaiting       int
+	ExclusiveHeld                   bool
+	ExclusiveWaiting                int
+	Starts                          uint64 // shared leases that reached Start
+}
+
+var (
+	ErrSelfLock       error // apperr internal: a holder of the exclusive lease asked for a lease
+	ErrSigchldIgnored error // C-10: this process ignores SIGCHLD; no check may start
+)
+```
+
+- **调用方的映射**：
+  - `ErrSelfLock` 是 `internal`（退出码 1）：持有排他租约的代码申请租约，是程序错误，失败即暴露。
+  - 排队中被取消：返回包装了 `ctx.Err()` 的错误，没有启动任何进程。`gitx` 沿用既有的映射（`ctx.Err() != nil` → `environment`，“git was interrupted”）。第 4 批把排他排队中的取消映射为退出码 6、当前项不记录（§8.4）。
+  - `ErrSigchldIgnored`：第 4 批映射为不启动、退出码 6、不记录（C-10，D7 的不启动）。
+- **钩子 `started`**：只为 `gitx` 既有的生命周期测试接缝（`testHookCommand` 的 “started”）保留 `Start` 与 `Wait` 之间的位置；生产传 nil，等价于 `cmd.Run()`。
+
+### 12.5 租约的状态、等待与释放
+
+**状态**（都在一个互斥锁之下）：
+
+| 字段 | 含义 |
+|---|---|
+| `shared` | 持有中的共享租约数 |
+| `exclusive` | 是否有排他持有者 |
+| `waitingExclusive` | 仍在等待的排他请求数（写者优先只计它） |
+| `waitingShared` | 等待中的共享请求数（只供 `State`） |
+| `changed` | 一个通道：每次状态改变时在锁下关闭并换新，等待者据此醒来 |
+
+**取得**（共享与排他相同的循环）：
+
+1. **自锁**：`ctx` 中有排他持有者的标记，且该持有者仍在持有 → 立即返回 `ErrSelfLock`，不排队。持有者释放之后，带旧标记的 `ctx` 不再触发自锁。
+2. 加锁，登记为等待者（排他：`waitingExclusive++`）。
+3. 循环：
+   - **先看上下文**：`ctx` 已取消 → 退出排队（排他：`waitingExclusive--`，并换新 `changed` 唤醒被写者优先挡住的共享请求），解锁，返回取消的错误。即使此刻租约已经可以取得，也不取得（§19.4 “取消与释放同时发生”）。
+   - **可以取得**：共享：没有排他持有者，且 `waitingExclusive == 0`；排他：没有排他持有者，且 `shared == 0`。取得（计数），退出排队，解锁，返回。
+   - **否则**：在锁下记下当前的 `changed`，解锁，`select` 等待 `changed` 被关闭或 `ctx.Done()`，再加锁回到循环开头。因为通道是在锁下记下的，此后的任何状态改变都会关闭它，不会丢失唤醒。
+4. 排队用可按上下文中断的 `select` 实现，不用不可中断的条件变量。等待没有固定的总上界（C-8）；没有超时。
+
+**释放**：只由持有者释放，每个租约一次。共享：`shared--`；排他：持有者标记设为已结束，`exclusive = false`；然后换新 `changed`。
+
+**写者优先与饥饿**：有排他请求在等待时，新的共享请求等待；排他请求之间不保证先后。持续不断的排他请求可以使共享请求一直等待；生产 CLI 一个进程只执行一条命令，这只可能出现在进程内的并发调用中（§19.4 “生产 CLI 中的排队”）。不为此增加期限（那是影响用户行为的政策，须另行提出）。
+
+### 12.6 各出口的租约责任与错误消费
+
+**共享租约**（`Run` / `Output`）：
+
+| 出口 | 租约 | 返回 |
+|---|---|---|
+| 自锁 | 没有取得 | `ErrSelfLock` |
+| 排队中取消 | 没有取得；排队的登记已撤回 | 包装了 `ctx.Err()` 的错误；没有启动进程 |
+| `Start` 失败（没有子进程） | 立即释放 | `Start` 的错误，原样（`exec.ErrNotFound` 等由调用方照旧映射） |
+| `Start` 成功，`Wait` 返回（成功、`*exec.ExitError` 或其他错误） | `Wait` 返回之后释放 | `Wait` 的错误，原样 |
+| 调用方的上下文在启动之后被取消 | 由 `exec.CommandContext` 终止子进程（既有行为）；仍在 `Wait` 返回之后释放 | 同上 |
+| 子进程不结束，`Wait` 不返回 | 一直持有 | 不返回（§19.4：没有协议给定的上界；不新增超时、终止策略或清理降级） |
+| `started` 钩子 panic（只在测试接缝） | 先 `Wait`，再释放 | 重新 panic，panic 值附带 `Wait` 的结果，两者都不丢 |
+| 标准库内部 panic，闸门不知道子进程是否已被回收 | **不释放**（失败关闭：不让排他区间误以为已经排净） | 重新 panic |
+
+**排他租约**（`Exclusive`）：
+
+| 出口 | 租约 | 返回 |
+|---|---|---|
+| 自锁（嵌套的 `Exclusive`） | 没有取得 | `ErrSelfLock` |
+| 排队中取消 | 没有取得；`waitingExclusive` 已减 1，共享请求被唤醒 | 包装了 `ctx.Err()` 的错误 |
+| 取得之后 C-10 不成立 | 释放；不调用 `fn` | `ErrSigchldIgnored` |
+| `fn` 返回 | `fn` 返回之后释放 | `fn` 的错误，原样 |
+| 取得之后、`fn` 之中被取消 | 由持有者按正常流程处理（第 4 批：S0 之前的取消为不启动）；`fn` 返回之后释放 | `fn` 的错误 |
+| `fn` panic | **不释放**（失败关闭：区间内的进程是否已结束未知） | 重新 panic |
+
+- F1 之后释放排他租约是规范的规定（§19.3），由第 4 批的 `fn` 正常返回实现；Linux 之后的检查由基线拒绝，三个平台都由宿主的禁用拒绝（Q-1）。闸门本身不新增禁用条件。
+- 闸门不吞掉任何它得到的错误；它自己产生的错误只有自锁、排队中取消与 C-10 三种。
+
+### 12.7 接线（只改接线，不改已验收的语义）
+
+| 调用者 | 现在 | 第三批之后 | 不变的语义 |
+|---|---|---|---|
+| `gitx.commandIO` | 生产 `cmd.Run()`；测试接缝 `Start`、`testHookCommand("started")`、`Wait`、`testHookCommand("waited")` | `procgate.Run(ctx, cmd, started)`：生产 `started` 为 nil；接缝时 `started` 调用 “started” 钩子，`Run` 返回之后调用 “waited” 钩子 | 参数、目录、环境、输入输出、`exec.CommandContext` 的终止、结果的映射（`ctx.Err()`、`*exec.ExitError`、`exec.ErrNotFound`、其他）都不变。只在映射的最前面加一条：`ErrSelfLock` 原样返回（`internal`），不被改写为 “cannot run git” |
+| doctor 的 `gitCheck` | `exec.Command("git", "--version").Output()` | `procgate.Output(context.Background(), exec.Command("git", "--version"))` | 不可取消（规范：没有上下文）；任何错误仍是 “git is required but was not found on PATH”；输出照旧去掉空白 |
+| `datadir.listACLs`（darwin） | `exec.Command("/bin/ls", args...).Output()` | `procgate.Output(context.Background(), exec.Command("/bin/ls", args...))` | 不可取消；错误照旧包装为 “cannot list access control lists with /bin/ls: …” |
+
+- `exec.Command` / `exec.CommandContext` 只构造 `*exec.Cmd`，不启动；调用者照旧构造并设置字段，再交给闸门。
+- 自锁标记依赖上下文的传递：doctor 与 ACL 检查没有上下文，不能带标记；它们在结构上不会出现在排他区间中（排他区间只在第 4 批的执行路径中，那里不调用它们）。这是标记的局限，如实记录。
+- `cmd/specmetry/main.go` 的 `signal.NotifyContext(ctx, os.Interrupt)` 不改；它满足 §12.9 的信号规则（参数是已知值 SIGINT）。
+
+### 12.8 C-10 的位置与拒绝
+
+- **位置**：`Exclusive` 取得租约之后、调用 `fn` 之前（§19.4 排他租约的第 1 步）。第 4 批的基线、能力探测与 subreaper 都在它之后。
+- **检查**：Unix 上 `signal.Ignored(syscall.SIGCHLD)`；为真 → 释放租约，不调用 `fn`，返回 `ErrSigchldIgnored`（不启动，退出码 6，不记录）。Windows 没有 SIGCHLD，检查恒为成立。
+- **不检查的**：共享租约（规范只在 S0 检查）；`SA_NOCLDWAIT`（由运行时的配置保证，§19.5 P3）。`signal.Ignored` 不是宿主全部信号配置的证明（C-10 的限定）。
+- 运行之中由别处改变 SIGCHLD 的处置，由 C-9 第一类的信号规则静态禁止（§12.9）。
+
+### 12.9 C-9：规则的具体化
+
+规则按 `go/types` 解析出的对象判断，不按名称匹配。“对象”指 `types.Info.Uses` 中标识符所指的 `types.Object`；比较用对象的完整名（`types.Func.FullName()`，如 `(*os/exec.Cmd).Start`、`os.StartProcess`），先经 `Origin()` 与别名的展开。
+
+**第一类：启动与回收的闸门**
+
+禁用对象表（闸门包之外的任何引用都是违规；“引用”包括调用、方法值、方法表达式、取函数值赋给变量、经类型别名或嵌入提升的选择）：
+
+| 组 | 对象 | 平台 |
+|---|---|---|
+| `os/exec` | `(*Cmd).Start`、`(*Cmd).Run`、`(*Cmd).Output`、`(*Cmd).CombinedOutput`、`(*Cmd).Wait` | 全部 |
+| `os` | `StartProcess`、`(*Process).Wait` | 全部 |
+| `syscall` | `ForkExec`、`StartProcess`、`Exec`、`Wait4` | Unix（Windows 上有 `StartProcess`） |
+| `golang.org/x/sys/unix` | `Exec`、`Wait4`、`Waitid` | Unix 中存在的平台 |
+| `os/signal` | `Ignore`、`Notify`、`Reset`，以及 `NotifyContext`（它在标准库内部调用 `Notify`；见 §12.11 的 X4） | 全部，按下面的信号规则 |
+| 第 5 批 | `internal/procgate/e2waitid` 的 `Waitid`（与 `unix.Waitid` 同属回收能力） | darwin |
+
+- **表的自检**：每个对象在它所属的平台上必须能在类型信息中找到（例如 linux 配置中必须找到 `golang.org/x/sys/unix.Waitid`，前提是该配置的依赖闭包中有这个包）；预期存在而找不到 → 分析失败，不当作“没有使用”。
+- **信号规则**：对 `signal.Ignore`、`Notify`、`Reset`、`NotifyContext` 的引用，只有在下列情况才不算违规：它是直接调用，信号参数至少一个，且每一个都是在该配置下取值已知、不等于 SIGCHLD 的常量（如 `syscall.SIGTERM`），或是标准库中取值固定的变量 `os.Interrupt`、`os.Kill`。没有信号参数（表示全部信号）、以 `sigs...` 展开、变量、函数值引用 → 违规。
+- **间接形式**（§12.11 的 X3）：在闸门包之外，下列写法也是违规，因为它们使禁用的方法可以经动态派发或反射到达：
+  - 类型为 `exec.Cmd`、`*exec.Cmd`、`os.Process`、`*os.Process`，或其结构中含有这些类型（字段、元素、指针，递归）的值，被显式或隐式地转换为接口类型或 `unsafe.Pointer`（包括作为 `any` 实参传给 `fmt`、`reflect` 等）；
+  - 声明中嵌入了这四种类型之一的结构体（嵌入使禁用的方法被提升）；
+  - 以这四种类型之一（或含有它们的类型）作为类型实参实例化泛型函数或泛型类型。
+
+  隐式转换按每个表达式所处的位置判断：调用实参（按实例化之后的签名，含变参）、赋值与短变量声明的左侧、带类型的变量声明、`return` 的结果类型、复合字面量的字段 / 元素 / 键、通道发送、`==` / `!=` 的另一侧为接口、显式转换。位置无法确定期望类型时 → 违规（失败关闭），不跳过。
+  这些规则只适用于仓库自己的生产包；第三方依赖只做对象表的引用扫描（规范：第三方只做第一类；X3 是对仓库的具体化）。
+- **闸门包的白名单**（第三批）：
+
+  | 包 | 对象 | 平台 | 用途 |
+  |---|---|---|---|
+  | `internal/procgate` | `(*os/exec.Cmd).Run` | 全部 | `Run`（`started` 为 nil） |
+  | `internal/procgate` | `(*os/exec.Cmd).Start`、`(*os/exec.Cmd).Wait` | 全部 | `Run`（有 `started`） |
+  | `internal/procgate` | `(*os/exec.Cmd).Output` | 全部 | `Output` |
+
+  白名单是精确的：闸门包中出现表外的禁用对象 → 违规；表中的项在该配置中没有被使用 → 违规（陈旧的项）。第 4 ~ 6 批加入平台动作时，在各自的设计中扩充这张表并经审查。闸门包自身不受“间接形式”的限制。
+
+**第二类：原始系统调用入口与指令**（只约束仓库自有的生产包）
+
+- **原始入口**（对象表，按平台自检）：`syscall` 的 `Syscall`、`Syscall6`、`Syscall9`、`Syscall12`、`Syscall15`、`Syscall18`、`SyscallN`、`RawSyscall`、`RawSyscall6`，以及各平台存在的 `RawSyscallNoError`、`AllThreadsSyscall`、`AllThreadsSyscall6`；`golang.org/x/sys/unix` 的 `Syscall`、`Syscall6`、`Syscall9`、`RawSyscall`、`RawSyscall6`、`SyscallNoError`、`RawSyscallNoError`。Windows 上 `golang.org/x/sys/windows` 的 `(*LazyProc).Call`、`(*Proc).Call` 见 §12.11 的 X2。
+- **指令**：`//go:linkname` 与任何 `//go:cgo_` 开头的指令（`cgo_import_dynamic`、`cgo_import_static`、`cgo_export_*`、`cgo_ldflag`、`cgo_dynamic_linker`、`cgo_unsafe_args`）。
+- **文件**：`.s`、`.syso`、`.c`、`.h`、`.cc`、`.cpp`、`.cxx`、`.hh`、`.hpp`、`.hxx`、`.m`、`.f`、`.F`、`.for`、`.f90`、`.swig`、`.swigcxx`；`import "C"`（cgo）。
+- **白名单**：只有 `internal/procgate/e2waitid`（第 5 批加入；第三批时不存在，不存在不是违规）。它存在时，逐项核对：
+  - 平台：它的每个 `.go` 与 `.s` 文件的构建约束对 darwin 以外的每个 GOOS 都为假；`.s` 文件只有 `darwin_amd64` 与 `darwin_arm64` 各一份。
+  - 指令：恰好一条 `//go:cgo_import_dynamic libc_waitid waitid "/usr/lib/libSystem.B.dylib"`；恰好一条 `//go:linkname`，把一个没有函数体的本地声明绑定到 `syscall.syscall6`；没有其他 `//go:linkname` 或 `//go:cgo_` 指令。
+  - 跳板：每个 `.s` 文件去掉注释、空行与 `#include "textflag.h"` 之后，按空白规范化，恰好等于下面四行：
+    ```text
+    TEXT libc_waitid_trampoline<>(SB),NOSPLIT,$0-0
+    JMP libc_waitid(SB)
+    GLOBL ·libc_waitid_trampoline_addr(SB),RODATA,$8
+    DATA ·libc_waitid_trampoline_addr(SB)/8,$libc_waitid_trampoline<>(SB)
+    ```
+  - 用途：经 `//go:linkname` 取得的本地函数只在一处被引用，即以跳板地址变量为第一个实参的调用；跳板地址变量只在这一处被引用；包中没有其他原始入口；包只导入 `syscall` 与 `unsafe`。
+  - 它同时受第一类约束：包中不能有启动或回收的对象；它导出的 `Waitid` 列入第一类的禁用对象表，只在闸门包中使用。
+- 第二类不套用到 Go 标准库与 `golang.org/x/sys` 本身（它们的生成桩与跳板就使用这些入口与指令）。
+
+### 12.10 C-9：分析的方式与范围
+
+**配置矩阵**：NFR-05 的平台，CGO 关闭（生产配置），标签 `nowebui`：
+
+| GOOS | GOARCH | 在哪个 CI 作业中分析 |
+|---|---|---|
+| linux | amd64、arm64 | Go tests（ubuntu-latest） |
+| darwin | arm64、amd64 | Go tests（macos-latest） |
+| windows | amd64、arm64 | Go tests（windows-latest） |
+
+每个作业只分析自己 GOOS 的两个架构；设置环境变量 `SPECMETRY_C9_ALL=1` 时分析全部六个（本地复查用）。分析只读源码，不编译，所以交叉架构不需要构建缓存或 C 工具链。NFR-05 没有写明 Windows 的架构；这里两个都分析，偏保守。
+
+**装载**（不新增依赖）：
+
+1. 对每个配置运行一次 `go list -e -deps -json -tags nowebui ./...`，环境为该配置的 `GOOS`、`GOARCH`、`CGO_ENABLED=0`，`GOFLAGS` 置空，`GOWORK=off`。取每个包的 `ImportPath`、`Dir`、`GoFiles`、`CgoFiles`、`IgnoredGoFiles`、`SFiles` 等文件表、`Imports`、`ImportMap`、`Standard`、`Module`、`Error`、`DepsErrors`、`Incomplete`。
+2. **全部从源码做类型检查**，按依赖顺序，导入器只从本次检查过的包中按 `ImportMap` 解析：
+   - 仓库自己的生产包：完整检查（含函数体），供两类规则使用；
+   - 第三方包：先用 `go/scanner` 做词法预筛：文件中出现禁用对象的名字（`Start`、`Run`、`Output`、`CombinedOutput`、`Wait`、`StartProcess`、`ForkExec`、`Exec`、`Wait4`、`Waitid`、`Ignore`、`Notify`、`NotifyContext`、`Reset`）的包完整检查并扫描；其余只检查声明（`IgnoreFuncBodies`）。预筛是可靠的：对一个对象的任何引用都必须写出它的名字（选择、限定标识符、方法值、点导入与嵌入提升都如此）；
+   - 标准库与 `golang.org/x/sys`：只检查声明（它们是能力的提供者，不在扫描范围内）。
+3. 类型检查的参数：`types.SizesFor("gc", GOARCH)`；语言版本取包所在模块的 `go` 版本；`FakeImportC` 关闭。
+4. 从源码检查标准库的声明是 gopls 等工具的常规做法；在本仓库各配置上的可行性、耗时与内存没有验证，实施时测量（Q-B3-2）。不用 `go list -export` 读编译器的导出数据，是为了不在交叉架构上编译全部依赖。
+
+**范围**：
+
+- 仓库的生产包：主模块中、不在 `internal/testutil/...` 之下的包，只取 `GoFiles`（不含 `_test.go`）；`prototype/wp25` 是另一个模块，不在范围内（它只在 test-only 的诊断中运行）。
+- 第三方依赖：每个配置中，从仓库的生产包出发、按 `Imports` 计算的依赖闭包（不经过 `internal/testutil`）里，`Standard` 为假、不属于主模块、也不在 `golang.org/x/sys/...` 之下的包。只在测试中使用的依赖（`go-pty` 等）不在这个闭包中，不扫描。
+- 与构建标签无关的文本扫描：第二类的指令、文件类型与 `import "C"`，对仓库生产包目录中的**全部**非测试文件做，不论构建约束（不依赖配置矩阵覆盖了所有标签组合）。
+- `web` 包：类型扫描在 `nowebui` 下进行（不带它须先构建前端）；它的两个变体文件都在文本扫描中。这一差别只涉及嵌入的文件，没有进程或系统调用。
+
+**失败而不跳过**（分析返回错误，测试失败，并列出全部问题）：
+
+- `go list` 非零退出、输出不能解析，或任何相关包有 `Error`、`DepsErrors`、`Incomplete`；
+- 任何需要的包缺少源码或不能解析，任何类型错误（被完整检查的包，以及只检查声明的包的声明部分）；
+- 仓库的生产包中出现 `CgoFiles`、`import "C"`；
+- 对象表或白名单中预期存在的对象在该配置中找不到；
+- 某个表达式的期望类型无法确定（§12.9 的间接形式）；
+- 配置的包集合中缺少锚点（`cmd/specmetry`、`internal/gitx`，以及第三批之后的 `internal/procgate`）；
+- 读取文件、规范化或文本扫描出错。
+
+### 12.11 超出冻结条文字面的具体化与待决事项
+
+下列项不改变规则的意图，但超出了 §19.4 的字面，或与它的前提不符，**须经审查与负责人决定**，实施不自行采用：
+
+| # | 事项 | 现状与依据 | 推荐 |
+|---|---|---|---|
+| **Q-B3-1** | **现有依赖 `modernc.org/libc` v1.77.1 中有第一类的能力**，与规范“当前依赖中没有启动子进程的库”的前提不符 | 只读核对（不是运行证据）：`Xsystem`（darwin `libc_darwin.go:1127`、linux `libc_musl.go:1196`、windows `libc_windows.go:1086`）调用 `exec.Command("sh", "-c", …)` 与 `(*exec.Cmd).Run`；darwin 的 `Xwaitpid` 调用 `unix.Wait4`，`Xexecve` 调用 `unix.Exec`；`Xsignal`（linux `libc_musl.go:1039` ~ `1045`，darwin 经 `libc_unix.go:86` ~ `90`）以运行时的信号值调用 `signal.Ignore`、`Reset`、`Notify`；darwin 的 `Xpause` 调用 `signal.Notify`；windows 的 `XCreateProcessW`、`XCreateProcessA` 经 `LazyProc.Call` 调用 `CreateProcess`。这些是 C 库函数的移植；SQLite 实际是否调用它们没有验证。按 §19.4，第三方扫描在现有依赖上就会失败 | **(a)** 精确的例外清单：按模块版本、包、函数与对象逐项列出，升级依赖即失效；每一项另须**链接级的不可达证明**：对每个配置构建 `cmd/specmetry`，用链接器的依赖图（`go build -ldflags=-dumpdep`）确认这些函数不可达，可达即失败。不新增依赖。本机 Go 1.27.1 的 `go tool link -help` 列有 `-dumpdep`，但它的输出格式没有文档承诺；每个配置的构建是一次编译（交叉架构没有现成的构建缓存），耗时计入 Q-B3-2。格式不可靠或耗时超出界限即停下报告。备选 (b)：例外清单不做可达性证明，记为 L；(c)：替换数据库驱动，超出本批范围 |
+| X1 | Windows 的启动能力：`syscall.CreateProcess`、`windows.CreateProcess`、`windows.CreateProcessAsUser` | §19.4 只列了 `ForkExec`、`StartProcess`、`Exec`；Windows 上 `os.StartProcess` 之下就是 `CreateProcess` | 列入第一类的对象表 |
+| X2 | Windows 的原始调用入口：`golang.org/x/sys/windows` 的 `(*LazyProc).Call`、`(*Proc).Call` | §19.4 第二类写的是 `syscall` 与 `golang.org/x/sys/unix`；`syscall.SyscallN` 在 `syscall` 中，已在范围内 | 列入第二类的对象表。仓库的生产代码目前没有这些用法（`NewLazySystemDLL` 只在 `gitx` 的测试中） |
+| X3 | §12.9 的间接形式（接口与 `unsafe.Pointer` 的转换、嵌入、泛型实参） | 规范要求覆盖方法值、函数变量与类型别名；接口派发与反射是同一能力的另一种到达方式 | 只对仓库的生产包采用 |
+| X4 | `signal.NotifyContext` 按 `Notify` 处理 | 它在标准库内部调用 `Notify`；标准库不在扫描范围内，不列出它就会漏掉 | 列入 |
+| Q-B3-2 | C-9 分析在 CI 中的耗时与内存 | 每个配置要从源码检查约 16 MB 的第三方源码（只读测得；`golang.org/x/sys` 除外）中通过预筛的部分与标准库的声明；没有测量 | 实施时在三个作业中记录耗时；`internal/testutil/c9lint` 的测试在任何作业中超过 120 秒或内存不足 → 停下报告，不自行调整预算 |
+
+### 12.12 验证
+
+**闸门**（`internal/procgate` 的包内测试，独立实例；真实子进程用测试二进制的再执行作为 helper，helper 读标准输入直到关闭，以便确定性地持有租约；每个等待都有截止，到期即失败）：
+
+| 测试 | 固定的预期 |
+|---|---|
+| 并发的共享 | N 个共享同时持有，`SharedHeld == N` |
+| 排他排除共享 | 共享持有时，排他等待、`fn` 不被调用；释放之后 `fn` 运行；`fn` 运行期间新的共享等待，`Starts` 不变；`fn` 返回之后共享启动 |
+| 写者优先 | 共享 S1 持有、排他 E 等待时，新的共享 S2 等待；S1 释放之后 E 先于 S2 取得 |
+| 排他之间不重叠 | 两个排他的区间（由取得与释放的时刻记录）不相交 |
+| 排队中取消（排他） | 取消之后在截止内返回取消的错误；`ExclusiveWaiting` 回到 0；被它挡住的 S2 立即取得；S1 不被提前释放（它的子进程仍在运行） |
+| 排队中取消（共享） | 返回取消的错误，`Starts` 不变 |
+| 取消与释放同时发生 | 包内的接缝把顺序固定为“醒来、释放、取消、加锁”：等待者返回取消的错误，没有取得；反向顺序（取得之后取消）：由持有者处理，租约只释放一次。另有 `-race` 下有次数上限与截止的随机交错：结束时各计数为 0，每个取得的租约恰好释放一次，没有取消之后的取得 |
+| 自锁 | `fn` 中以它的上下文调用 `Run` 或 `Exclusive` → 立即返回 `ErrSelfLock`，`Starts` 不变；`fn` 返回之后，带旧标记的上下文正常取得 |
+| 回收之前不释放 | 释放时断言 `cmd.ProcessState != nil`；`exec.CommandContext` 被取消时，也在 `Wait` 返回之后释放 |
+| `Start` 失败 | 不存在的程序：返回原错误，`SharedHeld` 回到 0 |
+| 钩子 panic | 先 `Wait` 再释放，panic 传出且带 `Wait` 的结果 |
+| `fn` panic | 租约保持持有；之后可取消的共享请求等待并在取消之后返回 |
+| C-10（Unix） | 在 helper 子进程中：`signal.Ignore(SIGCHLD)` 之后 `Exclusive` 返回 `ErrSigchldIgnored`，`fn` 不被调用，`ExclusiveHeld` 为假；对照不忽略时 `fn` 被调用。在子进程中做，避免改变测试进程的处置 |
+| 唯一实例 | 导出的 `Exclusive` 持有时，导出的 `Run` 等待 |
+
+**接线**（实际的生产调用者；记录 git 进程用 `testutil.PassthroughGit`）：
+
+- `gitx`（`procgate` 的外部测试包，可以导入 `gitx` 而不成环）：排他持有时调用一个 `gitx` 的读取函数 → `SharedWaiting == 1`，没有 git 进程；取消 → 返回 “git was interrupted”，仍没有 git 进程；释放之后再调用 → 成功，记录到一个 git 进程。在 `fn` 中以它的上下文调用 → 退出码 1（`internal`），没有 git 进程。
+- doctor（`internal/cli` 中一个小测试）：排他持有时 `gitCheck` 不返回、没有 git 进程、`SharedWaiting == 1`；释放之后返回 OK。
+- ACL 检查（`internal/datadir`，只在 darwin）：排他持有时不返回、`Starts` 不变；释放之后返回。
+- `gitx` 既有的测试（含 `testHookCommand` 的生命周期测试）全部保持通过。
+
+**入口绕过与额外回收者**：第三批的验证是静态的（下面的导入者测试）。动态的反例（排他区间中被绕过的启动与另一个回收者被基线发现）需要第 4 批的基线，在第 4 批验证。
+
+**C-9 的导入者测试**（`internal/testutil/c9lint`；夹具在 `testdata/` 中，是主模块中按路径显式列出的包，`./...` 不包含它们；每个夹具有测试中写定的预期发现：规则、包、文件与行、对象）：
+
+- 第一类，每种写法各一个违规夹具：直接调用、方法值、方法表达式、函数变量、类型别名、嵌入提升、接口转换、`any` 实参、`unsafe.Pointer`、嵌入的结构体声明、泛型实参；每个禁用对象至少一次；信号规则：没有参数、变量参数、`sigs...`、SIGCHLD 常量；
+- 第二类：表外包中的 `Syscall6`、`RawSyscall`、`SyscallN`、`//go:linkname`、`//go:cgo_import_dynamic`、`.s` 文件、`.syso` 文件、`import "C"`；白名单包（夹具中按配置的白名单指定）的变体：多一条指令、导入其他符号、跳板多一条指令、缺少 darwin 约束、调用其他原始入口、导入其他包；
+- 对照（零发现）：只构造 `*exec.Cmd` 并交给精确类型的参数；`NotifyContext` 以 `os.Interrupt` 与 `syscall.SIGTERM`；`unix.Flock` 等普通包装；夹具中的闸门包按它的白名单使用；白名单包的标准写法；
+- 装载失败：类型错误、缺少的依赖、`go list` 的错误、对象表中预期存在而找不到的对象 → 分析返回错误；
+- 仓库：对本仓库按真实白名单分析，零发现（第三方部分按 Q-B3-1 的决定）。
+
+### 12.13 实施安排（获授权之后）
+
+**提交顺序**：
+
+1. 实施登记（文档）：固定起点与本设计的审查结论、Q-B3-1 与 X1 ~ X4 的决定。
+2. `internal/procgate` 与它的包内测试。
+3. 三处接线与接线测试；`gitx`、`cli`、`datadir` 的既有测试保持通过。
+4. `internal/testutil/c9lint` 的装载、规则与导入者测试。
+5. 对本仓库的分析测试（含 Q-B3-1 决定的第三方处理）。
+
+**本地验证**：每步 `gofmt`、三个 GOOS 的 `go vet`；Windows 本机与 WSL Ubuntu 的测试；Linux 的 `-race` 只在 CI。
+
+**失败出口**（停下报告，不自行扩大）：
+
+- 接线改变了任何既有测试的结果；
+- 仓库的生产代码出现违规（不为通过而扩充白名单）；
+- 装载或类型检查失败、`-dumpdep` 的输出不可靠，或耗时与内存超出 Q-B3-2 的界限；
+- 发现必须改变冻结规则才能实现的情形。
+
+**预算**：不改 workflow 与期限。新增包的耗时按计划 §8 记录并与本节的起点比较；Ubuntu 的 `internal/cli` 已接近 600 秒的默认期限（run 41272280465 为 541.957 秒），第三批只在 `internal/cli` 中加一个小的 doctor 接线测试。每轮审查只推送一个固定代码点；CI 只在负责人授权时重跑。
+
+**继续登记、不在本批处理的事项**：已删除的登记 worktree 使解释器不可用（冻结规则，待负责人决定，不是已接受的 L）；`factgen/legality` 的差额；维护事项；冻结时保留的限制（§22.5）。

@@ -10276,3 +10276,43 @@ macOS 13+、Intel 的支持承诺与已批准的产品决定不变；没有新�
 
 - PR #48 按条件授权以 merge commit 合并。合并核验与 master push CI 的结果，记录在交付回执与第三批设计准备的纯文档 PR 中。
 - 第三批的设计准备在上述核验全部成功之后才获授权。
+
+## 162．PR #48 的合并与核验；第三批（计划 §4.3）具体设计准备的授权生效与设计
+
+**依据**：§161 的决定。
+
+- 条件授权以 merge commit 合并 PR #48。
+- PR #48 的合并核验与 master push CI 全部成功之后，第三批具体设计准备的授权生效。
+
+**第一阶段：PR #48 的收尾与合并**：
+
+| 项 | 值 |
+|---|---|
+| 收尾的提交 | `becc9a6`：Review 125 原样归档<br>`3b53afc`：§161 与状态的同步（含 data-model V-P04 的实施状态）；没有代码、测试或冻结规则的变更 |
+| 最终 HEAD | `3b53afc1bc17381c834a59a4ee0bddf0a1dafc93`，树 `2891c9798cdca9efa916e76477f7e334961f4cd9` |
+| 最终 HEAD 的常规 CI | run 41272280465，`pull_request`，attempt 1，success（8/8）<br>八个作业都检出合并快照 `a6e9e94c82e7cb0832cde58b40a249245d959dbd`：父提交为 `47f5680`、`3b53afc`，树与最终 HEAD 相同<br>lint 为 0 issues；SKIP 集合与之前相同（Ubuntu 15、macOS 7、Windows 10），没有 FAIL，每个 Go 测试作业 27 个 ok 包；CrossUser 在单独的 root 步骤中 8 个通过<br>`internal/cli` 的耗时（观测）：Ubuntu 541.957 s、macOS 174.937 s、Windows 357.301 s<br>回执写入 PR 描述；全部历史运行（含两次 lint failure）原样保留 |
+| PR 的标题与描述 | 合并之前更新：去掉过时的 “not for merge”，写明第二批的交付范围与 §161 的合并决定 |
+| 合并 | 2026-11-01，merge commit `53fe5195fe0a4efe0e7b974f43d990e6e9c09ad8`，锁定 head `3b53afc`（`--match-head-commit`）；没有 squash 或 rebase |
+| 合并的核验 | 父提交依次为 `47f5680`、`3b53afc`；树 `2891c97` 与最终 HEAD 相同<br>受审的提交 `1a2eda1`（Review 123）、`b6542be`（Review 124）、`eafaf5c`（Review 125）与收尾的 `becc9a6`、`3b53afc` 都是它的祖先 |
+| master push CI | run 41273194295，push，attempt 1，success（8/8）<br>八个作业都 `checkout -B master`，`git log -1` 为 `53fe519`<br>lint 为 0 issues；SKIP 集合相同，没有 FAIL，每个 Go 测试作业 27 个 ok 包；CrossUser 8 个通过<br>`internal/cli` 的耗时（观测）：Ubuntu 391.361 s、macOS 171.047 s、Windows 420.049 s |
+
+没有重跑，没有手动触发。
+
+**第三批具体设计准备的授权生效**：上述核验与 master push CI 全部成功，§161 第 3 项的授权自此生效。只授权具体设计；第三批的代码实现、新的机制实验、依赖或 workflow 的修改都未授权。
+
+**设计**（本节所在的纯文档 PR；分支 `docs/wp2.5-batch3-design`，起点 master `53fe519`）：见 [wp2.5-implementation-plan.md §12](wp2.5-implementation-plan.md)。
+
+- 包与接口：叶子包 `internal/procgate` 中唯一的闸门实例；`Run`、`Output`、`Exclusive`、`Interval`、`State`；三个生产入口的接线；第四批之后的平台动作的位置。
+- 并发、取消与错误：写者优先、可取消的排队、取消与释放同时发生、自锁标记；各出口的租约责任与错误消费；C-10 的位置与拒绝。
+- C-9：两类规则的对象表、信号规则、间接形式、两类白名单；从源码做类型检查的装载方式（只用标准库与 `go list`，不新增依赖）、配置矩阵、范围与失败出口。
+- 验证、提交顺序、失败出口与预算。
+- **待决事项**（§12.11）：
+  - **Q-B3-1**：现有依赖 `modernc.org/libc` 中有第一类的能力（`Xsystem` 的 `exec.Command`、`unix.Wait4`、`unix.Exec`、按运行时信号值的 `signal.Ignore` / `Notify` / `Reset`、Windows 的 `CreateProcess`），与规范“当前依赖中没有启动子进程的库”的前提不符；推荐精确的例外清单加链接级的不可达证明。
+  - **X1 ~ X4**：超出冻结条文字面的具体化（Windows 的 `CreateProcess`、`x/sys/windows` 的原始调用、间接形式、`NotifyContext`），推荐采纳。
+  - **Q-B3-2**：C-9 分析在 CI 中的耗时与内存，实施时测量，超出界限即停下报告。
+
+**状态**：
+
+- 设计 PR 不合并，交独立审查。第三批的实现须在设计审查之后另行授权。
+- 第四批及之后的批次与 WP2.5 / M2 的验收都未授权。
+- 已删除 worktree 的规范问题、`factgen/legality`、维护事项与冻结的限制继续登记，不混入本轮。
