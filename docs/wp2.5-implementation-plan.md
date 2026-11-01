@@ -843,3 +843,40 @@ Runner 的测试在 `internal/checkrun` 自己的包中，不放进 `internal/cl
 **不变的范围**：
 - 已删除 worktree 的待决规范问题维持原规则，不记为已接受的 L。
 - `factgen/legality`、维护事项、工具链、依赖、workflow 与预算都不改。
+
+### 11.13 Review 124 之后的定向修复登记（2026-11-01，写代码之前）
+
+本节在 B-123-2-R 的代码修复之前单独提交（review-resolution §160）。只修这一项及其回归；不改变冻结的规则，不扩大范围。发现必须改变冻结政策或扩大范围时停下报告。
+
+**固定起点**：PR #48 的 HEAD `b6542be72315260d5ad04049627fcf773b7aaa3a`，树 `e186e00c9d812d479e1bacb8498e4ee73c25789d`，base `47f568066c4e4e18cbf28fff2a01cfdda7d34ee4`。
+
+**修复**（只在 `internal/checkrun/interpreter.go` 的查找器）：
+
+- `released` 由单个错误改为按发生顺序保存的错误列表。
+- `final` 每次从 `finalPath` 得到含有 `*ReleaseError` 的错误时，追加 `finalPath` 返回的完整错误：同次路径读取的错误与注入的错误都在其中，不只是 `errors.As` 找到的那一份。
+- `releaseFailure` 返回受控的 `environment` 错误，后面按发生顺序接上保存的全部错误（`errors.Join`）。`message` 的文字与退出码 6 不变；原始错误只经 `errors.Is` / `errors.As` 取得，不进入展示的文本。
+
+**不变的规则**：
+
+- **遍历不变**：`newFinder` 在一个根的关闭失败之后继续解析其余的根；`onPath` 在一个候选的关闭失败之后继续后面的候选；Windows 的 `gitForWindows` 的顺序也不变。每个已取得的句柄只由 `finalPath` 关闭一次，不再关闭第二次。
+- **失败不被清除**：保存过任何关闭失败之后，查找失败。`lookup` 在 `find` 之前与之后都检查，后续的成功不清除它；它不是 `shell_unavailable` 的问题，也不是“无法核实”。
+- **优先级不变**：关闭失败、无法核实、找到与否、取消的先后与现在相同。
+- **普通情形不变**：不含 `*ReleaseError` 的错误（路径不存在或无法解析）仍是候选跳过或根无法核实，不进入保存的链。
+- **Unix 不受影响**：`finalPath` 不取得句柄，从不返回 `*ReleaseError`。
+- **其余不改**：`Prepare` / `Batch.Close`、`failed`、`ReleaseError`、`released` 与两处局部 lint 豁免；`apperr`、Schema、冻结规范、`gitx` / SQLite、依赖、workflow 与预算；没有新的宿主禁用条件，没有第四批的任务管理。
+
+**回归预期**（只在 Windows：句柄的关闭只在那里发生）：
+
+- **两个根**：`OnRelease` 对前两次句柄关闭依次追加 E1、E2，查找器有两个自建的登记根。
+  - 句柄关闭恰为 2 次：查找在 `find` 之前即失败，不再取得句柄。
+  - 退出码 6，没有路径与问题；`errors.Is` 取得 E1 与 E2，`errors.As` 取得 `*ReleaseError`。
+- **两个候选**：根先在没有注入时解析；PATH 的两个目录各有 `pwsh.exe`，两次候选的句柄关闭依次追加 E1、E2。
+  - 句柄关闭恰为 2 次；退出码 6，没有路径与问题；E1 与 E2 都可取得。
+- **信封**：两种情形各经第 7 步的入口与实际的 `ToEnvelope` 校验 `error.v1`；文本中没有根、候选的路径或注入的文本。
+- **对照**（接缝的证据）：
+  - 第一个候选的关闭追加 E1、第二个候选健康：仍拒绝，E1 可取得，关闭 2 次；
+  - 第一个 PATH 目录没有 `pwsh.exe`、第二个健康：选中第二个，关闭 1 次；
+  - 两个候选都健康：选中第一个，关闭 1 次。
+- **保留的回归**：`TestFinalPathConsumesItsClose`（原生、注入与两者并存，真实结果不被注入覆盖）、`TestLookupFailsOnACloseFailure`（原生：第一个候选的关闭失败而下一个健康，根的关闭失败）、`TestPrepareHandleCloseFailure` 与 Windows 的查找测试。
+- **证据类别**：E1、E2 由 `OnRelease` 追加在每次关闭自己的结果（nil）上，是注入的证据；不新增原生的故障实验。
+- **局限**：“同次读取的错误也在链中”没有动态构造，只由代码的读取与保存方式保证；不新增读取错误的接缝。
