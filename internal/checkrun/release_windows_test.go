@@ -1,6 +1,7 @@
 package checkrun_test
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -128,5 +129,123 @@ func TestPrepareHandleCloseFailure(t *testing.T) {
 	doc := refused(t, h, err, apperr.ExitEnvironment)
 	if !strings.Contains(doc, "not confirmed released") || strings.Contains(doc, "shell_unavailable") || !errors.Is(err, injected) {
 		t.Fatalf("the refusal: %s", doc)
+	}
+}
+
+// closeFailures adds errs, in their order, to the next handle closes' own
+// results, and counts every handle close from now on.
+func closeFailures(t *testing.T, errs ...error) *int {
+	t.Helper()
+	closes := 0
+	checkrun.OnRelease(t, func(r string) error {
+		if r != "handle" {
+			return nil
+		}
+		closes++
+		if closes <= len(errs) {
+			return errs[closes-1]
+		}
+		return nil
+	})
+	return &closes
+}
+
+// pathOf is a PATH of the directories named under base.
+func pathOf(base string, dirs ...string) string {
+	entries := make([]string, len(dirs))
+	for i, d := range dirs {
+		entries[i] = filepath.Join(base, d)
+	}
+	return strings.Join(entries, string(os.PathListSeparator))
+}
+
+// mentions reports whether an encoded document has s in it, as it is or
+// escaped as a JSON string.
+func mentions(doc, s string) bool {
+	b, _ := json.Marshal(s)
+	return strings.Contains(doc, s) || strings.Contains(doc, string(b[1:len(b)-1]))
+}
+
+// Review 124 B-123-2-R: a finder keeps every handle close that did not
+// confirm its release, not only the first: two registered roots whose
+// closes fail with E1 and E2, and two candidates on one PATH whose closes
+// fail with E1 and E2. Each handle is closed once, no more; the lookup
+// fails with environment (exit 6), no path and no problem; E1 and E2 are
+// both in its chain; and step 7 fails the same way, without a further
+// close, in a valid error.v1 that names neither a path nor the injected
+// text. The close failures are injected (added to each close's own
+// result, which was nil): no native failure was made.
+func TestFinderKeepsEveryCloseFailure(t *testing.T) {
+	e1, e2 := errors.New("injected: E1"), errors.New("injected: E2")
+	pwsh := manyItems(1, func(int) string { return "pwsh" }, func(int) string { return "echo" })
+	keepsBoth := func(t *testing.T, f *checkrun.Finder, closes *int, hidden ...string) {
+		t.Helper()
+		in, problem, err := checkrun.Lookup(ctx, f, "pwsh")
+		var rel *checkrun.ReleaseError
+		if in.Path != "" || problem != "" || apperr.ExitCode(err) != apperr.ExitEnvironment || !errors.As(err, &rel) ||
+			!errors.Is(err, e1) || !errors.Is(err, e2) || *closes != 2 {
+			t.Fatalf("the lookup: %+v, %q, %v; %d handle closes", in, problem, err, *closes)
+		}
+		err = checkrun.Interpreters(ctx, pwsh, f)
+		if apperr.ExitCode(err) != apperr.ExitEnvironment || !errors.Is(err, e1) || !errors.Is(err, e2) || *closes != 2 {
+			t.Fatalf("step 7: %v; %d handle closes", err, *closes)
+		}
+		doc := envelope(t, err)
+		if !strings.Contains(doc, "not confirmed released") || strings.Contains(doc, "shell_unavailable") ||
+			strings.Contains(doc, "injected") || len(apperr.From(err).Details) != 0 {
+			t.Fatalf("step 7's error.v1: %s", doc)
+		}
+		for _, h := range hidden {
+			if mentions(doc, h) {
+				t.Fatalf("step 7's error.v1 names %s: %s", h, doc)
+			}
+		}
+	}
+	t.Run("two roots", func(t *testing.T) {
+		a, b := t.TempDir(), t.TempDir()
+		closes := closeFailures(t, e1, e2)
+		keepsBoth(t, checkrun.NewFinder([]string{a, b}, "", nil), closes, a, b)
+	})
+	t.Run("two candidates", func(t *testing.T) {
+		base := t.TempDir()
+		file(t, filepath.Join(base, "one", "pwsh.exe"))
+		file(t, filepath.Join(base, "two", "pwsh.exe"))
+		f := checkrun.NewFinder([]string{t.TempDir()}, pathOf(base, "one", "two"), nil)
+		keepsBoth(t, f, closeFailures(t, e1, e2), base)
+	})
+}
+
+// Review 124 B-123-2-R, the controls with the same seam: one candidate's
+// close that fails, the next one healthy, still fails the lookup; a PATH
+// entry without the candidate is skipped and the next one chosen; two
+// healthy candidates give the first. The close failure is injected.
+func TestFinderCloseControls(t *testing.T) {
+	e1 := errors.New("injected: E1")
+	base := t.TempDir()
+	one := final(t, file(t, filepath.Join(base, "one", "pwsh.exe")))
+	two := final(t, file(t, filepath.Join(base, "two", "pwsh.exe")))
+	if err := os.MkdirAll(filepath.Join(base, "none"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		name   string
+		dirs   []string
+		errs   []error
+		want   string // the path chosen; "" when the lookup fails
+		closes int
+	}{
+		{"one close failure, the next healthy", []string{"one", "two"}, []error{e1}, "", 2},
+		{"a candidate missing, the next healthy", []string{"none", "two"}, nil, two, 1},
+		{"healthy", []string{"one", "two"}, nil, one, 1},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			f := checkrun.NewFinder([]string{t.TempDir()}, pathOf(base, c.dirs...), nil)
+			closes := closeFailures(t, c.errs...)
+			in, problem, err := checkrun.Lookup(ctx, f, "pwsh")
+			failed := apperr.ExitCode(err) == apperr.ExitEnvironment && errors.Is(err, e1)
+			if in.Path != c.want || problem != "" || *closes != c.closes || c.want == "" && !failed || c.want != "" && err != nil {
+				t.Fatalf("%+v, %q, %v; %d handle closes", in, problem, err, *closes)
+			}
+		})
 	}
 }

@@ -34,15 +34,16 @@ var foldCase = runtime.GOOS == "windows" || runtime.GOOS == "darwin"
 // interpreter is used (G11); when one cannot be resolved, where an
 // interpreter is cannot be verified and none is used. path is the PATH
 // searched; execPath gives the exec path of the git gitx runs (Windows'
-// sh and bash). released holds the first close of finalPath's own that
-// did not confirm its release (Review 123 B-123-2): the lookup then fails,
-// whatever else it found.
+// sh and bash). released holds, in their order, the errors of every
+// finalPath whose own close did not confirm its release (Review 123
+// B-123-2, Review 124 B-123-2-R): the lookup then fails, whatever else it
+// found.
 type finder struct {
 	roots      []string
 	unverified bool
 	path       string
 	execPath   func(context.Context) (string, error)
-	released   error
+	released   []error
 }
 
 func newFinder(worktrees []string, path string, execPath func(context.Context) (string, error)) *finder {
@@ -59,13 +60,14 @@ func newFinder(worktrees []string, path string, execPath func(context.Context) (
 }
 
 // final is finalPath, a close of its own that did not confirm its release
-// kept as the lookup's failure; for the caller it is a path not had, so
-// nothing found after it can make the lookup succeed.
+// kept as the lookup's failure: finalPath's whole error, added to those
+// kept before, each one. For the caller it is a path not had, so nothing
+// found after it can make the lookup succeed.
 func (f *finder) final(p string) (string, error) {
 	final, err := finalPath(p)
 	var rel *ReleaseError
-	if errors.As(err, &rel) && f.released == nil {
-		f.released = err
+	if errors.As(err, &rel) {
+		f.released = append(f.released, err)
 	}
 	return final, err
 }
@@ -151,13 +153,14 @@ func (f *finder) lookup(ctx context.Context, shell string) (Interpreter, string,
 
 // releaseFailure is the lookup's failure once a close of finalPath's own
 // did not confirm its release: environment (exit 6), its text controlled,
-// the close's error in its chain.
+// every kept error in its chain, in their order.
 func (f *finder) releaseFailure() error {
-	if f.released == nil {
+	if len(f.released) == 0 {
 		return nil
 	}
-	return errors.Join(apperr.New(apperr.Environment,
-		"a handle opened to resolve an interpreter's path closed with an error and is not confirmed released; no check was run"), f.released)
+	return errors.Join(append([]error{apperr.New(apperr.Environment,
+		"a handle opened to resolve an interpreter's path closed with an error and is not confirmed released; no check was run")},
+		f.released...)...)
 }
 
 func shellOf(c baseline.Check) string {
