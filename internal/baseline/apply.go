@@ -442,6 +442,14 @@ func (a *applier) setFields(c Change, r *Record, final map[string]any) error {
 			if err := json.Unmarshal(raw, &ch); err != nil {
 				return err
 			}
+			// WP2.5 D3, D4: the check this change writes, not one saved.
+			if p := ch.LineBreakProblem(); p != "" {
+				pointer := c.Pointer
+				if c.DataPointer != "" {
+					pointer = c.DataPointer + "/check/command"
+				}
+				a.problem(pointer, "the check's command %s", p)
+			}
 			r.Check = &ch
 		default:
 			return fmt.Errorf("unknown data field %q", key)

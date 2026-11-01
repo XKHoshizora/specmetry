@@ -99,8 +99,19 @@ func stringData(data map[string]json.RawMessage, key string) (string, bool) {
 
 // check is a criterion's check, when data sets one.
 type check struct {
+	Command string   `json:"command"`
+	Shell   *string  `json:"shell"`
 	Workdir string   `json:"workdir"`
 	Inputs  []string `json:"inputs"`
+}
+
+// lineBreaks adds the WP2.5 D3 and D4 problem of the check's command, if
+// any, at pointer (baseline.Check.LineBreakProblem); the command is not
+// quoted.
+func (c check) lineBreaks(pointer string, ps *problems) {
+	if p := (baseline.Check{Command: c.Command, Shell: c.Shell}).LineBreakProblem(); p != "" {
+		ps.add(pointer, "%s", p)
+	}
 }
 
 func checkData(data map[string]json.RawMessage) (*check, bool) {
@@ -145,8 +156,9 @@ func itemPointer(i int, rest ...string) string {
 // CheckStatic applies the rules that need no database (V-P03 – V-P06,
 // V-P08): no code fence in any string (doc is the decoded document), refs
 // unique and of the right type, every target named once and of the item's
-// type, paths inside the repository, line ranges in order, and excerpts
-// with text besides whitespace. Errors name fields, never their values.
+// type, a check's command without the line breaks of WP2.5 D3 and D4,
+// paths inside the repository, line ranges in order, and excerpts with text
+// besides whitespace. Errors name fields, never their values.
 func CheckStatic(doc any, p *Proposal) error {
 	var ps problems
 	fences(doc, "", &ps)
@@ -192,6 +204,7 @@ func CheckStatic(doc any, p *Proposal) error {
 			refersTo(itemPointer(i, "data", "requirement"), req, "requirement")
 		}
 		if c, _ := checkData(it.Data); c != nil {
+			c.lineBreaks(itemPointer(i, "data", "check", "command"), &ps)
 			if c.Workdir != "" && !insideRepository(c.Workdir) {
 				ps.add(itemPointer(i, "data", "check", "workdir"), "leaves the repository")
 			}
@@ -217,8 +230,9 @@ func CheckStatic(doc any, p *Proposal) error {
 }
 
 // CheckEditedData applies to data a reviewer edited the rules CheckStatic
-// applies to an item's data: no code fence in any string, and a check's
-// workdir and inputs inside the repository. pointer locates data.
+// applies to an item's data: no code fence in any string, a check's command
+// without the line breaks of WP2.5 D3 and D4, and its workdir and inputs
+// inside the repository. pointer locates data.
 func CheckEditedData(data map[string]json.RawMessage, pointer string) []apperr.Detail {
 	var ps problems
 	var doc any
@@ -226,6 +240,7 @@ func CheckEditedData(data map[string]json.RawMessage, pointer string) []apperr.D
 		fences(doc, pointer, &ps)
 	}
 	if c, _ := checkData(data); c != nil {
+		c.lineBreaks(pointer+"/check/command", &ps)
 		if c.Workdir != "" && !insideRepository(c.Workdir) {
 			ps.add(pointer+"/check/workdir", "leaves the repository")
 		}

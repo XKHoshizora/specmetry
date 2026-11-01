@@ -243,6 +243,27 @@ func TestCanceledContextStopsGit(t *testing.T) {
 	}
 }
 
+// ExecPath is the exec path of the git gitx runs, in its controlled
+// environment (WP2.5 spec §19.8 step 1): an existing git-core directory,
+// outside a repository too, whatever GIT_EXEC_PATH the caller has.
+func TestExecPath(t *testing.T) {
+	decoy := t.TempDir()
+	t.Setenv("GIT_EXEC_PATH", decoy)
+	for _, dir := range []string{t.TempDir(), committedRepo(t).Dir} {
+		p, err := ExecPath(ctx, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		native := filepath.FromSlash(p)
+		if !filepath.IsAbs(native) || filepath.Base(native) != "git-core" || Canonical(native) == Canonical(decoy) {
+			t.Fatalf("ExecPath = %q", p)
+		}
+		if fi, err := os.Stat(native); err != nil || !fi.IsDir() {
+			t.Fatalf("ExecPath = %q: %v", p, err)
+		}
+	}
+}
+
 func TestHeadBranchAndCommit(t *testing.T) {
 	repo := committedRepo(t)
 	head := repo.Git("rev-parse", "HEAD")
