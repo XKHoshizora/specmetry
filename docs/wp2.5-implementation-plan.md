@@ -894,7 +894,7 @@ Runner 的测试在 `internal/checkrun` 自己的包中，不放进 `internal/cl
 | 规则 | 冻结规范 §19.4（G4：闸门、git 的先后、取消、自锁、C-9）、§8.2（排他区间的三个条件）、§8.4（排队中取消）、§19.3（F1 之后释放排他租约）、§21.3 与 §22.2 中 C-8、C-9、C-10 的采纳与限定、§22.5 的保留限制 |
 | 计划 | §4.3（范围与验收）；§8（工具链、依赖与预算）；§9 的决定 2（`check run` 到第 7 批才注册）与决定 5（C-9 优先不新增依赖） |
 | 现有代码（只读核对） | 生产代码中启动或回收子进程的入口只有三处：`internal/gitx/gitx.go` 的 `commandIO`（全部 git；生产为 `cmd.Run()`，测试接缝为 `Start` / 钩子 / `Wait`）、`internal/cli/doctor.go` 的 `gitCheck`（`exec.Command("git", "--version").Output()`）、`internal/datadir/acl_darwin.go` 的 `listACLs`（`exec.Command("/bin/ls", …).Output()`，只在 darwin）。与信号有关的只有 `cmd/specmetry/main.go` 的 `signal.NotifyContext(ctx, os.Interrupt)`。其余进程调用都在 `_test.go` 与 `internal/testutil` 中 |
-| 依赖 | `go.mod` 不变；不新增依赖（§12.8 的方案只用标准库与 `go` 命令） |
+| 依赖 | `go.mod` 不变；不新增依赖（§12.10 的装载只用标准库与 `go` 命令） |
 
 ### 12.2 范围
 
@@ -1123,7 +1123,7 @@ var (
 1. 对每个配置运行一次 `go list -e -deps -json -tags nowebui ./...`，环境为该配置的 `GOOS`、`GOARCH`、`CGO_ENABLED=0`，`GOFLAGS` 置空，`GOWORK=off`。取每个包的 `ImportPath`、`Dir`、`GoFiles`、`CgoFiles`、`IgnoredGoFiles`、`SFiles` 等文件表、`Imports`、`ImportMap`、`Standard`、`Module`、`Error`、`DepsErrors`、`Incomplete`。
 2. **全部从源码做类型检查**，按依赖顺序，导入器只从本次检查过的包中按 `ImportMap` 解析：
    - 仓库自己的生产包：完整检查（含函数体），供两类规则使用；
-   - 第三方包：先用 `go/scanner` 做词法预筛：文件中出现禁用对象的名字（`Start`、`Run`、`Output`、`CombinedOutput`、`Wait`、`StartProcess`、`ForkExec`、`Exec`、`Wait4`、`Waitid`、`Ignore`、`Notify`、`NotifyContext`、`Reset`）的包完整检查并扫描；其余只检查声明（`IgnoreFuncBodies`）。预筛是可靠的：对一个对象的任何引用都必须写出它的名字（选择、限定标识符、方法值、点导入与嵌入提升都如此）；
+   - 第三方包：先用 `go/scanner` 做词法预筛：文件中出现禁用对象的名字（`Start`、`Run`、`Output`、`CombinedOutput`、`Wait`、`StartProcess`、`ForkExec`、`Exec`、`Wait4`、`Waitid`、`Ignore`、`Notify`、`NotifyContext`、`Reset`；X1 采纳时加上 `CreateProcess`、`CreateProcessAsUser`）的包完整检查并扫描；其余只检查声明（`IgnoreFuncBodies`）。预筛是可靠的：对一个对象的任何引用都必须写出它的名字（选择、限定标识符、方法值、点导入与嵌入提升都如此）；
    - 标准库与 `golang.org/x/sys`：只检查声明（它们是能力的提供者，不在扫描范围内）。
 3. 类型检查的参数：`types.SizesFor("gc", GOARCH)`；语言版本取包所在模块的 `go` 版本；`FakeImportC` 关闭。
 4. 从源码检查标准库的声明是 gopls 等工具的常规做法；在本仓库各配置上的可行性、耗时与内存没有验证，实施时测量（Q-B3-2）。不用 `go list -export` 读编译器的导出数据，是为了不在交叉架构上编译全部依赖。
