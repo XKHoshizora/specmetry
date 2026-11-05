@@ -10877,3 +10877,78 @@ macOS 13+、Intel 的支持承诺与已批准的产品决定不变；没有新�
 - N-132-1、N-132-2 已按报告修订，留待后续的审查顺带核对，本节不自行宣布关闭。
 - 第二阶段在上述核验全部成功之后才获授权。
 - 第三批的实现、链接验证的执行、第四批及之后的批次与 WP2.5 / M2 的验收都未授权。已删除 worktree 的规范问题、`factgen/legality`、维护事项、CLI 耗时的观测与冻结的限制继续登记，不混入本轮。
+
+## 171．PR #50 的合并与核验；原 Q-B3-1 (a) 强命题的限定证明准备
+
+**依据**：§170 的决定。
+
+- 条件授权以 merge commit 合并 PR #50，作为审计记录（原方法停止、提案未采纳）。
+- 合并核验与 master push CI 全部成功之后，原 (a) 强命题限定证明准备的授权生效。
+
+**第一阶段：PR #50 的收尾与合并**：
+
+| 项 | 值 |
+|---|---|
+| 开工核验 | 本地 HEAD、远程分支与 PR 的 HEAD 都是 `6dce1a1`，树 `2ec1580`，PR base 与远程 master 都是 `30bc8aa`；工作区只有未跟踪的 Review 132 |
+| 收尾的提交 | `a912acf`：Review 132 原样单独归档（34136 字节，SHA-256 `47e37d30…b0b009`，源文件、暂存区与提交 blob `cf32984` 一致）<br>`62b6d2f`：§170、N-132-1、N-132-2、`go env` 的证据边界与状态行；审计的其他结论与已关闭的收尾协议不变 |
+| 最终 HEAD | `62b6d2f9e3b46779c8ed1e6ceeb86e814bd26e77`，树 `95ad173b4724975707b483fc8033601cfdf2dc06` |
+| 最终 HEAD 的常规 CI | run 41956623694，`pull_request`，attempt 1，success（8/8）<br>八个作业都检出合并快照 `8f2d0ece55e2f7036f64b25c57fdab1a7bf75263`：父提交为 `30bc8aa`、`62b6d2f`，树与最终 HEAD 相同<br>三个测试作业都是 go1.27.3；lint 为 0 issues；SKIP 集合与 run 41898301526 逐名相同（Ubuntu 15、macOS 7、Windows 10），没有 FAIL，每个 Go 测试作业 27 个 ok 包；CrossUser 在单独的 root 步骤中 8 个通过<br>`internal/cli` 的耗时（观测）：Ubuntu 486.424 s、macOS 212.959 s、Windows 404.890 s |
+| PR 的标题与描述 | 合并之前更新：写明“审计记录、原方法停止、提案未采纳”，去掉 “not for merge”；历史回执保留 |
+| 合并 | 2026-11-05（UTC 02:54:08），merge commit `9c5860676de2b714f42a7210dca887bc61c6ec41`，以 `--match-head-commit` 锁定 `62b6d2f`；没有 squash 或 rebase |
+| 合并的核验 | 父提交依次为 `30bc8aa`、`62b6d2f`；树 `95ad173` 与最终 HEAD 相同<br>受审对象 `6dce1a1`（Review 132）与归档、收尾的 `a912acf`、`62b6d2f` 都是它的祖先 |
+| master push CI | run 41958169544，push，attempt 1，success（8/8）<br>八个作业都 `checkout -B master refs/remotes/origin/master`，`git log -1` 为 `9c58606`（合并提交本身）<br>三个测试作业都是 go1.27.3；lint 为 0 issues；SKIP 集合相同，没有 FAIL，每个 Go 测试作业 27 个 ok 包；CrossUser 8 个通过<br>`internal/cli` 的耗时（观测）：Ubuntu 409.252 s、macOS 181.124 s、Windows 406.816 s |
+
+没有重跑，没有手动触发。文档合并不是提案的采纳、依赖例外的批准、实现的授权或工作包的验收。
+
+**第二阶段的授权生效**：上述核验与 master push CI 全部成功，§170 第 3 项的授权自此生效。只授权限定证明的准备：固定 Go 1.27.3、原生产构建形态与配置 K 下 T0 的完备性论证；不运行 Go、构建、链接、验证分析器、驱动或实验，不安装工具链，不改代码。
+
+**证明准备**（本节所在的纯文档 PR；分支 `docs/wp2.5-a-strong-claim-proof-prep`，起点 master `9c58606`）：见 [wp2.5-c9-strong-claim-proof-prep.md](wp2.5-c9-strong-claim-proof-prep.md)。
+
+- **方法**：
+  - 固定源码的只读阅读与文本检索；
+  - 对 `go.mod` 列出的全部 23 个模块按 go.sum 的方法独立重算 dirhash，都一致；
+  - 以整词检索计算每个目标的宿主集合（源码中写出目标或宿主名字的顶层声明，迭代到不动点）。检索与闭包的脚本是临时的只读工具，不提交；算法写在文档 §3.1。
+- **通用引理**（文档 §2，均有固定源码的位置）：
+  - 产物的机器码只在文本符号中，每个符号只来自一个函数；
+  - 另一个函数的代码只能经内联进入，被内联者须以名字、方法表达式、闭包或局部的静态值写在调用链的源码中；
+  - PGO 的去虚化是唯一能引入源码中没有写出的被调用者的步骤，只在有 profile 时运行，仓库中没有 `*.pgo`；
+  - 含 `defer` 的函数不被内联；
+  - 名字的规则；
+  - 内容寻址合并的限制。
+- **定理**：在列明的前提下，A 的符号表中没有宿主集合 H(F) 任一成员的名字（或派生名字），则 A 中没有由 F 的函数体编译出的指令。它不依赖 DWARF，不收窄 absent 的含义。
+- **逐目标的结论**（21 个）：
+  - **甲**（不可内联，8 个）：`Xfexecve`、`Xwait4`、`Xpclose`、`Xexecle`、`X__execvpe`、`Xexecl`、`Xexeclp`、`X__sigaction`。已有可审查的充分论证（限定）。其中 7 个另有不依赖文件选择的宿主集合论证；`X__sigaction` 依赖 K 的文件选择。
+  - **乙**（可能被内联，宿主集合小，10 个）：`Xsystem`、`Xexecve`、`Xexecv`、`Xexecvp`、`Xexecvpe`、`Xvfork`、`Xwaitid`、`Xwaitpid`、`Xwait`、`Xwait3`。已有可审查的充分论证（限定）。宿主集合在全部文件上计算，为 2 ~ 18 个名字，都是 libc 的函数与汇编包装；sqlite 中没有任何一处写出 T0 的名字。
+  - **丙**：`Xsigaction`、`___libc_sigaction`（与甲组的 `X__sigaction`）。论证另以 K 的文件与包的选择为前提，须以 `go list` 核对。
+  - **丁**：`Xsignal`。未成立。宿主中有方法（`(*TLS).Free`、`checkSignal`、`deliverSignal`、`raiseSignal`）与通用入口（`X__syscall2`、`X__syscall3`），方法包装的名字规则没有写定。静态源码表明：`(*TLS).Free` 的代码，或 `X__syscall2`、`X__syscall3` 自身的符号在 A 中，`Xsignal` 的代码就在 A 中；所以原 (a) 对 `Xsignal` 所需的“不在产物中”很可能不成立。这一判断是推测，须运行确认。
+- **F-5 的发现**：K 编入的 libc 中有不在 T0、也不经 T0 的直接信号操作：
+  - `Xabort` 以 `unix.Tgkill`、`unix.Kill` 发送 `SIGABRT`，并调用 `resetSigDfl` 以原始的 `rt_sigaction`、`rt_sigprocmask` 改变处置；
+  - `(*TLS).raiseSignal`、`(*TLS).killSignal` 以 `unix.Kill` 发送信号，由 `X__syscall2`、`X__syscall3` 在 `SYS_tkill`、`SYS_tgkill` 时到达。
+  - 链接方法审计 §3.3 与链接验证计划 §4.1 的 T0 漏掉了它们。本轮只登记这一事实，不改写已合并的审计文档。
+  - 通用入口与经函数指针、`unsafe`、反射构造的到达方式仍然看不到。
+- **结论**：
+  - 原 (a) 的强命题对启动与回收一族（17 个）有继续定稿的技术基础（限定），对 `Xsigaction`、`X__sigaction`、`___libc_sigaction` 另以文件与包的选择为前提；
+  - 对信号处置的能力整体没有技术基础。
+  - 即使 T0 的强命题成立，也不能推出能力整体不可达或依赖例外可以批准。
+- **提案 H-1**（未采纳）：以宿主集合的符号表判定代替原计划 §7 第 6、7 条中依赖 DWARF 的判定，并新增“未得到 absent”一类；前提与影响写在文档 §8，交独立审查。
+- **须运行的前提**（R1 ~ R6，文档 §7.1）：PGO 没有启用与构建形态、工具链身份、模块身份、文件与包的选择、产物不剥离、符号表的判定。拟用的判定程序只作描述，不提交代码。
+- **需要另作决定的方向**（文档 §7.2；不选择，也不推荐其中任一项）：
+  - 把 (a) 的范围限于启动与回收，信号一族另行处理；
+  - Q-B3-1 (b)；
+  - Q-B3-1 (c)；
+  - 改变依赖本身。
+
+**原计划与状态行的更新**：
+
+- [wp2.5-c9-link-proof-plan.md](wp2.5-c9-link-proof-plan.md) 只在头部增加证明准备的引用与准确的状态，技术内容不变。
+- `AGENTS.md` 两处、[implementation-plan.md](implementation-plan.md) 的 WP2.5 条目、[wp2.5-implementation-plan.md](wp2.5-implementation-plan.md) 的头部状态与 §12 的引言同步。
+
+**不批准、不决定**：本轮不批准依赖例外或更弱的保证，不接受新的 L，不选择 Q-B3-1 的 (b)、(c)，不决定生产的 CGO、Q / X / E / U、F-8、场所或资源。M-1、M-3、M-5 的解析实现与定稿本轮没有展开。没有修改冻结正文、验收、代码、测试、原型、依赖、Schema、迁移或 workflow。本轮没有运行 Go、分析器、构建、链接、驱动或实验，也没有安装工具链。
+
+**影响的 PD / TD**：没有修改。
+
+**状态**：
+
+- 证明准备的 PR 不合并，交独立审查；文档的结论与提案 H-1 是否成立，由审查裁定。
+- 第三批的实现、链接验证的执行、第四批及之后的批次与 WP2.5 / M2 的验收都未授权。
+- 已删除 worktree 的规范问题、`factgen/legality`、维护事项、CLI 耗时的观测与冻结的限制继续登记，不混入本轮。
