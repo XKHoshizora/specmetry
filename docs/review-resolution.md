@@ -11443,3 +11443,99 @@ macOS 13+、Intel 的支持承诺与已批准的产品决定不变；没有新�
 - N-137-1 已按报告精化，留待之后顺带核对，本节不自行宣布关闭。
 - 第二阶段在上述核验全部成功之后才获授权。
 - 第三批的实现、链接验证的执行、第四批及之后的批次与 WP2.5 / M2 的验收都未授权。已删除 worktree 的规范问题、`factgen/legality`、维护事项、CLI 耗时的观测与冻结的限制继续登记，不混入本轮。
+
+## 178．PR #52 的合并核验与 master push CI 的定向重跑；方案 (b) 精确例外与保证变化决策稿（第二阶段）
+
+**第一阶段的结果**（§177 第 2 项）：
+
+- **起点、归档与收尾**：
+  - 起点核验成立：HEAD `0b33eea`、树 `9816980`、base `56d41b9`，工作区只有未跟踪的 Review 137。
+  - 归档提交 `4758a3c`。
+  - 收尾提交 `3e0ccb5`（树 `a0965ef1a81b361240b8fe8fb5386a837b4546c9`）。
+  - review-resolution 由 1161584 字节增为 1174487 字节，旧文件是新文件的字节前缀。
+- **最终 HEAD 的常规 CI**：run 42475588223（pull_request，attempt 1）正式成功，8/8。
+  - 八个作业都检出 `refs/remotes/pull/52/merge` = `9b66f54f0e3c0938f7c24495911256f8326bc8b3`：父提交 `56d41b9`、`3e0ccb5`，树 `a0965ef`，与 HEAD 的树相同。
+  - 三个测试作业都是 go1.27.3；lint 0 issues；没有 FAIL，每个测试作业 27 个 ok 包。
+  - SKIP 集合与 run 42402457607 逐名相同（Ubuntu 15、macOS 7、Windows 10）；CrossUser 8 项通过。
+- **PR 的标题与描述**：已按 §177 更新。
+- **合并**：2026-11-08T11:39:35Z，以 merge commit 合并为 `d12a347166b4c20dd89c4611963d1a2e35d43df0`。
+  - 用 `--match-head-commit` 锁定 `3e0ccb5`，没有 squash 或 rebase。
+  - 父提交依次为 `56d41b9`、`3e0ccb5`；树 `a0965ef` 与最终 HEAD 相同。
+  - `0b33eea`、`4758a3c`、`3e0ccb5` 都是它的祖先。
+- **master push CI，run 42476717705**：
+  - **attempt 1**（2026-11-08T11:39:38Z 起）为 failure，7/8。
+    - 失败的只有 Go lint（job 128719607248）。
+    - 第 1 ~ 6 步成功：检出 `d12a347`、go1.27.3、`go mod tidy -diff`、`go vet`、Markdown 链接检查。
+    - 第 7 步 `golangci/golangci-lint-action@v9.3.0` 失败：下载 `https://github.com/golangci/golangci-lint/releases/download/v2.14.0/golangci-lint-2.14.0-linux-amd64.tar.gz` 时，11:41:55、11:44:09 两次得到 “Unexpected HTTP response: 504”（各自之后等待重试），11:46:21 第三次为 504，以 `##[error]Failed to run: Error: Unexpected HTTP response: 504` 结束。
+    - golangci-lint 本身一次都没有运行。
+    - 其余七个作业成功。八个作业都执行了 `checkout -B master refs/remotes/origin/master`，`git log -1` 都是 `d12a347` 本身。
+    - 三个测试作业都是 go1.27.3，没有 FAIL，各 27 个 ok 包；SKIP 集合与 PR 运行逐名相同；CrossUser 8 项通过。
+    - `internal/cli` 的耗时（只是观测）：Ubuntu 552.659 s、macOS 197.933 s、Windows 390.949 s。
+  - 按“任一步失败，停止报告，不自行重跑”停下报告。第二阶段没有开始。
+  - **负责人的单独授权**（2026-11-08）：只定向重跑一次失败的作业。
+    - 重跑之前核验：master 仍为 `d12a347`，树仍为 `a0965ef`；run 仍为 attempt 1，唯一的失败作业是 Go lint（128719607248）；工作区干净；没有新的运行，也没有其他人重跑。全部成立。
+    - 执行一次：`gh run rerun 42476717705 --job 128719607248 --repo XKHoshizora/specmetry`（13:48:24Z）。
+    - 没有重跑整个 workflow，也没有修改代码、文档、依赖、工具版本或 CI 配置。
+  - **attempt 2**（`run_started_at` 13:48:25Z）为正式 success。
+    - 重跑的 Go lint 作业为 job 128750028703（`run_attempt` 2，13:48:29 ~ 13:48:48）：
+      - 检出 `-B master refs/remotes/origin/master`，`git log -1` 为 `d12a347`；go1.27.3；tidy、vet 与链接检查成功；
+      - golangci-lint v2.14.0 的二进制下载并安装成功（403 ms），执行 `config verify` 与 `run`，输出 “0 issues.”；
+      - golangci-lint 的缓存命中（键 `golangci-lint.cache-Linux-2966-8c6f56844e85855326a8e764abc848e0ca2c8ab2`），运行 690 ms；
+      - 没有 `##[error]`。
+    - 其余七个作业：attempt 2 中的条目（新的 job ID，例如 Web 128750030022）与 attempt 1 的开始时间、结束时间和 runner 名都相同，所以是沿用 attempt 1 的结果，没有重新执行。
+  - 结论：master push CI **重跑之后正式成功**。首次的安装失败与三次 HTTP 504 的回执保留在本节与 PR #52 的交付回执中，不改写为一次成功。
+- 第一阶段的合并核验与 master CI 全部成功，第二阶段按 §177 第 3 项生效。
+
+**第二阶段：决策稿**（本节所在的提交，纯文档）：
+
+- 分支 `docs/wp2.5-c9-dependency-exception-draft`，从核验后的 master `d12a347` 开出。
+- 新增 [wp2.5-c9-dependency-exception-draft.md](wp2.5-c9-dependency-exception-draft.md)，按 §177 第 3 项的五个部分：
+  1. **精确的静态候选清单**（§1、§2）：
+     - 固定的身份：libc v1.77.1、SQLite v1.60.1、`golang.org/x/sys` v0.49.0 的 dirhash 独立重算，与 go.sum 一致；列出 13 个相关 libc 文件的 SHA-256。
+     - 六个配置的文件选择（静态，缺证）。
+     - 冻结对象表下 12 处源码引用，分布在 8 个函数定义中，按配置计为 24 个条目：
+       - linux 两个架构各 4 处：`libc_musl.go` 的 `Xsystem` → `(*os/exec.Cmd).Run`，`Xsignal` → `os/signal` 的 `Reset`、`Ignore`、`Notify`；
+       - darwin 两个架构各 7 处：`libc_darwin.go` 的 `Xwaitpid` → `unix.Wait4`、`Xsystem` → `Run`、`Xpause` → 含常量 SIGCHLD 的 `Notify`、`Xexecve` → `unix.Exec`，以及 `libc_unix.go` 的 `Xsignal` 的三处；
+       - windows 两个架构各 1 处：`libc_windows.go` 的 `Xsystem` → `Run`。
+     - 信号命中在冻结字面与 E-1 具体化两种读法下的结论分开写。
+     - X1、X4 之下没有新增的候选。
+     - 已知的调用链只作背景，不另计命中；精确化 Q-B3-1 ① 中 `Xsigaction` 的归类：命中在 `Xsignal` 中。
+     - 原始入口、汇编、`LazyProc.Call` 与函数指针等未覆盖的路径另列，没有能力的存根另列。
+     - 其他依赖单列：SQLite 静态为零；`x/mod/zip` 等包是否在闭包中缺证。
+     - 缺证的事项共六项。
+  2. **例外规则的候选**（§3）：
+     - 条目由十项组成：配置、模块与版本、h1、包、文件与 SHA-256 与约束行、调用方、对象、次数、位置、用途与批准依据。
+     - 判定分为精确命中、额外发现、陈旧项、装载或扫描不完整、身份不符、重复或歧义六种。
+     - 限定：版本、内容、平台、调用位置、用途与来源。
+     - 七类失效的触发条件，失败关闭。
+     - 例外不能改变的事项。
+  3. **保证变化**（§4）：
+     - 11 项逐项写清：撤回“当前依赖中没有启动子进程的库”的前提，代之以 L-b1；“源码保有能力”与“区间之内活动”分开，只允许前者；仍由实现强制的与改为信任第三方的分开。
+     - 基线、subreaper、C-10 各自的作用与局限。
+     - 原始入口的“已登记的未覆盖”不是已接受的 L；硬规则不豁免；C-9 通过的含义改变；产物证明仍为可选的加强。
+     - 写明条件性风险，不声称 SQLite 实际触发。
+     - 须由负责人另行决定的硬性保证变化单列。
+  4. **条款与验收的修订候选**（§5）：
+     - R-1 ~ R-13：冻结规范 §19.4、§22.2、§22.5，实施计划 §12.9 ~ §12.12，链接验证计划与 H-1 候选稿的状态。
+     - 拟改文本只写在决策稿中。
+     - architecture（TD 的登记）、依赖的政策与验收项的落点单列。
+     - 验收候选 A-1 ~ A-10。
+  5. **负责人须逐项批准的内容**（§6）：
+     - 已有技术依据的 P-1 ~ P-4；尚缺证据的 G-1 ~ G-6；信任或风险决定的 T-1 ~ T-5。
+     - 保留原规则、(a)、更换驱动、修补依赖的影响。
+     - 相关的 Q / X / E / U 只列明。
+     - 不主张原 (a) 永远不可能。
+- **没有修改**：冻结正文、验收项、实施计划与链接验证计划的技术内容、代码、测试、原型、依赖、Schema、迁移、workflow 与预算。
+- **没有运行**：本轮没有运行 Go、`go env`、`go list`、`nm`、构建、链接、词法程序、分析器、驱动或实验，也没有安装工具链。重算 dirhash 与文件哈希用的是只读的临时脚本，不提交。
+- **PR #52 的交付回执**：在它的描述中补上合并核验，以及 master push CI 的 attempt 1 失败与 attempt 2 重跑成功的回执，历史回执保留。
+- **状态行**：`AGENTS.md` 两处、[implementation-plan.md](implementation-plan.md) 的 WP2.5 条目、[wp2.5-implementation-plan.md](wp2.5-implementation-plan.md) 的头部状态与 §12 的引言、[wp2.5-c9-link-proof-plan.md](wp2.5-c9-link-proof-plan.md) 的头部状态（技术内容不变）。
+- §177 没有回改。
+- **影响的 PD / TD**：没有修改。是否在 architecture 中为第三方依赖的进程与信号能力登记 TD，作为待决事项列在决策稿 §5.1。
+
+**状态**：
+
+- 决策稿待独立审查，新 PR 保持未合并，Auto-fix、Auto-merge 关闭。本 PR 最终 HEAD 的常规 CI 回执记录在 PR 描述中。
+- (b) 没有被选择；例外、L-b1、信任前提与新的 L 都没有被批准或接受；冻结规则没有改变。
+- H-1 未采纳，原方法继续停止；没有实际产物的 absent / present 证据。
+- N-137-1 按 §177 留待之后顺带核对。
+- 第三批的实现、链接验证的执行、第四批及之后的批次与 WP2.5 / M2 的验收都未授权。已删除 worktree 的规范问题、`factgen/legality`、维护事项、CLI 耗时的观测与冻结的限制继续登记，不混入本轮。
