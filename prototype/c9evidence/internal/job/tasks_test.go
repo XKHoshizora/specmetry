@@ -9,12 +9,16 @@ import (
 
 // The background tasks of a test job (Review 150 N-150-1). Begin starts the
 // record writer; the closeout registers the diagnostic task. Neither ends
-// by itself while it waits: the writer waits for a log change until the log
-// is sealed, and the diagnostic task waits for the writer's terminal state.
-// So a test that never runs Finish, or whose Finish takes an expiry exit
-// before the seal, leaves the writer waiting. These helpers end both tasks,
-// bounded, after the test's own assertions, and check their actual terminal
-// states. They change nothing in the tool.
+// by itself while it waits: while the log is not sealed, the writer waits
+// for a log change, and the diagnostic task waits for the writer's terminal
+// state. So a writer whose log is not sealed and that no later record has
+// woken is still waiting for a record change; a test that never ran Finish
+// or whose Finish took an expiry exit before the seal does not by itself
+// mean that (a record appended after D may already have woken it). These
+// helpers end both tasks, bounded, after the test's own assertions, and
+// check their published terminal states; a published terminal state is
+// the task's last state, not an observed exit of its goroutine. They change
+// nothing in the tool.
 
 // The terminal states the tests expect, as "state/qualification".
 const (
@@ -47,31 +51,55 @@ func tasksEnded(o chain.OuterSnapshot) bool {
 }
 
 // endTasks ends the job's record writer and diagnostic task and waits for
-// both terminal states, bounded; it returns the registry's copy.
+// both terminal states, bounded; it returns the registry's copy. It works
+// from the job's one closeout request (finish_test.go; Review 151
+// B-151-1), never from Closeout.Started:
 //
-//   - The closeout never ran (only on a failure exit, since every test calls
-//     Finish once): it runs Finish once here, only to seal the log and end
-//     the tasks; it does not judge the result.
-//   - The log is sealed: the writer finishes writing and closing, and the
-//     diagnostic task finishes after it; this only waits.
-//   - The closeout took an expiry exit before the seal (the latch is set):
-//     the writer waits for a log change and does not wake for D by itself.
-//     One wake item is appended to the log after the decision; at its next
-//     decision point the writer takes the expiry exit without writing it.
+//   - No request (Finish was never issued; only on a failure exit, since
+//     every test issues it once): it issues the request once here, only to
+//     seal the log and end the tasks; it does not judge the result.
+//   - A request: it waits, bounded, for that same request. When the wait
+//     fails it reports it and returns; the request stays registered and
+//     pending, and nothing is classified or claimed to have ended.
+//   - Only after the original call returned, by the original Final's exit:
+//     consumed or expired-final sealed the log, so it only waits for the
+//     writer and any registered diagnostic task; expired-at-m.Run or
+//     expired-at-snapshot came before the seal with the latch set, so a
+//     writer still waiting for a log change gets one wake item, appended
+//     after the decision, and takes the expiry exit at its next decision
+//     point without writing it. Any other exit is a failure.
 //
-// It never calls Finish twice and never releases a block of the test.
+// It never issues a second Finish and never releases a block of the test.
 func endTasks(t *testing.T, j *Job) chain.OuterSnapshot {
 	t.Helper()
-	if !j.outer.Snapshot().Closeout.Started {
-		finish(t, j)
+	r := requestOf(j)
+	if r == nil {
+		r = requestFinish(j)
+	}
+	f, ok := r.wait(bound)
+	if !ok {
+		t.Errorf("the job's closeout request did not return within %s; it stays registered and pending, and the tasks are not classified", bound)
+		return j.outer.Snapshot()
 	}
 	o := j.outer.Snapshot()
-	if sealed, _ := j.log.Sealed(); !sealed && o.Writer != nil && o.Writer.Terminal == nil {
-		if !o.Latch {
-			t.Errorf("the closeout left the log unsealed without the expiry latch: %+v", o.Closeout)
+	sealed, _ := j.log.Sealed()
+	switch f.Path {
+	case chain.PathConsumed, chain.PathExpiredFinal:
+		if !sealed {
+			t.Errorf("the closeout returned via %v without sealing the log", f.Path)
 			return o
 		}
-		j.log.Append(FileCloseout, []byte(`{"test":"lifecycle wake after the decision (N-150-1)"}`))
+	case chain.PathExpiredAtMRun, chain.PathExpiredAtSnapshot:
+		if sealed || !o.Latch {
+			t.Errorf("the closeout returned via %v with sealed %v and latch %v", f.Path, sealed, o.Latch)
+			return o
+		}
+		if o.Writer != nil && o.Writer.Terminal == nil {
+			j.log.Append(FileCloseout, []byte(`{"test":"lifecycle wake after the decision (N-150-1)"}`))
+		}
+	default:
+		t.Errorf("the closeout returned via %v (reasons %q): it did not run", f.Path, f.Reasons)
+		return o
 	}
 	timeout := time.After(bound)
 	for {

@@ -347,17 +347,18 @@ func TestB148RaStuckVerificationParentStillCloses(t *testing.T) {
 	if !waitFor(t, ran, "RunDomains returned at W") {
 		return
 	}
-	done := make(chan chain.Final, 1)
-	go func() { done <- j.Finish(0) }()
-	select {
-	case f := <-done:
+	// The job's one closeout request (Review 151 B-151-1): a failed wait
+	// keeps it; after the release the same request is awaited again.
+	if f, ok := tryFinish(j, bound); ok {
 		if !notValid(f) {
 			t.Errorf("a stuck verification gave %v exit %d", f.Conclusion, f.ExitCode)
 		}
-	case <-time.After(bound):
+	} else {
 		t.Errorf("Finish did not return within %s: the parent is running the verification", bound)
 		v.free()
-		waitFor(t, toStruct(done), "Finish after the release")
+		if _, ok := tryFinish(j, bound); !ok {
+			t.Errorf("Finish did not return within %s after the release", bound)
+		}
 		return
 	}
 	if n := len(v.callTimes()); n != 1 {
@@ -388,17 +389,17 @@ func TestB148RaStuckVerificationExpiredParent(t *testing.T) {
 		return
 	}
 	clk.Set(j.D)
-	done := make(chan chain.Final, 1)
-	go func() { done <- j.Finish(0) }()
-	select {
-	case f := <-done:
+	// The job's one closeout request (Review 151 B-151-1), as above.
+	if f, ok := tryFinish(j, bound); ok {
 		if !notValid(f) || f.Path != chain.PathExpiredAtMRun {
 			t.Errorf("final %v exit %d path %v", f.Conclusion, f.ExitCode, f.Path)
 		}
-	case <-time.After(bound):
+	} else {
 		t.Errorf("Finish did not return within %s: the expiry exit is running the verification", bound)
 		v.free()
-		waitFor(t, toStruct(done), "Finish after the release")
+		if _, ok := tryFinish(j, bound); !ok {
+			t.Errorf("Finish did not return within %s after the release", bound)
+		}
 		return
 	}
 	for _, at := range v.callTimes() {
@@ -409,12 +410,6 @@ func TestB148RaStuckVerificationExpiredParent(t *testing.T) {
 	// The expiry exit came before the seal: the writer waited for a log
 	// change; ended here, it takes its own expiry exit.
 	wantTasks(t, endTasks(t, j), writerExpired, diagNone)
-}
-
-func toStruct(ch <-chan chain.Final) <-chan struct{} {
-	out := make(chan struct{})
-	go func() { <-ch; close(out) }()
-	return out
 }
 
 // R-a 2: the verification returns success only after W; a late success
