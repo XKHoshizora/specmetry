@@ -43,15 +43,11 @@ func fakeJob(t *testing.T, tc collect.TypeChecker, vs []controls.Variant) (*Job,
 
 func finish(t *testing.T, j *Job) (chain.Final, bool) {
 	t.Helper()
-	done := make(chan chain.Final, 1)
-	go func() { done <- j.Finish(0) }()
-	select {
-	case f := <-done:
-		return f, true
-	case <-time.After(bound):
+	f, ok := tryFinish(j, bound)
+	if !ok {
 		t.Error("Finish did not return")
-		return chain.Final{}, false
 	}
+	return f, ok
 }
 
 func notValid(f chain.Final) bool {

@@ -253,6 +253,13 @@ func (v *verifier) callTimes() []time.Time {
 // the counting directory seams below a test directory.
 func newJob148(t *testing.T, vs []controls.Variant, tc collect.TypeChecker) (*Job, *chain.FakeClock, *opSeams, *gates) {
 	t.Helper()
+	return newJob148FS(t, vs, tc, newMemFS())
+}
+
+// newJob148FS is newJob148 with the given record file system (Review 152
+// B-152-1 passes a counting wrapper around the in-memory one).
+func newJob148FS(t *testing.T, vs []controls.Variant, tc collect.TypeChecker, wfs chain.FS) (*Job, *chain.FakeClock, *opSeams, *gates) {
+	t.Helper()
 	cfg, _ := newConfig(t, vs)
 	clk := chain.NewFakeClock(time.Unix(1_000_000, 0))
 	cfg.Clock, cfg.Start = clk, clk.Now()
@@ -260,7 +267,7 @@ func newJob148(t *testing.T, vs []controls.Variant, tc collect.TypeChecker) (*Jo
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg.R, cfg.Invoker, cfg.Guard, cfg.WriteFS = r, inv, guard, newMemFS()
+	cfg.R, cfg.Invoker, cfg.Guard, cfg.WriteFS = r, inv, guard, wfs
 	if tc != nil {
 		cfg.TypeCheck = tc
 	}
@@ -276,7 +283,10 @@ func newJob148(t *testing.T, vs []controls.Variant, tc collect.TypeChecker) (*Jo
 
 // settle releases every block and waits, bounded, for the work task to
 // finish; registered after the temporary directories, it runs before they
-// are removed.
+// are removed. Then it ends the job's record writer and diagnostic task and
+// checks that both reached a terminal state (endTasks; Review 150
+// N-150-1), also when the test left through a failure exit. The test's own
+// final judgment and expected terminal states are checked in its body.
 func settle(t *testing.T, j *Job, frees ...func()) {
 	t.Cleanup(func() {
 		for _, f := range frees {
@@ -289,6 +299,7 @@ func settle(t *testing.T, j *Job, frees ...func()) {
 				t.Errorf("the work task did not finish within %s after the release", bound)
 			}
 		}
+		endTasks(t, j)
 	})
 }
 
@@ -343,22 +354,26 @@ func TestB148RaStuckVerificationParentStillCloses(t *testing.T) {
 	if !waitFor(t, ran, "RunDomains returned at W") {
 		return
 	}
-	done := make(chan chain.Final, 1)
-	go func() { done <- j.Finish(0) }()
-	select {
-	case f := <-done:
+	// The job's one closeout request (Review 151 B-151-1): a failed wait
+	// keeps it; after the release the same request is awaited again.
+	if f, ok := tryFinish(j, bound); ok {
 		if !notValid(f) {
 			t.Errorf("a stuck verification gave %v exit %d", f.Conclusion, f.ExitCode)
 		}
-	case <-time.After(bound):
+	} else {
 		t.Errorf("Finish did not return within %s: the parent is running the verification", bound)
 		v.free()
-		waitFor(t, toStruct(done), "Finish after the release")
+		if _, ok := tryFinish(j, bound); !ok {
+			t.Errorf("Finish did not return within %s after the release", bound)
+		}
 		return
 	}
 	if n := len(v.callTimes()); n != 1 {
 		t.Errorf("verification calls: %d, want only the work task's one", n)
 	}
+	// The verification is still blocked; the closeout sealed the log, so
+	// the writer and the diagnostic task have ended.
+	wantTasks(t, endTasks(t, j), writerSuccess, diagComplete)
 }
 
 // R-a 1 at D: the verification stays stuck and m.Run returns only after D;
@@ -381,17 +396,17 @@ func TestB148RaStuckVerificationExpiredParent(t *testing.T) {
 		return
 	}
 	clk.Set(j.D)
-	done := make(chan chain.Final, 1)
-	go func() { done <- j.Finish(0) }()
-	select {
-	case f := <-done:
+	// The job's one closeout request (Review 151 B-151-1), as above.
+	if f, ok := tryFinish(j, bound); ok {
 		if !notValid(f) || f.Path != chain.PathExpiredAtMRun {
 			t.Errorf("final %v exit %d path %v", f.Conclusion, f.ExitCode, f.Path)
 		}
-	case <-time.After(bound):
+	} else {
 		t.Errorf("Finish did not return within %s: the expiry exit is running the verification", bound)
 		v.free()
-		waitFor(t, toStruct(done), "Finish after the release")
+		if _, ok := tryFinish(j, bound); !ok {
+			t.Errorf("Finish did not return within %s after the release", bound)
+		}
 		return
 	}
 	for _, at := range v.callTimes() {
@@ -399,12 +414,9 @@ func TestB148RaStuckVerificationExpiredParent(t *testing.T) {
 			t.Errorf("the verifier was called at %v, at or after D", at)
 		}
 	}
-}
-
-func toStruct(ch <-chan chain.Final) <-chan struct{} {
-	out := make(chan struct{})
-	go func() { <-ch; close(out) }()
-	return out
+	// The expiry exit came before the seal: the writer waited for a log
+	// change; ended here, it takes its own expiry exit.
+	wantTasks(t, endTasks(t, j), writerExpired, diagNone)
 }
 
 // R-a 2: the verification returns success only after W; a late success
@@ -434,6 +446,7 @@ func TestB148RaLateVerificationSuccessDoesNotRestore(t *testing.T) {
 	if !notValid(f) {
 		t.Fatalf("a late verification success gave %v exit %d", f.Conclusion, f.ExitCode)
 	}
+	wantTasks(t, endTasks(t, j), writerSuccess, diagComplete)
 }
 
 // R-a 3: a real verification error published after the parent stopped
@@ -470,6 +483,7 @@ func TestB148RaLateVerificationErrorIsConsumed(t *testing.T) {
 	if !found {
 		t.Error("the late verification error is not among the defects")
 	}
+	wantTasks(t, endTasks(t, j), writerSuccess, diagComplete)
 }
 
 // R-a 4: healthy: every record is verified once, by the work task, before
@@ -493,6 +507,7 @@ func TestB148RaHealthyVerifiedOnceByTheWork(t *testing.T) {
 	if n := len(v.callTimes()); n != 1 {
 		t.Errorf("verification calls after Finish: %d, want 1 (the parent must not verify)", n)
 	}
+	wantTasks(t, endTasks(t, j), writerSuccess, diagComplete)
 }
 
 // R-a 5: m.Run returns after D; the expiry exit consumes the published
@@ -516,6 +531,9 @@ func TestB148RaExpiredParentDoesNotVerify(t *testing.T) {
 			t.Errorf("the verifier was called at %v, at or after D", at)
 		}
 	}
+	// The expiry exit came before the seal: the writer waited for a log
+	// change; ended here, it takes its own expiry exit.
+	wantTasks(t, endTasks(t, j), writerExpired, diagNone)
 }
 
 // R-a (prefix rule's healthy counterpart): a broken record appended inside
@@ -536,6 +554,7 @@ func TestB148RaBrokenRecordBeforeTheVerification(t *testing.T) {
 	if f.Conclusion != chain.Invalid {
 		t.Fatalf("final %v %v", f.Conclusion, f.Reasons)
 	}
+	wantTasks(t, endTasks(t, j), writerSuccess, diagComplete)
 }
 
 // ---- R-b: the work task's abandonment and completion qualification are
@@ -586,6 +605,7 @@ func TestB148RbAbandonedThenCompletedBeforeFinish(t *testing.T) {
 	if len(st.pending) == 0 {
 		t.Error("the abandoned and late work task is not consumed")
 	}
+	wantTasks(t, endTasks(t, j), writerSuccess, diagComplete)
 }
 
 // R-b healthy branch: every necessary publication was made before W and only
@@ -617,6 +637,7 @@ func TestB148RbTimelyWorkParentLate(t *testing.T) {
 		if f.Conclusion != chain.Consistent || f.ExitCode != 0 {
 			t.Fatalf("run %d: timely work with a late parent gave %v exit %d %v", i, f.Conclusion, f.ExitCode, f.Reasons)
 		}
+		wantTasks(t, endTasks(t, j), writerSuccess, diagComplete)
 	}
 }
 
@@ -652,6 +673,7 @@ func TestB148RbWorkDoneAtOrAfterW(t *testing.T) {
 		if !notValid(f) {
 			t.Errorf("W+%v: the work task done at or after W gave %v exit %d", after, f.Conclusion, f.ExitCode)
 		}
+		wantTasks(t, endTasks(t, j), writerSuccess, diagComplete)
 	}
 }
 
@@ -686,6 +708,7 @@ func TestB148RcLateWorkCreatesNoRoot(t *testing.T) {
 	if f, ok := finish(t, j); ok && !notValid(f) {
 		t.Errorf("final %v exit %d", f.Conclusion, f.ExitCode)
 	}
+	wantTasks(t, endTasks(t, j), writerExpired, diagNone)
 }
 
 // lc5Then3 is LC5-0 (its analysis runs the job's type checker) followed by
@@ -729,6 +752,7 @@ func TestB148RcAnalysisReturnsAfterD(t *testing.T) {
 			t.Errorf("%s: %v (a directory whose cleanup was not admitted must still exist)", c.path, err)
 		}
 	}
+	wantTasks(t, endTasks(t, j), writerExpired, diagNone)
 }
 
 // R-c 3: the same instance returns after W and before D: its cleanup and
@@ -774,6 +798,7 @@ func TestB148RcCleanupBetweenWAndD(t *testing.T) {
 	if f, ok := finish(t, j); ok && !notValid(f) {
 		t.Errorf("a late instance gave %v exit %d", f.Conclusion, f.ExitCode)
 	}
+	wantTasks(t, endTasks(t, j), writerSuccess, diagComplete)
 }
 
 // R-c 4 (failures): a fixture's creation and the root's removal fail; each
@@ -801,6 +826,7 @@ func TestB148RcPrepareAndCleanupFailuresAreRecorded(t *testing.T) {
 	if f, ok := finish(t, j); ok && !notValid(f) {
 		t.Errorf("final %v exit %d", f.Conclusion, f.ExitCode)
 	}
+	wantTasks(t, endTasks(t, j), writerSuccess, diagComplete)
 }
 
 // R-c 5 (healthy): every preparation and cleanup is done before W, and
@@ -832,4 +858,5 @@ func TestB148RcHealthyPrepareAndCleanup(t *testing.T) {
 	if ok && (f.Conclusion != chain.Consistent || f.ExitCode != 0) {
 		t.Errorf("healthy: %v exit %d %v", f.Conclusion, f.ExitCode, f.Reasons)
 	}
+	wantTasks(t, endTasks(t, j), writerSuccess, diagComplete)
 }

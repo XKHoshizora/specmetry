@@ -59,6 +59,8 @@ func TestB149StepOpsHealthy(t *testing.T) {
 	})
 	p = "prepare LC-3 reread differs change"
 	sameList(t, p, opStates(o, p), []string{p + ": write lc3.go = done"})
+	finishWant(t, j, chain.Consistent, chain.PathConsumed)
+	wantTasks(t, endTasks(t, j), writerSuccess, diagComplete)
 }
 
 // A step that would start after a late return is refused, never started,
@@ -89,6 +91,8 @@ func TestB149RefusedStepIsNamed(t *testing.T) {
 	if r.Outcome.PrepErr == nil || r.Outcome.PrepErr.Error() != want || len(r.Variant.Reasons) != 1 || r.Variant.Reasons[0] != want {
 		t.Errorf("F record %+v, want the reason %q", r, want)
 	}
+	finishWant(t, j, chain.Invalid, chain.PathConsumed)
+	wantTasks(t, endTasks(t, j), writerSuccess, diagComplete)
 }
 
 // LC-3's Remove → Mkdir: two steps, the second refused after the first
@@ -104,6 +108,8 @@ func TestB149RemoveThenMkdirSteps(t *testing.T) {
 	if r := fRecord(t, j, v.Name); !errors.Is(r.Outcome.PrepErr, controls.ErrNotAdmitted) || !strings.HasSuffix(r.Outcome.PrepErr.Error(), "("+p+": mkdir lc3.go)") {
 		t.Errorf("F record %+v", r)
 	}
+	finishWant(t, j, chain.Invalid, chain.PathConsumed)
+	wantTasks(t, endTasks(t, j), writerSuccess, diagComplete)
 }
 
 // The other change closures are single steps with their own names.
@@ -115,4 +121,6 @@ func TestB149LC2ChangeSteps(t *testing.T) {
 	o := j.outer.Snapshot()
 	sameList(t, "LC-2 one byte changed", opStates(o, "prepare LC-2 one byte changed change"), []string{"prepare LC-2 one byte changed change: write lc2.go = done"})
 	sameList(t, "LC-2 one more file", opStates(o, "prepare LC-2 one more file change"), []string{"prepare LC-2 one more file change: write extra.txt = done"})
+	finishWant(t, j, chain.Consistent, chain.PathConsumed)
+	wantTasks(t, endTasks(t, j), writerSuccess, diagComplete)
 }

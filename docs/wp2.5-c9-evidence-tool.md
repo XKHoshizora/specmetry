@@ -1,6 +1,6 @@
 # WP2.5 第三批：C-9 限定取证工具第一阶段的实现记录
 
-> 状态：**第一阶段实现记录（test-only 的独立模块；不合并，不进行正式取证）**（2026-11-14，review-resolution §190）。审查 147 为技术 NO-GO（B-147-1 ~ 4）；定向修复在 PR #56 内进行（§191），待修复之后由 Review 148 复审。审查 148 关闭 B-147-2、B-147-3，B-147-1 尚余 R-a／R-b／R-c（R-a 与 B-147-4 共用），只授权这三个接点的定向修复（§192）；修复见 §9（已修复，待 Review 149 复审）。第一阶段旧测试 `TestWriterExpiresMidway` 的最小修正另经 §193 授权，见 §9.7，与 §192 的修复一起待 Review 149 复审。审查 149 关闭 R-a、R-b 与 B-147-4，认可该测试修正，B-147-1 只余 R-c/P，只授权它的修复（§194）；修复见 §10（R-c/P 已修复，待 Review 150 独立复审）。审查 150 认定 R-c/P、R-c 与 B-147-1 在受审的第一阶段范围内关闭，第一阶段技术 GO，负责人条件授权以 merge commit 合并 PR #56（§195；上文“不合并”是 §190 时的状态）；N-150-1 的覆盖描述已在 §10.2 更正，测试收尾留作后续事项，见 §10.6。真实调用、正式取证与第三批的生产实施仍未授权。
+> 状态：**第一阶段实现记录（test-only 的独立模块；不合并，不进行正式取证）**（2026-11-14，review-resolution §190）。审查 147 为技术 NO-GO（B-147-1 ~ 4）；定向修复在 PR #56 内进行（§191），待修复之后由 Review 148 复审。审查 148 关闭 B-147-2、B-147-3，B-147-1 尚余 R-a／R-b／R-c（R-a 与 B-147-4 共用），只授权这三个接点的定向修复（§192）；修复见 §9（已修复，待 Review 149 复审）。第一阶段旧测试 `TestWriterExpiresMidway` 的最小修正另经 §193 授权，见 §9.7，与 §192 的修复一起待 Review 149 复审。审查 149 关闭 R-a、R-b 与 B-147-4，认可该测试修正，B-147-1 只余 R-c/P，只授权它的修复（§194）；修复见 §10（R-c/P 已修复，待 Review 150 独立复审）。审查 150 认定 R-c/P、R-c 与 B-147-1 在受审的第一阶段范围内关闭，第一阶段技术 GO，负责人条件授权以 merge commit 合并 PR #56（§195；上文“不合并”是 §190 时的状态）；N-150-1 的覆盖描述已在 §10.2 更正，测试收尾留作后续事项，见 §10.6。真实调用、正式取证与第三批的生产实施仍未授权。PR #56 已合并为 `cd44f67`（§196）；N-150-1 在独立分支上处理，见 §11（待独立复审）；审查 151 为 NO-GO（B-151-1，测试侧），只授权测试侧的修复（§197）；修复见 §12（B-151-1 已修复，N-150-1 与 N-151-1 已处理，待 Review 152 独立复审）。审查 152 关闭 B-151-1，N-151-1 完成，N-150-1 在原 37 项／49 个实例的限定范围内关闭；新增的到期对照有独立的阻塞 B-152-1，只授权它的测试侧修复与 N-152-1 的精化（§198）；修复见 §13（B-152-1 已修复，N-152-1 已精化，待 Review 153 独立复审）。审查 153 认定 B-152-1 关闭、N-152-1 完成，B-151-1、N-151-1 与限定范围的 N-150-1 保持关闭，PR #57 技术 GO；负责人条件授权以 merge commit 合并 PR #57（§199；上文“待 Review 153 独立复审”是 §198 时的状态），见 §13.7。
 >
 > - 依据：[限定取证计划](wp2.5-c9-limited-evidence-plan.md)（PR #55 合并为 `9137279`），[G-4 方法记录](wp2.5-c9-exception-identity-method.md)，[实施计划](wp2.5-implementation-plan.md) §12.9 ~ §12.14，[决策稿](wp2.5-c9-dependency-exception-draft.md) §2.3、§2.7。
 > - 本文写定计划 §8.1 要求在实现中固定、在固定实现的审查中核对的事项，并逐项列出没有实现、没有执行与依赖 E-10 (ii) 的部分。
@@ -335,7 +335,12 @@ Review 148 认定 B-147-2、B-147-3 在受审范围内关闭，N-147-1 ~ 3 完�
   - `job` 的 `seams`：命名的钩子点（work start、parent wait、R published 〈配置〉、R done、before done），以及核验器、目录的创建与删除。
   - `controls.Env` 的 `MkdirTemp`、`RemoveAll`。
   - `Begin` 设为真实的函数，只有本包的测试替换。修复之前的运行用的就是这些接缝，它们本身不改变行为。
-- **回归**（`internal/job/regress148_test.go` 与 `regress148b_test.go`；都经过 `RunDomains` → `Finish`）：
+- **回归**（`internal/job/regress148_test.go` 与 `regress148b_test.go`；都经过实际的 `RunDomains`）：
+  - 当时 26 项中调用 `Finish` 的有 19 项：`regress148_test.go` 的全部 15 项，以及 `regress148b_test.go` 的 `StuckVerificationIsPending`、`LateVerificationErrorHeldAfterFinish`、`AppendedAfterTheVerificationIsADefect`、`LC1AndWorkQualification`。
+  - 其余 7 项只检查工作任务的完成与 O、F、Held 以及核验与 LC-1 的发布状态，没有调用 `Finish`：`PublishedVerificationCoversEveryRecord`、`LateSuccessIsNotTimely`、`BrokenRecordFoundByTheWork`、`RcRefusedPreparationIsRecordedApart`、`RcRefusedCleanupKeepsTheHold`、`RcFailureIsNotARefusal`、`RcHealthyHoldsReleased`。
+  - 当时 `settle` 只释放阻塞并有界等待工作完成，不封口、不等待写者。所以没有调用 `Finish` 的测试没有验证封口、写者与诊断任务的终态、manifest 或退出状态；调用了 `Finish` 但在 `D` 走到期出口的测试也没有检查写者的终态。
+  - 这些测试在 §11 之后都以 `Finish` 作最终判定，并检查写者与诊断任务的终态；各项的实际收尾状态见 §11.1。
+  - **更正**（review-resolution §196，与 §10.2 同一口径）：本行原写“都经过 `RunDomains` → `Finish`”，超出了实际覆盖。
   - `TestB148RaStuckVerificationParentStillCloses`：核验卡住，时钟到 `W` 时 `RunDomains` 返回，`Finish` 在有界时间内返回非 3、4 的结论；核验器只被工作任务调用了一次。
   - `TestB148RaStuckVerificationExpiredParent`：核验卡住，`m.Run` 在 `D` 之后才返回，`Finish` 经到期出口（`PathExpiredAtMRun`）返回；`D` 及之后没有调用核验器。
   - `TestB148RaStuckVerificationIsPending`：快照时核验仍在运行，状态为 running，记为未决，结论为 2。
@@ -552,15 +557,15 @@ Review 149 的裁定：
 都经过实际的 `RunDomains`、作业的外层登记表与假时钟，夹具的文件调用经接缝计数，并可在调用生效之后阻塞或返回注入的错误。
 
 - **调用 `Finish` 的只有两项**：`TestB149MkdirTempReturnsAfterD`（父端在 `D` 经到期出口返回，结论非成功）与 `TestB149HealthyStepsAllDone`（结论 4、退出 0）。
-- **其余 9 项**（`regress149_test.go` 的 5 项与 `regress149b_test.go` 的 4 项）验证 `RunDomains`、工作任务的完成以及 O、F 与持有（Held）的状态，没有调用 `Finish`。
+- **其余 9 项**（`regress149_test.go` 的 5 项与 `regress149b_test.go` 的 4 项）验证 `RunDomains`、工作任务的完成以及 O、F 与持有（Held）的状态，没有调用 `Finish`。（§11 之后这 9 项也以 `Finish` 作最终判定，并检查写者与诊断任务的终态。）
 - **等待与收尾**：每个等待都有 10 秒的失败出口，阻塞由 `t.Cleanup` 释放。`settle` 只释放受控阻塞，并有界地等待工作任务发布完成（WorkDone）；它不封口记录、不等待写者结束。所以这 9 项没有验证封口、写者的终态、manifest、诊断任务的终态或退出状态。
 - 不启动 helper 子进程。
 
 > **更正**（review-resolution §195，按 Review 150 的 N-150-1）：本段原写“都经过 `RunDomains` → `Finish` 的实际接线……收尾有界地等待工作任务结束”，超出了实际覆盖，已按上文改写；下面 `regress149_test.go` 一行原写“断言按……持有与终判”，也一并改正。
 >
-> 另外，没有调用 `Finish` 的测试中，`Begin` 启动的内存记录写者在日志没有封口、也没有新的变化时，可能仍停在等待记录变化处。测试结束与夹具目录的清理都不表示这个进程内任务已经结束。这是尚未修复的测试生命周期不足（只涉及测试中的内存文件系统与进程内任务），不是真实文件句柄或子进程的泄漏；测试的收尾留作后续事项，N-150-1 的这一部分未关闭。
+> 另外，没有调用 `Finish` 的测试中，`Begin` 启动的内存记录写者在日志没有封口、也没有新的变化时，可能仍停在等待记录变化处。测试结束与夹具目录的清理都不表示这个进程内任务已经结束。这是尚未修复的测试生命周期不足（只涉及测试中的内存文件系统与进程内任务），不是真实文件句柄或子进程的泄漏；测试的收尾留作后续事项，N-150-1 的这一部分未关闭。（§196 之后在 §11 中处理，待独立复审。）
 >
-> §9.1 对 Review 148 回归的“都经过 `RunDomains` → `Finish`”同样偏宽：作业层的 26 项中有 7 项（都在 `regress148b_test.go`）没有调用 `Finish`，同样的写者收尾不足也适用于它们。本轮只在此与 §195 登记，没有改写 §9.1。
+> §9.1 对 Review 148 回归的“都经过 `RunDomains` → `Finish`”同样偏宽：作业层的 26 项中有 7 项（都在 `regress148b_test.go`）没有调用 `Finish`，同样的写者收尾不足也适用于它们。本轮只在此与 §195 登记，没有改写 §9.1。（§196 之后，§9.1 已按同一口径更正。）
 
 `internal/job/regress149_test.go`（修复之前可以运行；断言按调用次数、拒绝记录、真实结果、持有与变体的判定，不依赖步骤的名称；只有第 1、7 项另经 `Finish` 断言父端的出口与结论）：
 
@@ -636,6 +641,433 @@ Review 149 的裁定：
 - **合并**：负责人条件授权以 merge commit 合并 PR #56（review-resolution §195）。本次只把第一阶段的成果入库，不是整个工具的完成，也不是 WP2.5 的验收。
 - **N-150-1**（非阻塞，整项未关闭）：
   - 覆盖描述：已更正（§10.2）；
-  - 测试收尾：待处理。没有调用 `Finish` 的回归缺最终断言，也没有结束记录写者；修复留作后续事项。本轮没有修改工具的源码或测试。
+  - 测试收尾：待处理（§196 之后在 §11 中处理，待独立复审）。没有调用 `Finish` 的回归缺最终断言，也没有结束记录写者；修复留作后续事项。本轮没有修改工具的源码或测试。
 - **证据**：本轮是文档收尾，没有重新运行工具模块的测试；固定工具子树 `95d92292b7807d211eab6fdbe6f7cdd6c5ab32f5` 的证据沿用 §10.4。常规 CI 不运行工具模块。
 - **仍然不变**：E-10 (ii)、LE-5 ① 与 ②、N2 保持待决；真实调用者、伪工具、平台控制协议、LC-9 与正式取证都没有实现或运行，没有运行分支；没有宣布任何 G 项满足，没有批准精确例外；第三批的生产实施与 WP2.5 / M2 的验收都未授权。
+
+## 11. N-150-1 的处理：回归覆盖的记录与测试收尾（§196；Review 151：测试收尾的 B-151-1 见 §12，N-151-1 的计数与措辞已在本节更正；已处理，待 Review 152 独立复审）
+
+PR #56 合并之后，负责人授权在独立分支 `test/wp2.5-c9-evidence-n150-1`（自 `cd44f67` 建立）上统一处理 N-150-1（review-resolution §196）：
+
+- 按与 §10.2 一致的口径更正 §9.1；
+- 先逐项核对 Review 148、149 的作业层回归；
+- 只修改相关的测试、必要的测试辅助函数与对应的文档。
+
+工具的实现、终判协议、依赖、workflow 与预算都不修改。N-150-1 记为“已处理，待独立复审”，不在本节关闭。
+
+### 11.1 逐项核对（动态审计）
+
+- **方法**：在仓库之外的导出副本（`758da73` 的工具模块，子树 `95d92292…`）里，给 `newJob148` 加一个临时探针，不提交。探针在每个测试的其他清理（释放阻塞、等待工作任务）之后运行，记录每个作业实例的以下状态：是否运行过收尾（`Finish`）、日志是否封口、到期锁存、工作任务的状态、写者与诊断任务的终态。
+- **日志**：`s196/logs/audit-probe.log`，12665 字节，SHA-256 `b049862583281c01520472c8c499baf1f1ca488a5f7d675eb86563674188d06c`。核对范围是作业包中 Review 148、149 的 37 项回归，共 49 个作业实例：`TestB148RbTimelyWorkParentLate` 有 10 个，`TestB148RbWorkDoneAtOrAfterW` 有 2 个，`TestB149RealFailureKeptApartFromRefusal` 有 3 个，其余各 1 个。
+- **补注**（Review 151，§197）：这个探针的“是否运行过收尾”读的是 `Closeout.Started`。`Started` 只说明收尾进入过内层的步骤 1，不能代替 `Finish` 的发起与返回状态（B-151-1）。在本节的两次运行中，测试都通过，没有一次 `Finish` 的等待超时，所以发起过的调用都在探针之前返回，读数与实际一致；没有调用 `Finish` 的测试是按源码确认的。§12.5 的修改之后的探针改读测试侧的单次请求。
+
+修改之前的状态：
+
+| 情形 | 测试 | 结束时的状态 |
+|---|---|---|
+| 调用 `Finish`，日志封口 | 16 项（26 个实例；原写 27，按 Review 151 的 N-151-1 更正）：`regress148_test.go` 的 `StuckVerificationParentStillCloses`、`LateVerificationSuccessDoesNotRestore`、`LateVerificationErrorIsConsumed`、`HealthyVerifiedOnceByTheWork`、`BrokenRecordBeforeTheVerification`、`AbandonedThenCompletedBeforeFinish`、`TimelyWorkParentLate`（10 个）、`WorkDoneAtOrAfterW`（2 个）、`CleanupBetweenWAndD`、`PrepareAndCleanupFailuresAreRecorded`、`HealthyPrepareAndCleanup`；`regress148b_test.go` 的 `StuckVerificationIsPending`、`LateVerificationErrorHeldAfterFinish`、`AppendedAfterTheVerificationIsADefect`、`LC1AndWorkQualification`；`regress149_test.go` 的 `HealthyStepsAllDone` | 写者 success/timely，诊断任务 complete-with-terminator/timely：已收尾 |
+| 调用 `Finish`，在 `D` 走到期出口（封口之前），写者已被 `D` 之后的记录唤醒 | 3 项：`RcLateWorkCreatesNoRoot`、`RcAnalysisReturnsAfterD`、`B149MkdirTempReturnsAfterD` | 写者 expired-incomplete/late，诊断任务没有登记：已收尾，但没有终态的断言 |
+| 调用 `Finish`，在 `D` 走到期出口（封口之前），之后没有新的记录 | 2 项：`RaExpiredParentDoesNotVerify`、`RaStuckVerificationExpiredParent` | **写者仍在等待日志的变化**，诊断任务没有登记 |
+| 没有调用 `Finish`，时钟在 `D`，写者已被 `D` 之后的记录唤醒 | 2 项：`RcRefusedPreparationIsRecordedApart`、`RcRefusedCleanupKeepsTheHold` | 写者 expired-incomplete/late：已收尾，但没有最终判定 |
+| 没有调用 `Finish`，日志没有封口，没有锁存 | 14 项（16 个实例）：`regress148b_test.go` 的 `PublishedVerificationCoversEveryRecord`、`LateSuccessIsNotTimely`、`BrokenRecordFoundByTheWork`、`FailureIsNotARefusal`、`HealthyHoldsReleased`；`regress149_test.go` 的 `MkdirAllCrossesW`、`WriteCrossesW`、`RemoveCrossesW`、`StepAtWIsRefusedCleanupAdmitted`、`RealFailureKeptApartFromRefusal`（3 个）；`regress149b_test.go` 的全部 4 项 | **写者仍在等待日志的变化**，诊断任务没有登记，没有最终判定 |
+
+- **结论**：
+  - 没有调用 `Finish` 的有 16 项：Review 148 的 7 项、Review 149 的 9 项。其中 2 项的写者已经结束，所以“没有调用 `Finish`”不等于泄漏。
+  - 调用了 `Finish` 的 2 项，写者仍在等待，所以“调用了 `Finish`”也不等于已收尾。
+  - 留在等待的只有记录写者（共 16 项、18 个实例）。每一个登记过的诊断任务都已结束。
+- **原因**：
+  - 写者在日志没有封口时只等日志的变化，不会因 `D` 自己醒来；在 `D` 之后的下一个决策点，它按既有规则走到期出口。
+  - 诊断任务只由收尾登记，并等写者的终态。
+  - 正式入口在 `Finish` 之后立即退出进程，这是设计中的边界；在测试中，进程不随每个测试结束。
+
+### 11.2 修改（`3a36222`，只改作业包的测试）
+
+- **`internal/job/tasks_test.go`**（新增）：
+  - `endTasks` 有界地结束一个作业的写者与诊断任务，并返回外层登记表的副本：
+    - 收尾从未运行（只会是失败出口）：运行一次 `Finish`，只为封口与收尾，不判定结果；
+    - 日志已封口：只等待；
+    - 封口之前走了到期出口（锁存已置）：在终判之后向日志追加一条唤醒项，写者在下一个决策点按既有规则走到期出口，不写入这一项。
+  - 它不会第二次调用 `Finish`，也不释放测试的任何阻塞。
+  - 以上是 `3a36222` 的版本。它以 `Closeout.Started` 判断收尾是否运行过，不能区分“从未发起”与“已发起、尚未发布 `Started`”，`Started` 已发布也不能证明原调用已经返回；`finish` 的等待超时之后，该次调用的完成与结果也没有交给收尾（Review 151 的 B-151-1）。§12 改为测试侧的单次收尾请求。
+  - `wantTasks` 检查写者与诊断任务的终态；`finishWant` 是最终判定，检查结论、退出状态与出口。
+- **`settle`**：释放阻塞、有界等待工作任务之后，再调用 `endTasks`。失败出口同样经过它，不依赖测试进程的退出。
+- **最终判定**：原来没有调用 `Finish` 的 16 项，在原有的断言都完成之后，以 `finishWant` 补上最终判定。结论与出口按各自的场景独立写定：
+
+| 测试 | 结论与出口 |
+|---|---|
+| `PublishedVerificationCoversEveryRecord`、`HealthyHoldsReleased`、`StepOpsHealthy`、`LC2ChangeSteps` | 4，consumed |
+| `LateSuccessIsNotTimely` | 2（核验晚到），consumed |
+| `FailureIsNotARefusal` | 2（根目录的移除失败），consumed |
+| `BrokenRecordFoundByTheWork` | 1（来源缺陷），consumed |
+| `MkdirAllCrossesW`、`WriteCrossesW`、`RemoveCrossesW`、`StepAtWIsRefusedCleanupAdmitted`、`RealFailureKeptApartFromRefusal`（3 个实例）、`RefusedStepIsNamed`、`RemoveThenMkdirSteps` | 1（准备没有完成，变体不命中），consumed |
+| `RcRefusedPreparationIsRecordedApart`、`RcRefusedCleanupKeepsTheHold` | `m.Run` 在 `D` 返回：1，经到期出口（expired-at-m.Run） |
+
+- **终态的断言**：Review 148、149 的全部 37 项作业层回归都以 `wantTasks` 检查实际的终态：
+  - 封口的，写者 success/timely、诊断任务 complete-with-terminator/timely；
+  - 封口之前走到期出口的 7 项，写者 expired-incomplete/late、没有诊断任务。
+- **保持不变**：原有的事件顺序、`W`、`D`、失败与持有的断言都不变。
+  - 新的断言都加在原有断言之后。
+  - 阻塞仍由原来的步骤或清理释放，“父端先返回”的回归没有改为先释放。
+  - 原来已经调用 `Finish` 的测试不再调用。
+  - 没有 sleep、跳过或放宽的预期。
+- **修改之后的审计**：同一探针在修改之后的测试上运行。日志为 `s196/logs/audit-probe-after.log`，13001 字节，SHA-256 `83d2dee04dcee9863e32b3fbf86a17bbaefdc5b798991e1d02d68bed4e817f32`，被测的是提交之前工作区中的同一份修改。
+  - 49 个实例都运行过收尾（读数的含义见 §11.1 的补注）。测试结束时，49 个写者都有终态；登记过诊断任务的 42 个实例，诊断任务都有终态；另外 7 个实例没有登记诊断任务（按 Review 151 的 N-151-1 精化）。
+  - 终态指任务最后的状态已经发布，不是观测到它的 goroutine 已经退出；测试没有等待这些 goroutine 退出（没有 join）。
+  - 42 个封口：success/timely 与 complete-with-terminator/timely。
+  - 7 个在封口之前到期：expired-incomplete/late，没有诊断任务。
+- **失败出口的探针**：在导出副本中另加一个临时测试（不提交），在 `Finish` 之前以 `t.Fatal` 离开。
+  - 日志：`s196/logs/failure-exit-probe.log`，779 字节，SHA-256 `5be5d55ace031831a9db140f61fc3d10d0b8d1d75b39a9db3205cc0c7e256456`。
+  - 结果：清理释放了被阻塞的核验，等到工作任务结束，运行一次收尾，写者与诊断任务都到达终态，没有挂起。这个测试按设计失败，退出 1。
+
+### 11.3 验证（提交 `3a36222`，工具模块子树 `d311efa4423ce294753eb7848799cf2ebd3f242d`；测试前后工作区都干净；环境与工具链同 §9.6）
+
+| 日志（草稿目录 `s196/logs/`） | 命令 | 结果 |
+|---|---|---|
+| `targeted-test.log`（4702 字节，SHA-256 `ddfa323b27cd3d09d432d218057df78635175df9e664f18191990f01530a1e07`） | `go test -count=1 -v -run 'B148\|B149' ./internal/job/` | 37 个通过，0 失败 |
+| `affected-package.log`（6163 字节，SHA-256 `5b1be3b14f3fa64b567d73ac9138c4f78f52dc9c295b95bb945dd2c371520188`） | `go test -count=1 -v ./internal/job/` | ok；55 个通过，0 失败 |
+| `full-test.log`（46995 字节，SHA-256 `91eb6f884f411c61a84db24afe03bcac3f2fedcb3399ea6e529c2c87bf70b614`） | `go test -count=1 -v ./...` | 11 个有测试的包全部 ok；顶层 198 个、子测试 271 个通过，0 失败；跳过 1 个（`TestTakeNegatives/symbolic_link`） |
+| `regress147-149-x20.log`（122284 字节，SHA-256 `9103210885c3739337a42546802ef47ebb7f9a9bbfc33fe4112fc31788f66cc8`） | `go test -count=20 -v -run 'B147\|B148\|B149\|SemanticSwap\|^TestWriterExpiresMidway$'`，只在 job、chain、controls、collect 四个包 | 61 个测试各通过 20 次（1220 个 PASS 行），0 失败 |
+| `static.log`（2699 字节，SHA-256 `25a46df11c700c8733241c545f73fe5bee6f4a9ff39b59656a51de9c1fe4d248`） | `gofmt -l`、vet、带标签的 vet、六种交叉 vet、正式入口只编译、`mod verify`、导入闭包 | 都成功；第三方导入闭包仍只有 `golang.org/x/mod/sumdb/dirhash` |
+
+- 只改了作业包的测试，`controls`、`chain`、`collect` 没有改动，它们由全量运行覆盖。
+- 重复 20 次只是适量的重复，不是竞态检测，也不是全调度覆盖。
+- 唤醒项只在测试中、在终判之后追加，所以写者到期出口的动态证据是测试中构造的。
+- `s192` ~ `s194` 的旧日志原样保留。
+
+### 11.4 没有覆盖的部分
+
+- 本轮只核对与修改 Review 148、149 的作业层回归。Review 147 的作业层回归（`regress147_test.go`、`regress147b_test.go`）与第一阶段的 `job_test.go` 没有在本轮核对它们的任务收尾，不据此说它们已经收尾或没有收尾。
+- 工具的实现与正式入口的行为不变：正式入口在 `Finish` 之后退出进程；封口之前到期时，写者在进程结束之前一直等待日志的变化，这是既有设计。
+
+## 12. 按 Review 151 的定向修复：测试侧的单次收尾请求（§197；Review 152：B-151-1 关闭，N-151-1 完成；本节新增的到期对照有独立的 B-152-1，N-152-1 精化本节的措辞，见 §13）
+
+Review 151 对 PR #57 为技术 NO-GO（review-resolution §197）：
+
+- **B-151-1**（BLOCKER，测试生命周期范围）：`endTasks` 以 `Closeout.Started` 判断是否补跑 `Finish`，不能区分“从未发起”与“已发起、尚未发布 `Started`”；`Started` 已发布也不能证明原调用已经返回。既有的 `finish` 等待超时之后，该次调用的完成与结果没有交给任何人，之后的收尾可以再次调用 `Finish`。两处手写的异步 `Finish` 同样如此。
+- **N-151-1**（非阻塞）：§11.1 的计数、`tasks_test.go` 的概括与修改之后审计的措辞，已在 §11 与 `tasks_test.go` 中更正。
+
+负责人只授权测试侧的修复、N-151-1 的精化与必要的验证。本轮只修改作业包的测试：
+
+- `Job.Finish`、`chain.Closeout` 与其他工具实现都不变；
+- `bound`（10 秒）、`W`、`D` 都不变，旧断言没有放宽；
+- Review 147 的作业回归与 `job_test.go` 不在范围内。
+
+B-151-1 记为“已修复，待 Review 152 独立复审”，N-150-1（含 N-151-1）记为“已处理，待 Review 152 独立复审”，都不在本节关闭。
+
+编号说明：本节的 §12.1 ~ §12.6 是本文自己的小节；本文前部的 §12.9、§12.10、§12.14 仍指实施计划的章节（见文首的依据）。
+
+### 12.1 修改（`ac0e2be`，只改作业包的测试）
+
+- **`internal/job/finish_test.go`**（新增）：测试侧的单次收尾请求。
+  - 每个作业至多一个请求，登记在以 `*Job` 为键、由互斥锁保护的表中。`requestFinish` 在启动调用 `Finish` 的 goroutine **之前**登记；已有请求时只返回它，不再调用。
+  - 请求持有两样东西：
+    - 完成通知：`Finish` 返回时关闭一次的通道，可被任意多个消费者等待；
+    - 原始 `Final`：在关闭通道之前写入一次，之后不变。
+  - 读取不消耗任何东西，正文、最终断言与 Cleanup 看到的是同一个结果。
+  - 三种状态：
+    - 没有请求：未发起；
+    - 有请求而通道未关闭：已发起未返回；
+    - 通道已关闭：已返回，带原始 `Final`。
+  - 请求一直留在表中，直到测试进程结束。
+  - `wait(d)` 最多等 `d`。超时只表示这一次等待失败：请求仍在表中，之后仍可返回。`tryFinish(j, d)` 取得（必要时登记）请求并等待它。
+  - 两个测试接缝，只供回归使用：
+    - `setFinishHook`：在请求的 goroutine 调用 `Finish` 之前运行（在计数之前）；
+    - `finishCalls`：经由请求实际调用 `Finish` 的次数。
+- **`finish`**（`regress147b_test.go`）与 **`finishWant`**：经由 `tryFinish(j, bound)` 等待同一请求。超时记错误，不发起第二次调用。
+- **两处手写的异步 `Finish`**（`TestB148RaStuckVerificationParentStillCloses`、`TestB148RaStuckVerificationExpiredParent`）：
+  - 先在 `bound` 之内等待本作业的请求；
+  - 等待失败时，记错误，释放核验的阻塞，再在 `bound` 之内等待同一请求，不发起第二次调用；
+  - 原来只为它们服务的 `toStruct` 已删除；
+  - “父端先返回、之后才释放”的顺序不变：释放只在第一次等待失败的分支中。
+- **`endTasks`**（`tasks_test.go`）不再读取 `Closeout.Started`：
+  - 没有请求（只会是失败出口）：登记并发起一次，只为封口与收尾，不判定结果；
+  - 已有请求：在 `bound` 之内等待同一请求。等待失败即记错误并返回：请求仍在表中、仍未返回；不判断封口或唤醒，也不声称任务已经结束；
+  - 原调用返回之后，才按原始 `Final` 的出口分类：
+    - consumed、expired-final：要求日志已封口，只等待写者与已登记的诊断任务；
+    - expired-at-m.Run、expired-at-snapshot：要求日志未封口且锁存已置，写者没有终态时追加一条唤醒项；
+    - 其他出口（包括第二次调用被拒绝时的 none）：记错误；
+  - 它不会第二次调用 `Finish`，也不释放测试的任何阻塞。
+- **`settle`** 不变：释放阻塞 → 有界等待工作任务 → `endTasks`。
+- **`tasks_test.go` 的开头说明**（N-151-1）：
+  - 只有日志未封口、之后也没有被记录唤醒的写者，仍在等待记录的变化；
+  - 没有调用 `Finish` 或封口之前到期，并不必然意味着写者仍在等待；
+  - 终态是任务最后发布的状态，不是观测到其 goroutine 已经退出。
+
+**调用点的核对**：
+
+- 作业包测试中经由 `endTasks` 收尾的作业，`Finish` 都经由同一请求：`finish`、`finishWant`、两处异步调用与 `endTasks` 本身。
+- 仍然直接调用 `j.Finish` 的只有：
+  - Review 147 的作业回归：`regress147_test.go` 1 处、`regress147b_test.go` 4 处；
+  - 第一阶段 `job_test.go` 的 `run`。
+- 它们不使用 `settle` 或 `endTasks`，与请求表没有交集。按 Review 151 §4.2，它们不在本轮范围，没有改动；不据此说它们已经收尾或没有收尾。
+
+**测试补丁**（草稿目录 `s197/`）：`fix.diff`（`8e52b8f` 到 `ac0e2be` 的测试改动，含接缝与回归），21582 字节，SHA-256 `767e3536ffb1c1f91d7a70b8cc8f4326cbb996afa2df27efd26d59fbcdf5652d`。
+
+### 12.2 回归（`regress151_test.go`：修复之前写定，之后没有改动）
+
+**设计**：
+
+- 每个用例都把第一次调用停在测试自己释放的受控接点上，因此第一次短等待（200 毫秒）按设计失败。这个失败来自持有，不来自调度。
+- 其余等待都有界：`bound`；`endTasks` 整体最多 3×`bound`。每个持有也在 `t.Cleanup` 中释放。
+- `endTasks` 在独立的 goroutine 中运行，与 Cleanup 中的情形一致。释放之前，先检查它尚未返回。
+- 文件在修复前后没有改动：9111 字节，SHA-256 `a28e76ba8853aed8abdacb73123b977e812226f0736cf441f36a180bc0abab0d`。
+
+**用例**：
+
+| 用例 | 接点与建立方式 | 断言 |
+|---|---|---|
+| `TestB151RegisteredNotYetCalled` | 请求已登记，goroutine 尚未调用 `Finish`：钩子只阻塞第一次到达，并以进入握手确认 | 第一次等待失败；当时实际调用 0 次；释放之前 `endTasks` 没有返回；释放之后实际调用恰好 1 次；原请求的 `Final` 为 4／退出 0／consumed；写者 success/timely，诊断任务 complete-with-terminator/timely |
+| `TestB151CallEnteredBeforeStarted` | 第一次调用已进入 `Job.Finish`、尚未发布 `Started`：测试持有作业锁 `j.mu`，调用阻塞在 `Job.Finish` 的第一条语句（`finalized` 尚未置位）；钩子作为进入握手 | 第一次等待失败；`Started` 未发布；释放之前 `endTasks` 没有返回；之后实际调用恰好 1 次；原始 `Final` 与终态同上 |
+| `TestB151StartedButNotReturned` | `Started` 已发布、`Finish` 未返回：工作任务阻塞在来源核验、时钟早于 `W`，收尾停在快照点；有界地等到 `Started` 发布，并确认日志尚未封口 | 同上；`endTasks` 不把这一时刻的“未封口、无锁存、无诊断”当成返回之后的状态 |
+| `TestB151LateReturnKeepsTheOriginalFinal` | 原调用迟到返回（两处异步调用失败分支的情形）：第一次等待失败之后释放 | 第二次等待取得同一请求的原始 `Final`（4／0／consumed），没有第二次调用；之后 `endTasks` 的终态同上，调用仍为 1 次 |
+| `TestB151NeverIssuedCleanupIssuesOnce` | 确实从未发起的失败出口：不发起请求，直接进入 `endTasks` | `endTasks` 恰好发起一次；第二次 `endTasks` 不再发起；终态同上；请求保留原始 `Final` |
+| `TestB151ControlsNormalAndExpiryBeforeTheSeal`（2 个子测试） | 健康对照：正常收尾；封口之前到期（时钟设到 `D`） | 正常：4／consumed，终态同上，调用 1 次。到期：2／expired-at-m.Run；`endTasks` 之前写者没有终态、没有诊断任务；之后写者 expired-incomplete/late、没有诊断任务；调用 1 次 |
+
+**按 Review 152 精化**（§198，见 §13）：
+
+- 上表中“释放之前 `endTasks` 没有返回”只是检查那一刻没有取得它的返回值，不证明 `endTasks` 已进入等待（N-152-1）。
+- `CallEnteredBeforeStarted` 的进入握手证明钩子已到达、作业锁被持有，不证明已观察到 `Job.Finish` 的函数体正在等锁（N-152-1）。
+- 到期对照一行的前提构造有 B-152-1：它没有先确定写者已写完全部记录并在等待。§13 改为先以写者发布的状态有界地握手。
+- 本表的预期与“修复前后没有改动”只指 §197 那一轮；本轮改动了 `regress151_test.go`，见 §13.2。
+
+**两处异步调用**：
+
+- 健康路径：由它们所在的 Review 148 回归覆盖，第一次等待即取得结果。
+- 失败分支：需要父端真实阻塞超过 `bound`，本轮没有动态执行。它与 `TestB151LateReturnKeepsTheOriginalFinal` 走同样的序列（同一请求的两次有界等待），以后者代表。
+
+**没有建立的接点**：
+
+- Review 151 描述的精确时点是 `Job.Finish` 已置 `finalized`、`chain.Closeout` 尚未发布 `Started`，位于两把锁之间。
+- 测试侧没有接缝能停在那里：需要 `chain` 包内未导出的锁或工具内的钩子，而本轮不修改工具实现。
+- `TestB151CallEnteredBeforeStarted` 停在它之前一步（`finalized` 尚未置位）。两者在测试侧可观察的状态相同：请求已登记且未返回，`Started` 未发布。
+- 这个精确时点本身不计作动态覆盖。
+
+### 12.3 修复之前的结果（如实记录）
+
+**被测代码**：
+
+- HEAD `8e52b8f`（树 `9c11593f2ce1d8ffc86b7c5768fbe22801afcd9f`，工具模块子树 `d311efa4423ce294753eb7848799cf2ebd3f242d`）；
+- 加上不改变行为的接缝：
+  - `pre-fix-seams.diff`：1606 字节，SHA-256 `668568a64a6021077d5d76470cf2fff8d2be56b883b3367d68b8dfb4ded4c623`；
+  - 修复之前的 `finish_test.go`：1434 字节，SHA-256 `5376d93ac89c2ff38eee007c6f3190d7db6d05d7246fd4cdec38b90b3d626223`。它只有计数与钩子；`tryFinish` 是原来“一次性调用加等待”的参数化，每次都发起新的调用；
+- 加上 §12.2 的回归。
+
+**日志**：`s197/logs/pre-fix-regressions.log`，4730 字节，SHA-256 `a897a9dc31d95a37bf48075389e7445f6abfd86da218ee1c862dc3cb99703f80`，命令 `go test -count=1 -v -run B151 ./internal/job/`。退出 1：5 项失败，1 项通过（2 个子测试通过）。
+
+| 用例 | 修复之前（这次运行中观察到的） | 归类 |
+|---|---|---|
+| `RegisteredNotYetCalled` | `endTasks` 读到 `Started` 已发布而原调用尚未返回，判为“未封口且没有锁存”，没有等待就返回。之后取原始结果只能再次调用，得到 `Finish called twice`（1／invalid／none），实际调用 2 次；写者没有终态 | 原缺陷 |
+| `CallEnteredBeforeStarted` | `endTasks` 读到 `Started` 未发布，于是再次调用。它自己的调用被拒绝、先返回，随后同样误判；释放之后实际调用 2 次，取原始结果再调用一次（共 3 次） | 原缺陷 |
+| `StartedButNotReturned` | `Started` 已发布而未返回，被判为返回之后的异常。原始 `Final` 无法取得，再调用一次（共 2 次） | 原缺陷 |
+| `LateReturnKeepsTheOriginalFinal` | 第二次等待发起了第二次调用，得到拒绝结果而不是原始 `Final`；调用 2 次 | 原缺陷 |
+| `NeverIssuedCleanupIssuesOnce` | “只发起一次”在修复之前已经成立：第二次 `endTasks` 读到 `Started` 后不再调用。失败只在取原始 `Final`：旧设计不保留结果，取结果只能再调用一次（`Finish called twice`，2 次） | 原缺陷（结果没有保留） |
+| `ControlsNormalAndExpiryBeforeTheSeal` | 通过 | — |
+
+没有夹具问题，也没有无法运行的情况。
+
+### 12.4 环境事件：本机缓存的重新下载
+
+本轮开始验证时，本机模块缓存中的 go1.27.3 工具链与 `golang.org/x/mod v0.42.0` 已被其他进程清除（不是本轮的操作）。经负责人在会话中同意，从 Go 官方代理重新下载并核对：
+
+- **工具链**：
+  - `go.exe` 的 SHA-256 为 `83b7ba66215e696414fa49462d0db2da4f4cf15c7bebd42f0b189fa04866999d`，与此前各轮记录的相同；
+  - `VERSION` 第一行为 go1.27.3；
+  - 模块 zip 为 76890515 字节，ziphash 为 `h1:Ke8xvH3G94wJ4SfCeyCpVAjhpTpJv+iU1Nz6+W97TD4=`；
+  - 日志：`s197/logs/toolchain-redownload.log`，1027 字节，SHA-256 `3682414754b7da9b9b93c2799bec65d91ddc2e9b11b8f40d31a40309fa0647b3`。
+- **`x/mod`**：
+  - 下载结果的 `h1:ICeL3t2L30ljSPHHxDnR4fqVcBt/zR2zJAb9juavmQg=` 与 `go.sum` 相同；
+  - 在 `GOPROXY=off` 下，`go mod verify` 的结果为 all modules verified；
+  - `go.mod`、`go.sum` 没有变化；
+  - 日志：`s197/logs/xmod-redownload.log`，1747 字节，SHA-256 `f9142361c6faca3c0230e08270f240c85e9547fe0fb3ab494d3efa4a105dfc75`。
+- 下载只用于恢复本机缓存。之后的全部测试都在 `GOTOOLCHAIN=local GOPROXY=off GOWORK=off GOFLAGS=` 下运行。
+
+### 12.5 修复之后的结果
+
+**身份**：提交 `ac0e2be`（树 `f0218b3d6eff6ecb3a140895f7b1ebac5bd73722`，工具模块子树 `3985b9929a75d8fa055ce524ed834fad62c63dc4`）。测试前后工作区都干净；环境与工具链同 §12.4。
+
+| 日志（草稿目录 `s197/logs/`） | 命令 | 结果 |
+|---|---|---|
+| `post-fix-targeted.log`（5611 字节，SHA-256 `2cabae2d41ecd4b0f0899ecfb0deaa388320f2d33a0f964f621b3292a3954d3d`） | `go test -count=1 -v -run 'B151\|B148\|B149' ./internal/job/` | 43 个通过（另 2 个子测试），0 失败 |
+| `post-fix-job.log`（7067 字节，SHA-256 `15bf61501342993617d7f49cc8a11d7b73df7309812c2d7d96aa7c85ae6e2fd2`） | `go test -count=1 -v ./internal/job/` | ok；61 个通过（另 2 个子测试），0 失败 |
+| `post-fix-module.log`（47902 字节，SHA-256 `e4e9a6239d0a2cbfe8202e5b664197bab8fcf381b7e8404b78db9a13d39ace51`） | `go test -count=1 -v ./...` | 11 个有测试的包全部 ok；顶层 204 个、子测试 273 个通过，0 失败；跳过 1 个（`TestTakeNegatives/symbolic_link`，与 §11.3 相同） |
+| `post-fix-x20.log`（140365 字节，SHA-256 `431defa0880bea926cee4ce375776f21827214b6a45c4b637b8be1aa41a4f897`） | `go test -count=20 -v -run 'B147\|B148\|B149\|B151\|SemanticSwap\|^TestWriterExpiresMidway$'`，只在 job、chain、controls、collect 四个包 | 67 个测试各通过 20 次（1340 个顶层 PASS 行，另 40 个子测试 PASS 行），0 失败 |
+| `post-fix-static.log`（2699 字节，SHA-256 `736ac6179d1e659d4481b98c3b40cc28a2f9fc998d92a83ea2b1e689e53586c3`） | `gofmt -l`、vet、带标签的 vet、六种交叉 vet、正式入口只编译、`mod verify`、导入闭包 | 都成功；第三方导入闭包仍只有 `golang.org/x/mod/sumdb/dirhash` |
+
+**修改之后的审计**：
+
+- **方法**：
+  - 在仓库之外，以 `git archive` 导出 `ac0e2be` 的工具模块，给 `newJob148` 加一个临时探针，不提交；
+  - 探针在 `newJob148` 中登记，早于测试正文登记的清理（包括 `settle` 与释放持有的清理），所以在它们之后运行；更早登记的临时目录清理在探针之后运行；
+  - 它只读不写：读本作业的请求（none／PENDING／returned 及出口）、实际调用次数、封口、锁存、工作任务的状态，以及写者与诊断任务的终态；
+  - 补丁脚本 `s197/probe_patch.py`：1780 字节，SHA-256 `63a17b0dfb624c0ec2560fd246aba4c6b1dc67e0be2ef92412a7f91948b03a7f`；
+  - 探针差异 `s197/probe.diff`：749 字节，SHA-256 `d1e74e005f64de06a898c92219cf19a57830d7f0bb60f2a9396a9c5d25193ce3`。
+- **日志**：`s197/logs/audit-probe-after-fix.log`，16672 字节，SHA-256 `9454c0535be5a3575f2d0ccaf55bfd124b981c678dbf7bf0bb3cf6ba01da5e12`，命令 `go test -count=1 -v -run 'B148|B149|B151' ./internal/job/`，退出 0。
+- **结果**：共 56 个实例，即 §11.1 的 49 个与本节的 7 个。每个实例的请求都已返回，实际调用都恰好 1 次：
+  - 48 个经 consumed 封口：写者 success/timely，诊断任务 complete-with-terminator/timely；
+  - 8 个经 expired-at-m.Run 在封口之前到期：写者 expired-incomplete/late，没有登记诊断任务。即 §11.2 的 7 个与本节的到期对照。
+- **没有出现**的情况：未发起、未返回、没有终态。
+- **终态的含义**：同 §11.2，是最后的状态已经发布，不是观测到 goroutine 已经退出。
+
+### 12.6 没有覆盖的部分
+
+- **精确时点**：`finalized` 已置位、`Started` 尚未发布的那一刻，见 §12.2。
+- **未执行的等待失败分支**：
+  - 两处异步调用的失败分支，见 §12.2；
+  - `endTasks` 自身等待失败的分支：需要原调用停住超过 `bound`，本轮不改 `bound`。
+  - 这两个分支都只有代码与 `TestB151LateReturnKeepsTheOriginalFinal` 的同类序列作依据。
+- **重复运行的性质**：重复 20 次只是适量的重复，不是 `-race`，也不是全调度覆盖。本轮没有运行 `-race`。
+- **范围之外**：Review 147 的作业回归与 `job_test.go` 仍直接调用 `Finish`，见 §12.1；本轮没有核对它们的任务收尾。
+- **唤醒项**：只在测试中、在终判之后追加，所以写者到期出口的动态证据是测试中构造的。正式入口的行为不变：它在 `Finish` 之后退出进程。
+- **CI**：常规 CI 不运行工具模块，本节的证据来自本机的固定工具链。
+- `s192` ~ `s196` 的旧日志原样保留。
+
+## 13. 按 Review 152 的定向修复：到期对照的前提（§198；Review 153：B-152-1 关闭，N-152-1 完成，PR #57 技术 GO，见 §13.7）
+
+Review 152 的裁定（review-resolution §198）：
+
+- B-151-1 关闭，N-151-1 完成；
+- N-150-1 在原 37 项作业层回归／49 个实例的限定范围内关闭；
+- 新增独立的 **B-152-1**（BLOCKER，P2，只涉及新增的测试）：§12 的到期对照没有先确定写者已写完原有记录并进入等待，就在推进到 `D` 之后要求写者“尚无终态”；合法的执行中，尚有待写记录的写者可以先发布到期终态，测试会误失败；
+- **N-152-1**（非阻塞）：`notReturned` 与进入握手的动态证据，措辞要收窄。
+
+负责人只授权修复 B-152-1、精化 N-152-1 与必要的验证，不合并。本轮只修改作业包的测试：
+
+- 工具实现、单次 `Finish` 请求机制、`bound`、`W`／`D` 与终判规则都不变；
+- 原到期对照的结论、退出码、出口与终态断言都保留。
+
+B-152-1 记为“已修复”，N-152-1 记为“已精化”，都待 Review 153 独立复审，不在本节关闭。（这是 §198 时的状态；Review 153 的裁定见 §13.7。）
+
+### 13.1 握手的依据
+
+握手只读写者在外层登记表中发布的状态与日志的条目，不读测试自己设置的标记。依据的源码：
+
+- **写者何时醒来**：`internal/chain/writer.go` 的 `writeUntilSeal` 每一轮先在日志锁下 `take` 未取的条目，并在同一临界区取得“下一次追加或封口时关闭”的通道（`internal/chain/log.go`）。它只为有待写字节的文件调用 `admit` 与 `Write`；日志没有封口时在该通道上等待。通道只在 `Append` 与 `sealWith` 时关闭，写者不因 `D` 自己醒来。
+- **到期出口不动日志**：`chain.Closeout` 的步骤 1 在 `D` 之后直接走 `expiredLocked`，既不追加也不封口；`Job.Finish` 在调用它之前也不写日志。工作任务在发布 done 之前写完它的全部条目（`internal/job/job.go` 的 `runWork`），之后没有其他生产者。
+- **判定 `writerIdle`**（`regress152_test.go`）：先取外层登记表的副本，再读日志的条目与封口状态。要求：
+  - 写者已启动，目录已创建且没有错误，没有终态与链错误；
+  - 每个记录文件都已创建、表头已写入，`WrittenThrough` 等于日志中该文件的最后序号（没有条目时为 0），没有开始关闭；
+  - 日志中的每个文件名都在写者的文件之中；日志没有封口。
+- **为什么足以证明三件事**：
+  - `WrittenThrough` 只在写入成功并发布之后前进，条目只增不减；在副本之后追加的条目，序号大于副本中的每个 `WrittenThrough`，判定为假。所以判定为真时，读取那一刻存在的全部条目都已写完并发布（**固定的全部现有记录已被处理**）。
+  - 待写的字节全部写完之后，写者不再为这些条目调用 `admit` 或文件操作：它至多完成清空缓冲、跳过空批次等局部步骤，然后在最后一次 `take` 取得的通道上等待（**没有进行中或待准入的文件操作**）。
+  - 之后只要日志的条目数不变且没有封口，该通道就不会关闭，写者不会开始新的文件工作，也不会去关闭文件或建立 manifest（**直到唤醒之前，没有新的记录使它推进**）。这一点在 `Finish` 之后逐项核对，见 §13.2。
+- **等待**：`waitWriterIdle` 在外层登记表的 `Watch` 上有界等待（`bound`），每次发布之后重新判定。判定只能因写者的发布由假变真（新的条目只会使它变假），所以等待发布不会错过。
+- **读法**（按 Review 153 §3.4 精化，§199）：本节与 §13.2 中的“等待”“仍在等待”“不会自行推进”，指的是**没有待处理的文件工作**，不是观测到写者的 goroutine 已阻塞在通道上，也不排除它仍在执行上面的局部步骤。握手的规则不变。
+
+### 13.2 修改（`4eae0e7`，只改作业包的测试）
+
+- **`regress152_test.go`**（新增）：
+  - `countFS`：包装内存文件系统，在每次调用开始时计数 `Mkdir`、`Create`、`Write`、`Close`；可选地持有第一次 `Write`（到达时关闭 `entered`，由测试释放，`t.Cleanup` 中也释放，只释放一次）；`containing` 检查哪些记录文件的字节含有给定的文本。
+  - `writerIdle`、`waitWriterIdle`：见 §13.1。握手固定条目数、每个文件已发布的写入次数与 `WrittenThrough`，以及文件系统的调用计数。
+  - `expireWaitingWriter`（唤醒对照的顺序）：
+    1. 推进到 `D`，原 `finishWant`：2／expired-at-m.Run；
+    2. 由前提推出“仍在等待”：条目数仍为握手时的值、日志未封口、锁存已置、写者没有终态、没有诊断登记，已发布的写入与文件系统的调用计数都不变；
+    3. `endTasks` 唤醒，写者为 expired-incomplete/late、没有诊断任务；
+    4. 唤醒之后：恰好追加了测试的唤醒项（`closeout.jsonl` 的最后一条）；已发布的写入与文件系统的调用计数仍不变（到期之后没有开始新的文件操作）；唤醒项不在任何记录文件的字节中；没有开始关闭，也没有创建 manifest；
+    5. `Finish` 恰好调用一次。
+  - `TestB152HandshakeWaitsForALaggingWriter`：写者的第一次写入被持有（进入握手）。`RunDomains` 返回之后（工作为 done），判定为假；以 200 毫秒的期限等待握手，按设计失败（失败来自持有）；当时只有一次 `Write`。释放之后握手成立，至少两次 `Write`，再走 `expireWaitingWriter`。
+  - `TestB152WriterExpiredByItselfNeedsNoWake`：**单独标明的健康分支，不是唤醒的对照**。写者被持有在第一次写入中，直到收尾按到期出口返回之后才释放；它发布这次写入，在下一个决策点自行发布 expired-incomplete/late。`endTasks` 不追加唤醒项，文件系统的调用计数不变，`Finish` 恰好调用一次。它只验证不需要唤醒的收尾，即 Review 152 所说的合法提前到期。
+- **到期对照**（`TestB151ControlsNormalAndExpiryBeforeTheSeal` 的到期子测试）：`RunDomains` → 有界的 `waitWriterIdle` → `expireWaitingWriter`。正常子测试不变。
+- **共享的测试辅助**：
+  - `newJob148` 委托给接受写入文件系统的 `newJob148FS`，原有调用者的行为不变；
+  - 唤醒项的文本改为常量 `wakeLine`（`tasks_test.go`），`endTasks` 的行为不变。
+- **N-152-1 的注释**：见 §13.5。
+- **测试补丁**（草稿目录 `s198/`）：`fix.diff`（`ec173bb` 到 `4eae0e7`），20515 字节，SHA-256 `52deb1f64b6e21ed28f9547d9a5c85efc74b8844cb126c8fea4ae82a0cb7bc26`。
+- **`regress151_test.go` 的改动**：本轮改动了该文件（到期子测试与注释），现为 SHA-256 `95e081f0b3d658e648b226091b55bd8692d8b5048daf972dd0a06309109d1293`。§12.2 所说的“修复前后没有改动”只指 §197 那一轮。
+
+### 13.3 修改之前的展示（旧测试源码不变，只加受控调度）
+
+- **方法**：
+  - 在仓库之外，以 `git archive` 导出 `ec173bb` 的工具模块（子树 `3985b99`，与 Review 152 的受审对象相同），加一个不提交的探针；
+  - 探针给 `newJob148` 加接缝，让写者的第一次写入被持有；在请求的 goroutine 调用 `Finish` 之前的钩子中释放，并有界地等到写者发布终态或写完全部条目；
+  - 然后原样调用旧的 `TestB151ControlsNormalAndExpiryBeforeTheSeal`，`regress151_test.go` 没有改动。
+- **材料**（草稿目录 `s198/`）：
+  - `demo_patch.py`：992 字节，SHA-256 `fa46cc8f1ff2b09cd2c00722b7c0c50ff979d7107b12934aab7999b8ec5327dc`；
+  - `demo-seam.diff`：202 字节，SHA-256 `846b9a6009827fc4003e1808043fcf9be2f33d9f80cad1dbfb43153e43df7b2a`；
+  - `probe152_test.go`：3027 字节，SHA-256 `bd69e103ce45ab43855e387c7f43c567bb5ac6b1f1b1150fe891ee58f776bd12`。
+- **日志**：`s198/logs/pre-change-demonstration.log`，1961 字节，SHA-256 `ea361f53ae668f09edb16273a60178388c990038e99345d18df517e0d7508fc3`，退出 1。
+- **结果**，与预测一致：
+  - 正常子测试通过：释放之后写者写完全部条目；
+  - 到期子测试：释放之后写者在 `Finish` 调用之前自行发布 expired-incomplete/late；`finishWant` 的到期结论成立；随后在旧的“仍在等待”断言（旧文件第 268 行）处失败：`writer "expired-incomplete/late" diagnostic "none", want a waiting writer and no diagnostic task`。
+- **范围**：
+  - 这实现的是 Review 152 所说的第二种合法顺序（写者在 `Finish` 之前已因 `D` 发布终态）。
+  - 第一种顺序（`Finish` 返回之后、旧断言之前写者恢复）需要在原调用返回与旧断言之间的接点，旧测试中没有；不改旧测试就无法建立，保留为静态反例。两种顺序命中的是同一个断言。
+
+### 13.4 修改之后的结果
+
+**身份**：提交 `4eae0e7a73d6ef8ad9d43cf2e9d3de9af527f3ae`（树 `2b5732461c759c083663407d80d7b82d2c1da1aa`，工具模块子树 `2866d4609f26e49095d98ab098877d55cdf59a6e`）。测试前后工作区都干净；环境与工具链同 §12.4。
+
+| 日志（草稿目录 `s198/logs/`） | 命令 | 结果 |
+|---|---|---|
+| `post-fix-targeted.log`（5834 字节，SHA-256 `5d9f5c107b680b8d9999727941097a3b96b8fafe0d3b7e9f02efe08e4435db80`） | `go test -count=1 -v -run 'B152\|B151\|B148\|B149' ./internal/job/` | 45 个通过（另 2 个子测试），0 失败 |
+| `post-fix-job.log`（7285 字节，SHA-256 `7ec7ebe83bc54f65069e6713e715a47e55989b9798994469c96eba9618165230`） | `go test -count=1 -v ./internal/job/` | ok；63 个通过（另 2 个子测试），0 失败 |
+| `post-fix-module.log`（48120 字节，SHA-256 `14a4edfe8645a95d29bec29f0928058638a509650f7c70189404aa061b637a98`） | `go test -count=1 -v ./...` | 11 个有测试的包全部 ok；顶层 206 个、子测试 273 个通过，0 失败；跳过 1 个（`TestTakeNegatives/symbolic_link`，与以前相同） |
+| `post-fix-x20.log`（144736 字节，SHA-256 `134fe270dee20c732502c568ff7ec0ff63875f39a793baed800306924c1792bb`） | `go test -count=20 -v -run 'B147\|B148\|B149\|B151\|B152\|SemanticSwap\|^TestWriterExpiresMidway$'`，只在 job、chain、controls、collect 四个包 | 69 个测试各通过 20 次（1380 个顶层 PASS 行，另 40 个子测试 PASS 行），0 失败 |
+| `post-fix-static.log`（2699 字节，SHA-256 `39edb79fb3e5a500cf3b53b0a26a290b07b5e39c982e47bb740eb60292206985`） | `gofmt -l`、vet、带标签的 vet、六种交叉 vet、正式入口只编译、`mod verify`、导入闭包 | 都成功；第三方导入闭包仍只有 `golang.org/x/mod/sumdb/dirhash` |
+
+计数的变化：作业包新增 2 个顶层测试（Review 152 的两项），到期对照仍是同一个子测试。
+
+**两个探针**（都在仓库之外的 `4eae0e7` 导出副本上运行，不提交）：
+
+- **失败出口**：
+  - 测试在写者被持有、短等待失败之后，于释放之前以 `t.Fatal` 离开（按设计失败）。最先登记的清理在 `settle` 之后记录状态：
+    - 持有已释放；
+    - `endTasks` 补发的请求已返回，经 consumed；
+    - `Finish` 调用 1 次；
+    - 日志已封口，写者 success/timely，诊断任务 complete-with-terminator/timely；
+    - 没有挂起。
+  - 源码：`s198/probe152fail_test.go`，1477 字节，SHA-256 `56cc6adff68699d8b1397543720e21a72cf98e3a878bda238c5c08c4f580ba08`。日志：`s198/logs/failure-exit-probe.log`，1074 字节，SHA-256 `05765fca251f89379eb9209a15b0e0a2b83c5f875851faf1f2a4d2549b197bf8`，退出 1。
+- **收尾审计**：
+  - 与 §12.5 相同的探针（`s197/probe_patch.py`，加在 `newJob148FS` 中），命令 `go test -count=1 -v -run 'B148|B149|B151|B152' ./internal/job/`，退出 0。
+  - 共 58 个实例（§12.5 的 56 个，加上本节的 2 个），每个请求都已返回，实际调用都恰好 1 次：
+    - 48 个经 consumed 封口：写者 success/timely，诊断任务 complete-with-terminator/timely；
+    - 10 个经 expired-at-m.Run 在封口之前到期：写者 expired-incomplete/late，没有登记诊断任务。
+  - 探针差异：`s198/audit-probe.diff`，749 字节，SHA-256 `b27c8da8306f4c1e24bf3d6d4b8c9ab85c882d0a6b3f2226fc019f88cf4c8faa`。日志：`s198/logs/audit-probe-after-fix.log`，17154 字节，SHA-256 `3de10f77d942e3e6140dfd62bc62232ee630b95d5982faf046973ac3aa6809e4`。
+
+### 13.5 N-152-1 的精化
+
+- **`notReturned`**：只证明检查的那一刻没有取得 `endTasks` 的返回值，不证明 `endTasks` 已进入等待；它的 goroutine 可能在释放之后才运行。因此 §12.2 各行中的“释放之前 `endTasks` 没有返回”，只是这一时刻的检查，不是“`endTasks` 已在未返回的请求上等待”的动态证明。注释已更正。
+- **`CallEnteredBeforeStarted` 的 `entered`**：在调用前的钩子中关闭，早于计数与 `j.Finish` 的调用。它证明钩子已到达、作业锁被持有，因而调用不能越过 `Job.Finish` 的锁；不证明已观察到 `Job.Finish` 的函数体正在等锁。注释与等待的说明文字已更正。
+- **精确窗口**：`finalized` 已置位、`Started` 尚未发布的那一刻，仍没有动态覆盖（§12.2）。
+- **两种通知的范围**：
+  - 请求的 done 关闭，只证明这次 `Finish` 调用已返回、原始 `Final` 已发布；
+  - 写者与诊断任务的终态，只证明它们最后的状态已发布；
+  - 两者都不是观测到任何 goroutine 已经退出。
+  - `finish_test.go` 的注释已补充。
+- 旧日志与 §11、§12 的历史说明保持原样；旧运行不被改写为具有新的握手。
+
+### 13.6 没有覆盖的部分
+
+- **握手的充分性**来自对写者、日志与收尾源码的阅读（§13.1），没有改动工具去观测写者的阻塞点。动态的支持有两项：
+  - 写者落后的对照（判定在持有时为假、释放之后为真）；
+  - `Finish` 之后与唤醒之后的逐项核对：前提一旦被破坏，这些核对会失败。
+- **写者落后的形式**：只以“持有第一次写入”构造了一种。写者尚未开始运行、或停在之后的写入等其他形式，由同一判定覆盖，但没有逐一动态构造。
+- **重复运行的性质**：重复 20 次只是适量的重复，不是 `-race`，也不是全调度覆盖。本轮没有运行 `-race`。
+- **范围之外**：Review 147 的作业回归与 `job_test.go` 不在本轮范围（§12.1）。
+- **CI**：常规 CI 不运行工具模块，本节的证据来自本机的固定工具链。
+- `s192` ~ `s197` 的旧日志原样保留。
+
+### 13.7 Review 153 的裁定与合并（§199）
+
+- **裁定**：
+  - B-152-1 关闭，N-152-1 完成；
+  - B-151-1、N-151-1 保持关闭／完成，N-150-1 保持在原 37 项作业层回归／49 个实例的范围内关闭；
+  - 第一阶段工具实现的已关闭问题保持原限定，本轮没有修改，也没有重新验收工具实现；
+  - PR #57 技术 GO，没有发现新的阻塞或直接回退。
+- **合并**：负责人条件授权以 merge commit 合并 PR #57（review-resolution §199）。本次合并的是 PR #57 的测试生命周期收尾（作业层的测试，技术通过）与文档，不代表完整的取证工具已经完成。
+- **范围的读法**：
+  - N-150-1 的关闭只限原 37 项／49 个实例，不扩大为全部旧测试的生命周期都已审完；Review 147 的作业回归与 `job_test.go` 不在范围之内。
+  - 握手证明“没有待处理的文件工作”，不是观测到 goroutine 已阻塞（§13.1 的读法）。
+  - 以下三者分别表述，见 §13.5：
+    - 请求的 done：这次 `Finish` 已返回，原始 `Final` 已发布；
+    - 后台任务的终态：各自最后的状态已发布；
+    - goroutine 的实际退出：没有观测。
+- **证据**：
+  - 本轮是文档收尾，没有重新运行工具模块的测试；固定工具子树 `2866d4609f26e49095d98ab098877d55cdf59a6e` 的证据沿用 §13.4。
+  - §13.6 的覆盖限制不变；常规 CI 不运行工具模块。
+  - 此前各轮的 NO-GO、失败日志、受控展示与探针原样保留。
+- **仍然不变**：
+  - 第二阶段、E-10 (ii)、LE-5 ① 与 ②、N2 保持待决；
+  - 真实调用者、伪工具、平台控制协议、LC-9 与正式取证都没有实现或运行，没有运行分支，现有的 workflow 不变；
+  - 没有宣布任何 G 项满足，没有批准精确例外；
+  - 第三批的生产实施与 WP2.5 / M2 的验收都未授权。
