@@ -248,6 +248,9 @@ func TestConstraint(t *testing.T) {
 		// go/build keeps accepting //go:build after a closed /* */ block
 		// (parseFileHeader checks only inSlashStar), and so does Constraint.
 		{"/* x */\n//go:build a\npackage p\n", "//go:build a", true, false},
+		// On the same line after the closed block it is only the rest of a
+		// comment line: go/build does not take it (Review 147 §4 item 3).
+		{"/* x */ //go:build a\npackage p\n", "", false, false},
 		{"package p\n//go:build a\n", "", false, false},
 	}
 	for _, c := range cases {

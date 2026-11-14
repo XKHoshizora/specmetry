@@ -77,16 +77,46 @@ type FileSnapshot struct {
 	HeaderWritten  bool
 	WrittenThrough int
 	Close          *Outcome
+	Holding        Holding
 }
 
 // ManifestSnapshot is the published state of the manifest.
 type ManifestSnapshot struct {
-	Create *Outcome
-	Write  *WriteOutcome
-	Close  *Outcome
-	Bytes  int64
-	SHA256 string
+	Create  *Outcome
+	Write   *WriteOutcome
+	Close   *Outcome
+	Bytes   int64
+	SHA256  string
+	Holding Holding
 }
+
+// HolderWriter is the only holder of the record files and the manifest.
+const HolderWriter = "writer"
+
+// Holding is the published ownership of one file handle (Review 147
+// B-147-2). From the moment Create returns a handle until a Close returns
+// nil, the writer holds the object itself (not only a result about it):
+//
+//   - Holder is HolderWriter while release is not confirmed, "" before the
+//     handle exists and after a confirmed release;
+//   - CloseStarted says the one Close was started; CloseReturned that it
+//     returned, with its real result in CloseErr;
+//   - Released is true only when Close returned nil.
+//
+// After an expiry exit no Close is started, and after a Close error the
+// release is unknown and the Close is not repeated; in both cases the
+// handle stays held by the writer until the process ends. Neither the GC
+// nor the process exit counts as a confirmed release.
+type Holding struct {
+	Holder        string
+	CloseStarted  bool
+	CloseReturned bool
+	CloseErr      error
+	Released      bool
+}
+
+// Held reports whether the handle exists and is not confirmed released.
+func (h Holding) Held() bool { return h.Holder != "" }
 
 // WriterSnapshot is a copy of the writer's record in the outer registry.
 // A nil Outcome means the operation was not attempted (or has not
@@ -130,16 +160,21 @@ type Writer struct {
 }
 
 type writerTask struct {
+	// handles keep every record file object until its Close returned nil;
+	// a handle whose Close failed or never started stays here.
 	handles []File
 	open    []bool
-	hashes  []hash.Hash
-	bytes   []int64
-	pending [][]byte // bytes not yet written: the header line, then item lines
-	header  []bool   // pending starts with the header line
-	first   []int    // first item sequence number in pending, 0 when none
-	last    []int    // last item sequence number in pending, 0 when none
-	next    int      // next item sequence number to take from the log
-	failed  bool     // some real error happened
+	// manifest keeps the manifest object from Create until its Close
+	// returned nil.
+	manifest File
+	hashes   []hash.Hash
+	bytes    []int64
+	pending  [][]byte // bytes not yet written: the header line, then item lines
+	header   []bool   // pending starts with the header line
+	first    []int    // first item sequence number in pending, 0 when none
+	last     []int    // last item sequence number in pending, 0 when none
+	next     int      // next item sequence number to take from the log
+	failed   bool     // some real error happened
 }
 
 var emptySHA = hex.EncodeToString(sha256.New().Sum(nil))
@@ -215,10 +250,11 @@ func (w *Writer) snapshotLocked() WriterSnapshot {
 		Mkdir:   copyOutcome(w.mkdir),
 		Errors:  append([]ChainError(nil), w.errs...),
 		Manifest: ManifestSnapshot{
-			Create: copyOutcome(w.manifest.Create),
-			Close:  copyOutcome(w.manifest.Close),
-			Bytes:  w.manifest.Bytes,
-			SHA256: w.manifest.SHA256,
+			Create:  copyOutcome(w.manifest.Create),
+			Close:   copyOutcome(w.manifest.Close),
+			Bytes:   w.manifest.Bytes,
+			SHA256:  w.manifest.SHA256,
+			Holding: w.manifest.Holding,
 		},
 	}
 	if w.manifest.Write != nil {
@@ -351,6 +387,7 @@ func (w *Writer) createAll() bool {
 		w.pub(0, func(now time.Time, q Qualification) {
 			w.files[i].Create = &Outcome{At: now, Qual: q}
 			w.files[i].SHA256 = emptySHA
+			w.files[i].Holding = Holding{Holder: HolderWriter}
 		})
 	}
 	return true
@@ -448,9 +485,14 @@ func (w *Writer) closeAll() bool {
 		if !w.admit() {
 			return false
 		}
+		w.markCloseStarted(&w.files[i].Holding)
 		err := t.handles[i].Close()
+		// The Close is the one attempt: it is never repeated. Only a nil
+		// result confirms the release; otherwise the writer keeps the object.
 		t.open[i] = false
-		t.handles[i] = nil
+		if err == nil {
+			t.handles[i] = nil
+		}
 		closed = true
 		if err != nil {
 			t.failed = true
@@ -458,6 +500,7 @@ func (w *Writer) closeAll() bool {
 		last := !t.anyOpen()
 		w.pub(failureIf(last && t.failed), func(now time.Time, q Qualification) {
 			w.files[i].Close = &Outcome{Err: err, At: now, Qual: q}
+			w.files[i].Holding = closedHolding(err)
 			w.addErrLocked("close "+name, err)
 		})
 	}
@@ -500,9 +543,14 @@ func (w *Writer) writeManifest() {
 		})
 		return
 	}
+	// From here the writer holds the manifest object itself: an expiry
+	// exit below leaves it held (no Close is started after D), and only a
+	// nil Close releases it (Review 147 B-147-2).
+	t.manifest = mf
 	w.pub(0, func(now time.Time, q Qualification) {
 		w.manifest.Create = &Outcome{At: now, Qual: q}
 		w.manifest.SHA256 = emptySHA
+		w.manifest.Holding = Holding{Holder: HolderWriter}
 	})
 	if !w.admit() {
 		return
@@ -522,9 +570,12 @@ func (w *Writer) writeManifest() {
 	if !w.admit() {
 		return
 	}
-	cerr := mf.Close()
+	w.markCloseStarted(&w.manifest.Holding)
+	cerr := t.manifest.Close()
 	if cerr != nil {
 		t.failed = true
+	} else {
+		t.manifest = nil
 	}
 	term := WriterSuccess
 	if t.failed {
@@ -532,8 +583,45 @@ func (w *Writer) writeManifest() {
 	}
 	w.pub(term, func(now time.Time, q Qualification) {
 		w.manifest.Close = &Outcome{Err: cerr, At: now, Qual: q}
+		w.manifest.Holding = closedHolding(cerr)
 		w.addErrLocked("close "+ManifestName, cerr)
 	})
+}
+
+// markCloseStarted publishes that the one Close of a held handle starts
+// (its result is published when it returns).
+func (w *Writer) markCloseStarted(h *Holding) {
+	w.o.mu.Lock()
+	h.CloseStarted = true
+	w.o.publishLocked()
+	w.o.mu.Unlock()
+}
+
+// closedHolding is a handle's ownership after its one Close returned: a nil
+// result confirms the release; an error leaves the release unknown and the
+// object held by the writer, never closed again.
+func closedHolding(err error) Holding {
+	if err == nil {
+		return Holding{CloseStarted: true, CloseReturned: true, Released: true}
+	}
+	return Holding{Holder: HolderWriter, CloseStarted: true, CloseReturned: true, CloseErr: err}
+}
+
+// Held lists the handles the writer still holds (created and not confirmed
+// released), for the O domain's persistent-holder records.
+func (w *Writer) Held() []string {
+	w.o.mu.Lock()
+	defer w.o.mu.Unlock()
+	var out []string
+	for _, f := range w.files {
+		if f.Holding.Held() {
+			out = append(out, f.Name)
+		}
+	}
+	if w.manifest.Holding.Held() {
+		out = append(out, ManifestName)
+	}
+	return out
 }
 
 func (s WriterSnapshot) String() string {

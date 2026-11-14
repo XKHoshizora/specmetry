@@ -12,8 +12,9 @@ import (
 // FixtureRepo prepares the LC-5 baseline (R_f with its dependency Q) under
 // root for job-level tests, and returns R_f, an in-process invoker that
 // answers every configuration of the GOOS with LC5-0's healthy output, and
-// the guard values a seam would hand over. It starts no process.
-func FixtureRepo(root, goos string) (string, collect.Invoker, func() collect.GuardValues, error) {
+// the guard values a seam would hand over. The invoker publishes its calls on
+// clock (the job's clock; nil means the real one). It starts no process.
+func FixtureRepo(root, goos string, clock collect.Clock) (string, collect.Invoker, func() collect.GuardValues, error) {
 	files := map[string]string{}
 	for k, v := range rfFiles() {
 		files["rf/"+k] = v
@@ -30,7 +31,10 @@ func FixtureRepo(root, goos string) (string, collect.Invoker, func() collect.Gua
 		return "", nil, nil, errors.New("unknown GOOS " + goos)
 	}
 	base.cfg = cfgs[0]
-	inv := perConfig{base: base, clock: realClock{}}
+	if clock == nil {
+		clock = realClock{}
+	}
+	inv := perConfig{base: base, clock: clock}
 	return base.rf, inv, func() collect.GuardValues { return base.guardValues(spec.ToolVersion) }, nil
 }
 

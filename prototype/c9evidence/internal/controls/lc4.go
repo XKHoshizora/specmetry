@@ -21,7 +21,7 @@ func LC4() []Variant {
 		if dv.WantOK {
 			want = []string{"decode hold", "values as expected"}
 		} else {
-			want = []string{"decode fail J-3 " + dv.Call.String() + " " + string(dv.WantKind) + " real"}
+			want = []string{"decode fail J-3 " + dv.Call.String() + " " + string(dv.WantKind) + " real @ decode at " + dv.WantAt}
 		}
 		out = append(out, Variant{
 			Control: "LC-4", Name: dv.Name, Applies: always, MustEnter: []string{"decode"}, Want: want,
@@ -33,21 +33,25 @@ func LC4() []Variant {
 				lines := []string{}
 				if o.OK {
 					ck.Hold("decode")
-					lines = append(lines, CheckLines(ck)...)
+					lines = append(lines, CheckLines(ck, noNorm)...)
 					if err := dv.Match(o); err == nil {
 						lines = append(lines, "values as expected")
 					} else {
 						lines = append(lines, "values differ: "+err.Error())
 					}
 				} else {
-					kind := "unknown"
+					kind, at, detail := "unknown", "", ""
 					if o.Err != nil {
-						kind = string(o.Err.Kind)
+						kind, at, detail = string(o.Err.Kind), o.Err.At, o.Err.Error()
 					}
-					ck.Fail("decode", judge.Real(judge.J3, dv.Call.String(), "LC-4 "+dv.Name, kind, ""))
-					lines = append(lines, CheckLines(ck)...)
+					// The site is where the decoder stopped (a JSON path or a
+					// line of the context text).
+					ck.Fail("decode", judge.Real(judge.J3, dv.Call.String(), "decode at "+at, kind, detail))
+					lines = append(lines, CheckLines(ck, noNorm)...)
 				}
-				return Outcome{Entered: Entered(ck), Lines: lines, Terminal: true}
+				inst := instanceOf(ck)
+				inst.Extra["outcome"] = o
+				return Outcome{Entered: Entered(ck), Lines: lines, Instance: inst, Terminal: true}
 			},
 		})
 	}

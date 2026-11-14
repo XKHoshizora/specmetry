@@ -62,7 +62,9 @@ func lc6(name string, extra map[string]string, want []string) Variant {
 					ck.Hold(id)
 				}
 			}
-			return Outcome{Entered: Entered(ck), Lines: CheckLines(ck), Terminal: true, CleanupErr: fx.cleanup()}
+			inst := instanceOf(ck)
+			inst.Extra["steps"], inst.Extra["read_failures"], inst.Extra["walk_failures"], inst.Extra["contexts"] = res.Steps, res.Read, walk, res.Contexts
+			return Outcome{Entered: Entered(ck), Lines: CheckLines(ck, normalizer("", fx.dir)), Instance: inst, Terminal: true, CleanupErr: fx.cleanup()}
 		},
 	}
 }
@@ -74,9 +76,9 @@ func LC6() []Variant {
 		lc6("healthy", nil, healthy),
 		lc6("!nowebui file with exec", map[string]string{
 			"extra.go": "//go:build !nowebui\n\npackage main\n\nimport \"os/exec\"\n\nfunc init() { _ = exec.Command(\"x\").Run() }\n",
-		}, []string{"cond/1 hold", "cond/2 fail J-3 extra.go production-only file not in the exception list real", "cond/3 hold", "cond/4 hold", "cond/5 hold"}),
+		}, []string{"cond/1 hold", "cond/2 fail J-3 extra.go production-only file not in the exception list real @ step 2 extra.go", "cond/3 hold", "cond/4 hold", "cond/5 hold"}),
 		lc6("cgo file", map[string]string{
 			"cgo.go": "//go:build cgo\n\npackage main\n",
-		}, []string{"cond/1 hold", "cond/2 fail J-3 cgo.go production-only file not in the exception list real", "cond/3 hold", "cond/4 hold", "cond/5 hold"}),
+		}, []string{"cond/1 hold", "cond/2 fail J-3 cgo.go production-only file not in the exception list real @ step 2 cgo.go", "cond/3 hold", "cond/4 hold", "cond/5 hold"}),
 	}
 }

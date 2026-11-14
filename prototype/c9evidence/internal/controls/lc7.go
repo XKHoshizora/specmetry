@@ -152,10 +152,10 @@ func LC7(goos string) []Variant {
 				lines = append(lines, fmt.Sprintf("diagnostic %s %s %s %s:%d:%d %s", d.Kind, d.Object, d.Caller, d.File, d.Line, d.Col, d.Detail))
 			}
 			for _, x := range out.Failures {
-				lines = append(lines, FailureLine("typecheck", x))
+				lines = append(lines, FailureLine("typecheck", x, noNorm))
 			}
 			for _, x := range out.SelfCheck {
-				lines = append(lines, FailureLine("S", x))
+				lines = append(lines, FailureLine("S", x, noNorm))
 			}
 			for _, u := range out.Unevaluated {
 				lines = append(lines, "unevaluated "+u)
@@ -168,7 +168,9 @@ func LC7(goos string) []Variant {
 			if r, _ := ck.Get("S"); r.Status == judge.Hold {
 				lines = append(lines, "S hold")
 			}
-			return Outcome{Entered: Entered(ck), Lines: lines, Terminal: true}
+			inst := instanceOf(ck)
+			inst.Extra["typecheck"] = out
+			return Outcome{Entered: Entered(ck), Lines: lines, Instance: inst, Terminal: true}
 		},
 	}}
 }

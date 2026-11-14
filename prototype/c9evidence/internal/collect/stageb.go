@@ -9,6 +9,7 @@ import (
 	"github.com/XKHoshizora/specmetry/prototype/c9evidence/internal/decode"
 	"github.com/XKHoshizora/specmetry/prototype/c9evidence/internal/judge"
 	"github.com/XKHoshizora/specmetry/prototype/c9evidence/internal/modsnap"
+	"github.com/XKHoshizora/specmetry/prototype/c9evidence/internal/spec"
 )
 
 func (res *Result) stageB(o Options) {
@@ -269,7 +270,7 @@ func (res *Result) b3(o Options) map[string]*modInfo {
 			mi.I3 = false
 		}
 	}
-	o.Rec.Derived(o.Config.String()+"/closure", "B3", nil, map[string]any{"closure": res.Closure})
+	res.Refs.Closure = o.Rec.Derived(o.Config.String()+"/closure", "B3", []Ref{res.Refs.Calls[spec.CallList]}, map[string]any{"closure": res.Closure})
 	ck.Set("B3", acc.Result())
 	return mods
 }
@@ -286,6 +287,7 @@ func (res *Result) b4(o Options, mods map[string]*modInfo) {
 		paths = append(paths, p)
 	}
 	sort.Strings(paths)
+	res.Modules = append([]string(nil), paths...)
 	for _, p := range paths {
 		mi := mods[p]
 		if !mi.I2 || !mi.I3 {
@@ -306,7 +308,7 @@ func (res *Result) b4(o Options, mods map[string]*modInfo) {
 		for _, f := range s.Files {
 			files = append(files, map[string]any{"name": f.Rel, "bytes": f.Size, "sha256": f.SHA256, "close_error": f.CloseErr})
 		}
-		o.Rec.Raw(o.Config.String()+"/I-4/"+p, map[string]any{"module": p, "version": mi.Version, "dir": mi.Dir, "files": files, "h1": s.H1, "go.sum h1": mi.Sum})
+		res.Refs.I4[p] = o.Rec.Raw(o.Config.String()+"/I-4/"+p, map[string]any{"module": p, "version": mi.Version, "dir": mi.Dir, "files": files, "h1": s.H1, "go.sum h1": mi.Sum})
 		for _, f := range s.Failures {
 			acc.Add(f)
 		}

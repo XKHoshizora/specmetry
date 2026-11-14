@@ -73,7 +73,10 @@ func lc2(name string, mutate func(dir string) error, want []string) Variant {
 				return Outcome{PrepErr: err, CleanupErr: cerr}
 			}
 			ck, s := snapshotInstance(fx.dir, "example.com/lc2", lc2GoSum)
-			return Outcome{Entered: Entered(ck), Lines: append(CheckLines(ck), h1Line(s)), Terminal: true, CleanupErr: fx.cleanup()}
+			inst := instanceOf(ck)
+			inst.Extra["files"], inst.Extra["h1"], inst.Extra["go.sum h1"] = s.Files, s.H1, lc2GoSum
+			lines := append(CheckLines(ck, normalizer("", fx.dir)), h1Line(s))
+			return Outcome{Entered: Entered(ck), Lines: lines, Instance: inst, Terminal: true, CleanupErr: fx.cleanup()}
 		},
 	}
 }
@@ -83,16 +86,16 @@ func LC2() []Variant {
 	return []Variant{
 		lc2("one byte changed", func(dir string) error {
 			return os.WriteFile(filepath.Join(dir, "lc2.go"), []byte("package lc2\n\nconst N = 2\n"), 0o644)
-		}, []string{"B4 fail J-4 . h1 differs from go.sum real", "h1 computed " + lc2ByteH1}),
+		}, []string{"B4 fail J-4 . h1 differs from go.sum real @ I-4 example.com/lc2@v1.0.0", "h1 computed " + lc2ByteH1}),
 		lc2("one more file", func(dir string) error {
 			return os.WriteFile(filepath.Join(dir, "extra.txt"), []byte("x\n"), 0o644)
-		}, []string{"B4 fail J-4 . h1 differs from go.sum real", "h1 computed " + lc2ExtraH1}),
+		}, []string{"B4 fail J-4 . h1 differs from go.sum real @ I-4 example.com/lc2@v1.0.0", "h1 computed " + lc2ExtraH1}),
 		// Applicable on all three runners (plan §5.6 item 4): a link that
 		// cannot be created is a failed preparation, so a miss, never "not
 		// applicable" after the fact.
 		lc2("symbolic link", func(dir string) error {
 			return os.Symlink("lc2.go", filepath.Join(dir, "link.go"))
-		}, []string{"B4 fail J-2 link.go not a regular file real", "h1 not computed"}),
+		}, []string{"B4 fail J-2 link.go not a regular file real @ I-4 example.com/lc2@v1.0.0", "h1 not computed"}),
 	}
 }
 
@@ -139,11 +142,13 @@ func lc3(name, rel string, change func(dir string) error, newInject func() modsn
 				acc.Add(judge.Real(judge.J3, rel, "LC-3", "read returned bytes despite failures", ""))
 			}
 			ck.Set("I-5", acc.Result())
-			lines := CheckLines(ck)
+			lines := CheckLines(ck, normalizer("", fx.dir))
 			for _, in := range r.Injections() {
 				lines = append(lines, "injected kept apart #"+itoa(in.ID))
 			}
-			return Outcome{Entered: Entered(ck), Lines: lines, Terminal: true, CleanupErr: fx.cleanup()}
+			inst := instanceOf(ck)
+			inst.Extra["reader_failures"], inst.Extra["injections"], inst.Extra["consumed"] = r.Failures(), r.Injections(), r.Consumed()
+			return Outcome{Entered: Entered(ck), Lines: lines, Instance: inst, Terminal: true, CleanupErr: fx.cleanup()}
 		},
 	}
 }
@@ -163,22 +168,22 @@ func itoa(n int) string {
 // LC3 are the controlled-read controls (plan §5.2 LC-3).
 func LC3() []Variant {
 	return []Variant{
-		lc3("name not in M", "missing.go", nil, nil, []string{"I-5 fail J-4 missing.go name not in M real"}),
+		lc3("name not in M", "missing.go", nil, nil, []string{"I-5 fail J-4 missing.go name not in M real @ I-5 example.com/lc3@v1.0.0/missing.go (P parse)"}),
 		lc3("reread differs", "lc3.go", func(dir string) error {
 			return os.WriteFile(filepath.Join(dir, "lc3.go"), []byte("package lc3\n\nconst N = 4\n"), 0o644)
-		}, nil, []string{"I-5 fail J-4 lc3.go sha256 differs from M real"}),
+		}, nil, []string{"I-5 fail J-4 lc3.go sha256 differs from M real @ I-5 example.com/lc3@v1.0.0/lc3.go (P parse)"}),
 		lc3("handle not a regular file", "lc3.go", func(dir string) error {
 			p := filepath.Join(dir, "lc3.go")
 			if err := os.Remove(p); err != nil {
 				return err
 			}
 			return os.Mkdir(p, 0o755)
-		}, nil, []string{"I-5 fail J-2 lc3.go handle not a regular file real"}),
+		}, nil, []string{"I-5 fail J-2 lc3.go handle not a regular file real @ I-5 example.com/lc3@v1.0.0/lc3.go (P parse)"}),
 		// The injection is only appended after the real Close returned nil;
 		// the real result stays nil (no real failure line) and the injected
 		// one is kept apart with its serial (V-29).
 		lc3("injection after a real nil close", "lc3.go", nil, oneInjection,
-			[]string{"I-5 fail J-1 lc3.go close error injected#1", "injected kept apart #1"}),
+			[]string{"I-5 fail J-1 lc3.go close error injected#1 @ I-5 example.com/lc3@v1.0.0/lc3.go (P parse)", "injected kept apart #1"}),
 	}
 }
 

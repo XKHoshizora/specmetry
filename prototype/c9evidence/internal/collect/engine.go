@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io/fs"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"github.com/XKHoshizora/specmetry/prototype/c9evidence/internal/decode"
@@ -97,12 +98,64 @@ type Result struct {
 	// differences.
 	Consistent bool
 	Diff       []string
+	// Modules are the dependency modules of the closure that B4 must
+	// snapshot (whether or not their snapshot was taken), for LC-1.
+	Modules []string
+	// Refs are this configuration's record references (B-147-4): the raw
+	// records the derived ones cite as their parents.
+	Refs Refs
+}
+
+// Refs are a configuration's record references.
+type Refs struct {
+	RepoFiles   Ref
+	Toolchain   Ref
+	Calls       map[spec.CallKind]Ref
+	I4          map[string]Ref // module path -> its raw I-4 record
+	Closure     Ref
+	Contexts    []Ref
+	Consumption Ref
+	Findings    Ref
+	Comparison  Ref
+}
+
+// All returns every reference that was recorded, raw first, in a stable
+// order: the parents of the configuration's checks record.
+func (r Refs) All() []Ref {
+	var out []Ref
+	add := func(x Ref) {
+		if x.Name != "" {
+			out = append(out, x)
+		}
+	}
+	add(r.RepoFiles)
+	add(r.Toolchain)
+	for _, k := range []spec.CallKind{spec.CallEnv, spec.CallContext, spec.CallList} {
+		add(r.Calls[k])
+	}
+	mods := make([]string, 0, len(r.I4))
+	for m := range r.I4 {
+		mods = append(mods, m)
+	}
+	sort.Strings(mods)
+	for _, m := range mods {
+		add(r.I4[m])
+	}
+	add(r.Closure)
+	for _, c := range r.Contexts {
+		add(c)
+	}
+	add(r.Consumption)
+	add(r.Findings)
+	add(r.Comparison)
+	return out
 }
 
 // Collect runs one configuration. It never starts a process itself: every
 // call goes through o.Invoker.
 func Collect(o Options) *Result {
-	res := &Result{Config: o.Config, Checks: judge.NewChecks(CheckIDs()), Snapshots: map[string]*modsnap.Snapshot{}}
+	res := &Result{Config: o.Config, Checks: judge.NewChecks(CheckIDs()), Snapshots: map[string]*modsnap.Snapshot{},
+		Refs: Refs{Calls: map[spec.CallKind]Ref{}, I4: map[string]Ref{}}}
 	ck := res.Checks
 	cfg := o.Config.String()
 	if !o.Budget.AdmitUnit("configuration " + cfg) {
@@ -131,25 +184,30 @@ func (res *Result) stageA(o Options) {
 	cfg := o.Config.String()
 
 	// A4: R/go.sum by I-1; R/go.mod's identity is recorded with it.
-	sumBytes, err := readClosed(o.FS, filepath.Join(o.R, "go.sum"))
-	ck.Enter("A4", sha(sumBytes))
-	modBytes, modErr := readClosed(o.FS, filepath.Join(o.R, "go.mod"))
-	o.Rec.Raw(cfg+"/repo-files", map[string]any{
-		"go.sum": fileIdentity(sumBytes, err),
-		"go.mod": fileIdentity(modBytes, modErr),
+	sum := ReadWhole(o.FS, filepath.Join(o.R, "go.sum"))
+	ck.Enter("A4", sha(sum.Data))
+	mod := ReadWhole(o.FS, filepath.Join(o.R, "go.mod"))
+	res.Refs.RepoFiles = o.Rec.Raw(cfg+"/repo-files", map[string]any{
+		"go.sum": fileIdentity(sum),
+		"go.mod": fileIdentity(mod),
 	})
 	var a4 judge.Acc
-	if err != nil {
-		a4.Add(judge.Real(judge.J1, "go.sum", "A4 read R/go.sum", "read error", err.Error()))
-	} else {
-		gs, problems := decode.ParseGoSum(sumBytes)
+	// Every real error of both reads is kept: an open, read or close error
+	// is one J-1 each, and a read error does not hide the close error.
+	for _, f := range []struct {
+		name string
+		r    ReadResult
+	}{{"go.sum", sum}, {"go.mod", mod}} {
+		for _, e := range f.r.Errors() {
+			a4.Add(judge.Real(judge.J1, f.name, "A4 "+e.Op+" R/"+f.name, e.Op+" error", e.Err.Error()))
+		}
+	}
+	if sum.OK() {
+		gs, problems := decode.ParseGoSum(sum.Data)
 		res.GoSum = gs
 		for _, p := range problems {
 			a4.Add(judge.Real(judge.J2, fmt.Sprintf("go.sum:%d", p.Line), "A4 I-1", string(p.Kind), p.Detail))
 		}
-	}
-	if modErr != nil {
-		a4.Add(judge.Real(judge.J1, "go.mod", "A4 read R/go.mod", "read error", modErr.Error()))
 	}
 	ck.Set("A4", a4.Result())
 
@@ -169,8 +227,8 @@ func (res *Result) stageA(o Options) {
 
 	// A1-a: the guard before any call.
 	res.Guard = o.Guard()
-	g := o.Rec.Raw(cfg+"/toolchain", res.Guard)
-	ck.Enter("A1-a", g.SHA256)
+	res.Refs.Toolchain = o.Rec.Raw(cfg+"/toolchain", res.Guard)
+	ck.Enter("A1-a", res.Refs.Toolchain.SHA256)
 	if fs := EvaluatePre(res.Guard); len(fs) > 0 {
 		ck.Fail("A1-a", fs...)
 		ck.Unevaluated("A1-b", "A1-a failed: no call runs")
@@ -249,7 +307,7 @@ func (res *Result) call(o Options, k spec.CallKind, id string) ([]byte, bool) {
 	cs := CallSpec{Config: o.Config, Kind: k, Exe: exe, Args: spec.Args(k), Dir: o.R, Env: spec.ToolEnv(o.Config)}
 	r := o.Invoker.Invoke(cs)
 	res.Calls = append(res.Calls, r)
-	o.Rec.Raw(fmt.Sprintf("%s/%s", cfg, k), rawCall(r))
+	res.Refs.Calls[k] = o.Rec.Raw(fmt.Sprintf("%s/%s", cfg, k), rawCall(r))
 	ck.Enter(id, sha(r.Stdout))
 	if !r.Succeeded(o.Budget.W) {
 		var fs []judge.Failure
@@ -265,11 +323,12 @@ func (res *Result) call(o Options, k spec.CallKind, id string) ([]byte, bool) {
 	return r.Stdout, true
 }
 
-func fileIdentity(b []byte, err error) map[string]any {
-	if err != nil {
-		return map[string]any{"error": err.Error()}
+func fileIdentity(r ReadResult) map[string]any {
+	out := map[string]any{"bytes": len(r.Data), "sha256": sha(r.Data), "closed": r.Closed}
+	for _, e := range r.Errors() {
+		out[e.Op+"_error"] = e.Err.Error()
 	}
-	return map[string]any{"bytes": len(b), "sha256": sha(b)}
+	return out
 }
 
 // rawCall is a call's raw record (plan §6.1): the argument array as passed,

@@ -38,13 +38,64 @@ type Env struct {
 // Outcome is one tested instance's result as canonical lines, plus the
 // outer layer's own state.
 type Outcome struct {
-	Entered     []string // checks with an entry record
-	Lines       []string // canonical results of the tested instance
-	Terminal    bool     // every task and resource of the instance is terminal
+	Entered []string // checks with an entry record
+	Lines   []string // canonical results, generated from Instance
+	// Instance is the tested instance's structured result, kept whole
+	// (Review 147 B-147-4); Lines never replace it.
+	Instance    *Instance
+	Terminal    bool // every task and resource of the instance is terminal
 	PrepErr     error
 	CleanupErr  error
 	NotExecuted string // an applicable variant that did not run, and why
 }
+
+// Instance is a tested instance's structured result: every check result
+// with each failure's site, kind, source and detail; the entry records; the
+// calls of the fake caller; the instance's own record lines; the admission
+// refusals; and any further raw outcome of the tested code.
+type Instance struct {
+	Checks  []judge.Item
+	Entries []judge.Entry
+	Calls   []collect.CallResult `json:",omitempty"`
+	Records []string             `json:",omitempty"`
+	Refused []judge.Failure      `json:",omitempty"`
+	Extra   map[string]any       `json:",omitempty"`
+}
+
+// instanceOf starts an instance from one check registry.
+func instanceOf(ck *judge.Checks) *Instance {
+	return &Instance{Checks: ck.Snapshot(), Entries: ck.Entries(), Extra: map[string]any{}}
+}
+
+// recordLines are a recorder's lines as text, without the LF.
+func recordLines(items []collect.Item) []string {
+	out := make([]string, 0, len(items))
+	for _, it := range items {
+		out = append(out, strings.TrimSuffix(string(it.Line), "\n"))
+	}
+	return out
+}
+
+// Norm rewrites the parts of a line that depend on where and for which
+// configuration the fixture ran: a fixture directory becomes "<fx>" and the
+// configuration "<cfg>". Nothing else is removed from the line.
+type Norm func(string) string
+
+func normalizer(cfg string, dirs ...string) Norm {
+	return func(s string) string {
+		for _, d := range dirs {
+			if d != "" {
+				s = strings.ReplaceAll(s, d, "<fx>")
+			}
+		}
+		if cfg != "" {
+			s = strings.ReplaceAll(s, cfg, "<cfg>")
+		}
+		return s
+	}
+}
+
+func noNorm(s string) string { return s }
 
 // Variant is one variant of a control.
 type Variant struct {
@@ -108,17 +159,18 @@ func Judge(v Variant, goos string, o Outcome, ran bool) verdict.Variant {
 }
 
 // CheckLines renders a check registry as canonical lines: "ID status" for
-// hold and unevaluated, and one "ID fail J-n item kind source[#k]" line per
-// failure; sites' paths and details are not part of the comparison. A
-// defect of the registry (an unknown or repeated check) is a line too, so it
-// can never match an expectation.
-func CheckLines(c *judge.Checks) []string {
+// hold and unevaluated, and one "ID fail J-n item kind source[#k] @ site"
+// line per failure, every failure kept (none is filtered). Only the
+// failure's free-text detail is left out of the comparison; the site stays,
+// normalized by norm. A defect of the registry (an unknown or repeated
+// check) is a line too, so it can never match an expectation.
+func CheckLines(c *judge.Checks, norm Norm) []string {
 	var out []string
 	for _, it := range c.Snapshot() {
 		switch it.Result.Status {
 		case judge.Fail:
 			for _, f := range it.Result.Failures {
-				out = append(out, FailureLine(it.ID, f))
+				out = append(out, FailureLine(it.ID, f, norm))
 			}
 		default:
 			out = append(out, it.ID+" "+it.Result.Status.String())
@@ -130,13 +182,14 @@ func CheckLines(c *judge.Checks) []string {
 	return out
 }
 
-// FailureLine is one failure's canonical line.
-func FailureLine(id string, f judge.Failure) string {
+// FailureLine is one failure's canonical line: check, class, item, kind,
+// source (with the injection serial) and site.
+func FailureLine(id string, f judge.Failure, norm Norm) string {
 	src := string(f.Source)
 	if f.Source == judge.SourceInjected {
 		src = fmt.Sprintf("injected#%d", f.Inject)
 	}
-	return fmt.Sprintf("%s fail %s %s %s %s", id, f.Class, f.Item, f.Kind, src)
+	return norm(fmt.Sprintf("%s fail %s %s %s %s @ %s", id, f.Class, f.Item, f.Kind, src, f.Site))
 }
 
 // Entered lists the checks with entry records.

@@ -95,6 +95,22 @@ type Analysis struct {
 	Coverage []judge.Failure // I-6 (b) and (c)
 }
 
+// consumptionParents are the consumption record's parents: the third
+// call (it named the packages and files) and the raw I-4 record of every
+// module whose bytes the controlled read handed out.
+func consumptionParents(res *Result) []Ref {
+	out := []Ref{res.Refs.Calls[spec.CallList]}
+	mods := make([]string, 0, len(res.Refs.I4))
+	for m := range res.Refs.I4 {
+		mods = append(mods, m)
+	}
+	sort.Strings(mods)
+	for _, m := range mods {
+		out = append(out, res.Refs.I4[m])
+	}
+	return out
+}
+
 func isXSys(ip string) bool {
 	return ip == "golang.org/x/sys" || strings.HasPrefix(ip, "golang.org/x/sys/")
 }
@@ -217,7 +233,7 @@ func (res *Result) b5(o Options, mods map[string]*modInfo) {
 		unevaluated = append(unevaluated, f.Item)
 	}
 	for _, c := range an.Cond.Contexts {
-		o.Rec.Derived(cfg+"/context/"+c.Condition, "B5 conditional", nil, c)
+		res.Refs.Contexts = append(res.Refs.Contexts, o.Rec.Derived(cfg+"/context/"+c.Condition, "B5 conditional", []Ref{res.Refs.Calls[spec.CallContext]}, c))
 	}
 
 	// I-6 (c): every candidate of a verified package was judged under every
@@ -294,7 +310,7 @@ func (res *Result) b5(o Options, mods map[string]*modInfo) {
 		acc.Add(f)
 	}
 	acc = dedupe(acc)
-	o.Rec.Derived(cfg+"/consumption", "B5 I-5", nil, map[string]any{
+	res.Refs.Consumption = o.Rec.Derived(cfg+"/consumption", "B5 I-5", consumptionParents(res), map[string]any{
 		"controlled": reader.Consumed(), "std": an.Std.Consumed(), "repo": an.Repo.Consumed(), "injected": reader.Injections(),
 	})
 	switch {
@@ -352,7 +368,8 @@ func (res *Result) scanAndCompare(o Options) {
 	ck := res.Checks
 	cfg := o.Config.String()
 	an := res.Analysis
-	fref := o.Rec.Derived(cfg+"/findings", "S", nil, map[string]any{"findings": an.TC.Findings, "diagnostics": an.TC.Diagnostics})
+	fref := o.Rec.Derived(cfg+"/findings", "S", []Ref{res.Refs.Consumption, res.Refs.Calls[spec.CallList]}, map[string]any{"findings": an.TC.Findings, "diagnostics": an.TC.Diagnostics})
+	res.Refs.Findings = fref
 	ck.Enter("S", fref.SHA256)
 	if len(an.TC.SelfCheck) > 0 {
 		ck.Fail("S", an.TC.SelfCheck...)
@@ -397,6 +414,6 @@ func (res *Result) scanAndCompare(o Options) {
 	sort.Strings(diff)
 	res.Diff = diff
 	res.Consistent = len(diff) == 0
-	o.Rec.Derived(cfg+"/comparison", "K", []Ref{fref}, map[string]any{"consistent": res.Consistent, "differences": diff})
+	res.Refs.Comparison = o.Rec.Derived(cfg+"/comparison", "K", []Ref{fref}, map[string]any{"consistent": res.Consistent, "differences": diff})
 	ck.Hold("K")
 }

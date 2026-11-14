@@ -67,7 +67,7 @@ func controlsWithout(t *testing.T, drop ...string) []controls.Variant {
 func newConfig(t *testing.T, vs []controls.Variant) (Config, *syncBuf) {
 	t.Helper()
 	root := t.TempDir()
-	r, inv, guard, err := controls.FixtureRepo(filepath.Join(root, "fx"), runtime.GOOS)
+	r, inv, guard, err := controls.FixtureRepo(filepath.Join(root, "fx"), runtime.GOOS, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

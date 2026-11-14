@@ -1,11 +1,11 @@
 // Package job wires one CI job of the limited evidence run (plan §4.1,
 // §5.4, §6.4, §7.1): TestMain takes the single deadline D and checks T2
 // (LC-10), the parent registers and starts the writer before m.Run, the one
-// test function runs the F domain (the controls) and the R domain (the two
-// configurations of this GOOS), and after m.Run the parent's closeout
-// decides the conclusion and the exit status. Domain results are never
-// reported through testing.T: the conclusion comes only from the published
-// state of the three domains and the identity checks.
+// test function registers the domains' work task, starts it and waits only
+// for its completion or W, and after m.Run the parent's closeout decides the
+// conclusion and the exit status. Domain results are never reported through
+// testing.T: the conclusion comes only from the published state of the
+// three domains and the identity checks.
 package job
 
 import (
@@ -65,6 +65,54 @@ type Config struct {
 	T2       string
 }
 
+// Work states.
+const (
+	WorkRegistered = "registered"
+	WorkRunning    = "running"
+	WorkDone       = "done"
+)
+
+// WorkRecord is the domains' work task (implementation plan §12.14
+// "同步的类型检查"; Review 147 B-147-1). It is registered before it starts
+// and runs in its own goroutine; nothing in it can be interrupted, so the
+// parent only waits for its published completion or W. When W comes first
+// the parent stops waiting (Abandoned) and the task keeps running: every
+// unit it has not started is refused (the budget admits nothing at or after
+// W), its unfinished unit, its inputs and its late results stay held by the
+// job until the process ends, and nothing it publishes later can restore
+// validity.
+type WorkRecord struct {
+	State       string
+	Registered  time.Time
+	Started     time.Time
+	Done        time.Time
+	Timely      bool // done was published before W and before the parent stopped waiting
+	Abandoned   bool
+	AbandonedAt time.Time
+	Current     string // the unit in progress
+	done        chan struct{}
+}
+
+// FRecord is one judged control variant as the F domain holds it: the
+// judgement, the whole outcome with its structured instance, and the
+// qualification of its publication (Review 147 B-147-4).
+type FRecord struct {
+	Variant verdict.Variant
+	Outcome controls.Outcome
+	At      time.Time
+	Timely  bool
+}
+
+// RRecord is one configuration's result as the R domain holds it, with the
+// qualification of its publication: a result published at or after W, or
+// after the parent stopped waiting, is late and cannot make the job valid.
+type RRecord struct {
+	Result  *collect.Result
+	Refused []judge.Failure
+	At      time.Time
+	Timely  bool
+}
+
 // Job is one job's state. Everything the closeout consumes is copied under
 // mu.
 type Job struct {
@@ -77,15 +125,13 @@ type Job struct {
 
 	mu        sync.Mutex
 	t2ok      bool
-	running   bool
-	ran       bool
 	changed   chan struct{}
-	variants  []verdict.Variant
-	results   []*collect.Result
-	refusals  map[string][]judge.Failure
+	work      *WorkRecord
+	fRecords  []FRecord
+	rRecords  []RRecord
 	defects   []string
 	rMissing  string
-	lc1       verdict.Variant
+	lc1       *verdict.Variant
 	budget    *collect.Budget
 	finalized bool
 }
@@ -99,7 +145,7 @@ func Begin(cfg Config) (*Job, error) {
 	if cfg.RecordsDir == "" {
 		return nil, errors.New("job: no records directory")
 	}
-	j := &Job{cfg: cfg, changed: make(chan struct{}), refusals: map[string][]judge.Failure{}}
+	j := &Job{cfg: cfg, changed: make(chan struct{})}
 	j.W, j.D = chain.Deadlines(cfg.Start)
 	j.outer = chain.NewOuter(cfg.Clock, j.D)
 	log, err := chain.NewLog(FileRaw, FileDerived, FileControls, FileCloseout)
@@ -130,8 +176,12 @@ func Begin(cfg Config) (*Job, error) {
 	for k, v := range cfg.Identity {
 		ids[k] = v
 	}
+	// W and D as instants and as offsets from the start (Review 147
+	// N-147-3); they are the same values the budget and the closeout use.
 	j.rec.Raw("identity/run", map[string]any{"goos": cfg.GOOS, "R": cfg.R, "records": cfg.RecordsDir, "env": ids,
-		"W": cfg.Start.Sub(cfg.Start).String(), "budget": chain.Budget.String(), "cleanup_margin": chain.CleanupMargin.String()})
+		"start": cfg.Start.Format(time.RFC3339Nano), "W": j.W.Format(time.RFC3339Nano), "D": j.D.Format(time.RFC3339Nano),
+		"W_offset": j.W.Sub(cfg.Start).String(), "D_offset": j.D.Sub(cfg.Start).String(),
+		"budget": chain.Budget.String(), "cleanup_margin": chain.CleanupMargin.String()})
 	return j, nil
 }
 
@@ -141,37 +191,81 @@ func (j *Job) publish() {
 }
 
 // terminal is the R and F registries' TerminalSource: they are terminal
-// when the domains are not running (they ran, or never started).
+// when the work task never registered or published done.
 func (j *Job) terminal() (bool, <-chan struct{}) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
-	if j.running {
+	if j.work != nil && j.work.State != WorkDone {
 		return false, j.changed
 	}
 	return true, nil
 }
 
-// RunDomains runs the F domain, then the R domain. The test function calls
-// it once.
+// RunDomains registers the domains' work task, starts it, and waits only
+// for its published completion or W, whichever comes first. The test
+// function calls it once; it returns at W at the latest, so m.Run returns
+// and the parent's closeout and its D exit stay reachable even when an
+// admitted analysis never returns.
 func (j *Job) RunDomains() {
 	j.mu.Lock()
-	if j.running || j.ran {
+	if j.work != nil {
 		j.defects = append(j.defects, "RunDomains called twice")
 		j.mu.Unlock()
 		return
 	}
-	j.running = true
 	j.budget = collect.NewBudget(j.cfg.Clock, j.cfg.Start, chain.Budget)
+	w := &WorkRecord{State: WorkRegistered, Registered: j.cfg.Clock.Now(), done: make(chan struct{})}
+	j.work = w // registered before it starts
 	j.publish()
 	j.mu.Unlock()
 
-	j.runControls()
-	j.runR()
+	go j.runWork(w)
+
+	wch, stop := j.cfg.Clock.Timer(j.W)
+	defer stop()
+	select {
+	case <-w.done:
+	case <-wch:
+		j.mu.Lock()
+		if w.State != WorkDone {
+			w.Abandoned, w.AbandonedAt = true, j.cfg.Clock.Now()
+			j.publish()
+		}
+		j.mu.Unlock()
+	}
+}
+
+func (j *Job) runWork(w *WorkRecord) {
+	j.mu.Lock()
+	w.State, w.Started = WorkRunning, j.cfg.Clock.Now()
+	j.publish()
+	j.mu.Unlock()
+
+	j.runControls(w)
+	j.runR(w)
 
 	j.mu.Lock()
-	j.running, j.ran = false, true
+	now := j.cfg.Clock.Now()
+	w.State, w.Done, w.Current = WorkDone, now, ""
+	w.Timely = now.Before(j.W) && !w.Abandoned
+	close(w.done)
 	j.publish()
 	j.mu.Unlock()
+}
+
+// begin marks the unit in progress.
+func (j *Job) begin(w *WorkRecord, unit string) {
+	j.mu.Lock()
+	w.Current = unit
+	j.publish()
+	j.mu.Unlock()
+}
+
+// timelyLocked decides a publication's qualification at its lock: before W
+// and while the parent still waits. Admission is not completion: a unit
+// admitted before W whose result is published at or after W is late.
+func (j *Job) timelyLocked(now time.Time) bool {
+	return now.Before(j.W) && (j.work == nil || !j.work.Abandoned)
 }
 
 type outerAdapter struct{ o *chain.Outer }
@@ -182,7 +276,7 @@ func (a outerAdapter) Begin(name string) func(error) {
 	return func(err error) { once.Do(func() { op.Done(err) }) }
 }
 
-func (j *Job) runControls() {
+func (j *Job) runControls(w *WorkRecord) {
 	root := j.cfg.FixtureRoot
 	oa := outerAdapter{j.outer}
 	if root == "" {
@@ -190,12 +284,10 @@ func (j *Job) runControls() {
 		dir, err := os.MkdirTemp("", "c9evidence-fixtures-")
 		done(err)
 		if err != nil {
-			j.mu.Lock()
 			for _, v := range j.cfg.Controls {
-				res := controls.Judge(v, j.cfg.GOOS, controls.Outcome{PrepErr: err}, true)
-				j.variants = append(j.variants, res)
+				o := controls.Outcome{PrepErr: err}
+				j.publishVariant(v, o, true)
 			}
-			j.mu.Unlock()
 			return
 		}
 		root = dir
@@ -210,23 +302,36 @@ func (j *Job) runControls() {
 		var o controls.Outcome
 		ran := false
 		if applicable {
-			if j.budget.AdmitUnit("fixture " + v.Control + " " + v.Name) {
+			unit := "fixture " + v.Control + " " + v.Name
+			if j.budget.AdmitUnit(unit) {
+				j.begin(w, unit)
 				o, ran = v.Run(env), true
 			} else {
 				o = controls.Outcome{NotExecuted: "not admitted: budget insufficient"}
 			}
 		}
-		res := controls.Judge(v, j.cfg.GOOS, o, ran)
-		j.log.Append(FileControls, mustLine(map[string]any{"control": v.Control, "variant": v.Name, "judgement": res.Judgement,
-			"reasons": res.Reasons, "expectation": v.Want, "must_enter": v.MustEnter, "entered": o.Entered, "results": o.Lines,
-			"terminal": o.Terminal, "prep_error": errText(o.PrepErr), "cleanup_error": errText(o.CleanupErr), "not_executed": o.NotExecuted}))
-		j.mu.Lock()
-		j.variants = append(j.variants, res)
-		j.mu.Unlock()
+		j.publishVariant(v, o, ran)
 	}
 }
 
-func (j *Job) runR() {
+// publishVariant judges a variant and publishes its record with the
+// qualification decided at this lock. The whole outcome, with its
+// structured instance, is held in memory and appended to controls.jsonl.
+func (j *Job) publishVariant(v controls.Variant, o controls.Outcome, ran bool) {
+	res := controls.Judge(v, j.cfg.GOOS, o, ran)
+	j.mu.Lock()
+	now := j.cfg.Clock.Now()
+	timely := j.timelyLocked(now)
+	j.fRecords = append(j.fRecords, FRecord{Variant: res, Outcome: o, At: now, Timely: timely})
+	j.publish()
+	j.mu.Unlock()
+	j.log.Append(FileControls, mustLine(map[string]any{"control": v.Control, "variant": v.Name, "judgement": res.Judgement,
+		"reasons": res.Reasons, "expectation": v.Want, "must_enter": v.MustEnter, "entered": o.Entered, "results": o.Lines,
+		"instance": o.Instance, "terminal": o.Terminal, "prep_error": errText(o.PrepErr), "cleanup_error": errText(o.CleanupErr),
+		"not_executed": o.NotExecuted, "published_at": now.Format(time.RFC3339Nano), "timely": timely}))
+}
+
+func (j *Job) runR(w *WorkRecord) {
 	if j.cfg.R == "" || !filepath.IsAbs(j.cfg.R) || filepath.Clean(j.cfg.R) != j.cfg.R {
 		j.mu.Lock()
 		j.rMissing = fmt.Sprintf("the analysed repository root R is not given as a clean absolute path (%q); it is never inferred", j.cfg.R)
@@ -239,51 +344,96 @@ func (j *Job) runR() {
 		if j.cfg.Candidates != nil {
 			cands = j.cfg.Candidates(c)
 		}
+		j.begin(w, "configuration "+c.String())
 		res := collect.Collect(collect.Options{
 			Config: c, R: j.cfg.R, Invoker: j.cfg.Invoker, Budget: j.budget, Guard: j.cfg.Guard, FS: j.cfg.ReadFS,
 			MainModule: j.cfg.MainModule, Exceptions: j.cfg.Exceptions, SkipDirs: spec.RepoSkipDirs, Candidates: cands,
 			Watch: j.cfg.Watch, Rec: j.rec, TypeCheck: j.cfg.TypeCheck,
 		})
 		refused := j.budget.Refused()[before:]
-		items := res.Checks.Snapshot()
-		j.rec.Derived(c.String()+"/checks", "A B S K", nil, map[string]any{"checks": items, "entries": res.Checks.Entries(),
-			"defects": res.Checks.Defects(), "refused": refused, "consistent": res.Consistent, "differences": res.Diff})
 		j.mu.Lock()
-		j.results = append(j.results, res)
-		j.refusals[c.String()] = refused
+		now := j.cfg.Clock.Now()
+		timely := j.timelyLocked(now)
+		j.rRecords = append(j.rRecords, RRecord{Result: res, Refused: refused, At: now, Timely: timely})
+		j.publish()
 		j.mu.Unlock()
+		j.rec.Derived(c.String()+"/checks", "A B S K", res.Refs.All(), map[string]any{"checks": res.Checks.Snapshot(), "entries": res.Checks.Entries(),
+			"defects": res.Checks.Defects(), "refused": refused, "modules": res.Modules, "consistent": res.Consistent, "differences": res.Diff,
+			"published_at": now.Format(time.RFC3339Nano), "timely": timely})
 	}
 	j.mu.Lock()
-	j.lc1 = lc1(j.results)
+	v := lc1(j.rRecords)
+	j.lc1 = &v
+	j.publish()
 	j.mu.Unlock()
 }
 
-// lc1 is the positive control of Hash1 on R's records (plan §5.2 LC-1):
-// a hit when every configuration computed the h1 of every module of its
-// closure; an h1 different from go.sum is R's J-4, not a miss. When R did
-// not reach or complete I-4 the control is pending (R is incomplete
-// anyway).
-func lc1(results []*collect.Result) verdict.Variant {
+// lc1 is the positive control of Hash1 on R's records (plan §5.2 LC-1;
+// Review 147 N-147-1): a hit when, in every configuration, every module of
+// the closure that B4 had to snapshot (Result.Modules, whether or not its
+// snapshot was taken) has a computed h1. An h1 different from go.sum is R's
+// J-4, not a miss. A module without a computed h1, a configuration whose
+// closure is unknown, or a late result leaves the control pending, with
+// every such module listed.
+func lc1(rs []RRecord) verdict.Variant {
 	v := verdict.Variant{Control: "LC-1", Variant: "Hash1 positive control on R"}
-	if len(results) == 0 {
+	if len(rs) == 0 {
 		v.Judgement, v.Reasons = verdict.Pending, []string{"R collected no configuration"}
 		return v
 	}
-	for _, r := range results {
-		st := r.Checks.Status("B4")
-		if st != judge.Hold && st != judge.Fail {
-			v.Judgement, v.Reasons = verdict.Pending, []string{r.Config.String() + ": I-4 not evaluated"}
-			return v
+	var missing []string
+	for _, r := range rs {
+		res := r.Result
+		if st := res.Checks.Status("B3"); st != judge.Hold && st != judge.Fail {
+			missing = append(missing, res.Config.String()+": the closure is not known (B3 not evaluated)")
+			continue
 		}
-		for p, s := range r.Snapshots {
-			if s.H1 == "" {
-				v.Judgement, v.Reasons = verdict.Pending, []string{r.Config.String() + ": no h1 computed for " + p}
-				return v
+		if !r.Timely {
+			missing = append(missing, res.Config.String()+": the result was published at or after W")
+		}
+		for _, m := range res.Modules {
+			s := res.Snapshots[m]
+			if s == nil || s.H1 == "" {
+				missing = append(missing, res.Config.String()+": no h1 computed for "+m)
 			}
 		}
 	}
+	if len(missing) > 0 {
+		v.Judgement, v.Reasons = verdict.Pending, missing
+		return v
+	}
 	v.Judgement = verdict.Hit
 	return v
+}
+
+// State is a copy of the job's held state, for records and tests.
+type State struct {
+	Work     *WorkRecord
+	FRecords []FRecord
+	RRecords []RRecord
+}
+
+// Snapshot returns a copy of the held state.
+func (j *Job) Snapshot() State {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	s := State{FRecords: append([]FRecord(nil), j.fRecords...), RRecords: append([]RRecord(nil), j.rRecords...)}
+	if j.work != nil {
+		w := *j.work
+		s.Work = &w
+	}
+	return s
+}
+
+// WorkDone is closed when the work task published done (nil before it
+// registered).
+func (j *Job) WorkDone() <-chan struct{} {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if j.work == nil {
+		return nil
+	}
+	return j.work.done
 }
 
 // state is the copy the closeout consumes.
@@ -297,30 +447,56 @@ func (j *Job) copyState(mRunCode int) state {
 	defer j.mu.Unlock()
 	in := verdict.Inputs{T2OK: j.t2ok, MRunCode: mRunCode, Defects: append([]string(nil), j.defects...)}
 	in.Defects = append(in.Defects, j.rec.Errors()...)
+	// The R records' source chain must resolve (Review 147 B-147-4): a
+	// missing or wrong association is a defect, whatever the manifest says.
+	for _, p := range collect.VerifyProvenance(j.rec.Items()) {
+		in.Defects = append(in.Defects, "provenance: "+p)
+	}
+	var pending []string
+	current := ""
+	if w := j.work; w != nil && w.State != WorkDone {
+		current = w.Current
+		if w.Abandoned {
+			pending = append(pending, "the domains' work task did not finish before W (the parent stopped waiting; unit in progress: "+w.Current+")")
+		} else {
+			pending = append(pending, "the domains' work task is not finished (unit in progress: "+w.Current+")")
+		}
+	}
 	judged := map[string]bool{}
-	for _, v := range j.variants {
+	for _, r := range j.fRecords {
+		v := r.Variant
 		judged[v.Control+"\x00"+v.Variant] = true
+		if !r.Timely && v.Judgement == verdict.Hit {
+			v.Judgement, v.Reasons = verdict.Pending, []string{"published at or after W: a late hit is not a hit"}
+		}
 		in.Variants = append(in.Variants, v)
 	}
-	// An applicable variant that never ran (for example the test function
-	// was not run) is a miss (plan §5.1).
 	for _, v := range j.cfg.Controls {
 		if judged[v.Control+"\x00"+v.Name] {
 			continue
 		}
-		in.Variants = append(in.Variants, controls.Judge(v, j.cfg.GOOS, controls.Outcome{NotExecuted: "the domains did not run"}, false))
+		unit := "fixture " + v.Control + " " + v.Name
+		if unit == current {
+			// The variant in progress has not reached a terminal state.
+			in.Variants = append(in.Variants, verdict.Variant{Control: v.Control, Variant: v.Name, Judgement: verdict.Pending, Reasons: []string{"still running at the snapshot"}})
+			continue
+		}
+		// An applicable variant that never ran is a miss (plan §5.1).
+		in.Variants = append(in.Variants, controls.Judge(v, j.cfg.GOOS, controls.Outcome{NotExecuted: "the work task did not run it"}, false))
 	}
-	if j.ran && j.cfg.R != "" {
-		in.Variants = append(in.Variants, j.lc1)
+	if j.lc1 != nil {
+		in.Variants = append(in.Variants, *j.lc1)
+	} else if j.work != nil && j.cfg.R != "" {
+		in.Variants = append(in.Variants, verdict.Variant{Control: "LC-1", Variant: "Hash1 positive control on R", Judgement: verdict.Pending, Reasons: []string{"R did not finish"}})
 	}
-	var pending []string
 	if j.rMissing != "" {
 		pending = append(pending, "R: "+j.rMissing)
 	}
-	for _, r := range j.results {
-		rc := verdict.RConfig{Config: r.Config.String(), Compared: r.Checks.Status("K") == judge.Hold, Consistent: r.Consistent}
-		rc.ABHold = r.Checks.AllHold(append(append([]string(nil), collect.AIDs...), collect.BIDs()...)...)
-		for _, it := range r.Checks.Snapshot() {
+	for _, r := range j.rRecords {
+		res := r.Result
+		rc := verdict.RConfig{Config: res.Config.String(), Compared: res.Checks.Status("K") == judge.Hold, Consistent: res.Consistent}
+		rc.ABHold = res.Checks.AllHold(append(append([]string(nil), collect.AIDs...), collect.BIDs()...)...)
+		for _, it := range res.Checks.Snapshot() {
 			switch it.Result.Status {
 			case judge.Fail:
 				rc.Failures = append(rc.Failures, it.Result.Failures...)
@@ -328,9 +504,13 @@ func (j *Job) copyState(mRunCode int) state {
 				rc.Unevaluated = append(rc.Unevaluated, it.ID+": "+it.Result.Reason)
 			}
 		}
-		rc.Failures = append(rc.Failures, j.refusals[r.Config.String()]...)
-		for _, d := range r.Checks.Defects() {
-			in.Defects = append(in.Defects, r.Config.String()+": "+d)
+		rc.Failures = append(rc.Failures, r.Refused...)
+		if !r.Timely {
+			rc.Failures = append(rc.Failures, judge.Failure{Class: judge.J1, Item: res.Config.String(), Site: "publication of the configuration result",
+				Kind: "published at or after W", Source: judge.SourceBudget, Detail: r.At.Format(time.RFC3339Nano)})
+		}
+		for _, d := range res.Checks.Defects() {
+			in.Defects = append(in.Defects, res.Config.String()+": "+d)
 		}
 		in.R = append(in.R, rc)
 	}

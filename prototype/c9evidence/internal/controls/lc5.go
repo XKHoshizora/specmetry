@@ -64,6 +64,9 @@ type lc5Case struct {
 	ctx        func(*ctxText)
 	listExit   int
 	listQExtra string // extra JSON for Q's Module (LC5-42's Replace)
+	// mainGoFiles are the main package's GoFiles in the third call (nil:
+	// just main.go); the tag-sensitive regression lists a tagged file.
+	mainGoFiles []string
 }
 
 // ctxText renders the second call's output, context text v1 (method record
@@ -147,9 +150,14 @@ func (s *rfSetup) responses(c lc5Case) map[spec.CallKind]collect.FakeResponse {
 	}
 	qMod := fmt.Sprintf(`{"Path":%q,"Version":"v1.0.0","Dir":%q,"GoVersion":"1.22","Sum":%q,"GoModSum":%q%s}`,
 		qModule, s.q, qH1, qGoModH1, c.listQExtra)
+	mainFiles := []string{"main.go"}
+	if c.mainGoFiles != nil {
+		mainFiles = c.mainGoFiles
+	}
+	mainJSON, _ := json.Marshal(mainFiles)
 	list := fmt.Sprintf("{\n\t\"ImportPath\": %q,\n\t\"Dir\": %q,\n\t\"Name\": \"q\",\n\t\"Module\": %s,\n\t\"GoFiles\": [\"q.go\"]\n}\n", qModule, s.q, qMod) +
-		fmt.Sprintf("{\n\t\"ImportPath\": %q,\n\t\"Dir\": %q,\n\t\"Name\": \"main\",\n\t\"Module\": {\"Path\":%q,\"Main\":true,\"Dir\":%q,\"GoVersion\":\"1.22\"},\n\t\"GoFiles\": [\"main.go\"],\n\t\"Imports\": [%q]\n}\n",
-			rfModule, s.rf, rfModule, s.rf, qModule)
+		fmt.Sprintf("{\n\t\"ImportPath\": %q,\n\t\"Dir\": %q,\n\t\"Name\": \"main\",\n\t\"Module\": {\"Path\":%q,\"Main\":true,\"Dir\":%q,\"GoVersion\":\"1.22\"},\n\t\"GoFiles\": %s,\n\t\"Imports\": [%q]\n}\n",
+			rfModule, s.rf, rfModule, s.rf, mainJSON, qModule)
 	return map[spec.CallKind]collect.FakeResponse{
 		spec.CallEnv:     {Stdout: append(envOut, '\n')},
 		spec.CallContext: {Stdout: ct.bytes()},
@@ -181,7 +189,38 @@ func projection(over map[string][]string, def map[string]string, calls [3]int, f
 	} else {
 		out = append(out, "derived from call 3: none")
 	}
+	return append(out, "provenance ok")
+}
+
+// instanceLines are the lines every LC-5-shaped instance adds after its
+// checks: the call counts, whether a derived record came from the third
+// call, and whether the instance's own records resolve (VerifyProvenance).
+func instanceLines(fake *collect.Fake, rec *collect.MemRecorder, cfg string) []string {
+	out := []string{fmt.Sprintf("calls env=%d context=%d list=%d", fake.Calls(spec.CallEnv), fake.Calls(spec.CallContext), fake.Calls(spec.CallList))}
+	if derivedFromCall3(rec, cfg) {
+		out = append(out, "derived from call 3: present")
+	} else {
+		out = append(out, "derived from call 3: none")
+	}
+	problems := collect.VerifyProvenance(rec.Items())
+	if len(problems) == 0 {
+		return append(out, "provenance ok")
+	}
+	for _, p := range problems {
+		out = append(out, "provenance problem: "+p)
+	}
 	return out
+}
+
+// collectInstance keeps a collection's whole result as the tested instance.
+func collectInstance(res *collect.Result, fake *collect.Fake, rec *collect.MemRecorder, b *collect.Budget) *Instance {
+	inst := instanceOf(res.Checks)
+	inst.Calls = res.Calls
+	inst.Records = recordLines(rec.Items())
+	inst.Refused = b.Refused()
+	inst.Extra["closure"], inst.Extra["modules"], inst.Extra["differences"] = res.Closure, res.Modules, res.Diff
+	inst.Extra["fake_specs"] = fake.Specs()
+	return inst
 }
 
 var bscK = map[string]string{"B5": "unevaluated", "S": "unevaluated", "K": "unevaluated"}
@@ -192,8 +231,8 @@ func lc5Cases() []struct {
 	c    lc5Case
 	want []string
 } {
-	j := func(id, class, item, kind string) string {
-		return fmt.Sprintf("%s fail %s %s %s real", id, class, item, kind)
+	j := func(id, class, item, kind, site string) string {
+		return fmt.Sprintf("%s fail %s %s %s real @ %s", id, class, item, kind, site)
 	}
 	return []struct {
 		c    lc5Case
@@ -201,21 +240,21 @@ func lc5Cases() []struct {
 	}{
 		{lc5Case{name: "LC5-0 (V-1)"}, projection(nil, nil, [3]int{1, 1, 1}, true)},
 		{lc5Case{name: "LC5-19b (V-19b)", env: func(m map[string]string) { m["GOWORK"] = "/rf/go.work" }},
-			projection(map[string][]string{"B1/GOWORK": {j("B1/GOWORK", "J-2", "GOWORK", "mismatch")}}, bscK, [3]int{1, 1, 1}, true)},
+			projection(map[string][]string{"B1/GOWORK": {j("B1/GOWORK", "J-2", "GOWORK", "mismatch", "B1 GOWORK")}}, bscK, [3]int{1, 1, 1}, true)},
 		{lc5Case{name: "LC5-20a (V-20)", env: func(m map[string]string) { m["GOFLAGS"] = "-mod=mod" }},
-			projection(map[string][]string{"B1/GOFLAGS": {j("B1/GOFLAGS", "J-2", "GOFLAGS", "mismatch")}}, bscK, [3]int{1, 1, 1}, true)},
+			projection(map[string][]string{"B1/GOFLAGS": {j("B1/GOFLAGS", "J-2", "GOFLAGS", "mismatch", "B1 GOFLAGS")}}, bscK, [3]int{1, 1, 1}, true)},
 		{lc5Case{name: "LC5-20b (V-20)", env: func(m map[string]string) { m["GOFLAGS"] = "-mod=mod" }, listExit: 1},
-			projection(map[string][]string{"A3": {j("A3", "J-1", "call3-list", "call failed")}}, allBSK, [3]int{1, 1, 1}, false)},
+			projection(map[string][]string{"A3": {j("A3", "J-1", "call3-list", "call failed", "A3 call3-list <cfg>")}}, allBSK, [3]int{1, 1, 1}, false)},
 		{lc5Case{name: "LC5-24 (V-24)", goVersion: "go1.27.4"},
-			projection(map[string][]string{"A1-a": {j("A1-a", "J-1", "analyzer", "version"), j("A1-a", "J-1", "VERSION", "version")},
+			projection(map[string][]string{"A1-a": {j("A1-a", "J-1", "analyzer", "version", "A1-a guard"), j("A1-a", "J-1", "VERSION", "version", "A1-a guard")},
 				"A1-b": {"A1-b unevaluated"}, "A1-c": {"A1-c unevaluated"}, "A2": {"A2 unevaluated"}, "A3": {"A3 unevaluated"}}, allBSK, [3]int{0, 0, 0}, false)},
 		{lc5Case{name: "LC5-40a (V-40)", ctx: func(c *ctxText) { c.ToolTags = nil }},
-			projection(map[string][]string{"B2/ToolTags": {j("B2/ToolTags", "J-3", "ToolTags", "mismatch")}}, bscK, [3]int{1, 1, 1}, true)},
+			projection(map[string][]string{"B2/ToolTags": {j("B2/ToolTags", "J-3", "ToolTags", "mismatch", "B2 ToolTags")}}, bscK, [3]int{1, 1, 1}, true)},
 		{lc5Case{name: "LC5-40b (V-40)", ctx: func(c *ctxText) { c.ToolTags = nil; c.BuildTags = []string{"x"} }},
-			projection(map[string][]string{"B2/ToolTags": {j("B2/ToolTags", "J-3", "ToolTags", "mismatch")},
-				"B2/BuildTags": {j("B2/BuildTags", "J-2", "BuildTags", "mismatch")}}, bscK, [3]int{1, 1, 1}, true)},
+			projection(map[string][]string{"B2/ToolTags": {j("B2/ToolTags", "J-3", "ToolTags", "mismatch", "B2 ToolTags")},
+				"B2/BuildTags": {j("B2/BuildTags", "J-2", "BuildTags", "mismatch", "B2 BuildTags")}}, bscK, [3]int{1, 1, 1}, true)},
 		{lc5Case{name: "LC5-42 (V-42)", listExit: 1, listQExtra: `,"Replace":{"Path":"example.com/q","Dir":"/elsewhere"}`},
-			projection(map[string][]string{"A3": {j("A3", "J-1", "call3-list", "call failed")}}, allBSK, [3]int{1, 1, 1}, false)},
+			projection(map[string][]string{"A3": {j("A3", "J-1", "call3-list", "call failed", "A3 call3-list <cfg>")}}, allBSK, [3]int{1, 1, 1}, false)},
 	}
 }
 
@@ -264,17 +303,12 @@ func LC5() []Variant {
 				clock := &fakeClock{t: time.Unix(1_000_000, 0)}
 				b := collect.NewBudget(clock, clock.Now(), 120*time.Second)
 				res, fake, rec := runCollect(e, s, row.c, clock, b, 0)
-				lines := CheckLines(res.Checks)
-				lines = append(lines, fmt.Sprintf("calls env=%d context=%d list=%d", fake.Calls(spec.CallEnv), fake.Calls(spec.CallContext), fake.Calls(spec.CallList)))
-				if derivedFromCall3(rec, s.cfg.String()) {
-					lines = append(lines, "derived from call 3: present")
-				} else {
-					lines = append(lines, "derived from call 3: none")
-				}
+				norm := normalizer(s.cfg.String(), fx.dir)
+				lines := append(CheckLines(res.Checks, norm), instanceLines(fake, rec, s.cfg.String())...)
 				for _, f := range b.Refused() {
-					lines = append(lines, FailureLine("admission", f))
+					lines = append(lines, FailureLine("admission", f, norm))
 				}
-				return Outcome{Entered: Entered(res.Checks), Lines: lines, Terminal: true, CleanupErr: fx.cleanup()}
+				return Outcome{Entered: Entered(res.Checks), Lines: lines, Instance: collectInstance(res, fake, rec, b), Terminal: true, CleanupErr: fx.cleanup()}
 			},
 		})
 	}
@@ -296,8 +330,8 @@ func LC8() []Variant {
 	return []Variant{
 		{
 			Control: "LC-8", Name: "unit after W", Applies: always, MustEnter: []string{"admission"},
-			Want: append([]string{"admission fail J-1 probe budget insufficient budget"}, append(allUnevaluated(),
-				"collect admission fail J-1 configuration CFG budget insufficient budget")...),
+			Want: append([]string{"admission fail J-1 probe budget insufficient budget @ admission probe"}, append(allUnevaluated(),
+				"collect admission fail J-1 configuration <cfg> budget insufficient budget @ admission configuration <cfg>")...),
 			Run: func(e *Env) Outcome {
 				fx, s, err := prepareRF(e, "LC-8 unit after W")
 				if err != nil {
@@ -313,17 +347,20 @@ func LC8() []Variant {
 				} else {
 					ck.Fail("admission", b.Refused()...)
 				}
-				res, _, _ := runCollect(e, s, lc5Case{name: "after W"}, clock, b, 0)
-				lines := append(CheckLines(ck), CheckLines(res.Checks)...)
+				res, fake, rec := runCollect(e, s, lc5Case{name: "after W"}, clock, b, 0)
+				norm := normalizer(s.cfg.String(), fx.dir)
+				lines := append(CheckLines(ck, norm), CheckLines(res.Checks, norm)...)
 				for _, f := range b.Refused()[1:] {
-					lines = append(lines, strings.Replace(FailureLine("collect admission", f), s.cfg.String(), "CFG", 1))
+					lines = append(lines, FailureLine("collect admission", f, norm))
 				}
-				return Outcome{Entered: Entered(ck), Lines: lines, Terminal: true, CleanupErr: fx.cleanup()}
+				inst := collectInstance(res, fake, rec, b)
+				inst.Extra["admission"] = ck.Snapshot()
+				return Outcome{Entered: Entered(ck), Lines: lines, Instance: inst, Terminal: true, CleanupErr: fx.cleanup()}
 			},
 		},
 		{
 			Control: "LC-8", Name: "result after W", Applies: always, MustEnter: []string{"A3"},
-			Want: projection(map[string][]string{"A3": {"A3 fail J-1 call3-list call failed real"}}, allBSK, [3]int{1, 1, 1}, false),
+			Want: projection(map[string][]string{"A3": {"A3 fail J-1 call3-list call failed real @ A3 call3-list <cfg>"}}, allBSK, [3]int{1, 1, 1}, false),
 			Run: func(e *Env) Outcome {
 				fx, s, err := prepareRF(e, "LC-8 result after W")
 				if err != nil {
@@ -334,14 +371,8 @@ func LC8() []Variant {
 				// The third call is admitted (W − now ≥ 5 s) but publishes
 				// its successful result after W.
 				res, fake, rec := runCollect(e, s, lc5Case{name: "late"}, clock, b, 115*time.Second)
-				lines := CheckLines(res.Checks)
-				lines = append(lines, fmt.Sprintf("calls env=%d context=%d list=%d", fake.Calls(spec.CallEnv), fake.Calls(spec.CallContext), fake.Calls(spec.CallList)))
-				if derivedFromCall3(rec, s.cfg.String()) {
-					lines = append(lines, "derived from call 3: present")
-				} else {
-					lines = append(lines, "derived from call 3: none")
-				}
-				return Outcome{Entered: Entered(res.Checks), Lines: lines, Terminal: true, CleanupErr: fx.cleanup()}
+				lines := append(CheckLines(res.Checks, normalizer(s.cfg.String(), fx.dir)), instanceLines(fake, rec, s.cfg.String())...)
+				return Outcome{Entered: Entered(res.Checks), Lines: lines, Instance: collectInstance(res, fake, rec, b), Terminal: true, CleanupErr: fx.cleanup()}
 			},
 		},
 	}

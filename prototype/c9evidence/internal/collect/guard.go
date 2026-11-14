@@ -81,39 +81,72 @@ func ReadGuard(src GuardSources) GuardValues {
 	if fi, err := src.FS.Lstat(filepath.Join(v.Root, "src", "cmd", "go")); err == nil && fi.IsDir() {
 		v.SrcCmdGo = true
 	}
-	if b, err := readClosed(src.FS, filepath.Join(v.Root, "VERSION")); err != nil {
-		v.Errors = append(v.Errors, "read VERSION: "+err.Error())
+	if r := ReadWhole(src.FS, filepath.Join(v.Root, "VERSION")); !r.OK() {
+		for _, e := range r.Errors() {
+			v.Errors = append(v.Errors, e.Op+" VERSION: "+e.Err.Error())
+		}
 	} else {
-		line, _, _ := bufio.NewReader(bytes.NewReader(b)).ReadLine()
+		line, _, _ := bufio.NewReader(bytes.NewReader(r.Data)).ReadLine()
 		v.VersionLine = string(line)
 	}
 	if v.ExeRegular {
-		if b, err := readClosed(src.FS, abs); err != nil {
-			v.Errors = append(v.Errors, "read candidate: "+err.Error())
+		if r := ReadWhole(src.FS, abs); !r.OK() {
+			for _, e := range r.Errors() {
+				v.Errors = append(v.Errors, e.Op+" candidate: "+e.Err.Error())
+			}
 		} else {
-			sum := sha256.Sum256(b)
+			sum := sha256.Sum256(r.Data)
 			v.ExeSHA256 = hex.EncodeToString(sum[:])
 		}
 	}
 	return v
 }
 
-// readClosed reads a whole file and returns the read or the real close
-// error.
-func readClosed(fsys modsnap.FS, path string) ([]byte, error) {
+// ReadResult keeps every real result of one whole-file read: the open
+// error, the bytes with the read error, and the real Close result. None of
+// them replaces another (Review 147 B-147-3): a read error and a close
+// error of the same read are both kept and both consumed by the caller.
+type ReadResult struct {
+	Data     []byte
+	OpenErr  error
+	ReadErr  error
+	CloseErr error
+	Closed   bool // Close was called (the open succeeded)
+}
+
+// OK reports whether the open, the read and the close all succeeded.
+func (r ReadResult) OK() bool { return r.OpenErr == nil && r.ReadErr == nil && r.CloseErr == nil }
+
+// Errors returns each real error with its operation, in order.
+func (r ReadResult) Errors() []struct {
+	Op  string
+	Err error
+} {
+	var out []struct {
+		Op  string
+		Err error
+	}
+	for _, e := range []struct {
+		Op  string
+		Err error
+	}{{"open", r.OpenErr}, {"read", r.ReadErr}, {"close", r.CloseErr}} {
+		if e.Err != nil {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// ReadWhole opens a file once, reads it to EOF and closes it once, keeping
+// every real result.
+func ReadWhole(fsys modsnap.FS, path string) ReadResult {
 	f, err := fsys.Open(path)
 	if err != nil {
-		return nil, err
+		return ReadResult{OpenErr: err}
 	}
 	b, rerr := io.ReadAll(f)
 	cerr := f.Close()
-	if rerr != nil {
-		return nil, rerr
-	}
-	if cerr != nil {
-		return nil, fmt.Errorf("close: %w", cerr)
-	}
-	return b, nil
+	return ReadResult{Data: b, ReadErr: rerr, CloseErr: cerr, Closed: true}
 }
 
 // EvaluatePre is the A1-a guard: the analyser and <root>/VERSION are both

@@ -658,11 +658,29 @@ func (r *runner) admit(unit string) bool {
 }
 
 func (r *runner) markBudget(res *PackageResult) {
+	r.markBudgetKeeping(res, nil, nil)
+}
+
+// markBudgetKeeping is the early exit at a refused admission (Review 147
+// B-147-3): every error the package already observed (an import cycle, the
+// language version, a read, a parse error, a package clause, a constraint
+// line) is kept as the result of its check; only the checks that never ran
+// are marked "not evaluated: budget". The budget failure itself is the
+// report's separate Budget result and never replaces these.
+func (r *runner) markBudgetKeeping(res *PackageResult, own, header *judge.Acc) {
 	res.Depth = Skipped
-	res.Load = unevaluated(ReasonBudget)
+	if own != nil && own.Failed() {
+		res.Load = own.Result()
+	} else {
+		res.Load = unevaluated(ReasonBudget)
+	}
 	if applies(res.Kind) {
 		res.ImportSet = unevaluated(ReasonBudget)
-		res.Header = unevaluated(ReasonBudget)
+		if header != nil && header.Failed() {
+			res.Header = header.Result()
+		} else {
+			res.Header = unevaluated(ReasonBudget)
+		}
 	}
 	if res.Kind == ThirdParty {
 		res.Prefilter = PrefilterUnevaluated
@@ -676,7 +694,11 @@ func (r *runner) process(path string, cycle []string) {
 	p := r.byPath[path]
 	res := r.res[path]
 	if r.stopped || !r.admit(PackageUnit(path)) {
-		r.markBudget(res)
+		var observed judge.Acc
+		if cycle != nil { // found while ordering, before this admission
+			observed.Add(judge.Real(judge.J3, path, SiteOrder, KindCycle, "import cycle among: "+strings.Join(cycle, ", ")))
+		}
+		r.markBudgetKeeping(res, &observed, nil)
 		return
 	}
 
@@ -710,7 +732,7 @@ func (r *runner) process(path string, cycle []string) {
 		}
 		seen[name] = true
 		if !r.admit(FileUnit(path, name)) {
-			r.markBudget(res)
+			r.markBudgetKeeping(res, &own, &header)
 			return
 		}
 		src, err := r.in.Source(path, name)
