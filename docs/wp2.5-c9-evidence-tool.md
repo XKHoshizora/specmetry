@@ -335,7 +335,12 @@ Review 148 认定 B-147-2、B-147-3 在受审范围内关闭，N-147-1 ~ 3 完�
   - `job` 的 `seams`：命名的钩子点（work start、parent wait、R published 〈配置〉、R done、before done），以及核验器、目录的创建与删除。
   - `controls.Env` 的 `MkdirTemp`、`RemoveAll`。
   - `Begin` 设为真实的函数，只有本包的测试替换。修复之前的运行用的就是这些接缝，它们本身不改变行为。
-- **回归**（`internal/job/regress148_test.go` 与 `regress148b_test.go`；都经过 `RunDomains` → `Finish`）：
+- **回归**（`internal/job/regress148_test.go` 与 `regress148b_test.go`；都经过实际的 `RunDomains`）：
+  - 当时 26 项中调用 `Finish` 的有 19 项：`regress148_test.go` 的全部 15 项，以及 `regress148b_test.go` 的 `StuckVerificationIsPending`、`LateVerificationErrorHeldAfterFinish`、`AppendedAfterTheVerificationIsADefect`、`LC1AndWorkQualification`。
+  - 其余 7 项只检查工作任务的完成与 O、F、Held 以及核验与 LC-1 的发布状态，没有调用 `Finish`：`PublishedVerificationCoversEveryRecord`、`LateSuccessIsNotTimely`、`BrokenRecordFoundByTheWork`、`RcRefusedPreparationIsRecordedApart`、`RcRefusedCleanupKeepsTheHold`、`RcFailureIsNotARefusal`、`RcHealthyHoldsReleased`。
+  - 当时 `settle` 只释放阻塞并有界等待工作完成，不封口、不等待写者。所以没有调用 `Finish` 的测试没有验证封口、写者与诊断任务的终态、manifest 或退出状态；调用了 `Finish` 但在 `D` 走到期出口的测试也没有检查写者的终态。
+  - 这些测试在 §11 之后都以 `Finish` 作最终判定，并检查写者与诊断任务的终态；各项的实际收尾状态见 §11.1。
+  - **更正**（review-resolution §196，与 §10.2 同一口径）：本行原写“都经过 `RunDomains` → `Finish`”，超出了实际覆盖。
   - `TestB148RaStuckVerificationParentStillCloses`：核验卡住，时钟到 `W` 时 `RunDomains` 返回，`Finish` 在有界时间内返回非 3、4 的结论；核验器只被工作任务调用了一次。
   - `TestB148RaStuckVerificationExpiredParent`：核验卡住，`m.Run` 在 `D` 之后才返回，`Finish` 经到期出口（`PathExpiredAtMRun`）返回；`D` 及之后没有调用核验器。
   - `TestB148RaStuckVerificationIsPending`：快照时核验仍在运行，状态为 running，记为未决，结论为 2。
@@ -552,15 +557,15 @@ Review 149 的裁定：
 都经过实际的 `RunDomains`、作业的外层登记表与假时钟，夹具的文件调用经接缝计数，并可在调用生效之后阻塞或返回注入的错误。
 
 - **调用 `Finish` 的只有两项**：`TestB149MkdirTempReturnsAfterD`（父端在 `D` 经到期出口返回，结论非成功）与 `TestB149HealthyStepsAllDone`（结论 4、退出 0）。
-- **其余 9 项**（`regress149_test.go` 的 5 项与 `regress149b_test.go` 的 4 项）验证 `RunDomains`、工作任务的完成以及 O、F 与持有（Held）的状态，没有调用 `Finish`。
+- **其余 9 项**（`regress149_test.go` 的 5 项与 `regress149b_test.go` 的 4 项）验证 `RunDomains`、工作任务的完成以及 O、F 与持有（Held）的状态，没有调用 `Finish`。（§11 之后这 9 项也以 `Finish` 作最终判定，并检查写者与诊断任务的终态。）
 - **等待与收尾**：每个等待都有 10 秒的失败出口，阻塞由 `t.Cleanup` 释放。`settle` 只释放受控阻塞，并有界地等待工作任务发布完成（WorkDone）；它不封口记录、不等待写者结束。所以这 9 项没有验证封口、写者的终态、manifest、诊断任务的终态或退出状态。
 - 不启动 helper 子进程。
 
 > **更正**（review-resolution §195，按 Review 150 的 N-150-1）：本段原写“都经过 `RunDomains` → `Finish` 的实际接线……收尾有界地等待工作任务结束”，超出了实际覆盖，已按上文改写；下面 `regress149_test.go` 一行原写“断言按……持有与终判”，也一并改正。
 >
-> 另外，没有调用 `Finish` 的测试中，`Begin` 启动的内存记录写者在日志没有封口、也没有新的变化时，可能仍停在等待记录变化处。测试结束与夹具目录的清理都不表示这个进程内任务已经结束。这是尚未修复的测试生命周期不足（只涉及测试中的内存文件系统与进程内任务），不是真实文件句柄或子进程的泄漏；测试的收尾留作后续事项，N-150-1 的这一部分未关闭。
+> 另外，没有调用 `Finish` 的测试中，`Begin` 启动的内存记录写者在日志没有封口、也没有新的变化时，可能仍停在等待记录变化处。测试结束与夹具目录的清理都不表示这个进程内任务已经结束。这是尚未修复的测试生命周期不足（只涉及测试中的内存文件系统与进程内任务），不是真实文件句柄或子进程的泄漏；测试的收尾留作后续事项，N-150-1 的这一部分未关闭。（§196 之后在 §11 中处理，待独立复审。）
 >
-> §9.1 对 Review 148 回归的“都经过 `RunDomains` → `Finish`”同样偏宽：作业层的 26 项中有 7 项（都在 `regress148b_test.go`）没有调用 `Finish`，同样的写者收尾不足也适用于它们。本轮只在此与 §195 登记，没有改写 §9.1。
+> §9.1 对 Review 148 回归的“都经过 `RunDomains` → `Finish`”同样偏宽：作业层的 26 项中有 7 项（都在 `regress148b_test.go`）没有调用 `Finish`，同样的写者收尾不足也适用于它们。本轮只在此与 §195 登记，没有改写 §9.1。（§196 之后，§9.1 已按同一口径更正。）
 
 `internal/job/regress149_test.go`（修复之前可以运行；断言按调用次数、拒绝记录、真实结果、持有与变体的判定，不依赖步骤的名称；只有第 1、7 项另经 `Finish` 断言父端的出口与结论）：
 
@@ -636,6 +641,97 @@ Review 149 的裁定：
 - **合并**：负责人条件授权以 merge commit 合并 PR #56（review-resolution §195）。本次只把第一阶段的成果入库，不是整个工具的完成，也不是 WP2.5 的验收。
 - **N-150-1**（非阻塞，整项未关闭）：
   - 覆盖描述：已更正（§10.2）；
-  - 测试收尾：待处理。没有调用 `Finish` 的回归缺最终断言，也没有结束记录写者；修复留作后续事项。本轮没有修改工具的源码或测试。
+  - 测试收尾：待处理（§196 之后在 §11 中处理，待独立复审）。没有调用 `Finish` 的回归缺最终断言，也没有结束记录写者；修复留作后续事项。本轮没有修改工具的源码或测试。
 - **证据**：本轮是文档收尾，没有重新运行工具模块的测试；固定工具子树 `95d92292b7807d211eab6fdbe6f7cdd6c5ab32f5` 的证据沿用 §10.4。常规 CI 不运行工具模块。
 - **仍然不变**：E-10 (ii)、LE-5 ① 与 ②、N2 保持待决；真实调用者、伪工具、平台控制协议、LC-9 与正式取证都没有实现或运行，没有运行分支；没有宣布任何 G 项满足，没有批准精确例外；第三批的生产实施与 WP2.5 / M2 的验收都未授权。
+
+## 11. N-150-1 的处理：回归覆盖的记录与测试收尾（§196；已处理，待独立复审）
+
+PR #56 合并之后，负责人授权在独立分支 `test/wp2.5-c9-evidence-n150-1`（自 `cd44f67` 建立）上统一处理 N-150-1（review-resolution §196）：
+
+- 按与 §10.2 一致的口径更正 §9.1；
+- 先逐项核对 Review 148、149 的作业层回归；
+- 只修改相关的测试、必要的测试辅助函数与对应的文档。
+
+工具的实现、终判协议、依赖、workflow 与预算都不修改。N-150-1 记为“已处理，待独立复审”，不在本节关闭。
+
+### 11.1 逐项核对（动态审计）
+
+- **方法**：在仓库之外的导出副本（`758da73` 的工具模块，子树 `95d92292…`）里，给 `newJob148` 加一个临时探针，不提交。探针在每个测试的其他清理（释放阻塞、等待工作任务）之后运行，记录每个作业实例的以下状态：是否运行过收尾（`Finish`）、日志是否封口、到期锁存、工作任务的状态、写者与诊断任务的终态。
+- **日志**：`s196/logs/audit-probe.log`，12665 字节，SHA-256 `b049862583281c01520472c8c499baf1f1ca488a5f7d675eb86563674188d06c`。核对范围是作业包中 Review 148、149 的 37 项回归，共 49 个作业实例：`TestB148RbTimelyWorkParentLate` 有 10 个，`TestB148RbWorkDoneAtOrAfterW` 有 2 个，`TestB149RealFailureKeptApartFromRefusal` 有 3 个，其余各 1 个。
+
+修改之前的状态：
+
+| 情形 | 测试 | 结束时的状态 |
+|---|---|---|
+| 调用 `Finish`，日志封口 | 16 项（27 个实例）：`regress148_test.go` 的 `StuckVerificationParentStillCloses`、`LateVerificationSuccessDoesNotRestore`、`LateVerificationErrorIsConsumed`、`HealthyVerifiedOnceByTheWork`、`BrokenRecordBeforeTheVerification`、`AbandonedThenCompletedBeforeFinish`、`TimelyWorkParentLate`（10 个）、`WorkDoneAtOrAfterW`（2 个）、`CleanupBetweenWAndD`、`PrepareAndCleanupFailuresAreRecorded`、`HealthyPrepareAndCleanup`；`regress148b_test.go` 的 `StuckVerificationIsPending`、`LateVerificationErrorHeldAfterFinish`、`AppendedAfterTheVerificationIsADefect`、`LC1AndWorkQualification`；`regress149_test.go` 的 `HealthyStepsAllDone` | 写者 success/timely，诊断任务 complete-with-terminator/timely：已收尾 |
+| 调用 `Finish`，在 `D` 走到期出口（封口之前），写者已被 `D` 之后的记录唤醒 | 3 项：`RcLateWorkCreatesNoRoot`、`RcAnalysisReturnsAfterD`、`B149MkdirTempReturnsAfterD` | 写者 expired-incomplete/late，诊断任务没有登记：已收尾，但没有终态的断言 |
+| 调用 `Finish`，在 `D` 走到期出口（封口之前），之后没有新的记录 | 2 项：`RaExpiredParentDoesNotVerify`、`RaStuckVerificationExpiredParent` | **写者仍在等待日志的变化**，诊断任务没有登记 |
+| 没有调用 `Finish`，时钟在 `D`，写者已被 `D` 之后的记录唤醒 | 2 项：`RcRefusedPreparationIsRecordedApart`、`RcRefusedCleanupKeepsTheHold` | 写者 expired-incomplete/late：已收尾，但没有最终判定 |
+| 没有调用 `Finish`，日志没有封口，没有锁存 | 14 项（16 个实例）：`regress148b_test.go` 的 `PublishedVerificationCoversEveryRecord`、`LateSuccessIsNotTimely`、`BrokenRecordFoundByTheWork`、`FailureIsNotARefusal`、`HealthyHoldsReleased`；`regress149_test.go` 的 `MkdirAllCrossesW`、`WriteCrossesW`、`RemoveCrossesW`、`StepAtWIsRefusedCleanupAdmitted`、`RealFailureKeptApartFromRefusal`（3 个）；`regress149b_test.go` 的全部 4 项 | **写者仍在等待日志的变化**，诊断任务没有登记，没有最终判定 |
+
+- **结论**：
+  - 没有调用 `Finish` 的有 16 项：Review 148 的 7 项、Review 149 的 9 项。其中 2 项的写者已经结束，所以“没有调用 `Finish`”不等于泄漏。
+  - 调用了 `Finish` 的 2 项，写者仍在等待，所以“调用了 `Finish`”也不等于已收尾。
+  - 留在等待的只有记录写者（共 16 项、18 个实例）。每一个登记过的诊断任务都已结束。
+- **原因**：
+  - 写者在日志没有封口时只等日志的变化，不会因 `D` 自己醒来；在 `D` 之后的下一个决策点，它按既有规则走到期出口。
+  - 诊断任务只由收尾登记，并等写者的终态。
+  - 正式入口在 `Finish` 之后立即退出进程，这是设计中的边界；在测试中，进程不随每个测试结束。
+
+### 11.2 修改（`3a36222`，只改作业包的测试）
+
+- **`internal/job/tasks_test.go`**（新增）：
+  - `endTasks` 有界地结束一个作业的写者与诊断任务，并返回外层登记表的副本：
+    - 收尾从未运行（只会是失败出口）：运行一次 `Finish`，只为封口与收尾，不判定结果；
+    - 日志已封口：只等待；
+    - 封口之前走了到期出口（锁存已置）：在终判之后向日志追加一条唤醒项，写者在下一个决策点按既有规则走到期出口，不写入这一项。
+  - 它不会第二次调用 `Finish`，也不释放测试的任何阻塞。
+  - `wantTasks` 检查写者与诊断任务的终态；`finishWant` 是最终判定，检查结论、退出状态与出口。
+- **`settle`**：释放阻塞、有界等待工作任务之后，再调用 `endTasks`。失败出口同样经过它，不依赖测试进程的退出。
+- **最终判定**：原来没有调用 `Finish` 的 16 项，在原有的断言都完成之后，以 `finishWant` 补上最终判定。结论与出口按各自的场景独立写定：
+
+| 测试 | 结论与出口 |
+|---|---|
+| `PublishedVerificationCoversEveryRecord`、`HealthyHoldsReleased`、`StepOpsHealthy`、`LC2ChangeSteps` | 4，consumed |
+| `LateSuccessIsNotTimely` | 2（核验晚到），consumed |
+| `FailureIsNotARefusal` | 2（根目录的移除失败），consumed |
+| `BrokenRecordFoundByTheWork` | 1（来源缺陷），consumed |
+| `MkdirAllCrossesW`、`WriteCrossesW`、`RemoveCrossesW`、`StepAtWIsRefusedCleanupAdmitted`、`RealFailureKeptApartFromRefusal`（3 个实例）、`RefusedStepIsNamed`、`RemoveThenMkdirSteps` | 1（准备没有完成，变体不命中），consumed |
+| `RcRefusedPreparationIsRecordedApart`、`RcRefusedCleanupKeepsTheHold` | `m.Run` 在 `D` 返回：1，经到期出口（expired-at-m.Run） |
+
+- **终态的断言**：Review 148、149 的全部 37 项作业层回归都以 `wantTasks` 检查实际的终态：
+  - 封口的，写者 success/timely、诊断任务 complete-with-terminator/timely；
+  - 封口之前走到期出口的 7 项，写者 expired-incomplete/late、没有诊断任务。
+- **保持不变**：原有的事件顺序、`W`、`D`、失败与持有的断言都不变。
+  - 新的断言都加在原有断言之后。
+  - 阻塞仍由原来的步骤或清理释放，“父端先返回”的回归没有改为先释放。
+  - 原来已经调用 `Finish` 的测试不再调用。
+  - 没有 sleep、跳过或放宽的预期。
+- **修改之后的审计**：同一探针在修改之后的测试上运行。日志为 `s196/logs/audit-probe-after.log`，13001 字节，SHA-256 `83d2dee04dcee9863e32b3fbf86a17bbaefdc5b798991e1d02d68bed4e817f32`，被测的是提交之前工作区中的同一份修改。
+  - 49 个实例都运行过收尾，测试结束时写者与诊断任务都有终态。
+  - 42 个封口：success/timely 与 complete-with-terminator/timely。
+  - 7 个在封口之前到期：expired-incomplete/late，没有诊断任务。
+- **失败出口的探针**：在导出副本中另加一个临时测试（不提交），在 `Finish` 之前以 `t.Fatal` 离开。
+  - 日志：`s196/logs/failure-exit-probe.log`，779 字节，SHA-256 `5be5d55ace031831a9db140f61fc3d10d0b8d1d75b39a9db3205cc0c7e256456`。
+  - 结果：清理释放了被阻塞的核验，等到工作任务结束，运行一次收尾，写者与诊断任务都到达终态，没有挂起。这个测试按设计失败，退出 1。
+
+### 11.3 验证（提交 `3a36222`，工具模块子树 `d311efa4423ce294753eb7848799cf2ebd3f242d`；测试前后工作区都干净；环境与工具链同 §9.6）
+
+| 日志（草稿目录 `s196/logs/`） | 命令 | 结果 |
+|---|---|---|
+| `targeted-test.log`（4702 字节，SHA-256 `ddfa323b27cd3d09d432d218057df78635175df9e664f18191990f01530a1e07`） | `go test -count=1 -v -run 'B148\|B149' ./internal/job/` | 37 个通过，0 失败 |
+| `affected-package.log`（6163 字节，SHA-256 `5b1be3b14f3fa64b567d73ac9138c4f78f52dc9c295b95bb945dd2c371520188`） | `go test -count=1 -v ./internal/job/` | ok；55 个通过，0 失败 |
+| `full-test.log`（46995 字节，SHA-256 `91eb6f884f411c61a84db24afe03bcac3f2fedcb3399ea6e529c2c87bf70b614`） | `go test -count=1 -v ./...` | 11 个有测试的包全部 ok；顶层 198 个、子测试 271 个通过，0 失败；跳过 1 个（`TestTakeNegatives/symbolic_link`） |
+| `regress147-149-x20.log`（122284 字节，SHA-256 `9103210885c3739337a42546802ef47ebb7f9a9bbfc33fe4112fc31788f66cc8`） | `go test -count=20 -v -run 'B147\|B148\|B149\|SemanticSwap\|^TestWriterExpiresMidway$'`，只在 job、chain、controls、collect 四个包 | 61 个测试各通过 20 次（1220 个 PASS 行），0 失败 |
+| `static.log`（2699 字节，SHA-256 `25a46df11c700c8733241c545f73fe5bee6f4a9ff39b59656a51de9c1fe4d248`） | `gofmt -l`、vet、带标签的 vet、六种交叉 vet、正式入口只编译、`mod verify`、导入闭包 | 都成功；第三方导入闭包仍只有 `golang.org/x/mod/sumdb/dirhash` |
+
+- 只改了作业包的测试，`controls`、`chain`、`collect` 没有改动，它们由全量运行覆盖。
+- 重复 20 次只是适量的重复，不是竞态检测，也不是全调度覆盖。
+- 唤醒项只在测试中、在终判之后追加，所以写者到期出口的动态证据是测试中构造的。
+- `s192` ~ `s194` 的旧日志原样保留。
+
+### 11.4 没有覆盖的部分
+
+- 本轮只核对与修改 Review 148、149 的作业层回归。Review 147 的作业层回归（`regress147_test.go`、`regress147b_test.go`）与第一阶段的 `job_test.go` 没有在本轮核对它们的任务收尾，不据此说它们已经收尾或没有收尾。
+- 工具的实现与正式入口的行为不变：正式入口在 `Finish` 之后退出进程；封口之前到期时，写者在进程结束之前一直等待日志的变化，这是既有设计。
