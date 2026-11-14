@@ -1,6 +1,6 @@
 # WP2.5 第三批：C-9 限定取证工具第一阶段的实现记录
 
-> 状态：**第一阶段实现记录（test-only 的独立模块；不合并，不进行正式取证）**（2026-11-14，review-resolution §190）。待独立的实现审查。
+> 状态：**第一阶段实现记录（test-only 的独立模块；不合并，不进行正式取证）**（2026-11-14，review-resolution §190）。审查 147 为技术 NO-GO（B-147-1 ~ 4）；定向修复在 PR #56 内进行（§191），待修复之后由 Review 148 复审。
 >
 > - 依据：[限定取证计划](wp2.5-c9-limited-evidence-plan.md)（PR #55 合并为 `9137279`），[G-4 方法记录](wp2.5-c9-exception-identity-method.md)，[实施计划](wp2.5-implementation-plan.md) §12.9 ~ §12.14，[决策稿](wp2.5-c9-dependency-exception-draft.md) §2.3、§2.7。
 > - 本文写定计划 §8.1 要求在实现中固定、在固定实现的审查中核对的事项，并逐项列出没有实现、没有执行与依赖 E-10 (ii) 的部分。
