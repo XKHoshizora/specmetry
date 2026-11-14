@@ -81,6 +81,16 @@ const (
 // W), its unfinished unit, its inputs and its late results stay held by the
 // job until the process ends, and nothing it publishes later can restore
 // validity.
+//
+// The necessary work (Review 148 R-b) is everything the task publishes
+// before done, in this order: every control variant's F record (with its
+// outer preparation and cleanup), every configuration's R result and checks
+// record, LC-1, and the source-chain verification. Done is published last,
+// so a timely done (before W, the parent still waiting) means every one of
+// them was published before W. The closeout consumes the task's completion
+// qualification as a whole: not done, abandoned, or done at or after W each
+// keep the job from a valid conclusion, whatever is published later; each
+// publication also keeps its own qualification.
 type WorkRecord struct {
 	State       string
 	Registered  time.Time
@@ -101,6 +111,54 @@ type FRecord struct {
 	Outcome controls.Outcome
 	At      time.Time
 	Timely  bool
+}
+
+// LC1Record is LC-1 as the job holds it, with the qualification of its
+// publication (Review 148 R-b): a hit published at or after W, or after the
+// parent stopped waiting, is not a timely hit.
+type LC1Record struct {
+	Variant verdict.Variant
+	At      time.Time
+	Timely  bool
+}
+
+// The verification states.
+const (
+	ProvRegistered = "registered"
+	ProvRunning    = "running"
+	ProvDone       = "done"
+	ProvRefused    = "not admitted"
+)
+
+// ProvRecord is the published source-chain verification (Review 148 R-a;
+// Review 147 B-147-4). The work task runs it as its last unit, admitted only
+// before W, over every record item the job holds at that moment; the
+// parent's closeout only consumes this record. Covered says which items
+// were verified: the first Covered items of the job's recorder (items are
+// only appended), the last of them being Last. An item appended after the
+// verification is not covered by it, and the old result is never reused for
+// it.
+type ProvRecord struct {
+	State      string
+	Registered time.Time
+	Started    time.Time
+	At         time.Time // when the result was published
+	Covered    int
+	Last       collect.Ref
+	Problems   []string
+	Timely     bool
+}
+
+// HeldDir is a directory the outer layer created (the fixture root or a
+// fixture); the job holds it until a cleanup confirms its removal (Review
+// 148 R-c). State is "held", "cleanup started", "removed", "cleanup failed:
+// <error>" or "cleanup not admitted: <reason>".
+type HeldDir struct {
+	Name    string
+	Dir     string
+	At      time.Time
+	State   string
+	Removed bool
 }
 
 // RRecord is one configuration's result as the R domain holds it, with the
@@ -131,9 +189,31 @@ type Job struct {
 	rRecords  []RRecord
 	defects   []string
 	rMissing  string
-	lc1       *verdict.Variant
+	lc1       *LC1Record
+	prov      *ProvRecord
+	held      []HeldDir
 	budget    *collect.Budget
 	finalized bool
+
+	s seams
+}
+
+// seams are the job's test seams. Begin sets the real ones; only this
+// package's tests replace them, after Begin and before RunDomains.
+type seams struct {
+	// hook runs at the named points of the work task and of the parent's
+	// wait ("work start", "parent wait", "R published <cfg>", "R done",
+	// "before done"); a test may block in it to order events.
+	hook      func(point string)
+	verify    func([]collect.Item) []string
+	mkdirTemp func(dir, pattern string) (string, error)
+	removeAll func(path string) error
+}
+
+func (j *Job) at(point string) {
+	if j.s.hook != nil {
+		j.s.hook(point)
+	}
 }
 
 // Begin takes D, checks T2 (LC-10), and registers and starts the writer,
@@ -146,6 +226,7 @@ func Begin(cfg Config) (*Job, error) {
 		return nil, errors.New("job: no records directory")
 	}
 	j := &Job{cfg: cfg, changed: make(chan struct{})}
+	j.s = seams{verify: collect.VerifyProvenance, mkdirTemp: os.MkdirTemp, removeAll: os.RemoveAll}
 	j.W, j.D = chain.Deadlines(cfg.Start)
 	j.outer = chain.NewOuter(cfg.Clock, j.D)
 	log, err := chain.NewLog(FileRaw, FileDerived, FileControls, FileCloseout)
@@ -221,6 +302,7 @@ func (j *Job) RunDomains() {
 
 	go j.runWork(w)
 
+	j.at("parent wait")
 	wch, stop := j.cfg.Clock.Timer(j.W)
 	defer stop()
 	select {
@@ -236,6 +318,7 @@ func (j *Job) RunDomains() {
 }
 
 func (j *Job) runWork(w *WorkRecord) {
+	j.at("work start")
 	j.mu.Lock()
 	w.State, w.Started = WorkRunning, j.cfg.Clock.Now()
 	j.publish()
@@ -243,7 +326,10 @@ func (j *Job) runWork(w *WorkRecord) {
 
 	j.runControls(w)
 	j.runR(w)
+	j.at("R done")
+	j.verifyRecords(w)
 
+	j.at("before done")
 	j.mu.Lock()
 	now := j.cfg.Clock.Now()
 	w.State, w.Done, w.Current = WorkDone, now, ""
@@ -268,21 +354,83 @@ func (j *Job) timelyLocked(now time.Time) bool {
 	return now.Before(j.W) && (j.work == nil || !j.work.Abandoned)
 }
 
-type outerAdapter struct{ o *chain.Outer }
+// outerAdapter is the F domain's outer layer on the job's outer registry
+// (Review 148 R-c). Registration is not admission: each preparation and
+// each cleanup is decided by the registry right before it starts, a
+// preparation against the work deadline W and a cleanup against D; a
+// refusal is registered as refused (never as a success) and nothing starts.
+// Every directory the outer layer created is held by the job until a
+// cleanup confirms its removal; a refused or failed cleanup leaves it held.
+// An admitted operation's real result is published when it returns, also
+// when that is late.
+type outerAdapter struct{ j *Job }
 
-func (a outerAdapter) Begin(name string) func(error) {
-	op := a.o.RegisterOp(name)
+func (a outerAdapter) Prepare(name string) (func(error), bool) {
+	op, ok := a.j.outer.AdmitOp(name, a.j.W)
+	if !ok {
+		return nil, false
+	}
+	return opDone(op), true
+}
+
+func (a outerAdapter) Hold(name, dir string) {
+	a.j.mu.Lock()
+	defer a.j.mu.Unlock()
+	a.j.held = append(a.j.held, HeldDir{Name: name, Dir: dir, At: a.j.cfg.Clock.Now(), State: "held"})
+	a.j.publish()
+}
+
+func (a outerAdapter) Cleanup(name, dir string) (func(error), bool) {
+	op, ok := a.j.outer.AdmitOp("cleanup "+name, a.j.D)
+	if !ok {
+		a.j.setHeld(dir, "cleanup not admitted: D has passed", false)
+		return nil, false
+	}
+	a.j.setHeld(dir, "cleanup started", false)
+	done := opDone(op)
+	return func(err error) {
+		done(err)
+		if err != nil {
+			a.j.setHeld(dir, "cleanup failed: "+err.Error(), false)
+			return
+		}
+		a.j.setHeld(dir, "removed", true)
+	}, true
+}
+
+func opDone(op *chain.Op) func(error) {
 	var once sync.Once
 	return func(err error) { once.Do(func() { op.Done(err) }) }
 }
 
+// setHeld updates a held directory's state; only a confirmed removal
+// releases it.
+func (j *Job) setHeld(dir, state string, removed bool) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	for i := range j.held {
+		if j.held[i].Dir == dir && !j.held[i].Removed {
+			j.held[i].State, j.held[i].Removed = state, removed
+		}
+	}
+	j.publish()
+}
+
 func (j *Job) runControls(w *WorkRecord) {
 	root := j.cfg.FixtureRoot
-	oa := outerAdapter{j.outer}
+	oa := outerAdapter{j}
 	if root == "" {
-		done := oa.Begin("prepare fixture root")
-		dir, err := os.MkdirTemp("", "c9evidence-fixtures-")
-		done(err)
+		var dir string
+		var err error
+		if done, ok := oa.Prepare("prepare fixture root"); ok {
+			dir, err = j.s.mkdirTemp("", "c9evidence-fixtures-")
+			if err == nil {
+				oa.Hold("fixture root", dir)
+			}
+			done(err)
+		} else {
+			err = fmt.Errorf("outer preparation of the fixture root %w: the work deadline W has passed", controls.ErrNotAdmitted)
+		}
 		if err != nil {
 			for _, v := range j.cfg.Controls {
 				o := controls.Outcome{PrepErr: err}
@@ -291,12 +439,16 @@ func (j *Job) runControls(w *WorkRecord) {
 			return
 		}
 		root = dir
+		// The root's cleanup is admitted against D when the controls are
+		// done, like any other cleanup: a deferred call does not bypass the
+		// deadline.
 		defer func() {
-			done := oa.Begin("cleanup fixture root")
-			done(os.RemoveAll(dir))
+			if done, ok := oa.Cleanup("fixture root", dir); ok {
+				done(j.s.removeAll(dir))
+			}
 		}()
 	}
-	env := &controls.Env{GOOS: j.cfg.GOOS, TempRoot: root, Outer: oa, TypeCheck: j.cfg.TypeCheck}
+	env := &controls.Env{GOOS: j.cfg.GOOS, TempRoot: root, Outer: oa, TypeCheck: j.cfg.TypeCheck, MkdirTemp: j.s.mkdirTemp, RemoveAll: j.s.removeAll}
 	for _, v := range j.cfg.Controls {
 		applicable, _ := v.Applies(j.cfg.GOOS)
 		var o controls.Outcome
@@ -357,13 +509,51 @@ func (j *Job) runR(w *WorkRecord) {
 		j.rRecords = append(j.rRecords, RRecord{Result: res, Refused: refused, At: now, Timely: timely})
 		j.publish()
 		j.mu.Unlock()
+		j.at("R published " + c.String())
 		j.rec.Derived(c.String()+"/checks", "A B S K", res.Refs.All(), map[string]any{"checks": res.Checks.Snapshot(), "entries": res.Checks.Entries(),
 			"defects": res.Checks.Defects(), "refused": refused, "modules": res.Modules, "consistent": res.Consistent, "differences": res.Diff,
 			"published_at": now.Format(time.RFC3339Nano), "timely": timely})
 	}
 	j.mu.Lock()
-	v := lc1(j.rRecords)
-	j.lc1 = &v
+	now := j.cfg.Clock.Now()
+	j.lc1 = &LC1Record{Variant: lc1(j.rRecords), At: now, Timely: j.timelyLocked(now)}
+	j.publish()
+	j.mu.Unlock()
+}
+
+// verifyRecords is the work task's last unit (Review 148 R-a): the
+// source-chain verification of every record item the job holds, admitted
+// only before W. It is registered before it is admitted, runs outside every
+// lock, and publishes its result, its coverage and its qualification under
+// the job's lock; the record is held by the job until the process ends, so
+// a late result (a real error included) is kept. A refusal is published as
+// such; nothing is skipped silently.
+func (j *Job) verifyRecords(w *WorkRecord) {
+	j.mu.Lock()
+	p := &ProvRecord{State: ProvRegistered, Registered: j.cfg.Clock.Now()}
+	j.prov = p
+	j.publish()
+	j.mu.Unlock()
+	if !j.budget.AdmitUnit("source-chain verification") {
+		j.mu.Lock()
+		p.State, p.At = ProvRefused, j.cfg.Clock.Now()
+		j.publish()
+		j.mu.Unlock()
+		return
+	}
+	j.begin(w, "source-chain verification")
+	items := j.rec.Items()
+	j.mu.Lock()
+	p.State, p.Started = ProvRunning, j.cfg.Clock.Now()
+	j.publish()
+	j.mu.Unlock()
+	problems := j.s.verify(items)
+	j.mu.Lock()
+	now := j.cfg.Clock.Now()
+	p.State, p.At, p.Covered, p.Problems, p.Timely = ProvDone, now, len(items), problems, j.timelyLocked(now)
+	if len(items) > 0 {
+		p.Last = items[len(items)-1].Ref
+	}
 	j.publish()
 	j.mu.Unlock()
 }
@@ -411,16 +601,28 @@ type State struct {
 	Work     *WorkRecord
 	FRecords []FRecord
 	RRecords []RRecord
+	LC1      *LC1Record
+	Prov     *ProvRecord
+	Held     []HeldDir
 }
 
 // Snapshot returns a copy of the held state.
 func (j *Job) Snapshot() State {
 	j.mu.Lock()
 	defer j.mu.Unlock()
-	s := State{FRecords: append([]FRecord(nil), j.fRecords...), RRecords: append([]RRecord(nil), j.rRecords...)}
+	s := State{FRecords: append([]FRecord(nil), j.fRecords...), RRecords: append([]RRecord(nil), j.rRecords...), Held: append([]HeldDir(nil), j.held...)}
 	if j.work != nil {
 		w := *j.work
 		s.Work = &w
+	}
+	if j.lc1 != nil {
+		l := *j.lc1
+		s.LC1 = &l
+	}
+	if j.prov != nil {
+		p := *j.prov
+		p.Problems = append([]string(nil), p.Problems...)
+		s.Prov = &p
 	}
 	return s
 }
@@ -440,26 +642,62 @@ func (j *Job) WorkDone() <-chan struct{} {
 type state struct {
 	in      verdict.Inputs
 	pending []string
+	held    []HeldDir
+	summary map[string]any // the work task's and the verification's published state, for the closeout record
 }
 
+// copyState copies the published state under the job's lock. It only reads
+// what the work task published (Review 148 R-a): it does not hash, decode
+// or walk the record items, and it starts no analysis, so the expiry exits
+// can call it after D.
 func (j *Job) copyState(mRunCode int) state {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	in := verdict.Inputs{T2OK: j.t2ok, MRunCode: mRunCode, Defects: append([]string(nil), j.defects...)}
 	in.Defects = append(in.Defects, j.rec.Errors()...)
-	// The R records' source chain must resolve (Review 147 B-147-4): a
-	// missing or wrong association is a defect, whatever the manifest says.
-	for _, p := range collect.VerifyProvenance(j.rec.Items()) {
-		in.Defects = append(in.Defects, "provenance: "+p)
-	}
 	var pending []string
+	items := j.rec.Len()
+	summary := map[string]any{"record_items": items}
+	// The source chain (Review 147 B-147-4) as the work task's verification
+	// published it (Review 148 R-a). Its real problems are defects whenever
+	// they were published; a verification not run, refused, unfinished or
+	// late gives no valid conclusion; items appended after it are not
+	// covered, and the old result is not reused for them.
+	switch p := j.prov; {
+	case p == nil:
+		pending = append(pending, "the source-chain verification is not registered")
+	default:
+		summary["verification"] = map[string]any{"state": p.State, "covered": p.Covered, "last": p.Last, "problems": len(p.Problems),
+			"published_at": p.At.Format(time.RFC3339Nano), "timely": p.Timely}
+		for _, x := range p.Problems {
+			in.Defects = append(in.Defects, "provenance: "+x)
+		}
+		switch {
+		case p.State != ProvDone:
+			pending = append(pending, "the source-chain verification is "+p.State)
+		case !p.Timely:
+			pending = append(pending, "the source-chain verification published at or after W ("+p.At.Format(time.RFC3339Nano)+")")
+		}
+		if p.State == ProvDone && items != p.Covered {
+			in.Defects = append(in.Defects, fmt.Sprintf("provenance: %d record items were appended after the source-chain verification, which covered %d", items-p.Covered, p.Covered))
+		}
+	}
 	current := ""
-	if w := j.work; w != nil && w.State != WorkDone {
-		current = w.Current
-		if w.Abandoned {
+	if w := j.work; w != nil {
+		summary["work"] = map[string]any{"state": w.State, "timely": w.Timely, "abandoned": w.Abandoned}
+		// The work task's completion qualification (Review 148 R-b): an
+		// established abandonment or late completion stays after done.
+		switch {
+		case w.State != WorkDone && w.Abandoned:
+			current = w.Current
 			pending = append(pending, "the domains' work task did not finish before W (the parent stopped waiting; unit in progress: "+w.Current+")")
-		} else {
+		case w.State != WorkDone:
+			current = w.Current
 			pending = append(pending, "the domains' work task is not finished (unit in progress: "+w.Current+")")
+		case w.Abandoned:
+			pending = append(pending, "the domains' work task finished at "+w.Done.Format(time.RFC3339Nano)+", after the parent stopped waiting at "+w.AbandonedAt.Format(time.RFC3339Nano)+": a later completion does not restore validity")
+		case !w.Timely:
+			pending = append(pending, "the domains' work task finished at or after W ("+w.Done.Format(time.RFC3339Nano)+")")
 		}
 	}
 	judged := map[string]bool{}
@@ -484,8 +722,12 @@ func (j *Job) copyState(mRunCode int) state {
 		// An applicable variant that never ran is a miss (plan §5.1).
 		in.Variants = append(in.Variants, controls.Judge(v, j.cfg.GOOS, controls.Outcome{NotExecuted: "the work task did not run it"}, false))
 	}
-	if j.lc1 != nil {
-		in.Variants = append(in.Variants, *j.lc1)
+	if l := j.lc1; l != nil {
+		v := l.Variant
+		if !l.Timely && v.Judgement == verdict.Hit {
+			v.Judgement, v.Reasons = verdict.Pending, []string{"published at or after W: a late hit is not a hit"}
+		}
+		in.Variants = append(in.Variants, v)
 	} else if j.work != nil && j.cfg.R != "" {
 		in.Variants = append(in.Variants, verdict.Variant{Control: "LC-1", Variant: "Hash1 positive control on R", Judgement: verdict.Pending, Reasons: []string{"R did not finish"}})
 	}
@@ -514,7 +756,7 @@ func (j *Job) copyState(mRunCode int) state {
 		}
 		in.R = append(in.R, rc)
 	}
-	return state{in: in, pending: pending}
+	return state{in: in, pending: pending, held: append([]HeldDir(nil), j.held...), summary: summary}
 }
 
 // Finish runs the parent's closeout after m.Run returned (plan §6.4 steps
@@ -540,13 +782,21 @@ func (j *Job) Finish(mRunCode int) chain.Final {
 				switch op.State {
 				case chain.OpPending:
 					in.OPending = append(in.OPending, op.Name)
-				case chain.OpFailed, chain.OpUnknown:
+				case chain.OpFailed, chain.OpUnknown, chain.OpRefused:
 					in.OFailures = append(in.OFailures, fmt.Sprintf("%s: %s %s", op.Name, op.State, opDetail(op)))
+				}
+			}
+			// A directory the outer layer created and no cleanup confirmed
+			// removed stays the job's responsibility (Review 148 R-c).
+			for _, h := range p.Copied.held {
+				if !h.Removed {
+					in.OPending = append(in.OPending, fmt.Sprintf("%s directory %s not confirmed removed: %s", h.Name, h.Dir, h.State))
 				}
 			}
 			in.OPending = append(in.OPending, p.Copied.pending...)
 			c, reasons := verdict.Decide(in)
-			line := mustLine(map[string]any{"provisional": int(c), "name": c.String(), "reasons": reasons, "all_terminal": p.AllTerminal, "m.Run": p.MRunCode})
+			line := mustLine(map[string]any{"provisional": int(c), "name": c.String(), "reasons": reasons, "all_terminal": p.AllTerminal, "m.Run": p.MRunCode,
+				"published": p.Copied.summary})
 			var fails, pend []string
 			for _, r := range reasons {
 				if strings.Contains(r, "pending") {
@@ -561,7 +811,7 @@ func (j *Job) Finish(mRunCode int) chain.Final {
 		Level1: func(o chain.OuterSnapshot) bool {
 			s := j.copyState(mRunCode)
 			for _, op := range o.Ops {
-				if op.State == chain.OpFailed || op.State == chain.OpUnknown {
+				if op.State == chain.OpFailed || op.State == chain.OpUnknown || op.State == chain.OpRefused {
 					s.in.OFailures = append(s.in.OFailures, op.Name)
 				}
 			}

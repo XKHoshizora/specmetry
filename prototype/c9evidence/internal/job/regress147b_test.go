@@ -245,6 +245,11 @@ func TestB1474FRecordsKeepInstances(t *testing.T) {
 }
 
 // A broken source chain makes the job invalid even with complete files.
+// Since Review 148 R-a the work task verifies the chain as its last unit, so
+// this record, appended after that verification, is not covered by it: the
+// closeout reports it as appended after the verification (a defect) and
+// never reuses the earlier success. A broken record the verification itself
+// finds is TestB148RaBrokenRecordFoundByTheWork.
 func TestB1474BrokenProvenanceIsInvalid(t *testing.T) {
 	cfg, _ := newConfig(t, controlsWithout(t, "LC-9"))
 	j, err := Begin(cfg)

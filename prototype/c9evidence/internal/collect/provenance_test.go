@@ -9,11 +9,23 @@ import (
 // change the parents of a derived item by name before it is appended.
 func chainItems(t *testing.T, mutate func(name string, parents []Ref) []Ref) []Item {
 	t.Helper()
+	var m func(string, []Ref, map[string]Ref) []Ref
+	if mutate != nil {
+		m = func(name string, parents []Ref, _ map[string]Ref) []Ref { return mutate(name, parents) }
+	}
+	return chainItemsWith(t, m)
+}
+
+// chainItemsWith is chainItems whose mutate also sees the references of the
+// items appended so far, so it can name a real earlier record with its
+// correct SHA-256.
+func chainItemsWith(t *testing.T, mutate func(name string, parents []Ref, refs map[string]Ref) []Ref) []Item {
+	t.Helper()
 	var items []Item
 	refs := map[string]Ref{}
 	add := func(file, name string, parents []Ref) {
 		if mutate != nil && file == "derived" {
-			parents = mutate(name, parents)
+			parents = mutate(name, parents, refs)
 		}
 		it, ref, err := Line(file, name, "step", parents, map[string]string{"x": name})
 		if err != nil {
@@ -96,5 +108,40 @@ func TestVerifyProvenanceRejects(t *testing.T) {
 	items[0].Line = []byte(`{"name":"tampered"}` + "\n")
 	if p := VerifyProvenance(items); len(p) == 0 {
 		t.Error("a line that does not match its reference must be reported")
+	}
+}
+
+// Review 148 (non-blocking): every digest is correct and only the semantic
+// parent is swapped for a real earlier record. The verifier still rejects
+// the wrong call and the other configuration's record, and reports nothing
+// about digests or order.
+func TestVerifyProvenanceRejectsASemanticSwap(t *testing.T) {
+	c := "linux/amd64/"
+	cases := []struct {
+		name   string
+		mutate func(string, []Ref, map[string]Ref) []Ref
+		want   []string
+	}{
+		{"the closure names the second call", func(n string, p []Ref, refs map[string]Ref) []Ref {
+			if n == c+"closure" {
+				return []Ref{refs[c+"call2-context"]}
+			}
+			return p
+		}, []string{c + "closure: required parent " + c + "call3-list is missing"}},
+		{"the consumption names another configuration's I-4", func(n string, p []Ref, refs map[string]Ref) []Ref {
+			if n == c+"consumption" {
+				return []Ref{refs[c+"call3-list"], refs["linux/arm64/I-4/example.com/q"]}
+			}
+			return p
+		}, []string{
+			c + "consumption: parent linux/arm64/I-4/example.com/q belongs to another configuration",
+			c + "consumption: required parent " + c + "I-4/example.com/q is missing",
+		}},
+	}
+	for _, tc := range cases {
+		got := VerifyProvenance(chainItemsWith(t, tc.mutate))
+		if g, w := strings.Join(got, "\n"), strings.Join(tc.want, "\n"); g != w {
+			t.Errorf("%s: problems\n%s\nwant exactly\n%s", tc.name, g, w)
+		}
 	}
 }

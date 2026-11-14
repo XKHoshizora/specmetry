@@ -61,9 +61,7 @@ func lc2(name string, mutate func(dir string) error, want []string) Variant {
 		Run: func(e *Env) Outcome {
 			fx, err := prepare(e, "LC-2 "+name, lc2Base)
 			if err == nil && mutate != nil {
-				done := e.Outer.Begin("prepare LC-2 " + name + " change")
-				err = mutate(fx.dir)
-				done(err)
+				err = change(e, "prepare LC-2 "+name+" change", func() error { return mutate(fx.dir) })
 			}
 			if err != nil {
 				var cerr error
@@ -106,7 +104,7 @@ var lc3Base = map[string]string{
 
 // lc3 runs I-4 on the fixture (it must hold), applies the change, and then
 // one controlled read as the tested instance with the check I-5.
-func lc3(name, rel string, change func(dir string) error, newInject func() modsnap.Injector, want []string) Variant {
+func lc3(name, rel string, modify func(dir string) error, newInject func() modsnap.Injector, want []string) Variant {
 	return Variant{
 		Control: "LC-3", Name: name, Applies: always, MustEnter: []string{"I-5"}, Want: want,
 		Run: func(e *Env) Outcome {
@@ -118,11 +116,8 @@ func lc3(name, rel string, change func(dir string) error, newInject func() modsn
 			if !s.Holds() {
 				return Outcome{PrepErr: errors.New("the LC-3 fixture's I-4 does not hold"), CleanupErr: fx.cleanup()}
 			}
-			if change != nil {
-				done := e.Outer.Begin("prepare LC-3 " + name + " change")
-				err := change(fx.dir)
-				done(err)
-				if err != nil {
+			if modify != nil {
+				if err := change(e, "prepare LC-3 "+name+" change", func() error { return modify(fx.dir) }); err != nil {
 					return Outcome{PrepErr: err, CleanupErr: fx.cleanup()}
 				}
 			}

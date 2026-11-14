@@ -80,6 +80,14 @@ func (m *MemRecorder) add(file, name, step string, parents []Ref, v any) Ref {
 	return ref
 }
 
+// Len returns the number of items so far. Items are only appended, so the
+// first Len items never change.
+func (m *MemRecorder) Len() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.items)
+}
+
 // Items returns the items so far.
 func (m *MemRecorder) Items() []Item {
 	m.mu.Lock()

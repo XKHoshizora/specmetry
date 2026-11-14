@@ -7,6 +7,7 @@
 package controls
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -19,12 +20,29 @@ import (
 	"github.com/XKHoshizora/specmetry/prototype/c9evidence/internal/verdict"
 )
 
-// Outer registers the outer layer's own operations (preparation and
-// cleanup) in the O domain: Begin registers one before it runs, and the
-// returned func publishes its result.
+// Outer is the outer layer's own operations (preparation and cleanup) in
+// the O domain (Review 148 R-c): registration is not admission. Prepare and
+// Cleanup decide, right before the operation starts, whether it may start:
+// a preparation only before the work deadline W, a cleanup only before D.
+// When admitted, the operation is registered and done publishes its real
+// result (also when it comes late). When refused (ok false), the refusal is
+// recorded as such, never as a success or as the operation's failure, and
+// nothing may start. Hold hands the outer layer a directory it created; the
+// outer layer holds it until a cleanup confirms its removal.
 type Outer interface {
-	Begin(name string) (done func(err error))
+	Prepare(name string) (done func(err error), ok bool)
+	Hold(name, dir string)
+	Cleanup(name, dir string) (done func(err error), ok bool)
 }
+
+// ErrNotAdmitted is the result of an outer operation that was not admitted:
+// it never started.
+var ErrNotAdmitted = errors.New("not admitted")
+
+var (
+	errPrepareNotAdmitted = fmt.Errorf("outer preparation %w: the work deadline W has passed", ErrNotAdmitted)
+	errCleanupNotAdmitted = fmt.Errorf("outer cleanup %w: D has passed", ErrNotAdmitted)
+)
 
 // Env is what every variant gets.
 type Env struct {
@@ -33,6 +51,24 @@ type Env struct {
 	Outer    Outer
 	// TypeCheck is the tool's type checker, run by LC-5 and LC-7.
 	TypeCheck collect.TypeChecker
+	// MkdirTemp and RemoveAll are the outer layer's directory operations
+	// (nil: os.MkdirTemp and os.RemoveAll); tests replace them.
+	MkdirTemp func(dir, pattern string) (string, error)
+	RemoveAll func(path string) error
+}
+
+func (e *Env) mkdirTemp(dir, pattern string) (string, error) {
+	if e.MkdirTemp != nil {
+		return e.MkdirTemp(dir, pattern)
+	}
+	return os.MkdirTemp(dir, pattern)
+}
+
+func (e *Env) removeAll(path string) error {
+	if e.RemoveAll != nil {
+		return e.RemoveAll(path)
+	}
+	return os.RemoveAll(path)
 }
 
 // Outcome is one tested instance's result as canonical lines, plus the
@@ -126,7 +162,11 @@ func Judge(v Variant, goos string, o Outcome, ran bool) verdict.Variant {
 		res.Judgement, res.Reasons = verdict.Miss, []string{"applicable but not executed: " + o.NotExecuted}
 		return res
 	case o.PrepErr != nil:
-		res.Judgement, res.Reasons = verdict.Miss, []string{"outer preparation failed: " + o.PrepErr.Error()}
+		why := "outer preparation failed: " + o.PrepErr.Error()
+		if errors.Is(o.PrepErr, ErrNotAdmitted) {
+			why = o.PrepErr.Error()
+		}
+		res.Judgement, res.Reasons = verdict.Miss, []string{why}
 		return res
 	case !o.Terminal:
 		res.Judgement, res.Reasons = verdict.Pending, []string{"tested instance not terminal"}
@@ -151,7 +191,11 @@ func Judge(v Variant, goos string, o Outcome, ran bool) verdict.Variant {
 		return res
 	}
 	if o.CleanupErr != nil {
-		res.Judgement, res.Reasons = verdict.Pending, []string{"outer cleanup failed or unknown: " + o.CleanupErr.Error()}
+		why := "outer cleanup failed or unknown: " + o.CleanupErr.Error()
+		if errors.Is(o.CleanupErr, ErrNotAdmitted) {
+			why = o.CleanupErr.Error()
+		}
+		res.Judgement, res.Reasons = verdict.Pending, []string{why}
 		return res
 	}
 	res.Judgement = verdict.Hit
@@ -215,11 +259,18 @@ type fixture struct {
 }
 
 // prepare creates a fixture directory with files (slash paths), as one
-// registered outer operation.
+// admitted outer operation. A refused preparation creates nothing and
+// returns an error that wraps ErrNotAdmitted. A created directory is held by
+// the outer layer from the moment it exists, also when writing its files
+// fails afterwards.
 func prepare(e *Env, name string, files map[string]string) (*fixture, error) {
-	done := e.Outer.Begin("prepare " + name)
-	dir, err := os.MkdirTemp(e.TempRoot, "fx-")
+	done, ok := e.Outer.Prepare("prepare " + name)
+	if !ok {
+		return nil, errPrepareNotAdmitted
+	}
+	dir, err := e.mkdirTemp(e.TempRoot, "fx-")
 	if err == nil {
+		e.Outer.Hold(name, dir)
 		err = writeFiles(dir, files)
 	}
 	done(err)
@@ -227,6 +278,18 @@ func prepare(e *Env, name string, files map[string]string) (*fixture, error) {
 		return nil, err
 	}
 	return &fixture{dir: dir, e: e, name: name}, nil
+}
+
+// change runs one preparation step on an existing fixture, as one admitted
+// outer operation.
+func change(e *Env, name string, step func() error) error {
+	done, ok := e.Outer.Prepare(name)
+	if !ok {
+		return errPrepareNotAdmitted
+	}
+	err := step()
+	done(err)
+	return err
 }
 
 func writeFiles(dir string, files map[string]string) error {
@@ -247,25 +310,54 @@ func writeFiles(dir string, files map[string]string) error {
 	return nil
 }
 
-// cleanup removes the fixture, as one registered outer operation.
+// cleanup removes the fixture, as one admitted outer operation. A refused
+// cleanup removes nothing and returns an error that wraps ErrNotAdmitted;
+// the directory stays held by the outer layer.
 func (f *fixture) cleanup() error {
-	done := f.e.Outer.Begin("cleanup " + f.name)
-	err := os.RemoveAll(f.dir)
+	done, ok := f.e.Outer.Cleanup(f.name, f.dir)
+	if !ok {
+		return errCleanupNotAdmitted
+	}
+	err := f.e.removeAll(f.dir)
 	done(err)
 	return err
 }
 
-// MemOuter is an Outer that only remembers, for tests and for runs
-// without the record chain.
+// MemOuter is an Outer that admits every operation and only remembers, for
+// tests and for runs without the record chain.
 type MemOuter struct {
 	mu   sync.Mutex
 	ops  []string
 	errs []string
 	open int
+	held map[string]bool // the directories created and not confirmed removed
 }
 
-// Begin registers one operation.
-func (m *MemOuter) Begin(name string) func(error) {
+// Prepare admits and registers one preparation.
+func (m *MemOuter) Prepare(name string) (func(error), bool) { return m.begin(name, nil), true }
+
+// Hold records a created directory.
+func (m *MemOuter) Hold(_, dir string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.held == nil {
+		m.held = map[string]bool{}
+	}
+	m.held[dir] = true
+}
+
+// Cleanup admits and registers one cleanup; a nil result releases the
+// directory.
+func (m *MemOuter) Cleanup(name, dir string) (func(error), bool) {
+	return m.begin("cleanup "+name, func(err error) {
+		if err == nil {
+			delete(m.held, dir)
+		}
+	}), true
+}
+
+// begin registers an operation; after runs under the mutex with its result.
+func (m *MemOuter) begin(name string, after func(error)) func(error) {
 	m.mu.Lock()
 	m.ops = append(m.ops, name)
 	m.open++
@@ -278,9 +370,25 @@ func (m *MemOuter) Begin(name string) func(error) {
 			if err != nil {
 				m.errs = append(m.errs, name+": "+err.Error())
 			}
+			if after != nil {
+				after(err)
+			}
 			m.mu.Unlock()
 		})
 	}
+}
+
+// Held returns the directories still held (created and not confirmed
+// removed), sorted.
+func (m *MemOuter) Held() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]string, 0, len(m.held))
+	for d := range m.held {
+		out = append(out, d)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // State returns the operations, the failures and how many are still open.

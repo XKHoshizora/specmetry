@@ -97,6 +97,10 @@ const (
 	OpDone            // succeeded
 	OpFailed          // a real error
 	OpUnknown         // the result cannot be known (e.g. cleanup unknown)
+	// OpRefused: the operation was not admitted (its deadline had passed),
+	// so it never started. It is neither a success nor the operation's
+	// failure (Review 148 R-c).
+	OpRefused
 )
 
 func (s OpState) String() string {
@@ -109,6 +113,8 @@ func (s OpState) String() string {
 		return "failed"
 	case OpUnknown:
 		return "unknown"
+	case OpRefused:
+		return "refused"
 	}
 	return "invalid"
 }
@@ -128,13 +134,43 @@ type Op struct {
 	i int
 }
 
-// RegisterOp registers a pending outer operation.
+// RegisterOp registers a pending outer operation. Registration is not
+// admission: an operation that must not start after a deadline is
+// registered through AdmitOp.
 func (o *Outer) RegisterOp(name string) *Op {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.ops = append(o.ops, opRec{name: name})
 	o.publishLocked()
 	return &Op{o: o, i: len(o.ops) - 1}
+}
+
+// AdmitOp decides, right before a new outer operation starts, whether it
+// may start (Review 148 R-c). Under the mutex it reads the clock (a
+// decision point: a reading at or past D sets the latch) and admits the
+// operation only when the reading is before until and the latch is not set;
+// until is W for a preparation and D for a cleanup (a later until is capped
+// by D). An admitted operation is registered pending, as RegisterOp does,
+// and its caller publishes the real result with Done or Unknown. A refused
+// one is registered terminal (OpRefused) with the reading and the deadline,
+// returns nil and false, and nothing may start.
+func (o *Outer) AdmitOp(name string, until time.Time) (*Op, bool) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	now, q := o.checkLocked()
+	if q == Timely && now.Before(until) {
+		o.ops = append(o.ops, opRec{name: name})
+		o.publishLocked()
+		return &Op{o: o, i: len(o.ops) - 1}, true
+	}
+	o.ops = append(o.ops, opRec{
+		name:    name,
+		state:   OpRefused,
+		reason:  fmt.Sprintf("not admitted: the reading %s is not before the deadline %s (latch %v); nothing was started", now.Format(time.RFC3339Nano), until.Format(time.RFC3339Nano), o.latch),
+		outcome: &Outcome{At: now, Qual: q},
+	})
+	o.publishLocked()
+	return nil, false
 }
 
 // Done publishes the operation's real result: OpDone when err is nil,
