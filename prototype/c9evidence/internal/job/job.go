@@ -208,6 +208,12 @@ type seams struct {
 	verify    func([]collect.Item) []string
 	mkdirTemp func(dir, pattern string) (string, error)
 	removeAll func(path string) error
+	// The controls' other fixture file operations (nil: the os functions).
+	mkdirAll  func(path string) error
+	writeFile func(path string, data []byte) error
+	remove    func(path string) error
+	mkdir     func(path string) error
+	symlink   func(oldname, newname string) error
 }
 
 func (j *Job) at(point string) {
@@ -448,7 +454,8 @@ func (j *Job) runControls(w *WorkRecord) {
 			}
 		}()
 	}
-	env := &controls.Env{GOOS: j.cfg.GOOS, TempRoot: root, Outer: oa, TypeCheck: j.cfg.TypeCheck, MkdirTemp: j.s.mkdirTemp, RemoveAll: j.s.removeAll}
+	env := &controls.Env{GOOS: j.cfg.GOOS, TempRoot: root, Outer: oa, TypeCheck: j.cfg.TypeCheck, MkdirTemp: j.s.mkdirTemp, RemoveAll: j.s.removeAll,
+		MkdirAll: j.s.mkdirAll, WriteFile: j.s.writeFile, Remove: j.s.remove, Mkdir: j.s.mkdir, Symlink: j.s.symlink}
 	for _, v := range j.cfg.Controls {
 		applicable, _ := v.Applies(j.cfg.GOOS)
 		var o controls.Outcome

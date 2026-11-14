@@ -27,8 +27,11 @@ import (
 // When admitted, the operation is registered and done publishes its real
 // result (also when it comes late). When refused (ok false), the refusal is
 // recorded as such, never as a success or as the operation's failure, and
-// nothing may start. Hold hands the outer layer a directory it created; the
-// outer layer holds it until a cleanup confirms its removal.
+// nothing may start. One admission covers one external file call: a
+// preparation or a change that makes several calls asks for each of them
+// right before it starts (Review 149 B-147-1-R-c/P). Hold hands the outer
+// layer a directory it created; the outer layer holds it until a cleanup
+// confirms its removal.
 type Outer interface {
 	Prepare(name string) (done func(err error), ok bool)
 	Hold(name, dir string)
@@ -55,6 +58,49 @@ type Env struct {
 	// (nil: os.MkdirTemp and os.RemoveAll); tests replace them.
 	MkdirTemp func(dir, pattern string) (string, error)
 	RemoveAll func(path string) error
+	// MkdirAll, WriteFile, Remove, Mkdir and Symlink are the outer layer's
+	// other file operations on fixtures (nil: the os functions with modes
+	// 0o755 and 0o644); tests replace them.
+	MkdirAll  func(path string) error
+	WriteFile func(path string, data []byte) error
+	Remove    func(path string) error
+	Mkdir     func(path string) error
+	Symlink   func(oldname, newname string) error
+}
+
+func (e *Env) mkdirAll(path string) error {
+	if e.MkdirAll != nil {
+		return e.MkdirAll(path)
+	}
+	return os.MkdirAll(path, 0o755)
+}
+
+func (e *Env) writeFile(path string, data []byte) error {
+	if e.WriteFile != nil {
+		return e.WriteFile(path, data)
+	}
+	return os.WriteFile(path, data, 0o644)
+}
+
+func (e *Env) remove(path string) error {
+	if e.Remove != nil {
+		return e.Remove(path)
+	}
+	return os.Remove(path)
+}
+
+func (e *Env) mkdir(path string) error {
+	if e.Mkdir != nil {
+		return e.Mkdir(path)
+	}
+	return os.Mkdir(path, 0o755)
+}
+
+func (e *Env) symlink(oldname, newname string) error {
+	if e.Symlink != nil {
+		return e.Symlink(oldname, newname)
+	}
+	return os.Symlink(oldname, newname)
 }
 
 func (e *Env) mkdirTemp(dir, pattern string) (string, error) {
@@ -258,40 +304,92 @@ type fixture struct {
 	name string
 }
 
-// prepare creates a fixture directory with files (slash paths), as one
-// admitted outer operation. A refused preparation creates nothing and
-// returns an error that wraps ErrNotAdmitted. A created directory is held by
-// the outer layer from the moment it exists, also when writing its files
-// fails afterwards.
-func prepare(e *Env, name string, files map[string]string) (*fixture, error) {
-	done, ok := e.Outer.Prepare("prepare " + name)
+// step runs one external file call of the outer layer's preparation as
+// one outer operation, admitted against W right before it starts (Review
+// 149 B-147-1-R-c/P). A refused step starts nothing and returns an error
+// that wraps ErrNotAdmitted and names the step; it is registered as refused,
+// never as a success or as a real failure. An admitted step's real result is
+// published when the call returns, also when that is late, and is returned
+// unchanged.
+func step(e *Env, op string, run func() error) error {
+	done, ok := e.Outer.Prepare(op)
 	if !ok {
-		return nil, errPrepareNotAdmitted
+		return fmt.Errorf("%w (%s)", errPrepareNotAdmitted, op)
 	}
-	dir, err := e.mkdirTemp(e.TempRoot, "fx-")
-	if err == nil {
-		e.Outer.Hold(name, dir)
-		err = writeFiles(dir, files)
-	}
+	err := run()
 	done(err)
-	if err != nil {
+	return err
+}
+
+// prepare creates a fixture directory with files (slash paths). Each
+// external call is its own admitted step: the directory's creation
+// ("prepare <name>"), then for each file in name order the creation of its
+// parent ("prepare <name>: mkdir parent of <file>") and its write
+// ("prepare <name>: write <file>"). It stops at the first refusal or real
+// error, so nothing starts after it. The directory is held by the outer
+// layer from the moment it exists; a preparation that stops part way leaves
+// it, with the files written so far, held (it is not cleaned up by this
+// variant; the fixture root's cleanup is admitted against D as before).
+func prepare(e *Env, name string, files map[string]string) (*fixture, error) {
+	op := "prepare " + name
+	var dir string
+	if err := step(e, op, func() error {
+		d, err := e.mkdirTemp(e.TempRoot, "fx-")
+		if err == nil {
+			dir = d
+			e.Outer.Hold(name, d)
+		}
+		return err
+	}); err != nil {
+		return nil, err
+	}
+	if err := e.writeFiles(op, dir, files); err != nil {
 		return nil, err
 	}
 	return &fixture{dir: dir, e: e, name: name}, nil
 }
 
-// change runs one preparation step on an existing fixture, as one admitted
-// outer operation.
-func change(e *Env, name string, step func() error) error {
-	done, ok := e.Outer.Prepare(name)
-	if !ok {
-		return errPrepareNotAdmitted
-	}
-	err := step()
-	done(err)
-	return err
+// changeStep is one external file call of a fixture change.
+type changeStep struct {
+	name string // e.g. "write lc3.go"
+	run  func(e *Env, dir string) error
 }
 
+// change applies a change to an existing fixture, each call its own
+// admitted step ("<op>: <step>"), stopping at the first refusal or real
+// error.
+func change(e *Env, op, dir string, steps []changeStep) error {
+	for _, s := range steps {
+		if err := step(e, op+": "+s.name, func() error { return s.run(e, dir) }); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// writeFiles writes a fixture's files through the environment's file
+// operations, each call its own admitted step named after op.
+func (e *Env) writeFiles(op, dir string, files map[string]string) error {
+	names := make([]string, 0, len(files))
+	for n := range files {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	for _, rel := range names {
+		p := filepath.Join(dir, filepath.FromSlash(rel))
+		if err := step(e, op+": mkdir parent of "+rel, func() error { return e.mkdirAll(filepath.Dir(p)) }); err != nil {
+			return err
+		}
+		if err := step(e, op+": write "+rel, func() error { return e.writeFile(p, []byte(files[rel])) }); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// writeFiles writes files with the os functions. Only controls.FixtureRepo
+// uses it, to prepare the test repository; it is not an outer operation of
+// the job.
 func writeFiles(dir string, files map[string]string) error {
 	names := make([]string, 0, len(files))
 	for n := range files {

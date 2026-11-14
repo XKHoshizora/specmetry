@@ -2,7 +2,6 @@ package controls
 
 import (
 	"errors"
-	"os"
 	"path/filepath"
 
 	"github.com/XKHoshizora/specmetry/prototype/c9evidence/internal/judge"
@@ -55,13 +54,13 @@ func h1Line(s *modsnap.Snapshot) string {
 	return "h1 computed " + s.H1
 }
 
-func lc2(name string, mutate func(dir string) error, want []string) Variant {
+func lc2(name string, mutate []changeStep, want []string) Variant {
 	return Variant{
 		Control: "LC-2", Name: name, Applies: always, MustEnter: []string{"B4"}, Want: want,
 		Run: func(e *Env) Outcome {
 			fx, err := prepare(e, "LC-2 "+name, lc2Base)
 			if err == nil && mutate != nil {
-				err = change(e, "prepare LC-2 "+name+" change", func() error { return mutate(fx.dir) })
+				err = change(e, "prepare LC-2 "+name+" change", fx.dir, mutate)
 			}
 			if err != nil {
 				var cerr error
@@ -82,18 +81,18 @@ func lc2(name string, mutate func(dir string) error, want []string) Variant {
 // LC2 are the negative controls of Hash1 and I-4 (plan §5.2 LC-2).
 func LC2() []Variant {
 	return []Variant{
-		lc2("one byte changed", func(dir string) error {
-			return os.WriteFile(filepath.Join(dir, "lc2.go"), []byte("package lc2\n\nconst N = 2\n"), 0o644)
-		}, []string{"B4 fail J-4 . h1 differs from go.sum real @ I-4 example.com/lc2@v1.0.0", "h1 computed " + lc2ByteH1}),
-		lc2("one more file", func(dir string) error {
-			return os.WriteFile(filepath.Join(dir, "extra.txt"), []byte("x\n"), 0o644)
-		}, []string{"B4 fail J-4 . h1 differs from go.sum real @ I-4 example.com/lc2@v1.0.0", "h1 computed " + lc2ExtraH1}),
+		lc2("one byte changed", []changeStep{{"write lc2.go", func(e *Env, dir string) error {
+			return e.writeFile(filepath.Join(dir, "lc2.go"), []byte("package lc2\n\nconst N = 2\n"))
+		}}}, []string{"B4 fail J-4 . h1 differs from go.sum real @ I-4 example.com/lc2@v1.0.0", "h1 computed " + lc2ByteH1}),
+		lc2("one more file", []changeStep{{"write extra.txt", func(e *Env, dir string) error {
+			return e.writeFile(filepath.Join(dir, "extra.txt"), []byte("x\n"))
+		}}}, []string{"B4 fail J-4 . h1 differs from go.sum real @ I-4 example.com/lc2@v1.0.0", "h1 computed " + lc2ExtraH1}),
 		// Applicable on all three runners (plan §5.6 item 4): a link that
 		// cannot be created is a failed preparation, so a miss, never "not
 		// applicable" after the fact.
-		lc2("symbolic link", func(dir string) error {
-			return os.Symlink("lc2.go", filepath.Join(dir, "link.go"))
-		}, []string{"B4 fail J-2 link.go not a regular file real @ I-4 example.com/lc2@v1.0.0", "h1 not computed"}),
+		lc2("symbolic link", []changeStep{{"symlink link.go", func(e *Env, dir string) error {
+			return e.symlink("lc2.go", filepath.Join(dir, "link.go"))
+		}}}, []string{"B4 fail J-2 link.go not a regular file real @ I-4 example.com/lc2@v1.0.0", "h1 not computed"}),
 	}
 }
 
@@ -104,7 +103,7 @@ var lc3Base = map[string]string{
 
 // lc3 runs I-4 on the fixture (it must hold), applies the change, and then
 // one controlled read as the tested instance with the check I-5.
-func lc3(name, rel string, modify func(dir string) error, newInject func() modsnap.Injector, want []string) Variant {
+func lc3(name, rel string, modify []changeStep, newInject func() modsnap.Injector, want []string) Variant {
 	return Variant{
 		Control: "LC-3", Name: name, Applies: always, MustEnter: []string{"I-5"}, Want: want,
 		Run: func(e *Env) Outcome {
@@ -117,7 +116,7 @@ func lc3(name, rel string, modify func(dir string) error, newInject func() modsn
 				return Outcome{PrepErr: errors.New("the LC-3 fixture's I-4 does not hold"), CleanupErr: fx.cleanup()}
 			}
 			if modify != nil {
-				if err := change(e, "prepare LC-3 "+name+" change", func() error { return modify(fx.dir) }); err != nil {
+				if err := change(e, "prepare LC-3 "+name+" change", fx.dir, modify); err != nil {
 					return Outcome{PrepErr: err, CleanupErr: fx.cleanup()}
 				}
 			}
@@ -164,15 +163,13 @@ func itoa(n int) string {
 func LC3() []Variant {
 	return []Variant{
 		lc3("name not in M", "missing.go", nil, nil, []string{"I-5 fail J-4 missing.go name not in M real @ I-5 example.com/lc3@v1.0.0/missing.go (P parse)"}),
-		lc3("reread differs", "lc3.go", func(dir string) error {
-			return os.WriteFile(filepath.Join(dir, "lc3.go"), []byte("package lc3\n\nconst N = 4\n"), 0o644)
-		}, nil, []string{"I-5 fail J-4 lc3.go sha256 differs from M real @ I-5 example.com/lc3@v1.0.0/lc3.go (P parse)"}),
-		lc3("handle not a regular file", "lc3.go", func(dir string) error {
-			p := filepath.Join(dir, "lc3.go")
-			if err := os.Remove(p); err != nil {
-				return err
-			}
-			return os.Mkdir(p, 0o755)
+		lc3("reread differs", "lc3.go", []changeStep{{"write lc3.go", func(e *Env, dir string) error {
+			return e.writeFile(filepath.Join(dir, "lc3.go"), []byte("package lc3\n\nconst N = 4\n"))
+		}}}, nil, []string{"I-5 fail J-4 lc3.go sha256 differs from M real @ I-5 example.com/lc3@v1.0.0/lc3.go (P parse)"}),
+		// Two calls, each its own admitted step (Review 149 R-c/P).
+		lc3("handle not a regular file", "lc3.go", []changeStep{
+			{"remove lc3.go", func(e *Env, dir string) error { return e.remove(filepath.Join(dir, "lc3.go")) }},
+			{"mkdir lc3.go", func(e *Env, dir string) error { return e.mkdir(filepath.Join(dir, "lc3.go")) }},
 		}, nil, []string{"I-5 fail J-2 lc3.go handle not a regular file real @ I-5 example.com/lc3@v1.0.0/lc3.go (P parse)"}),
 		// The injection is only appended after the real Close returned nil;
 		// the real result stays nil (no real failure line) and the injected
