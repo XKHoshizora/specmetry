@@ -175,7 +175,16 @@ func TestWriterManifestFailures(t *testing.T) {
 
 // The writer is in a record file's Close when D passes; the close returns
 // nil afterwards (late), and the next decision point takes the expiry exit:
-// no further close, no manifest. Closeout has already returned at D.
+// no further close, no manifest. Closeout has already returned at D, while
+// the Close is still blocked: the parent never waits for it.
+//
+// Past D the parent's D timer and the diagnostic task's re-check race
+// (review-resolution §193): the parent either finds no diagnostic terminal
+// state (step 5 branch b, expired-final) or consumes the diagnostic task's
+// expired-stopped state (branch a, consumed). Both are legal by the
+// five-state table and both give 2; no other exit is accepted. The
+// background results are checked only after both the writer and the
+// diagnostic task have published their terminal states.
 func TestWriterExpiresMidway(t *testing.T) {
 	h := newHarness(t)
 	dc := h.fs.set(t, "close", "derived.jsonl", 1, blocking())
@@ -185,26 +194,85 @@ func TestWriterExpiresMidway(t *testing.T) {
 	done := h.run(h.cfg(Consistent, nil, nil))
 	waitCh(t, dc.entered, "derived close")
 	h.clk.Set(at(121))
-	wantFinal(t, h.final(done), Incomplete, PathExpiredFinal)
+	f := h.final(done) // the derived Close is still blocked
+	if f.Conclusion != Incomplete || f.ExitCode != ExitCode(Incomplete) {
+		t.Fatalf("final %v exit %d via %s (reasons %q), want 2", f.Conclusion, f.ExitCode, f.Path, f.Reasons)
+	}
+	if f.DecidedAt.Before(h.d) {
+		t.Errorf("decided at %v, before D", f.DecidedAt)
+	}
+	last := ""
+	if bs := h.finalBranches(); len(bs) > 0 {
+		last = bs[len(bs)-1]
+	}
+	t.Logf("exit %s, last final branch %q", f.Path, last) // which legal exit this run took
+	switch f.Path {
+	case PathConsumed: // (a): the published expired-stopped state was consumed
+		if last != "a" || !hasReason(f.Reasons, "diagnostic terminal state: "+DiagExpiredStopped.String()) {
+			t.Errorf("consumed exit: last branch %q, reasons %q", last, f.Reasons)
+		}
+	case PathExpiredFinal: // (b): no diagnostic terminal state, D passed
+		if last != "b" || !hasReason(f.Reasons, "the diagnostic task had no terminal state at D") {
+			t.Errorf("expired-final exit: last branch %q, reasons %q", last, f.Reasons)
+		}
+	default:
+		t.Fatalf("exit %s, want consumed (a) or expired-final (b)", f.Path)
+	}
 	dc.free()
-	s := h.waitFor("diagnostic terminal", diagTerminal)
+	s := h.waitFor("writer and diagnostic terminal states", func(s OuterSnapshot) bool { return writerTerminal(s) && diagTerminal(s) })
 	if st := s.Writer.Terminal; st.State != WriterExpired || st.Qual != Late {
 		t.Errorf("writer terminal %v/%v, want expired-incomplete/late", st.State, st.Qual)
 	}
-	if oc := s.Writer.Files[1].Close; oc == nil || oc.Err != nil || oc.Qual != Late {
+	// raw.jsonl was closed before D; the admitted derived Close returned nil
+	// after D and its real, late result is kept; both are released.
+	raw, derived := fileNamed(s, "raw.jsonl"), fileNamed(s, "derived.jsonl")
+	if oc := raw.Close; oc == nil || oc.Err != nil || oc.Qual != Timely {
+		t.Errorf("raw close %+v, want nil/timely", oc)
+	}
+	if oc := derived.Close; oc == nil || oc.Err != nil || oc.Qual != Late {
 		t.Errorf("derived close %+v, want nil/late", oc)
 	}
+	for _, x := range []FileSnapshot{raw, derived} {
+		if hd := x.Holding; hd.Held() || !hd.CloseStarted || !hd.CloseReturned || hd.CloseErr != nil || !hd.Released {
+			t.Errorf("%s holding %+v, want released after its one nil Close", x.Name, hd)
+		}
+		if n := h.fs.count("close", x.Name); n != 1 {
+			t.Errorf("%s closed %d times, want 1", x.Name, n)
+		}
+	}
+	// After D no further Close starts: the other record files stay held by
+	// the writer, with no Close started.
 	for _, name := range []string{"controls.jsonl", "closeout.jsonl"} {
 		if n := h.fs.count("close", name); n != 0 {
 			t.Errorf("%s closed after D", name)
+		}
+		fs := fileNamed(s, name)
+		if hd := fs.Holding; hd.Holder != HolderWriter || hd.CloseStarted || hd.CloseReturned || hd.Released || fs.Close != nil {
+			t.Errorf("%s holding %+v close %+v, want held by the writer, no Close started", name, hd, fs.Close)
 		}
 	}
 	if h.fs.count("create", ManifestName) != 0 {
 		t.Error("manifest created after D")
 	}
-	if st := s.Diag.Terminal; st.State != DiagExpiredStopped {
-		t.Errorf("diagnostic terminal %v", st.State)
+	if m := s.Writer.Manifest; m.Create != nil || m.Holding.Held() {
+		t.Errorf("manifest create %+v holding %+v, want none", m.Create, m.Holding)
 	}
+	if got := h.wr.Held(); len(got) != 2 || got[0] != "controls.jsonl" || got[1] != "closeout.jsonl" {
+		t.Errorf("Held() %v, want the two record files whose Close never started", got)
+	}
+	if st := s.Diag.Terminal; st.State != DiagExpiredStopped || st.Qual != Late {
+		t.Errorf("diagnostic terminal %v/%v, want expired-stopped/late", st.State, st.Qual)
+	}
+}
+
+// fileNamed returns the writer's published state of one record file.
+func fileNamed(s OuterSnapshot, name string) FileSnapshot {
+	for _, f := range s.Writer.Files {
+		if f.Name == name {
+			return f
+		}
+	}
+	return FileSnapshot{Name: name}
 }
 
 // The seal: a producer keeps appending during and after the closeout; the
