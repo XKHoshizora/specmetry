@@ -1,0 +1,86 @@
+name: C-9 limited evidence
+
+# The C-9 limited evidence run (docs/wp2.5-c9-limited-evidence-plan.md
+# §9.1, §9.2; LE-3). It runs ONLY when a dedicated run branch is pushed.
+# No run branch exists, and creating one needs the owner's run
+# authorization (plan §8 step 4). There is no pull_request,
+# workflow_dispatch or schedule trigger, so the implementation PR, master
+# and any other branch never run it. Phase 1 (review-resolution §190): this
+# file is written for review only; E-10 (ii) is not confirmed, so the tool's
+# real invoker is stopped and a run would conclude "invalid" anyway (LC-9
+# is applicable and not implemented).
+on:
+  push:
+    branches:
+      - evidence/c9-run-1
+
+permissions:
+  contents: read
+
+concurrency:
+  group: c9-evidence-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  evidence:
+    name: C-9 evidence (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    # An outer backstop only; the budget is the tool's own 120 seconds.
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash
+    env:
+      GOTOOLCHAIN: local
+      GOFLAGS: ""
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-go@v7.0.0
+        with:
+          go-version: 1.27.3
+          cache: false
+      - name: Check the checkout and print its identity
+        run: |
+          set -euo pipefail
+          head=$(git rev-parse HEAD)
+          if [ "$head" != "$GITHUB_SHA" ]; then
+            echo "HEAD $head is not GITHUB_SHA $GITHUB_SHA" >&2
+            exit 1
+          fi
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "the worktree is not clean" >&2
+            exit 1
+          fi
+          echo "HEAD $head"
+          echo "tree $(git rev-parse 'HEAD^{tree}')"
+          echo "GITHUB_WORKFLOW_REF $GITHUB_WORKFLOW_REF"
+          echo "GITHUB_WORKFLOW_SHA $GITHUB_WORKFLOW_SHA"
+          go version
+      - name: Prepare the module cache (LE-4)
+        run: |
+          set -euo pipefail
+          go mod download
+          echo "go.mod blob $(git rev-parse HEAD:go.mod)"
+          echo "go.sum blob $(git rev-parse HEAD:go.sum)"
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "the module download changed the worktree" >&2
+            exit 1
+          fi
+      - name: Collect
+        working-directory: prototype/c9evidence
+        env:
+          C9EVIDENCE_R: ${{ github.workspace }}
+          C9EVIDENCE_RECORDS: ${{ runner.temp }}/c9evidence-records
+        run: go test -tags c9evidence_run -count=1 -v ./run/
+      - name: Upload the records
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: c9evidence-records-${{ matrix.os }}
+          path: ${{ runner.temp }}/c9evidence-records
+          retention-days: 90
+          if-no-files-found: warn
