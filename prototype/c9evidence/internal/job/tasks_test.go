@@ -20,6 +20,11 @@ import (
 // the task's last state, not an observed exit of its goroutine. They change
 // nothing in the tool.
 
+// wakeLine is the item endTasks appends to wake a writer that still waits
+// for a log change after an expiry exit before the seal. The writer takes
+// its expiry exit at its next decision point without writing it.
+const wakeLine = `{"test":"lifecycle wake after the decision (N-150-1)"}`
+
 // The terminal states the tests expect, as "state/qualification".
 const (
 	writerSuccess = "success/timely"
@@ -95,7 +100,7 @@ func endTasks(t *testing.T, j *Job) chain.OuterSnapshot {
 			return o
 		}
 		if o.Writer != nil && o.Writer.Terminal == nil {
-			j.log.Append(FileCloseout, []byte(`{"test":"lifecycle wake after the decision (N-150-1)"}`))
+			j.log.Append(FileCloseout, []byte(wakeLine))
 		}
 	default:
 		t.Errorf("the closeout returned via %v (reasons %q): it did not run", f.Path, f.Reasons)

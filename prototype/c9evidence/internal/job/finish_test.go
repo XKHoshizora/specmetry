@@ -16,6 +16,11 @@ import (
 //   - a request whose done channel is closed: returned, with its original
 //     Final.
 //
+// A closed done shows only that this Finish call returned and its Final
+// was published. The record writer's and the diagnostic task's terminal
+// states (tasks_test.go) are separate facts, and neither is an observed
+// exit of any goroutine (Review 152 N-152-1).
+//
 // Every caller (finish, finishWant, the asynchronous waits, endTasks and
 // the cleanup) uses the same request; none of them issues a second Finish,
 // and reading the result consumes nothing: done is closed once and final is

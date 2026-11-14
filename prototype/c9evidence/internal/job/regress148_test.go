@@ -253,6 +253,13 @@ func (v *verifier) callTimes() []time.Time {
 // the counting directory seams below a test directory.
 func newJob148(t *testing.T, vs []controls.Variant, tc collect.TypeChecker) (*Job, *chain.FakeClock, *opSeams, *gates) {
 	t.Helper()
+	return newJob148FS(t, vs, tc, newMemFS())
+}
+
+// newJob148FS is newJob148 with the given record file system (Review 152
+// B-152-1 passes a counting wrapper around the in-memory one).
+func newJob148FS(t *testing.T, vs []controls.Variant, tc collect.TypeChecker, wfs chain.FS) (*Job, *chain.FakeClock, *opSeams, *gates) {
+	t.Helper()
 	cfg, _ := newConfig(t, vs)
 	clk := chain.NewFakeClock(time.Unix(1_000_000, 0))
 	cfg.Clock, cfg.Start = clk, clk.Now()
@@ -260,7 +267,7 @@ func newJob148(t *testing.T, vs []controls.Variant, tc collect.TypeChecker) (*Jo
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg.R, cfg.Invoker, cfg.Guard, cfg.WriteFS = r, inv, guard, newMemFS()
+	cfg.R, cfg.Invoker, cfg.Guard, cfg.WriteFS = r, inv, guard, wfs
 	if tc != nil {
 		cfg.TypeCheck = tc
 	}

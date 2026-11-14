@@ -44,8 +44,10 @@ func awaitEnd(t *testing.T, ch <-chan chain.OuterSnapshot) (chain.OuterSnapshot,
 	}
 }
 
-// notReturned checks that endTasks has not returned while the original
-// request is still held.
+// notReturned checks, at that moment only, that endTasks has not delivered
+// a result while the original request is still held. It does not show that
+// endTasks has started waiting: its goroutine may run only after the
+// release (Review 152 N-152-1).
 func notReturned(t *testing.T, ch <-chan chain.OuterSnapshot) {
 	t.Helper()
 	select {
@@ -130,9 +132,14 @@ func TestB151RegisteredNotYetCalled(t *testing.T) {
 	}
 }
 
-// B-151-1 (2): the first call has entered Job.Finish and is held at its
-// lock (so neither finalized nor Started is set) when the first wait
-// fails. The cleanup must wait for that call, not make another.
+// B-151-1 (2): the test holds the job's lock and the hook that runs right
+// before the call has been reached (entered), so the call cannot pass
+// Job.Finish's lock and neither finalized nor Started can be set when the
+// first wait fails. entered shows the hook was reached and the lock held;
+// it does not show the call observed waiting at the lock inside Job.Finish,
+// and the exact window with finalized set and Started not yet published is
+// not reached (Review 152 N-152-1). The cleanup must wait for that call,
+// not make another.
 func TestB151CallEnteredBeforeStarted(t *testing.T) {
 	j, _, _, g := newJob148(t, controls.LC3(), nil)
 	settle(t, j, g.freeAll)
@@ -147,7 +154,7 @@ func TestB151CallEnteredBeforeStarted(t *testing.T) {
 	if _, ok := tryFinish(j, failingWait); ok {
 		t.Fatal("Finish returned while the job's lock was held")
 	}
-	if !waitFor(t, entered, "the first call started") {
+	if !waitFor(t, entered, "the hook before the first call was reached") {
 		return
 	}
 	if j.outer.Snapshot().Closeout.Started {
@@ -246,7 +253,10 @@ func TestB151NeverIssuedCleanupIssuesOnce(t *testing.T) {
 }
 
 // B-151-1 (6) controls: a normal closeout, and an expiry exit before the
-// seal whose writer is still waiting until the cleanup wakes it.
+// seal whose writer is still waiting until the cleanup wakes it. Since
+// Review 152 B-152-1 the expiry control first establishes, from the
+// writer's published state, that the writer has written every record and
+// is waiting (see regress152_test.go).
 func TestB151ControlsNormalAndExpiryBeforeTheSeal(t *testing.T) {
 	t.Run("normal", func(t *testing.T) {
 		j, _, _, g := newJob148(t, controls.LC3(), nil)
@@ -259,17 +269,21 @@ func TestB151ControlsNormalAndExpiryBeforeTheSeal(t *testing.T) {
 		}
 	})
 	t.Run("expiry before the seal", func(t *testing.T) {
-		j, clk, _, g := newJob148(t, controls.LC3(), nil)
+		// Review 152 B-152-1: RunDomains returning does not mean the writer
+		// has written the records. Before D, wait (bounded) until the
+		// writer's own published state shows every existing item written and
+		// nothing left to write (regress152_test.go); only then is a writer
+		// without a terminal state after Finish a consequence of the
+		// precondition, which expireWaitingWriter checks before and after
+		// endTasks's wake.
+		fs := newCountFS(false)
+		j, clk, _, g := newJob148FS(t, controls.LC3(), nil, fs)
 		settle(t, j, g.freeAll)
 		j.RunDomains()
-		clk.Set(j.D)
-		finishWant(t, j, chain.Incomplete, chain.PathExpiredAtMRun)
-		if w, d := taskStates(j.outer.Snapshot()); w != "" || d != diagNone {
-			t.Fatalf("before the cleanup: writer %q diagnostic %q, want a waiting writer and no diagnostic task", w, d)
+		idle, why, ok := waitWriterIdle(j, fs, bound)
+		if !ok {
+			t.Fatalf("the writer was not idle within %s before D: %s", bound, why)
 		}
-		wantTasks(t, endTasks(t, j), writerExpired, diagNone)
-		if n := finishCalls(j); n != 1 {
-			t.Errorf("Finish called %d times, want exactly 1", n)
-		}
+		expireWaitingWriter(t, j, clk, fs, idle)
 	})
 }
