@@ -278,6 +278,7 @@ func TestB149MkdirTempReturnsAfterD(t *testing.T) {
 	if r := fRecord(t, j, v.Name); !errors.Is(r.Outcome.PrepErr, controls.ErrNotAdmitted) || r.Variant.Judgement != verdict.Miss {
 		t.Errorf("F record %+v", r)
 	}
+	wantTasks(t, endTasks(t, j), writerExpired, diagNone)
 }
 
 // R-c/P 2: a MkdirAll admitted before W returns after W; the WriteFile
@@ -301,6 +302,8 @@ func TestB149MkdirAllCrossesW(t *testing.T) {
 	if mk := fs.list("mkdirtemp"); len(mk) != 1 || heldDir(j, mk[0].path) == nil || heldDir(j, mk[0].path).Removed {
 		t.Errorf("the partly prepared directory is not held by the job: %+v", mk)
 	}
+	finishWant(t, j, chain.Invalid, chain.PathConsumed)
+	wantTasks(t, endTasks(t, j), writerSuccess, diagComplete)
 }
 
 // R-c/P 3: the first file's WriteFile returns after W; the next file's
@@ -318,6 +321,8 @@ func TestB149WriteCrossesW(t *testing.T) {
 	if w := fs.list("write"); len(w) != 1 || w[0].err != nil || w[0].at.Before(j.W) {
 		t.Errorf("write %+v, want one nil result returned after W", w)
 	}
+	finishWant(t, j, chain.Invalid, chain.PathConsumed)
+	wantTasks(t, endTasks(t, j), writerSuccess, diagComplete)
 }
 
 // R-c/P 4: LC-3's Remove returns after W; the Mkdir after it does not
@@ -348,6 +353,8 @@ func TestB149RemoveCrossesW(t *testing.T) {
 			t.Errorf("%s not released after its cleanup: %+v", c.path, h)
 		}
 	}
+	finishWant(t, j, chain.Invalid, chain.PathConsumed)
+	wantTasks(t, endTasks(t, j), writerSuccess, diagComplete)
 }
 
 // R-c/P 5: a new preparation step at exactly W is refused (W is late); a
@@ -367,6 +374,8 @@ func TestB149StepAtWIsRefusedCleanupAdmitted(t *testing.T) {
 	if len(root) != 1 || root[0].State != chain.OpDone || root[0].Outcome == nil || !root[0].Outcome.At.Equal(j.W) {
 		t.Errorf("root cleanup %+v, want admitted and done at W", root)
 	}
+	finishWant(t, j, chain.Invalid, chain.PathConsumed)
+	wantTasks(t, endTasks(t, j), writerSuccess, diagComplete)
 }
 
 // R-c/P 6: a real failure of a step is kept as that step's failure (also
@@ -410,10 +419,14 @@ func TestB149RealFailureKeptApartFromRefusal(t *testing.T) {
 		}
 	}
 	failedOne(j, false)
+	finishWant(t, j, chain.Invalid, chain.PathConsumed)
+	wantTasks(t, endTasks(t, j), writerSuccess, diagComplete)
 
 	// Returned after W: the real error stays, not replaced by a refusal.
 	j2, _, _ := crossW(t, v, "write", 1, time.Second, werr)
 	failedOne(j2, true)
+	finishWant(t, j2, chain.Invalid, chain.PathConsumed)
+	wantTasks(t, endTasks(t, j2), writerSuccess, diagComplete)
 
 	// A refusal after a partial preparation is consumed as "not admitted".
 	j3, _, _ := crossW(t, v, "write", 1, time.Second, nil)
@@ -421,6 +434,8 @@ func TestB149RealFailureKeptApartFromRefusal(t *testing.T) {
 	if len(r.Variant.Reasons) != 1 || !strings.HasPrefix(r.Variant.Reasons[0], "outer preparation not admitted") {
 		t.Errorf("refusal consumed as %v", r.Variant.Reasons)
 	}
+	finishWant(t, j3, chain.Invalid, chain.PathConsumed)
+	wantTasks(t, endTasks(t, j3), writerSuccess, diagComplete)
 }
 
 // R-c/P 7 (healthy): LC-3 with every variant prepares, changes and cleans up
@@ -458,4 +473,5 @@ func TestB149HealthyStepsAllDone(t *testing.T) {
 	if f, ok := finish(t, j); ok && (f.Conclusion != chain.Consistent || f.ExitCode != 0) {
 		t.Errorf("healthy: %v exit %d %v", f.Conclusion, f.ExitCode, f.Reasons)
 	}
+	wantTasks(t, endTasks(t, j), writerSuccess, diagComplete)
 }

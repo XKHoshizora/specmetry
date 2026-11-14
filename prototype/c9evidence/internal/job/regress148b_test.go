@@ -41,6 +41,8 @@ func TestB148RaPublishedVerificationCoversEveryRecord(t *testing.T) {
 	if p.Covered != len(items) || p.Last != items[len(items)-1].Ref {
 		t.Errorf("covered %d (last %v) of %d items (last %v)", p.Covered, p.Last, len(items), items[len(items)-1].Ref)
 	}
+	finishWant(t, j, chain.Consistent, chain.PathConsumed)
+	wantTasks(t, endTasks(t, j), writerSuccess, diagComplete)
 }
 
 // R-a: a verification still running at the snapshot is pending: the parent
@@ -68,6 +70,7 @@ func TestB148RaStuckVerificationIsPending(t *testing.T) {
 	if f, ok := finish(t, j); ok && f.Conclusion != chain.Incomplete {
 		t.Errorf("final %v %v", f.Conclusion, f.Reasons)
 	}
+	wantTasks(t, endTasks(t, j), writerSuccess, diagComplete)
 }
 
 // R-a: a success published after W is held as late and consumed as such.
@@ -96,6 +99,8 @@ func TestB148RaLateSuccessIsNotTimely(t *testing.T) {
 	if st := j.copyState(0); !hasSub(st.pending, "source-chain verification published at or after W") {
 		t.Errorf("pending %v", st.pending)
 	}
+	finishWant(t, j, chain.Incomplete, chain.PathConsumed)
+	wantTasks(t, endTasks(t, j), writerSuccess, diagComplete)
 }
 
 // R-a: a real verification error published after the parent decided stays
@@ -129,6 +134,7 @@ func TestB148RaLateVerificationErrorHeldAfterFinish(t *testing.T) {
 	if p == nil || p.State != ProvDone || p.Timely || !hasSub(p.Problems, "injected verification problem") {
 		t.Errorf("verification %+v", p)
 	}
+	wantTasks(t, endTasks(t, j), writerSuccess, diagComplete)
 }
 
 // R-a prefix rule: a record appended after the verification is not covered
@@ -147,6 +153,7 @@ func TestB148RaAppendedAfterTheVerificationIsADefect(t *testing.T) {
 	if f, ok := finish(t, j); ok && f.Conclusion != chain.Invalid {
 		t.Errorf("final %v %v", f.Conclusion, f.Reasons)
 	}
+	wantTasks(t, endTasks(t, j), writerSuccess, diagComplete)
 }
 
 // R-a: a broken record appended inside the work task before the
@@ -164,6 +171,8 @@ func TestB148RaBrokenRecordFoundByTheWork(t *testing.T) {
 	if p == nil || p.Covered != len(j.rec.Items()) || !hasSub(p.Problems, "closure: no parent") {
 		t.Errorf("verification %+v", p)
 	}
+	finishWant(t, j, chain.Invalid, chain.PathConsumed)
+	wantTasks(t, endTasks(t, j), writerSuccess, diagComplete)
 }
 
 // R-b: in the Review 148 window, LC-1 is published after W (its own
@@ -200,6 +209,7 @@ func TestB148RbLC1AndWorkQualification(t *testing.T) {
 	if f, ok := finish(t, j); ok && f.Conclusion != chain.Incomplete {
 		t.Errorf("final %v %v", f.Conclusion, f.Reasons)
 	}
+	wantTasks(t, endTasks(t, j), writerSuccess, diagComplete)
 }
 
 // R-c: refusals are recorded apart from failures. The work task scheduled
@@ -235,6 +245,9 @@ func TestB148RcRefusedPreparationIsRecordedApart(t *testing.T) {
 			t.Errorf("%s %s: %+v", r.Variant.Control, r.Variant.Variant, r)
 		}
 	}
+	// m.Run returns at D: the expiry exit, invalid from the published misses.
+	finishWant(t, j, chain.Invalid, chain.PathExpiredAtMRun)
+	wantTasks(t, endTasks(t, j), writerExpired, diagNone)
 }
 
 // R-c: an instance returning after D: its cleanup and the root's are
@@ -280,6 +293,10 @@ func TestB148RcRefusedCleanupKeepsTheHold(t *testing.T) {
 	if st := j.copyState(0); len(st.held) != 2 {
 		t.Errorf("the held directories are not in the copied state: %+v", st.held)
 	}
+	// m.Run returns at D: the expiry exit, invalid from the published miss of
+	// the LC-3 variant that was never admitted.
+	finishWant(t, j, chain.Invalid, chain.PathExpiredAtMRun)
+	wantTasks(t, endTasks(t, j), writerExpired, diagNone)
 }
 
 // R-c: a real failure stays a failure, distinct from a refusal.
@@ -298,6 +315,8 @@ func TestB148RcFailureIsNotARefusal(t *testing.T) {
 			t.Errorf("held %+v", h)
 		}
 	}
+	finishWant(t, j, chain.Incomplete, chain.PathConsumed)
+	wantTasks(t, endTasks(t, j), writerSuccess, diagComplete)
 }
 
 // R-c healthy: every held directory is released by a confirmed removal.
@@ -314,4 +333,6 @@ func TestB148RcHealthyHoldsReleased(t *testing.T) {
 			t.Errorf("held %+v", h)
 		}
 	}
+	finishWant(t, j, chain.Consistent, chain.PathConsumed)
+	wantTasks(t, endTasks(t, j), writerSuccess, diagComplete)
 }
