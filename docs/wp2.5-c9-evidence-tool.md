@@ -1,6 +1,6 @@
 # WP2.5 第三批：C-9 限定取证工具第一阶段的实现记录
 
-> 状态：**第一阶段实现记录（test-only 的独立模块；不合并，不进行正式取证）**（2026-11-14，review-resolution §190）。审查 147 为技术 NO-GO（B-147-1 ~ 4）；定向修复在 PR #56 内进行（§191），待修复之后由 Review 148 复审。审查 148 关闭 B-147-2、B-147-3，B-147-1 尚余 R-a／R-b／R-c（R-a 与 B-147-4 共用），只授权这三个接点的定向修复（§192），修复之后由 Review 149 复审。
+> 状态：**第一阶段实现记录（test-only 的独立模块；不合并，不进行正式取证）**（2026-11-14，review-resolution §190）。审查 147 为技术 NO-GO（B-147-1 ~ 4）；定向修复在 PR #56 内进行（§191），待修复之后由 Review 148 复审。审查 148 关闭 B-147-2、B-147-3，B-147-1 尚余 R-a／R-b／R-c（R-a 与 B-147-4 共用），只授权这三个接点的定向修复（§192）；修复见 §9（已修复，待 Review 149 复审）。
 >
 > - 依据：[限定取证计划](wp2.5-c9-limited-evidence-plan.md)（PR #55 合并为 `9137279`），[G-4 方法记录](wp2.5-c9-exception-identity-method.md)，[实施计划](wp2.5-implementation-plan.md) §12.9 ~ §12.14，[决策稿](wp2.5-c9-dependency-exception-draft.md) §2.3、§2.7。
 > - 本文写定计划 §8.1 要求在实现中固定、在固定实现的审查中核对的事项，并逐项列出没有实现、没有执行与依赖 E-10 (ii) 的部分。
@@ -97,7 +97,7 @@
 
 - **R**：每个配置一个 `collect.Result`，持有检查的登记表、调用记录、I-4 的快照与受控读取，直到进程结束。预算的准入拒绝按配置归入 R 的失败。
 - **F**：每个变体一个被测实例，带自己的检查登记表与记录。需要时钟的实例（LC-5、LC-8）使用自己的假时钟，由它给出到期点，不占用包的 `D`。作业在内存中持有每个变体的判定与结构化的实例（`FRecord`），并把它们连同发布的时刻与及时资格写入 `controls.jsonl`（§7.4）。
-- **O**：外层的每一次准备与清理都先以 `RegisterOp` 登记，再在锁外执行，最后发布真实的结果。快照点等待它们全部进入终态。
+- **O**：外层的每一次准备与清理都在开始之前经外层登记表准入（准备以 `W` 为截止，清理以 `D` 为截止；Review 148 的 R-c，§9.3）：准入的操作登记为 pending，在锁外执行，最后发布真实的结果；被拒绝的操作登记为 refused，什么也不启动。外层创建的目录由作业持有，直到清理确认移除。快照点等待全部操作进入终态。
 
 ### 2.7 记录与收尾（§6.4）
 
@@ -108,7 +108,7 @@
 - **记录项**：
   - 原始记录有：工具链（守卫的值）、每次调用（参数数组、工具设定的环境、工作目录、两路输出与它们的 SHA-256、退出状态、时刻、控制的失败与注入）、`R/go.sum` 与 `R/go.mod` 的身份、每个模块的 M（名字、字节数、SHA-256、关闭结果）与 h1、T2 的绑定、运行的身份（`GITHUB_SHA`、`GITHUB_REF`、`GITHUB_WORKFLOW_REF`、`GITHUB_WORKFLOW_SHA`、`RUNNER_OS`、`RUNNER_ARCH`）。
   - 派生记录有：闭包、交给 `MatchFile` 的 `Context`、受控读取的消费记录、发现与诊断、与候选的对照、每个配置全部检查的结果与进入记录。
-  - 派生记录写明父记录的名称与 SHA-256，只追加：闭包绑定第 3 种调用；`Context` 绑定第 2 种调用；消费记录绑定第 3 种调用与本配置的全部 I-4；发现绑定消费记录与第 3 种调用；对照绑定发现；配置的检查记录绑定以上全部与仓库文件、工具链。收尾之前由 `collect.VerifyProvenance` 核对，缺失或错误的关联是工具缺陷（第 1 级），不因 manifest 完整而得到有效结论（Review 147 的 B-147-4，§7.4）。
+  - 派生记录写明父记录的名称与 SHA-256，只追加：闭包绑定第 3 种调用；`Context` 绑定第 2 种调用；消费记录绑定第 3 种调用与本配置的全部 I-4；发现绑定消费记录与第 3 种调用；对照绑定发现；配置的检查记录绑定以上全部与仓库文件、工具链。由工作任务的最后一个单元以 `collect.VerifyProvenance` 核对，收尾只消费它发布的结果与覆盖范围（Review 148 的 R-a，§9.1）；缺失或错误的关联是工具缺陷（第 1 级），不因 manifest 完整而得到有效结论（Review 147 的 B-147-4，§7.4）。
   - 记录不含第三方源码的字节。
 - **封口**：父端在快照点、在同一次锁下，追加收尾记录项（暂定结论与原因）并封口；写者只写到封口为止，封口之后到达的记录项留在内存中（`chain.Log`）。写者与诊断任务自己的发布（字节数、哈希、资格、终态）不是记录项。
 - **诊断行**：都以 `c9evidence: ` 开头，依次为：
@@ -119,7 +119,7 @@
 - **截止**：写者与诊断任务在每一次建立、写入或关闭之前，都在外层登记表的锁下复核截止；资格在发布的同一次锁下确定（锁存未置且时刻早于 `D` 为及时，否则为晚到并置锁存）；父端的最后消费按第 5 步的唯一顺序 (a)/(b)/(c) 处理（`internal/chain/closeout.go`）。
 - **由记录链自身降低暂定结论**（只降不升，原因记在收尾记录项的 `caps` 中，并作为失败行写出）：
   - 降为 1：`m.Run` 非零、日志或登记表的缺陷；
-  - 降为 2：快照点上仍有记录没有进入终态、有外层操作没有成功、写者已经发布错误或非成功的终态。
+  - 降为 2：快照点上仍有记录没有进入终态、有外层操作没有成功（被拒绝准入的也算，§9.3）、写者已经发布错误或非成功的终态。
 - **退出状态**：最终结论为 3 或 4 时为 0，否则为 1（LE-10）。`TestMain` 只以收尾的返回值调用 `os.Exit`。配置本身不完整（例如没有给出记录目录）时以 2 退出，这时没有任何证据。
 
 ### 2.8 workflow（§6.3、§9.1）
@@ -158,7 +158,7 @@
 | 15 | 最后一次写入在 `D` 之后才发布 | 诊断任务的终态仍是“完成”，但资格为晚到，最终结论为 2（§6.6 情形 4）；还有写入要做时则走到期出口（情形 5） |
 | 16 | LC-1 的判定 | 见 §2.5；按 Review 147 的 N-147-1 改为以应检查的模块集合判定（§7.5） |
 
-## 4. 测试与结果（第一阶段提交 `84c7718` 时；按 Review 147 修复之后的结果见 §7.7）
+## 4. 测试与结果（第一阶段提交 `84c7718` 时；按 Review 147 修复之后的结果见 §7.7，按 Review 148 修复之后的结果见 §9.6）
 
 - **命令**（在 `prototype/c9evidence`）：`GOTOOLCHAIN=local GOPROXY=off GOWORK=off GOFLAGS= <go1.27.3 的 go.exe> test -count=1 -v ./...`；另有 `vet ./...`、`vet -tags c9evidence_run ./...`、对 linux、darwin、windows 三个 GOOS（amd64 与 arm64）的交叉 `vet`、`test -tags c9evidence_run -c ./run/`（只编译正式入口）、`gofmt -l`、`mod verify`。
 - **结果**（2026-11-14，Windows 本机，go1.27.3 windows/amd64）：
@@ -196,9 +196,9 @@
 4. 本实现记录与固定代码点的独立审查，包括第 3 节列出的解释，以及对标签敏感的夹具是否加入 LC-6。
 5. N2 的两项（LE-4 与 G4-Q9 的模块缓存准备；声明的范围），以及运行的授权（写定 C 与 T），都在之后。
 
-## 7. 按 Review 147 的定向修复（§191；已修复，待 Review 148 复审）
+## 7. 按 Review 147 的定向修复（§191；Review 148：B-147-2、B-147-3 关闭，B-147-1 尚余三个接点，见 §9）
 
-Review 147 对第一阶段实现为技术 NO-GO（B-147-1 ~ 4）。负责人只授权在 PR #56 内做这四项的定向修复与适用回归，以及 N-147-1 ~ 3 与两处措辞的精化（review-resolution §191）。以下只说明修了什么、由哪些回归覆盖、跑出了什么；阻塞是否关闭由 Review 148 裁定。
+Review 147 对第一阶段实现为技术 NO-GO（B-147-1 ~ 4）。负责人只授权在 PR #56 内做这四项的定向修复与适用回归，以及 N-147-1 ~ 3 与两处措辞的精化（review-resolution §191）。以下只说明修了什么、由哪些回归覆盖、跑出了什么；阻塞是否关闭由 Review 148 裁定。Review 148 的裁定登记在 review-resolution §192；本节保留修复当时的记录（只按 §192 第 6 项做了措辞的精化），之后的修改见 §9。
 
 ### 7.1 B-147-1：父端脱离未返回的分析
 
@@ -247,7 +247,7 @@ Review 147 对第一阶段实现为技术 NO-GO（B-147-1 ~ 4）。负责人只�
 - **来源链**：
   - `collect.Result.Refs` 保存本配置的原始记录引用（仓库文件、工具链、三种调用、每个模块的 I-4）与派生记录的引用。
   - 每条派生记录绑定实际的父记录（§2.7）。
-  - `collect.VerifyProvenance` 按追加的顺序核对：每条记录的引用等于它这一行的 SHA-256；每条派生记录至少有一个父项，每个父项都能解析为更早出现、SHA-256 相同的记录；父项属于同一个配置；各类派生记录都绑定了必要的父项。作业在收尾时对 R 的记录调用它，任何问题都是工具缺陷（第 1 级），manifest 完整也不能使结论有效。LC-5 的八个用例与 LC-8 的“W 之后的结果”实例也调用它，结果作为 `provenance ok` 一行进入完整预期（LC-8 的“W 之后的单元”在准入处被拒绝，它的完整预期不含这一行）。
+  - `collect.VerifyProvenance` 按追加的顺序核对：每条记录的引用等于它这一行的 SHA-256；每条派生记录至少有一个父项，每个父项都能解析为更早出现、SHA-256 相同的记录；父项属于同一个配置；各类派生记录都绑定了必要的父项。作业在收尾时对 R 的记录调用它（Review 148 的 R-a 之后改为工作任务的最后一个单元，收尾只消费发布的结果，见 §9.1），任何问题都是工具缺陷（第 1 级），manifest 完整也不能使结论有效。LC-5 的八个用例与 LC-8 的“W 之后的结果”实例也调用它，结果作为 `provenance ok` 一行进入完整预期（LC-8 的“W 之后的单元”在准入处被拒绝，它的完整预期不含这一行）。
 - **F 域的结构化记录**：
   - `controls.Outcome` 携带 `Instance`：完整的检查结果（每条失败的站点、类型、来源、注入序号与细节）、进入记录、假调用者的调用、实例自己的记录行、准入拒绝，以及被测代码的其他原始结果（例如 I-4 的文件清单、受控读取的消费与注入、解码的输出、条件检查的各步、类型检查的完整输出）。
   - 规范行由它生成，保留站点；每条失败一行，不过滤。
@@ -255,7 +255,7 @@ Review 147 对第一阶段实现为技术 NO-GO（B-147-1 ~ 4）。负责人只�
 - **回归**：
   - `TestVerifyProvenanceHealthy`、`TestVerifyProvenanceRejects`：健康的来源链没有问题；父项缺失、摘要错误、引用另一个配置的记录、绑定了错误的调用、以更晚的记录为父项、行与引用不符，都被拒绝。
   - `TestB1474DerivedRecordsNameResolvableParents`：健康作业的 `derived.jsonl` 中，每条派生记录的父项都能逐项解析。
-  - `TestB1474BrokenProvenanceIsInvalid`：加入一条没有父项的派生记录，作业的结论为无效。
+  - `TestB1474BrokenProvenanceIsInvalid`：加入一条没有父项的派生记录，作业的结论为无效。（Review 148 之后，这条记录是在核验之后追加的，按“核验之后追加的记录”记为缺陷，见 §9.1。）
   - `TestB1474OnlyTheSiteDiffersIsAMiss`：LC-4 的 `list.malformed` 与 `list.second-malformed` 同为 J-3、`call3-list`、`syntax`，只有解码器停下的位置不同（`$[0]`、`$[1]`）；以对方的期望判定为不命中，以自己的期望判定为命中。两条预期独立写在测试中。
   - `TestB1474SameClassAtTheWrongSiteIsAMiss`：以 LC5-19b 的期望判定 LC5-20a 的实例（同为 B1 的 J-2 不符），判为不命中。两者的检查（`B1/GOWORK`、`B1/GOFLAGS`）与站点都不同，所以它不能单独说明站点参加比较；只有站点不同的情形由上一项覆盖。
   - `TestB1474ExtraRealFailureIsNotFiltered`：夹具多出一个真实失败（同一检查、同一类别），它作为单独的一行出现，判为不命中。
@@ -273,13 +273,13 @@ Review 147 对第一阶段实现为技术 NO-GO（B-147-1 ~ 4）。负责人只�
 
 | 日志（草稿目录 `s191/logs/`） | 被测代码 | 结果 |
 |---|---|---|
-| `pre-fix-regressions.log`（4515 字节，SHA-256 `089c92e3c6bafdfdb519edd20c644a495b1a4f388339e8f48732ae55b86024a9`） | HEAD `b44203e`（树 `04b64c8`），工作区只多出三个未跟踪的回归文件 | 8 项失败、1 项通过：类型检查的三项保留错误的回归失败，健康对照通过；A4 与守卫的两项失败；作业层的三项失败（其中 B-147-1 一项当时没有进入类型检查，见下行） |
-| `pre-fix-B1471.log`（2114 字节，SHA-256 `99209fedcab6f129ccbce8a3256838fc87fc98e61def9f5c2ce24ddf136756f1`） | 同上，另加测试夹具的时钟修正（`controls.FixtureRepo` 接收作业的时钟） | 失败：分析卡住时 `RunDomains` 没有在 `W` 返回（10 秒有界出口触发之后释放阻塞） |
+| `pre-fix-regressions.log`（4515 字节，SHA-256 `089c92e3c6bafdfdb519edd20c644a495b1a4f388339e8f48732ae55b86024a9`） | HEAD `b44203e`（树 `04b64c8`），工作区只多出三个未跟踪的回归文件 | 8 项失败、1 项通过：类型检查的三项保留错误的回归失败，健康对照通过；A4 与守卫的两项失败；作业层的三项失败（其中 B-147-1 一项当时没有进入类型检查，见下行）。B-147-1 一项结束时，TempDir 的 `RemoveAll` 报 sharing violation（`closeout.jsonl` 仍被占用），那次夹具的收尾不是全部成功 |
+| `pre-fix-B1471.log`（2114 字节，SHA-256 `99209fedcab6f129ccbce8a3256838fc87fc98e61def9f5c2ce24ddf136756f1`） | 同上，另加测试夹具的时钟修正（`controls.FixtureRepo` 接收作业的时钟） | 失败：分析卡住时 `RunDomains` 没有在 `W` 返回（10 秒有界出口触发之后释放阻塞）。结束时同样有 TempDir 的 sharing violation，那次夹具的收尾不是全部成功 |
 | `pre-fix-site-only.log`（1237 字节，SHA-256 `5d5d8a6e1c463a8c9412497e9e38724d38a8569807e5111170b66468364a48f6`） | 第一阶段提交 `84c7718` 的工具模块（子树 `c26eb00c…`），以 `git archive` 导出到草稿目录，另加一个探针测试（SHA-256 `7b41aa71…d7d8`）；不在仓库的工作区中运行 | 失败：两个变体的预期都是 `decode fail J-3 call3-list syntax real`，交叉判定为命中（修复之前站点不参加比较） |
 
 - 第一次运行时，B-147-1 的回归失败在“分析没有进入类型检查”：夹具调用者用的是真实时钟，作业用的是假时钟，调用被判为在 `W` 之后发布，停在 A1-b。这是测试夹具的缺陷，修正之后单独重跑，才按预期失败在缺陷本身。
 - B-147-2 的回归与来源核验器的测试在修复之前**不能编译**：当时没有可以观察的持有状态，也没有核验器。它们只有修复之后的结果。
-- 修复过程中，记录链的一项新回归在全量运行中失败过一次：它要求出口必须是到期出口 (b)，而时钟越过 `D` 之后，父端也可能先看到诊断任务发布的“到期停止”并按 (a) 消费，两者按五种状态表都得到 2。这是断言过窄，已改为接受这两个出口并只断言结论为 2；修改之后这一组回归连续 30 次通过，全部 Review 147 回归连续 20 次通过（这两次重复运行在提交 `bf0a01c` 之前，没有留下日志）。
+- 修复过程中，记录链的一项新回归在全量运行中失败过一次：它要求出口必须是到期出口 (b)，而时钟越过 `D` 之后，父端也可能先看到诊断任务发布的“到期停止”并按 (a) 消费，两者按五种状态表都得到 2。这是断言过窄，已改为接受这两个出口。放宽的只是出口：结论仍须为 2，并且仍断言写者终态为到期、晚到，到期之后没有关闭，manifest 由写者持有、没有启动关闭、未释放，`Create` 的结果保留，`Held()` 列出 manifest；`Write` 一例另断言晚到的写入结果保留（此前写成“只断言结论为 2”，不准确，按 Review 148 §7 更正）。修改之后这一组回归连续 30 次通过，全部 Review 147 回归连续 20 次通过（这两次重复运行在提交 `bf0a01c` 之前，没有留下日志）。
 - 修复提交 `bf0a01c` 之后，核对实现记录时发现原有的错误站点回归同时改变了检查与站点，于是补了只有站点不同的回归，并更正原测试的注释（提交 `ec07dec`，只改测试文件）。它在修复之前的行为由上表最后一行记录。
 
 ### 7.7 修复之后的结果
@@ -288,13 +288,14 @@ Review 147 对第一阶段实现为技术 NO-GO（B-147-1 ~ 4）。负责人只�
 |---|---|---|
 | `final-full-test.log`（43053 字节，SHA-256 `1f3ac1413d0ffd12896ec9c9eeade1ead9f3658935b7a1590cd94f675defd099`） | 提交 `ec07dec8aa5c56f00d861a6b2a07f0ff66cd9a39`（树 `1baced68…`，工具模块子树 `3b6b26dd…`）；测试前后工作区只有本文件未提交的修改，工具模块内没有修改 | `go test -count=1 -v ./...`：11 个有测试的包全部 ok；顶层测试 158 个通过、0 个失败；子测试 271 个通过、0 个失败；跳过 1 个（`TestTakeNegatives/symbolic_link`，本机没有创建符号链接的权限） |
 | `final-static.log`（2771 字节，SHA-256 `e0546c77894c63b426db63cf26b3081ab56449ed437569aea8a9fd1b71462996`） | 同上 | `gofmt -l` 为空；`go vet ./...`、带 `c9evidence_run` 标签的 vet、linux / darwin / windows × amd64 / arm64 的交叉 vet、正式入口只编译、`go mod verify` 都成功；第三方导入闭包仍只有 `golang.org/x/mod/sumdb/dirhash` |
-| `final-regress147-x20.log`（2136 字节，SHA-256 `bc53f6ce77c365e208b97ce24a2d547c2d1cba2c6d69bdefea636339b411793f`） | 同上 | `go test -count=20 -run 'B147\|N147\|VerifyProvenance\|ConstraintLineAfterABlockComment' ./...`：Review 147 的全部回归各重复 20 次，各包 ok（不带 `-v`，日志中只有包级结果） |
+| `final-regress147-x20.log`（2136 字节，SHA-256 `bc53f6ce77c365e208b97ce24a2d547c2d1cba2c6d69bdefea636339b411793f`） | 同上 | `go test -count=20 -run 'B147\|N147\|VerifyProvenance\|ConstraintLineAfterABlockComment' ./...`：Review 147 的全部回归各重复 20 次，各包 ok（不带 `-v`，日志中只有包级结果）。其中 cond、decode、judge、modsnap、spec、verdict 六个包为 `[no tests to run]`，没有执行任何匹配的回归，不能计作执行了回归；有匹配回归的是 chain、collect、controls、job、typecheck 五个包 |
 | `post-fix-full-test.log`（42748 字节，SHA-256 `f24e49842f6193f2530ff0b582b82bc9b273f81c734ea8a1d8f37035e4e7b46b`）、`post-fix-static.log`（2699 字节，SHA-256 `e0b0fd5aff53caf833a1a01b59c6304f17fee7e7fadc62f5d7725cbf8b6a3b24`） | 修复提交 `bf0a01c`（子树 `9dae606b…`），工作区干净 | 同样全部成功（顶层 157 个）；被上面三行取代，只作为历史保留 |
 
 - 命令都在 `prototype/c9evidence` 下执行，环境为 `GOTOOLCHAIN=local GOPROXY=off GOWORK=off GOFLAGS=`，工具链为 `C:\Users\hoshi\go\pkg\mod\golang.org\toolchain@v0.0.1-go1.27.3.windows-amd64\bin\go.exe`（SHA-256 `83b7ba66…999d`，`go1.27.3 windows/amd64`）。每份日志的开头写下了命令、环境、工具链、HEAD、树、工具模块的子树与测试前的工作区，结尾写下了退出状态与测试后的工作区。
 - 日志保存在仓库之外的会话草稿目录（`C:\Users\hoshi\AppData\Local\Temp\claude\b96df3361c677053\67d963ef-6de7-4877-aebf-656e909830be\scratchpad\s191\logs\`），可供复审读取。日志与被测代码的关系是“测试时读到的 HEAD 与子树”，属于时间上的关联；它们不是不可变产物级的绑定，日志中也没有嵌入测试二进制的哈希。
 - 本节之后提交的实现记录是纯文档，不改变工具模块的子树；推送的最终 HEAD 上，工具模块的子树仍是 `3b6b26dd…`。
 - 这些日志在会话草稿目录中，重启或清理可能丢失；如须长期保存，要另行决定存放位置。
+- 全量日志中，`TestStripBodiesCounterExamples` 下有一行 “The following panic happened checking types near”。这是被测的类型检查对反例输出的诊断，所属测试通过；它不是测试进程的失败，也没有被省略。
 - 仍然**没有**：Linux、macOS 上的运行（只做了交叉 vet）；`-race`；伪工具；真实的 `go` 调用；正式入口的取证。§5 所列的部分全部不变。
 
 ## 8. 开发期间的执行记录（按 Review 147 §6 更正总括的表述）
@@ -306,3 +307,181 @@ Review 147 对第一阶段实现为技术 NO-GO（B-147-1 ~ 4）。负责人只�
   - 为挑选只有站点不同的 LC-4 变体，在工具模块的 `internal/decode` 中临时放入一个只列出失败变体的测试文件，运行一次之后删除，没有提交；删除之后工作区中工具模块没有修改。
   - 修复之前的站点行为在仓库之外检查：以 `git archive` 把 `84c7718` 的工具模块导出到草稿目录，加一个探针测试运行（§7.6 最后一行）。
 - **开发期间的其他失败与修正**：条件检查测试中块注释与 `"C"` 导入两处预期写错，按固定源码修正；守卫测试的一处预期写错；作业测试中记录文件的计数写错；一次作业测试因记录项带着行尾 LF 而失败，记录链判为缺陷，修正之后通过；一条 shell 命令因多余的 `cat` 等待标准输入而挂起，被停止。最终的测试结果见 §4 与 §7.7，不说成第一次就全部通过。
+
+## 9. 按 Review 148 的定向修复（§192；已修复，待 Review 149 复审）
+
+Review 148 认定 B-147-2、B-147-3 在受审范围内关闭，N-147-1 ~ 3 完成，B-147-4 的主体修复成立。B-147-1 尚余三个截止接点：
+
+- R-a：父端的 `Copy` 与 `Level1` 重新执行来源核验。它与 B-147-4 共用，按同一个缺陷处理。
+- R-b：放弃等待与工作完成的资格没有持续进入终判；LC-1 没有自己的发布资格。
+- R-c：后台夹具的准备与清理没有外层截止的准入。
+
+负责人只授权这三个接点的定向修复与适用回归，以及五项精化（review-resolution §192）。以下说明修了什么、由哪些回归覆盖、跑出了什么；是否关闭由 Review 149 裁定。
+
+### 9.1 R-a：来源核验进入工作阶段，父端只消费发布的结果
+
+- **位置**：`internal/job/job.go` 的 `verifyRecords`、`ProvRecord`、`copyState`；`internal/collect/record.go` 的 `MemRecorder.Len`。
+- **修改**：
+  - 来源核验是工作任务的最后一个单元。它先登记（`ProvRecord`，状态 registered），再经既有的预算准入（只在 `W` 之前；不新增预算），然后在锁外对当时作业持有的全部记录项运行 `collect.VerifyProvenance`。最后在作业的锁下发布结果、覆盖范围、发布时刻与及时资格。覆盖范围是记录器的前 `Covered` 项，`Last` 是其中最后一项的引用。
+  - 准入被拒绝时发布 “not admitted”，不跳过，也不保留旧的成功。核验记录由作业持有到进程结束，所以父端停止等待之后晚到的结果（包括真实错误）仍被保留。核验函数不需要可以中断。
+  - 父端的 `Copy` 与 `Level1`（包括 `D` 的到期出口）只读取已发布的状态：不重新计算 SHA-256，不解码，不遍历记录，也不新启动任何分析。读取记录项的个数（`Len`）只是一个计数。
+  - 消费规则：
+    - 发布的问题不论何时发布，都是工具缺陷（第 1 级）。
+    - 核验没有登记、被拒绝、未完成，或在 `W` 之后才发布，都记为未决，不能得到有效结论。
+    - 核验完成之后作业又多出的记录项不在覆盖范围之内，记为工具缺陷（第 1 级）；旧的成功不沿用。
+  - 收尾记录项增加 `published` 字段，写入快照时工作任务与核验的发布状态：状态、覆盖、最后一项、问题的个数、发布时刻与资格。
+- **必要记录的范围**：工作任务追加到作业记录器中的全部原始与派生记录，即运行身份、各配置的采集记录与检查记录。F 域实例的记录在各自的实例中，不进入作业的记录器。
+- **测试接缝**：
+  - `job` 的 `seams`：命名的钩子点（work start、parent wait、R published 〈配置〉、R done、before done），以及核验器、目录的创建与删除。
+  - `controls.Env` 的 `MkdirTemp`、`RemoveAll`。
+  - `Begin` 设为真实的函数，只有本包的测试替换。修复之前的运行用的就是这些接缝，它们本身不改变行为。
+- **回归**（`internal/job/regress148_test.go` 与 `regress148b_test.go`；都经过 `RunDomains` → `Finish`）：
+  - `TestB148RaStuckVerificationParentStillCloses`：核验卡住，时钟到 `W` 时 `RunDomains` 返回，`Finish` 在有界时间内返回非 3、4 的结论；核验器只被工作任务调用了一次。
+  - `TestB148RaStuckVerificationExpiredParent`：核验卡住，`m.Run` 在 `D` 之后才返回，`Finish` 经到期出口（`PathExpiredAtMRun`）返回；`D` 及之后没有调用核验器。
+  - `TestB148RaStuckVerificationIsPending`：快照时核验仍在运行，状态为 running，记为未决，结论为 2。
+  - `TestB148RaLateVerificationSuccessDoesNotRestore`、`TestB148RaLateSuccessIsNotTimely`：核验在 `W` 之后返回成功，记为不及时，结论不是 3、4。
+  - `TestB148RaLateVerificationErrorIsConsumed`：父端停止等待之后、快照之前发布的真实问题被消费，结论为 1。
+  - `TestB148RaLateVerificationErrorHeldAfterFinish`：父端作出结论之后才发布的真实问题，由作业持有（不及时）。
+  - `TestB148RaHealthyVerifiedOnceByTheWork`、`TestB148RaPublishedVerificationCoversEveryRecord`：健康时由工作任务核验一次，覆盖作业的全部记录项，及时，没有问题；收尾不再调用核验器；结论为 4。
+  - `TestB148RaExpiredParentDoesNotVerify`：工作任务健康完成，`m.Run` 在 `D` 之后返回，到期出口不调用核验器。
+  - `TestB148RaBrokenRecordBeforeTheVerification`、`TestB148RaBrokenRecordFoundByTheWork`：工作任务在核验之前追加一条没有父项的派生记录；核验发现并覆盖了它，结论为 1。
+  - `TestB148RaAppendedAfterTheVerificationIsADefect`：与原有的 `TestB1474BrokenProvenanceIsInvalid` 是同一事件。核验之后追加的记录不在覆盖范围之内，记为缺陷，结论为 1，旧的成功不沿用。原测试保留，注释已按新的路径改写。
+  - `TestVerifyProvenanceRejectsASemanticSwap`：见 §9.4。
+
+### 9.2 R-b：持续消费放弃等待与必要完成资格
+
+- **位置**：`job.go` 中 `WorkRecord` 的注释（必要工作的边界）、`LC1Record`、`runR`、`copyState`。
+- **必要工作的边界**：工作任务在发布完成之前依次发布的全部内容，即每个对照变体的 F 记录（含它的外层准备与清理）、每个配置的 R 结果与检查记录、LC-1、来源核验。完成最后发布，所以及时的完成（早于 `W`，且父端仍在等待）意味着这些都在 `W` 之前发布。
+- **修改**：
+  - 收尾整体消费工作任务的完成资格。未完成、放弃等待（即使之后完成了）、在 `W` 或之后完成，都记为未决；之后发布的任何内容都不能消除它。放弃等待之后才完成时，原因写明完成的时刻与放弃的时刻。
+  - 各项发布仍保留自己的资格。LC-1 改为 `LC1Record`，在发布的同一次锁下确定资格；晚到的命中按未决消费，与 F 记录相同。
+  - 等于 `W` 按晚到处理：早于 `W` 才及时。
+  - **完成通道与计时器同时可读时**，结论不依赖 `select` 的选择：
+    - 完成的资格由发布完成的那一次锁下的时钟读数决定；父端只在完成尚未发布时记放弃等待。
+    - 若完成在 `W` 之前发布，父端不论选择哪一路都不会记放弃：选到计时器时时钟已不早于 `W`，而完成在此之前已经发布。
+    - 若完成不早于 `W`，它本身就不及时。
+- **回归**：
+  - `TestB148RbAbandonedThenCompletedBeforeFinish`、`TestB148RbLC1AndWorkQualification` 按 Review 148 的窗口排定事件：
+    1. F 结果与最后一个 R 结果在 `W` 之前发布；
+    2. 工作任务暂停在检查记录、LC-1 与核验之前；
+    3. 父端在 `W` 放弃等待；
+    4. 工作任务在 `W` 之后、`D` 之前补齐；
+    5. 父端这时才进入 `Finish`。
+
+    结论为 2，不是 3、4。LC-1 的命中按未决消费，原因写明在 `W` 之后发布；放弃等待的事实在完成之后仍被消费。
+  - `TestB148RbWorkDoneAtOrAfterW`：父端被扣住，工作任务恰在 `W`、或在 `W` 之后 1 秒发布完成；然后父端在完成与 `W` 都可读时进入等待。两种情形都不是 3、4。
+  - `TestB148RbTimelyWorkParentLate`：全部必要工作在 `W` 之前完成，只是父端到 `W` 才进入等待（完成与 `W` 都可读）。十次都为 4、退出 0，工作任务及时，没有放弃。重复只改变调度的选择，每次都断言同样的事件。
+
+### 9.3 R-c：外层准备与清理接上截止准入
+
+- **实际的 O 操作与调用者**（全部核对）：
+
+| 操作 | 调用者 | 准入的截止 |
+|---|---|---|
+| 夹具根目录的创建（`MkdirTemp`） | `job.runControls` | `W` |
+| 各夹具的创建与写入（`prepare`） | LC-2（3 个变体）、LC-3（4 个）、LC-5（8 个，经 `prepareRF`）、LC-8（2 个，经 `prepareRF`）、LC-6（3 个） | `W` |
+| 夹具的修改步骤（`change`） | LC-2 的 3 个变化、LC-3 的 2 个变化 | `W` |
+| 夹具的清理（`fixture.cleanup`，`RemoveAll`） | 以上各变体 | `D` |
+| 根目录的清理（`defer`，`RemoveAll`） | `job.runControls` | `D` |
+
+  LC-4、LC-7、LC-9 没有外层操作。`controls.FixtureRepo` 只供测试准备仓库夹具，不在作业的流程中。
+- **修改**：
+  - `chain.Outer.AdmitOp` 在外层登记表的锁下读时钟（读数不早于 `D` 时置锁存）。只有读数早于给定的截止、且锁存未置时，才准入并登记为 pending。否则登记为终态 `OpRefused`，带读数与截止，什么也不启动；它既不是成功，也不是操作的失败。
+  - 准备以 `W` 为截止，清理以 `D` 为截止；每个新的操作都在开始之前单独判定。登记不等于准入：`RegisterOp` 保留，外层的准备与清理改经 `AdmitOp`。
+  - `controls.Outer` 改为 `Prepare`、`Hold`、`Cleanup`；被拒绝时返回包装 `ErrNotAdmitted` 的错误。`Judge` 把准备的拒绝记为 “outer preparation not admitted”（不命中），把清理的拒绝记为 “outer cleanup not admitted”（未决），与真实的失败分开，也不记为成功。
+  - 作业持有外层创建的每个目录（`HeldDir`：名称、路径、创建时刻、状态），从目录存在的那一刻起，直到清理返回 nil 才确认释放；清理被拒绝或失败时继续持有。快照把没有确认移除的目录记为外层的未决；O 域把 `OpRefused` 与 failed、unknown 一样记为外层的失败。
+  - 根目录的 `defer` 清理同样经 `Cleanup` 判定，不能以 `defer` 绕过 `D`。已经开始的操作不中断，它晚到的真实结果照样发布，资格为晚到。
+  - F 域模型的假时钟（LC-5、LC-8）只给出实例内部的到期点；外层操作的准入用作业的时钟与 `W`、`D`。
+- **回归**：
+  - `TestB148RcLateWorkCreatesNoRoot`、`TestB148RcRefusedPreparationIsRecordedApart`：工作任务登记之后迟至 `D` 之后才调度。
+    - 不创建根目录，不启动清理；
+    - “prepare fixture root” 记为 refused，不是成功，也不是失败；
+    - 每个变体记为“准备未准入”的不命中；作业没有持有任何目录。
+  - `TestB148RcAnalysisReturnsAfterD`、`TestB148RcRefusedCleanupKeepsTheHold`：LC-5 的实例在 `W` 之前准入，类型检查到 `D` 之后才返回。
+    - 不启动它的清理，不准备下一个实例（LC-3），根目录的清理也不启动；两个清理都记为 refused；
+    - 两个目录仍在磁盘上，由作业持有，状态为 “cleanup not admitted”；
+    - LC-5 的 F 记录的清理错误是 `ErrNotAdmitted`，不是命中。
+  - `TestB148RcCleanupBetweenWAndD`：同一实例在 `W` 之后、`D` 之前返回，它的清理与根目录的清理照常准入并完成，目录被移除；下一个实例不准备。
+  - `TestB148RcPrepareAndCleanupFailuresAreRecorded`、`TestB148RcFailureIsNotARefusal`：经接缝注入的创建失败与根目录的移除失败记为 failed，带着真实的错误；目录继续持有，状态为 “cleanup failed”。
+  - `TestB148RcHealthyPrepareAndCleanup`、`TestB148RcHealthyHoldsReleased`：健康时五次创建、五次移除都在 `W` 之前完成，全部 done；目录都已移除，持有全部释放，结论为 4。
+  - `TestB148AdmitOp`（`chain`）：`W` 之前准入；在 `W` 时准备被拒绝；`W` 与 `D` 之间清理准入；在 `D` 时清理被拒绝并置锁存；被拒绝的操作是终态，记录读数与原因。
+  - `TestB148RefusalsInTheOuterJudgement`（`controls`）：外层判定中，准备的拒绝、清理的拒绝与真实的失败各有不同的原因；清理被拒绝时目录仍被持有。
+
+### 9.4 精化
+
+- **来源链反例**：`TestVerifyProvenanceRejectsASemanticSwap`。所有摘要都正确，只把语义父项换成真实存在的更早记录：闭包绑定第 2 种调用；消费记录绑定另一个配置的 I-4。核验器只报告缺少必要的父项与跨配置，不报告摘要或次序的问题。核验的规则此前已有，所以它在修复之前也通过；它的作用是使运行证据更精确，不是某个缺陷的回归。
+- **manifest 到期回归的记录**：§7.6 的措辞已更正。放宽的只是出口（(a) 或 (b)）；回归仍断言写者终态为到期、晚到，到期之后没有关闭，manifest 由写者持有、没有启动关闭、未释放，`Create` 的结果保留，`Held()` 列出 manifest。`Write` 一例另断言晚到的写入结果保留。
+- **旧红色日志中的 TempDir 清理错误**：§7.6 已补记。`s191` 的 `pre-fix-regressions.log` 与 `pre-fix-B1471.log` 中，`TestB1471ParentLeavesAStuckAnalysisAtW` 结束时 TempDir 的 `RemoveAll` 报 sharing violation（`closeout.jsonl` 仍被占用），那两次夹具的收尾不是全部成功。本轮的作业回归改用内存中的记录文件系统，到期出口留下的未关闭句柄不再落在磁盘上；本轮修复前后的日志中都没有 TempDir 的清理错误。
+- **类型检查的 panic 诊断**：§7.7 已补记。全量日志中 `TestStripBodiesCounterExamples` 下的 “The following panic happened checking types near” 是被测的类型检查对反例输出的诊断，所属测试通过；它不是测试进程的失败，也没有被省略。本轮的两份全量日志中同样有这一行。
+- **重复回归日志中没有匹配测试的包**：§7.7 已补记。`final-regress147-x20.log` 中 cond、decode、judge、modsnap、spec、verdict 六个包为 `[no tests to run]`，没有执行任何匹配的回归，不能计作执行了回归。本轮的重复只运行有匹配测试的四个包，并带 `-v` 逐个计数。
+
+### 9.5 修复之前的结果（如实记录）
+
+| 日志（草稿目录 `s192/logs/`） | 被测代码 | 结果 |
+|---|---|---|
+| `pre-fix-regressions.log`（6311 字节，SHA-256 `59209644c642e1214421280460e7ab5eecb9572c3fc5eb3b8e6d139ada1964ce`） | HEAD `4c7e6f7`（树 `41a52e7`；工具模块子树 `3b6b26dd`，与 `fcf41b0` 相同），工作区中另有：不改变行为的接缝（`job.go`、`controls.go`），修复之前可编译的回归文件 `regress148_test.go`（SHA-256 `cfaf1288…3efd3`），以及 `provenance_test.go` 中的反例。已跟踪文件的 diff 的 SHA-256 为 `1ca360fc…f81e`，另存为 `s192/pre-fix-seams.diff`（其中也含 `provenance_test.go` 的修改） | 9 项失败、6 项通过 |
+| `pre-fix-stuck-at-D.log`（1351 字节，SHA-256 `19fc1db12d5c02b754301a10a56e6ee382829a4b0e7b068e16eefaef2353f8c5`） | 以 `git archive` 导出的 `4c7e6f7` 工具模块，加同一份 diff，再加修复之后补充了一项回归的 `regress148_test.go`（SHA-256 `e16956ca…c2a538`）；在草稿目录中运行，不在仓库的工作区中 | `TestB148RaStuckVerificationExpiredParent` 失败：`m.Run` 在 `D` 之后返回时，到期出口卡在核验中，10 秒的有界出口触发 |
+
+- **失败在原缺陷本身的**：
+  - R-a：
+    - `TestB148RaStuckVerificationParentStillCloses`：`Finish` 10 秒没有返回，父端在执行核验；
+    - `TestB148RaHealthyVerifiedOnceByTheWork`：工作完成时核验器被调用 0 次，核验在父端；
+    - `TestB148RaExpiredParentDoesNotVerify`：到期出口在 `D` 调用了核验器；
+    - `TestB148RaStuckVerificationExpiredParent`：见上表第二行。
+  - R-b：
+    - `TestB148RbAbandonedThenCompletedBeforeFinish`：结论 4、退出 0；LC-1 为及时的命中；放弃等待没有被消费；
+    - `TestB148RbWorkDoneAtOrAfterW`：在 `W` 与 `W` 之后 1 秒两种情形都为 4、退出 0。
+  - R-c：
+    - `TestB148RcLateWorkCreatesNoRoot`：`D` 之后创建并删除了根目录；
+    - `TestB148RcAnalysisReturnsAfterD`：`D` 之后启动了夹具与根目录的清理，两个目录被删除。
+- **不能在旧代码上建立前提的两项**（不算原缺陷已被验证）：`TestB148RaLateVerificationSuccessDoesNotRestore`、`TestB148RaLateVerificationErrorIsConsumed` 失败在“工作任务没有进入核验”。旧代码的工作任务根本不运行核验，10 秒的有界出口触发；这是夹具的前提不成立，不是对缺陷的验证。
+- **修复之前通过的六项**：
+  - `TestB148RaBrokenRecordBeforeTheVerification`：旧代码由父端核验，也能发现；
+  - `TestB148RbTimelyWorkParentLate`：健康的分支；
+  - `TestB148RcCleanupBetweenWAndD`：`W` 与 `D` 之间的收尾规则；
+  - `TestB148RcPrepareAndCleanupFailuresAreRecorded`：失败的记录；
+  - `TestB148RcHealthyPrepareAndCleanup`：健康对照；
+  - `TestVerifyProvenanceRejectsASemanticSwap`：精化的反例。
+- **只能在修复之后编译的回归**：`job` 的 `regress148b_test.go`，以及 `chain`、`controls` 的 `regress148_test.go`。它们用到修复新增的发布状态与接口（`ProvRecord`、`LC1Record`、`HeldDir`、`OpRefused`、`AdmitOp`、`ErrNotAdmitted`、`Prepare`／`Hold`／`Cleanup`），修复之前不能编译，只有修复之后的结果。
+  - 它们的预期在写修复代码之前已经写定：三个文件先放在草稿目录（`s192/post-tests/`），于 2026-11-14T16:39:19+09:00 记下 SHA-256（`a8d825e4…`、`d80f425d…`、`af7e3e06…`）。
+  - 修复之后原样复制进模块；提交的文件与这三个哈希相同。
+- 修复之前的运行中没有 TempDir 的清理错误（作业回归使用内存中的记录文件系统）。
+
+### 9.6 修复之后的结果
+
+修复提交为 `ef1d9ad757690958ecb2d8d0468bf7a0b2285846`（树 `0af666f4…`，工具模块子树 `31c11ad1d118c5045e09342d9f78ab43eeec0e68`）；测试前后工作区都干净。
+
+| 日志（草稿目录 `s192/logs/`） | 结果 |
+|---|---|
+| `final-full-test-run1.log`（46880 字节，SHA-256 `1cfb1b15064596ded1c7833f17e12737d0d2b91b9b7d42ad771ea409bda47d24`） | 第一次全量 `go test -count=1 -v ./...`：`chain` 包中第一阶段的旧测试 `TestWriterExpiresMidway` 失败（panic，`chain` 包其余的测试因此没有运行），其余 10 个有测试的包 ok；顶层 183 个通过、1 个失败。见 §9.7 |
+| `final-full-test-run2.log`（46003 字节，SHA-256 `32e9a5ec1d866ae359ad26b35dda424c0b62c18604471cc32d69a5e93e24cb73`） | 第二次全量：11 个有测试的包全部 ok；顶层 187 个通过、0 个失败；子测试 271 个通过；跳过 1 个（`TestTakeNegatives/symbolic_link`，本机没有创建符号链接的权限） |
+| `final-static.log`（2699 字节，SHA-256 `703cb16b85af3bfa64acba74135780738b8d5de87ae4daefff6604f588f8684b`） | `gofmt -l` 为空；`go vet ./...`、带 `c9evidence_run` 标签的 vet、linux / darwin / windows × amd64 / arm64 的交叉 vet、正式入口只编译、`go mod verify` 都成功；第三方导入闭包仍只有 `golang.org/x/mod/sumdb/dirhash` |
+| `final-regress148-x20.log`（100812 字节，SHA-256 `3473c11a909f75139e508967484c0f4d02312f99868318d295cd53309c613229`） | `go test -count=20 -v -run 'B148\|B147\|SemanticSwap'`，只在 job、chain、controls、collect 四个包：49 个测试各通过 20 次（980 个 PASS 行），没有失败 |
+
+- 两次全量运行都如实保留；第二次通过不抵消第一次的失败。
+- 49 个测试是 Review 147 的 B-147-1 ~ 4 回归（20 个）与 Review 148 的回归（29 个）。N-147-1、N-147-3 的回归与块注释的用例不在这个正则之内；它们在两次全量运行中都通过。
+- 全量日志中类型检查的 panic 诊断见 §9.4。
+- 回归以钩子、受控阻塞与假时钟固定事件的顺序。重复 20 次只是适量的重复，不替代事件断言；它不是 `-race`，也不是全调度覆盖。
+- 环境、工具链与日志的保存同 §7.7（命令都在 `prototype/c9evidence` 下以 `GOTOOLCHAIN=local GOPROXY=off GOWORK=off GOFLAGS=` 执行，工具链 SHA-256 `83b7ba66…999d`）。每份日志的开头记下命令、环境、工具链、HEAD、树、工具模块的子树、测试前的工作区（以及已跟踪文件 diff 的哈希与未跟踪文件的哈希），结尾记下退出状态与测试后的工作区。日志与代码的关系是测试时读到的 HEAD 与子树，属于时间上的关联，不是不可变产物的绑定。
+- 本节之后提交的实现记录是纯文档；推送的最终 HEAD 上，工具模块的子树仍是 `31c11ad1…`。
+
+### 9.7 新发现：第一阶段旧测试 `TestWriterExpiresMidway` 的测试侧时序缺陷（未修复，交负责人决定）
+
+- **现象**：第一次全量运行中，`internal/chain/writer_test.go` 的 `TestWriterExpiresMidway` 在第 191 行解引用 `s.Writer.Terminal` 时 panic（nil）。
+- **原因**（读代码确定）：
+  - 测试在时钟越过 `D` 之后释放被阻塞的 `Close`，然后只等到诊断任务发布终态（`diagTerminal`）就读取写者的终态。到期之后，诊断任务可能先发布“到期停止”，而写者的终态要在 `Close` 返回之后才发布，所以读到的写者终态可能还是 nil。
+  - 同一测试的第 188 行还把出口限定为 (b)（expired-final），而父端也可能按 (a) 消费诊断任务的到期停止，两者按五种状态表都得到 2。这与 §7.6 记下的 B-147-2 回归的过窄断言是同一类问题；当时只放宽了新的回归，没有改这个第一阶段的旧测试。
+- **不是本轮引入的**：写者、诊断任务与这个测试在本轮都没有修改。各重复 500 次：
+
+| 日志（草稿目录 `s192/logs/`） | 被测代码 | 结果 |
+|---|---|---|
+| `flake-writer-expires-midway-fcf41b0.log`（1927 字节，SHA-256 `443500507da97a1547c3e67dad1c79cd2e04224bc1739f1d5637cb2ee1e92c81`） | 以 `git archive` 导出的 `fcf41b0`（本轮之前） | 2 次失败在第 188 行（出口为 consumed） |
+| `flake-writer-expires-midway-ef1d9ad.log`（2519 字节，SHA-256 `ef796f9a3dad68e37cb5d096ed61e66e6d680aca2c6f70d31a4332125924c920`） | 修复提交 `ef1d9ad` | 1 次失败在第 188 行，之后 1 次在第 191 行 panic，运行中止 |
+
+- **处理**：这个测试不在 §192 授权的三个接点之内，也不是受本次接线影响的检查，本轮没有修改。建议的最小修复（待负责人决定）：等待条件改为诊断任务与写者都已发布终态；按 §7.6 的同一原则接受 (a)、(b) 两个出口，只断言结论为 2，以及写者的持有与关闭结果。它不涉及工具的判定代码；常规 CI 也不运行工具模块。
+
+### 9.8 仍未验证
+
+- Linux、macOS 上的运行（只做了交叉 vet）；`-race`；伪工具；采集器的真实 `go` 调用；正式入口的取证。§5 所列的部分全部不变。
+- 夹具的创建与删除失败都经测试接缝注入，不是自然发生的文件系统故障；到 `D` 之后才返回的分析由受控阻塞模拟，不是真实的长耗时输入。
+- 并发回归只覆盖钩子排定的事件顺序，不是全调度覆盖。
