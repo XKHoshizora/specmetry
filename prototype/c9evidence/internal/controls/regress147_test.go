@@ -35,10 +35,11 @@ func variantNamed(t *testing.T, vs []Variant, name string) Variant {
 	return Variant{}
 }
 
-// Review 147 B-147-4: a failure of the same check, class and kind at
-// another site does not hit. LC5-19b expects the J-2 mismatch on GOWORK;
-// the instance that actually runs is LC5-20a's, whose J-2 mismatch is on
-// GOFLAGS.
+// Review 147 B-147-4: a J-2 mismatch of the same class on another B1 key
+// does not hit. LC5-19b expects the J-2 mismatch on GOWORK; the instance
+// that actually runs is LC5-20a's, whose J-2 mismatch is on GOFLAGS. The
+// two differ in the check (B1/GOWORK, B1/GOFLAGS) as well as the site; the
+// site alone is TestB1474OnlyTheSiteDiffersIsAMiss.
 func TestB1474SameClassAtTheWrongSiteIsAMiss(t *testing.T) {
 	env, _ := newEnv(t)
 	_, want19b := lc5Row(t, "LC5-19b")
@@ -47,6 +48,30 @@ func TestB1474SameClassAtTheWrongSiteIsAMiss(t *testing.T) {
 	j := Judge(v, env.GOOS, v.Run(env), true)
 	if j.Judgement != verdict.Miss {
 		t.Fatalf("%s %v, want a miss", j.Judgement, j.Reasons)
+	}
+}
+
+// Review 147 B-147-4, the site alone: the LC-4 variants list.malformed and
+// list.second-malformed both fail with J-3, call3-list and kind syntax; the
+// decoder stops at $[0] and $[1]. Judged against the other's expectation,
+// the instance misses although its line differs only after " @ ".
+func TestB1474OnlyTheSiteDiffersIsAMiss(t *testing.T) {
+	env, _ := newEnv(t)
+	first := variantNamed(t, LC4(), "list.malformed")
+	second := variantNamed(t, LC4(), "list.second-malformed")
+	wantFirst := []string{"decode fail J-3 call3-list syntax real @ decode at $[0]"}
+	wantSecond := []string{"decode fail J-3 call3-list syntax real @ decode at $[1]"}
+	if strings.Join(first.Want, "\n") != strings.Join(wantFirst, "\n") || strings.Join(second.Want, "\n") != strings.Join(wantSecond, "\n") {
+		t.Fatalf("expectations changed: %q %q", first.Want, second.Want)
+	}
+	o := first.Run(env)
+	if j := Judge(first, env.GOOS, o, true); j.Judgement != verdict.Hit {
+		t.Fatalf("own expectation: %s %v, want a hit", j.Judgement, j.Reasons)
+	}
+	crossed := first
+	crossed.Want = wantSecond
+	if j := Judge(crossed, env.GOOS, first.Run(env), true); j.Judgement != verdict.Miss {
+		t.Fatalf("other site: %s %v, want a miss", j.Judgement, j.Reasons)
 	}
 }
 
