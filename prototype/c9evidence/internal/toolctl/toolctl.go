@@ -9,6 +9,13 @@
 // registry: a result that comes late is appended, and a failure is never
 // cleared by a later success.
 //
+// Review 154 (review-resolution §202): every new action of a call (its
+// entry, each pipe and Start) is admitted against W right before it starts;
+// the record holds the actual objects (the four files, the Cmd, the
+// Process) from the moment they exist; the start task's panic exit is
+// handled by the stage it reached; and every error an operation returned is
+// kept as a structured fault, apart from the display lines.
+//
 // It is the only code of the tool that starts a process. It is used for
 // the three reviewed calls (E-10 (ii) accepted for phase 2's tests only)
 // and, through the seams, for the pseudo-tools of LC-9.
@@ -57,6 +64,16 @@ const (
 	DescClosed  = "closed"
 )
 
+// What is known of a descriptor's release (B-154-2): the close initiated,
+// its real result and the release are kept apart.
+const (
+	ReleaseNone      = "none"      // never acquired
+	ReleaseHeld      = "held"      // acquired and open; its object is held
+	ReleasePending   = "pending"   // the close was initiated and has not returned
+	ReleaseConfirmed = "confirmed" // the real Close returned nil
+	ReleaseUnknown   = "unknown"   // the real Close returned an error, or did not return (panic); never retried
+)
+
 // Record states (§12.14 item 3).
 const (
 	StRegistered  = "registered"
@@ -65,6 +82,21 @@ const (
 	StStartFailed = "start-failed"
 	StWaited      = "waited" // this call's one Wait returned; Class says whether the reap is confirmed
 	StRefused     = "refused"
+	StNotAdmitted = "not-admitted" // an admission refused a new action; nothing after it ran (B-154-1)
+)
+
+// The admission points of a call (B-154-1).
+const (
+	PointEntry  = "entry"
+	PointStdout = "stdout pipe"
+	PointStderr = "stderr pipe"
+	PointStart  = "start"
+)
+
+// The holders of a descriptor (§12.14 item 4).
+const (
+	HolderStart = "start task"
+	HolderRead  = "read task"
 )
 
 // pidfd states (§12.14 item 9).
@@ -93,19 +125,31 @@ const (
 	ModeNone  = "none"  // darwin: no termination request
 )
 
+// The sources of a fault (B-154-4).
+const (
+	SourceOperation = "operation" // the result an operation call returned (a test seam may stand in for it)
+	SourceInjected  = "injected"  // appended by a seam after the real result was published (item 12)
+	SourcePanic     = "panic"     // the start task panicked
+)
+
 // The named hook points the seams can block in to fix an interleaving.
 const (
+	HookStartTask        = "start task"         // the start task begins; before its first admission
 	HookAfterHandover    = "after handover"     // pipes built and handed over; before Start
+	HookBeforeStart      = "before start"       // the Cmd is complete (after Prepare); before the start admission
 	HookBeforeWait       = "before wait"        // after Start (and the pidfd); before the one Wait
 	HookExpiryDecided    = "expiry decided"     // the parent decided to request; before the reservation
 	HookRequestStart     = "request start"      // a request task starts; before its window check
 	HookBeforePidfdClose = "before pidfd close" // the pidfd is sealed; before the closer waits and closes
 )
 
-// Desc is one descriptor's holder and close state.
+// Desc is one descriptor's holder and close state. The actual file is held
+// by the record (not in this published copy); Held says whether it is.
 type Desc struct {
 	State    string
 	Holder   string
+	Held     bool   // the record holds the actual *os.File (from its acquisition on, never cleared)
+	Release  string // Release* constants
 	CloseErr string // the real Close result; "" is nil
 	Injected []string
 	Late     bool // the real result was published at or after W
@@ -126,11 +170,12 @@ type Stream struct {
 
 // Pidfd is the pidfd the start task opened (Linux).
 type Pidfd struct {
-	State    string
-	FD       int
-	OpenErr  string
-	CloseErr string
-	Closes   int
+	State       string
+	FD          int
+	OpenErr     string
+	CloseCalled bool // the one close was initiated
+	CloseErr    string
+	Closes      int
 }
 
 // Request is the one termination request of a call.
@@ -157,64 +202,104 @@ type Event struct {
 	Late bool // at or after W
 }
 
+// Admission is one admission decision of a call (B-154-1): at Point, at
+// the clock's reading At, whether the new action was admitted, and why not.
+type Admission struct {
+	Point    string
+	At       time.Time
+	Admitted bool
+	Why      string
+}
+
+// Fault is one error an operation of the call returned, or an injection,
+// or the start task's panic, kept whole (B-154-4): the site, the source,
+// the text and the error value (for the tests' classification; not
+// serialized).
+type Fault struct {
+	Site   string
+	Source string
+	Detail string
+	Late   bool
+	Err    error `json:"-"`
+}
+
 // Record is one call as the registry holds it until the process ends.
 type Record struct {
-	ID         int
-	Spec       collect.CallSpec
-	State      string
-	Class      string // A, B or C by §12.6; "" while unknown
-	Phase      string // C's phase: start, wait, std-panic; A's: pipe, precondition
-	StartErr   string
-	WaitCalled bool
-	WaitErr    string
-	Exit       *Exit
-	Pid        int
-	Desc       [4]Desc
-	Out        [2]Stream
-	Pidfd      Pidfd
-	Req        Request
-	Expired    bool
-	NotAdmit   []string // termination not admitted, and why
-	Unknown    []string // cleanup unknown, and why
-	Failures   []string // control failures, in order; never removed
-	Injected   []string
-	Events     []Event
-	Tasks      int // tasks started and not returned
-	Registered time.Time
+	ID            int
+	Spec          collect.CallSpec
+	State         string
+	Class         string // A, B or C by §12.6; "" while unknown
+	Phase         string // C's phase: start, wait, std-panic, panic-before-wait; A's: pipe, precondition, not-admitted, panic-before-start
+	Stage         string // the start task's stage, for its panic exit
+	Admissions    []Admission
+	Skipped       []string // the actions not executed after a refusal
+	StartCalled   bool     // Start was initiated
+	StartReturned bool
+	StartErr      string
+	WaitCalled    bool // the one Wait was initiated
+	WaitReturned  bool
+	WaitErr       string
+	Exit          *Exit
+	Pid           int
+	Desc          [4]Desc
+	Out           [2]Stream
+	Pidfd         Pidfd
+	Req           Request
+	Expired       bool
+	NotAdmit      []string // termination not admitted, and why
+	Unknown       []string // cleanup unknown, and why
+	Failures      []string // control failures, in order; never removed
+	Faults        []Fault  // every error, by site and source; never removed
+	Injected      []string
+	Panic         string
+	Events        []Event
+	Tasks         int // tasks started and not returned
+	Registered    time.Time
 
-	cmd     *exec.Cmd
-	proc    *os.Process
+	files   [4]*os.File // the actual descriptors, held from acquisition to the process end
+	cmd     *exec.Cmd   // held from construction (before Start) to the process end
+	proc    *os.Process // held from a successful Start
 	changed chan struct{}
 }
 
 // Snapshot is a copy of a record's published state.
 type Snapshot struct {
-	ID         int
-	Kind       string
-	Args       []string
-	Dir        string
-	State      string
-	Class      string
-	Phase      string
-	StartErr   string
-	WaitCalled bool
-	WaitErr    string
-	Exit       *Exit
-	Pid        int
-	Desc       [4]Desc
-	Out        [2]Stream
-	Pidfd      Pidfd
-	Req        Request
-	Expired    bool
-	NotAdmit   []string
-	Unknown    []string
-	Failures   []string
-	Injected   []string
-	Events     []Event
-	Tasks      int
-	Terminal   bool
-	Success    bool
-	Mode       string
+	ID            int
+	Kind          string
+	Args          []string
+	Dir           string
+	State         string
+	Class         string
+	Phase         string
+	Stage         string
+	Admissions    []Admission
+	Skipped       []string
+	StartCalled   bool
+	StartReturned bool
+	StartErr      string
+	WaitCalled    bool
+	WaitReturned  bool
+	WaitErr       string
+	Exit          *Exit
+	Pid           int
+	CmdHeld       bool
+	ProcessHeld   bool
+	Desc          [4]Desc
+	Out           [2]Stream
+	Pidfd         Pidfd
+	Req           Request
+	Expired       bool
+	NotAdmit      []string
+	Unknown       []string
+	Failures      []string
+	Faults        []Fault
+	Injected      []string
+	Panic         string
+	Events        []Event
+	Tasks         int
+	Terminal      bool
+	Success       bool
+	Mode          string
 }
 
 // Seams are the test seams; production leaves every field nil. Each one
@@ -226,6 +311,7 @@ type Seams struct {
 	InjectClose   func(id, desc int) error // after the real result is published
 	AfterHandover func(id int, stdoutW, stderrW *os.File)
 	Prepare       func(id int, cmd *exec.Cmd) // completes the Cmd before Start (pseudo-tools)
+	Start         func(id int, cmd *exec.Cmd) error
 	PidfdOpen     func(id, pid int) (int, error)
 	SendSignal    func(id, fd int) error
 	CloseFD       func(id, fd int) error
@@ -295,9 +381,9 @@ func (r *Registry) publishLocked(rec *Record, what string) {
 }
 
 // noProcessLocked marks that this call has no process to anchor a pidfd
-// on (a start failure).
+// on (a start failure, a refusal).
 func (r *Registry) noProcessLocked(rec *Record) {
-	if r.mode == ModePidfd {
+	if r.mode == ModePidfd && rec.Pidfd.State == PidfdUnpublished {
 		rec.Pidfd.State = PidfdNone
 	}
 }
@@ -306,13 +392,62 @@ func (r *Registry) lateLocked() bool { return !r.o.Clock.Now().Before(r.o.W) }
 
 func (r *Registry) failLocked(rec *Record, s string) { rec.Failures = append(rec.Failures, s) }
 
+func (r *Registry) faultLocked(rec *Record, site, source string, err error) {
+	rec.Faults = append(rec.Faults, Fault{Site: site, Source: source, Detail: errText(err), Late: r.lateLocked(), Err: err})
+}
+
+// admitLocked is the admission of one new action (B-154-1; §12.14 "准入"
+// and item 8): the clock is re-read right before the action, and starting
+// a tool call needs W − now ≥ the call margin. Every decision is recorded;
+// a refusal is a failure.
+func (r *Registry) admitLocked(rec *Record, point string) bool {
+	now := r.o.Clock.Now()
+	left := r.o.W.Sub(now)
+	a := Admission{Point: point, At: now, Admitted: left >= collect.CallMargin}
+	if !a.Admitted {
+		a.Why = fmt.Sprintf("W − now is %s, less than the call margin %s", left, collect.CallMargin)
+		r.failLocked(rec, "not admitted at "+point+": "+a.Why)
+	}
+	rec.Admissions = append(rec.Admissions, a)
+	r.publishLocked(rec, "admission "+point+" "+admittedText(a.Admitted))
+	return a.Admitted
+}
+
+func admittedText(ok bool) string {
+	if ok {
+		return "admitted"
+	}
+	return "refused"
+}
+
+// refuseLocked records a refusal at point: the call is class A (no start
+// function was called), the actions from point on are not executed.
+func (r *Registry) refuseLocked(rec *Record, point string) {
+	skipped := map[string][]string{
+		PointEntry:  {PointStdout, PointStderr, PointStart},
+		PointStdout: {PointStdout, PointStderr, PointStart},
+		PointStderr: {PointStderr, PointStart},
+		PointStart:  {PointStart},
+	}[point]
+	rec.State, rec.Class, rec.Phase, rec.StartErr = StNotAdmitted, "A", "not-admitted", "not admitted at "+point
+	rec.Skipped = append(rec.Skipped, skipped...)
+	r.noProcessLocked(rec)
+	r.publishLocked(rec, "not admitted at "+point)
+}
+
+// holdLocked registers an acquired descriptor's actual object (B-154-2).
+func (r *Registry) holdLocked(rec *Record, d int, f *os.File, holder string) {
+	rec.files[d] = f
+	rec.Desc[d] = Desc{State: DescOpen, Holder: holder, Held: f != nil, Release: ReleaseHeld}
+}
+
 // Invoke runs one call (collect.Invoker). It registers the record, starts
 // the start task, and waits only on the record's published changes and W
 // (§12.14 items 3, 6, 7). At W it decides the termination (item 8) and
 // returns the published copy, which then fails; the tasks go on.
 func (r *Registry) Invoke(s collect.CallSpec) collect.CallResult {
 	rec := r.register(s)
-	if rec.State == StRefused {
+	if rec.State == StRefused || rec.State == StNotAdmitted {
 		r.mu.Lock()
 		defer r.mu.Unlock()
 		return r.resultLocked(rec)
@@ -341,6 +476,8 @@ func (r *Registry) Invoke(s collect.CallSpec) collect.CallResult {
 	}
 }
 
+// register is the registration before anything runs (item 3) and the
+// admission of the real entry (B-154-1).
 func (r *Registry) register(s collect.CallSpec) *Record {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -351,8 +488,9 @@ func (r *Registry) register(s collect.CallSpec) *Record {
 	}
 	rec.Req = Request{Mode: r.mode, State: ReqNone}
 	for i := range rec.Desc {
-		rec.Desc[i].State = DescNone
+		rec.Desc[i] = Desc{State: DescNone, Release: ReleaseNone}
 	}
+	rec.Stage = "registered"
 	r.recs = append(r.recs, rec)
 	if r.refusal != "" {
 		rec.State = StRefused
@@ -360,8 +498,12 @@ func (r *Registry) register(s collect.CallSpec) *Record {
 		r.publishLocked(rec, "refused")
 		return rec
 	}
-	rec.Tasks = 1 // the start task, counted before it starts
 	r.publishLocked(rec, "registered")
+	if !r.admitLocked(rec, PointEntry) {
+		r.refuseLocked(rec, PointEntry)
+		return rec
+	}
+	rec.Tasks = 1 // the start task, counted before it starts
 	return rec
 }
 
@@ -405,67 +547,97 @@ func (r *Registry) closeFile(id, d int, f *os.File) error {
 	return f.Close()
 }
 
-// startTask is the start task and the only reaper (§12.14 items 4 and 5).
-func (r *Registry) startTask(rec *Record) {
-	defer func() {
-		if v := recover(); v != nil {
-			r.mu.Lock()
-			rec.Class, rec.Phase = "C", "std-panic"
-			r.failLocked(rec, fmt.Sprintf("panic in the start task: %v", v))
-			rec.Tasks--
-			r.publishLocked(rec, "start task panicked")
-			r.mu.Unlock()
-		}
-	}()
-	id := rec.ID
-	r.mu.Lock()
-	rec.State = StStarting
-	r.publishLocked(rec, "starting")
-	r.mu.Unlock()
+func (r *Registry) start(id int, cmd *exec.Cmd) error {
+	if r.s.Start != nil {
+		return r.s.Start(id, cmd)
+	}
+	return cmd.Start()
+}
 
-	outR, outW, err := r.pipe(id, 0)
-	if err != nil {
-		r.mu.Lock()
-		rec.State, rec.Class, rec.Phase, rec.StartErr = StStartFailed, "A", "pipe", "stdout pipe: "+errText(err)
-		r.noProcessLocked(rec)
-		r.failLocked(rec, "stdout pipe: "+errText(err))
-		rec.Tasks--
-		r.publishLocked(rec, "start failed: stdout pipe")
+// endTask returns the start task's count, last.
+func (r *Registry) endTask(rec *Record, what string) {
+	r.mu.Lock()
+	rec.Stage = "done"
+	rec.Tasks--
+	r.publishLocked(rec, what)
+	r.mu.Unlock()
+}
+
+// startTask is the start task and the only reaper (§12.14 items 4 and 5).
+// Each new action (each pipe, Start) is admitted right before it starts
+// (B-154-1); what the task acquired is held by the record before anything
+// else is done with it (B-154-2); its panic exit is recoverStart.
+func (r *Registry) startTask(rec *Record) {
+	defer r.recoverStart(rec)
+	id := rec.ID
+	r.hook(HookStartTask, id)
+
+	r.mu.Lock()
+	rec.State, rec.Stage = StStarting, "stdout pipe"
+	r.publishLocked(rec, "starting")
+	if !r.admitLocked(rec, PointStdout) {
+		r.refuseLocked(rec, PointStdout)
 		r.mu.Unlock()
+		r.endTask(rec, "start task done: not admitted")
 		return
 	}
+	r.mu.Unlock()
+	outR, outW, err := r.pipe(id, 0)
 	r.mu.Lock()
-	rec.Desc[StdoutR] = Desc{State: DescOpen, Holder: "start task"}
-	rec.Desc[StdoutW] = Desc{State: DescOpen, Holder: "start task"}
+	if err != nil {
+		rec.State, rec.Class, rec.Phase, rec.StartErr = StStartFailed, "A", "pipe", "stdout pipe: "+errText(err)
+		r.faultLocked(rec, "pipe stdout", SourceOperation, err)
+		r.noProcessLocked(rec)
+		r.failLocked(rec, "stdout pipe: "+errText(err))
+		r.publishLocked(rec, "start failed: stdout pipe")
+		r.mu.Unlock()
+		r.endTask(rec, "start task done")
+		return
+	}
+	r.holdLocked(rec, StdoutR, outR, HolderStart)
+	r.holdLocked(rec, StdoutW, outW, HolderStart)
 	r.publishLocked(rec, "stdout pipe built")
+	rec.Stage = "stderr pipe"
+	if !r.admitLocked(rec, PointStderr) {
+		// The first pipe is the start task's: it closes both ends once
+		// each; these closes are its existing responsibility, not new work.
+		r.refuseLocked(rec, PointStderr)
+		r.mu.Unlock()
+		r.closeDesc(rec, StdoutR)
+		r.closeDesc(rec, StdoutW)
+		r.endTask(rec, "start task done: not admitted")
+		return
+	}
 	r.mu.Unlock()
 	errR, errW, err := r.pipe(id, 1)
 	if err != nil {
 		// Half built: the first pipe's two ends are closed once each by
 		// the start task; no read task, no Start (§12.14 item 4).
-		r.closeDesc(rec, StdoutR, outR)
-		r.closeDesc(rec, StdoutW, outW)
 		r.mu.Lock()
 		rec.State, rec.Class, rec.Phase, rec.StartErr = StStartFailed, "A", "pipe", "stderr pipe: "+errText(err)
+		r.faultLocked(rec, "pipe stderr", SourceOperation, err)
 		r.noProcessLocked(rec)
 		r.failLocked(rec, "stderr pipe: "+errText(err))
-		rec.Tasks--
 		r.publishLocked(rec, "start failed: stderr pipe")
 		r.mu.Unlock()
+		r.closeDesc(rec, StdoutR)
+		r.closeDesc(rec, StdoutW)
+		r.endTask(rec, "start task done")
 		return
 	}
 	r.mu.Lock()
-	rec.Desc[StderrR] = Desc{State: DescOpen, Holder: "start task"}
-	rec.Desc[StderrW] = Desc{State: DescOpen, Holder: "start task"}
+	r.holdLocked(rec, StderrR, errR, HolderStart)
+	r.holdLocked(rec, StderrW, errW, HolderStart)
 	// The hand-over: both pipes exist, so both read ends go to their read
-	// tasks, counted before they start.
-	rec.Desc[StdoutR].Holder, rec.Desc[StderrR].Holder = "read task", "read task"
+	// tasks, counted before they start; the record keeps holding them.
+	rec.Desc[StdoutR].Holder, rec.Desc[StderrR].Holder = HolderRead, HolderRead
 	rec.Out[0].Started, rec.Out[1].Started = true, true
 	rec.Tasks += 2
+	rec.Stage = "handover"
 	r.publishLocked(rec, "read ends handed over")
 	r.mu.Unlock()
-	go r.readTask(rec, 0, outR)
-	go r.readTask(rec, 1, errR)
+	go r.readTask(rec, 0)
+	go r.readTask(rec, 1)
 	if r.s.AfterHandover != nil {
 		r.s.AfterHandover(id, outW, errW)
 	}
@@ -474,14 +646,34 @@ func (r *Registry) startTask(rec *Record) {
 	cmd.Dir = rec.Spec.Dir
 	cmd.Env = env(rec.Spec)
 	cmd.Stdout, cmd.Stderr = outW, errW
+	r.mu.Lock()
+	rec.cmd, rec.Stage = cmd, "cmd"
+	r.publishLocked(rec, "cmd built")
+	r.mu.Unlock()
 	if r.s.Prepare != nil {
 		r.s.Prepare(id, cmd)
 	}
+	r.hook(HookBeforeStart, id)
 	// §12.6 A ②: Start returns before any descriptor or process when the
 	// lookup failed or the path is empty.
 	pre := cmd.Err != nil || cmd.Path == ""
-	err = cmd.Start()
 	r.mu.Lock()
+	if !r.admitLocked(rec, PointStart) {
+		// Start is not initiated. The write ends are the start task's: it
+		// closes them; the read tasks then reach EOF and close theirs.
+		r.refuseLocked(rec, PointStart)
+		r.mu.Unlock()
+		r.closeDesc(rec, StdoutW)
+		r.closeDesc(rec, StderrW)
+		r.endTask(rec, "start task done: not admitted")
+		return
+	}
+	rec.StartCalled, rec.Stage = true, "start"
+	r.publishLocked(rec, "start initiated")
+	r.mu.Unlock()
+	err = r.start(id, cmd)
+	r.mu.Lock()
+	rec.StartReturned = true
 	if err != nil {
 		rec.State, rec.StartErr = StStartFailed, errText(err)
 		if pre {
@@ -489,30 +681,34 @@ func (r *Registry) startTask(rec *Record) {
 		} else {
 			rec.Class, rec.Phase = "C", "start"
 		}
+		r.faultLocked(rec, "start", SourceOperation, err)
 		r.failLocked(rec, fmt.Sprintf("start failed (class %s, %s): %s", rec.Class, rec.Phase, errText(err)))
 		r.publishLocked(rec, "start failed")
 	} else {
-		rec.State, rec.cmd, rec.proc, rec.Pid = StStarted, cmd, cmd.Process, cmd.Process.Pid
+		rec.State, rec.proc, rec.Pid, rec.Stage = StStarted, cmd.Process, cmd.Process.Pid, "started"
 		r.publishLocked(rec, "started")
 	}
 	r.mu.Unlock()
-	r.closeDesc(rec, StdoutW, outW)
-	r.closeDesc(rec, StderrW, errW)
+	r.closeDesc(rec, StdoutW)
+	r.closeDesc(rec, StderrW)
 	if err != nil {
 		// Start failed: no Wait (§12.14 item 5); a C class's internal child
-		// stays unknown and nothing is done about it.
+		// stays unknown and nothing is done about it. The Cmd stays held.
 		r.mu.Lock()
 		r.noProcessLocked(rec)
-		rec.Tasks--
-		r.publishLocked(rec, "start task done")
 		r.mu.Unlock()
+		r.endTask(rec, "start task done")
 		return
 	}
+	// The admitted call's own protocol goes on whatever the clock reads:
+	// the pidfd that anchors the termination (item 5), the one Wait and
+	// the pidfd's close (item 9). They are not new work.
 	if r.mode == ModePidfd {
 		fd, perr := r.pidfdOpen(id, rec.Pid)
 		r.mu.Lock()
 		if perr != nil {
 			rec.Pidfd.State, rec.Pidfd.OpenErr = PidfdOpenFailed, errText(perr)
+			r.faultLocked(rec, "pidfd open", SourceOperation, perr)
 			r.failLocked(rec, "pidfd open: "+errText(perr))
 			r.publishLocked(rec, "pidfd open failed")
 		} else {
@@ -522,10 +718,17 @@ func (r *Registry) startTask(rec *Record) {
 		r.mu.Unlock()
 	}
 	r.hook(HookBeforeWait, id)
+	r.mu.Lock()
+	rec.WaitCalled, rec.Stage = true, "wait"
+	r.publishLocked(rec, "wait called")
+	r.mu.Unlock()
 	werr := cmd.Wait()
 	r.mu.Lock()
-	rec.WaitCalled, rec.WaitErr = true, errText(werr)
+	rec.WaitReturned, rec.WaitErr, rec.Stage = true, errText(werr), "waited"
 	rec.State = StWaited
+	if werr != nil {
+		r.faultLocked(rec, "wait", SourceOperation, werr)
+	}
 	if ps := cmd.ProcessState; ps != nil {
 		rec.Class, rec.Exit = "B", &Exit{Code: ps.ExitCode(), Exited: ps.Exited(), String: ps.String()}
 	} else {
@@ -539,26 +742,107 @@ func (r *Registry) startTask(rec *Record) {
 	r.publishLocked(rec, "waited")
 	r.mu.Unlock()
 	if sealed {
+		r.hook(HookBeforePidfdClose, rec.ID)
 		r.closePidfd(rec)
 	}
-	r.mu.Lock()
-	rec.Tasks--
-	r.publishLocked(rec, "start task done")
-	r.mu.Unlock()
+	r.endTask(rec, "start task done")
 }
 
-// closeDesc closes one descriptor once and publishes the real result, then
-// lets the seam append an injection (§12.14 item 12).
-func (r *Registry) closeDesc(rec *Record, d int, f *os.File) {
+// recoverStart is the start task's panic exit (B-154-2), by the stage it
+// reached: the class and the unknowns are recorded, the ends the start task
+// still holds are closed once each (so read tasks waiting for EOF are not
+// left behind), a close the panic interrupted is not retried, and after an
+// initiated Wait the pidfd is sealed and closed (item 9 rules 2 to 4). It
+// adds no reap and no termination: a process whose one Wait was never
+// called stays held, with its Cmd and pidfd, as unknown.
+func (r *Registry) recoverStart(rec *Record) {
+	v := recover()
+	if v == nil {
+		return
+	}
 	r.mu.Lock()
-	rec.Desc[d].State = DescClosing
+	stage := rec.Stage
+	rec.Panic = fmt.Sprint(v)
+	r.faultLocked(rec, "panic", SourcePanic, fmt.Errorf("%v", v))
+	r.failLocked(rec, fmt.Sprintf("panic in the start task (stage %s): %v", stage, v))
+	closePidfd := false
+	switch {
+	case !rec.StartCalled:
+		rec.Class, rec.Phase = "A", "panic-before-start"
+		if rec.State == StRegistered || rec.State == StStarting {
+			rec.State = StStartFailed
+		}
+		r.noProcessLocked(rec)
+	case !rec.StartReturned:
+		rec.Class, rec.Phase, rec.State = "C", "std-panic", StStartFailed
+		if rec.cmd != nil && rec.cmd.Process != nil {
+			rec.proc, rec.Pid = rec.cmd.Process, rec.cmd.Process.Pid
+		}
+		rec.Unknown = append(rec.Unknown, "Start did not return (panic): whether a process exists is unknown; the Cmd is held")
+		r.noProcessLocked(rec)
+	case !rec.WaitCalled:
+		rec.Class, rec.Phase = "C", "panic-before-wait"
+		rec.Unknown = append(rec.Unknown, "the start task ended after Start and before its one Wait: the reap is unknown; the process, the Cmd and the pidfd are held")
+	case !rec.WaitReturned:
+		rec.Class, rec.Phase = "C", "std-panic"
+		rec.Unknown = append(rec.Unknown, "Wait did not return (panic): the reap is unknown")
+		if rec.Pidfd.State == PidfdOpen {
+			rec.Pidfd.State = PidfdClosing
+		}
+		closePidfd = rec.Pidfd.State == PidfdClosing && !rec.Pidfd.CloseCalled
+	default:
+		closePidfd = rec.Pidfd.State == PidfdClosing && !rec.Pidfd.CloseCalled
+	}
+	if rec.Pidfd.State == PidfdClosing && rec.Pidfd.CloseCalled {
+		rec.Unknown = append(rec.Unknown, "the pidfd's close did not return (panic); not retried")
+	}
+	var toClose []int
+	for _, d := range []int{StdoutW, StderrW, StdoutR, StderrR} {
+		desc := rec.Desc[d]
+		if desc.Holder != HolderStart {
+			continue
+		}
+		switch desc.State {
+		case DescOpen:
+			toClose = append(toClose, d)
+		case DescClosing:
+			rec.Desc[d].Release = ReleaseUnknown
+			rec.Unknown = append(rec.Unknown, DescNames[d]+": the close did not return (panic); not retried")
+		}
+	}
+	r.publishLocked(rec, "start task panicked")
+	r.mu.Unlock()
+	for _, d := range toClose {
+		r.closeDesc(rec, d)
+	}
+	if closePidfd {
+		r.closePidfd(rec)
+	}
+	r.endTask(rec, "start task done (panic)")
+}
+
+// closeDesc closes one descriptor once with the object the record holds
+// and publishes the real result, then lets the seam append an injection
+// (§12.14 item 12). A descriptor that is not open is never closed again.
+func (r *Registry) closeDesc(rec *Record, d int) {
+	r.mu.Lock()
+	if rec.Desc[d].State != DescOpen {
+		r.mu.Unlock()
+		return
+	}
+	f := rec.files[d]
+	rec.Desc[d].State, rec.Desc[d].Release = DescClosing, ReleasePending
 	r.publishLocked(rec, DescNames[d]+" closing")
 	r.mu.Unlock()
 	err := r.closeFile(rec.ID, d, f)
 	r.mu.Lock()
 	rec.Desc[d].State, rec.Desc[d].CloseErr, rec.Desc[d].Late = DescClosed, errText(err), r.lateLocked()
 	if err != nil {
+		rec.Desc[d].Release = ReleaseUnknown
+		r.faultLocked(rec, "close "+DescNames[d], SourceOperation, err)
 		r.failLocked(rec, "close "+DescNames[d]+": "+errText(err))
+	} else {
+		rec.Desc[d].Release = ReleaseConfirmed
 	}
 	r.publishLocked(rec, DescNames[d]+" closed")
 	r.mu.Unlock()
@@ -567,6 +851,7 @@ func (r *Registry) closeDesc(rec *Record, d int, f *os.File) {
 			r.mu.Lock()
 			rec.Desc[d].Injected = append(rec.Desc[d].Injected, errText(e))
 			rec.Injected = append(rec.Injected, "close "+DescNames[d]+": "+errText(e))
+			r.faultLocked(rec, "close "+DescNames[d], SourceInjected, e)
 			r.publishLocked(rec, DescNames[d]+" injected")
 			r.mu.Unlock()
 		}
@@ -574,8 +859,16 @@ func (r *Registry) closeDesc(rec *Record, d int, f *os.File) {
 }
 
 // readTask reads one output until EOF, a read error or an overflow, then
-// closes its read end once (§12.14 item 4).
-func (r *Registry) readTask(rec *Record, i int, f *os.File) {
+// closes its read end once (§12.14 item 4). The read end is the one the
+// record holds.
+func (r *Registry) readTask(rec *Record, i int) {
+	d := StdoutR
+	if i == 1 {
+		d = StderrR
+	}
+	r.mu.Lock()
+	f := rec.files[d]
+	r.mu.Unlock()
 	limit := r.o.Limit
 	var data []byte
 	var total int64
@@ -610,14 +903,11 @@ func (r *Registry) readTask(rec *Record, i int, f *os.File) {
 			break
 		}
 	}
-	d := StdoutR
-	if i == 1 {
-		d = StderrR
-	}
 	r.mu.Lock()
 	o := &rec.Out[i]
 	o.Done, o.Bytes, o.Data, o.EOF, o.ReadErr, o.Overflow, o.Late = true, total, data, eof, errText(rerr), overflow, r.lateLocked()
 	if rerr != nil {
+		r.faultLocked(rec, "read "+StreamNames[i], SourceOperation, rerr)
 		r.failLocked(rec, "read "+StreamNames[i]+": "+errText(rerr))
 	}
 	if overflow {
@@ -625,7 +915,7 @@ func (r *Registry) readTask(rec *Record, i int, f *os.File) {
 	}
 	r.publishLocked(rec, StreamNames[i]+" read stopped")
 	r.mu.Unlock()
-	r.closeDesc(rec, d, f)
+	r.closeDesc(rec, d)
 	r.mu.Lock()
 	rec.Tasks--
 	r.publishLocked(rec, StreamNames[i]+" read task done")
@@ -670,9 +960,8 @@ func (r *Registry) kill(id int, p *os.Process) error {
 
 // closePidfd is rule 3 and 4 of §12.14 item 9: the start task, the only
 // closer, waits outside the lock while a request is reserved or running,
-// then closes once.
+// then closes once. The hook before it is the caller's.
 func (r *Registry) closePidfd(rec *Record) {
-	r.hook(HookBeforePidfdClose, rec.ID)
 	r.mu.Lock()
 	for rec.Req.State == ReqReserved || rec.Req.State == ReqRunning {
 		ch := rec.changed
@@ -681,12 +970,14 @@ func (r *Registry) closePidfd(rec *Record) {
 		r.mu.Lock()
 	}
 	fd := rec.Pidfd.FD
+	rec.Pidfd.CloseCalled = true
 	r.mu.Unlock()
 	err := r.closeFD(rec.ID, fd)
 	r.mu.Lock()
 	rec.Pidfd.State, rec.Pidfd.CloseErr = PidfdClosed, errText(err)
 	rec.Pidfd.Closes++
 	if err != nil {
+		r.faultLocked(rec, "pidfd close", SourceOperation, err)
 		r.failLocked(rec, "pidfd close: "+errText(err))
 	}
 	r.publishLocked(rec, "pidfd closed")
@@ -707,7 +998,7 @@ func (r *Registry) expire(rec *Record) {
 		r.failLocked(rec, "not completed before W")
 		r.publishLocked(rec, "expired at W")
 	}
-	need := rec.State != StWaited && rec.State != StStartFailed
+	need := rec.State != StWaited && rec.State != StStartFailed && rec.State != StNotAdmitted
 	r.mu.Unlock()
 	if !need {
 		return
@@ -737,7 +1028,7 @@ func (r *Registry) expire(rec *Record) {
 func (r *Registry) notAdmittedLocked(rec *Record, why string) {
 	rec.NotAdmit = append(rec.NotAdmit, why)
 	r.failLocked(rec, "termination not admitted: "+why)
-	if rec.State != StWaited && rec.State != StStartFailed {
+	if rec.State != StWaited && rec.State != StStartFailed && rec.State != StNotAdmitted {
 		rec.Unknown = append(rec.Unknown, "no termination was sent and the reap is not published")
 	}
 	r.publishLocked(rec, "termination not admitted")
@@ -870,6 +1161,7 @@ func (r *Registry) requestTask(rec *Record, fd int, p *os.Process) {
 	r.mu.Lock()
 	rec.Req.State, rec.Req.Err, rec.Req.Late = ReqDone, errText(err), r.lateLocked()
 	if err != nil {
+		r.faultLocked(rec, "request", SourceOperation, err)
 		r.failLocked(rec, "termination request: "+errText(err))
 	}
 	rec.Tasks--
@@ -895,8 +1187,14 @@ func (r *Registry) successLocked(rec *Record) bool {
 	if r.mode == ModePidfd && (rec.Pidfd.State != PidfdClosed || rec.Pidfd.CloseErr != "") {
 		return false
 	}
-	if rec.Req.State != ReqNone || rec.Expired || len(rec.Unknown) > 0 || len(rec.NotAdmit) > 0 || len(rec.Failures) > 0 || len(rec.Injected) > 0 {
+	if rec.Req.State != ReqNone || rec.Expired || len(rec.Unknown) > 0 || len(rec.NotAdmit) > 0 || len(rec.Failures) > 0 || len(rec.Injected) > 0 ||
+		len(rec.Faults) > 0 || rec.Panic != "" || len(rec.Skipped) > 0 {
 		return false
+	}
+	for _, a := range rec.Admissions {
+		if !a.Admitted {
+			return false
+		}
 	}
 	for _, e := range rec.Events {
 		if e.Late {
@@ -908,11 +1206,14 @@ func (r *Registry) successLocked(rec *Record) bool {
 
 func (r *Registry) snapshotLocked(rec *Record) Snapshot {
 	s := Snapshot{ID: rec.ID, Kind: rec.Spec.Kind.String(), Args: append([]string(nil), rec.Spec.Args...), Dir: rec.Spec.Dir,
-		State: rec.State, Class: rec.Class, Phase: rec.Phase, StartErr: rec.StartErr, WaitCalled: rec.WaitCalled, WaitErr: rec.WaitErr,
-		Pid: rec.Pid, Desc: rec.Desc, Out: rec.Out, Pidfd: rec.Pidfd, Req: rec.Req, Expired: rec.Expired,
+		State: rec.State, Class: rec.Class, Phase: rec.Phase, Stage: rec.Stage,
+		Admissions: append([]Admission(nil), rec.Admissions...), Skipped: append([]string(nil), rec.Skipped...),
+		StartCalled: rec.StartCalled, StartReturned: rec.StartReturned, StartErr: rec.StartErr,
+		WaitCalled: rec.WaitCalled, WaitReturned: rec.WaitReturned, WaitErr: rec.WaitErr,
+		Pid: rec.Pid, CmdHeld: rec.cmd != nil, ProcessHeld: rec.proc != nil, Desc: rec.Desc, Out: rec.Out, Pidfd: rec.Pidfd, Req: rec.Req, Expired: rec.Expired,
 		NotAdmit: append([]string(nil), rec.NotAdmit...), Unknown: append([]string(nil), rec.Unknown...),
-		Failures: append([]string(nil), rec.Failures...), Injected: append([]string(nil), rec.Injected...),
-		Events: append([]Event(nil), rec.Events...), Tasks: rec.Tasks, Terminal: rec.Tasks == 0, Mode: r.mode}
+		Failures: append([]string(nil), rec.Failures...), Faults: append([]Fault(nil), rec.Faults...), Injected: append([]string(nil), rec.Injected...),
+		Panic: rec.Panic, Events: append([]Event(nil), rec.Events...), Tasks: rec.Tasks, Terminal: rec.Tasks == 0, Mode: r.mode}
 	if rec.Exit != nil {
 		e := *rec.Exit
 		s.Exit = &e
@@ -983,7 +1284,7 @@ func (r *Registry) pendingLocked(rec *Record) string {
 	var p []string
 	switch rec.State {
 	case StRegistered, StStarting:
-		p = append(p, "start "+rec.State)
+		p = append(p, "start "+rec.State+" ("+rec.Stage+")")
 	case StStarted:
 		p = append(p, "reap not published")
 	}

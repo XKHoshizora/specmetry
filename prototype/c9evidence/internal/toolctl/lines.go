@@ -6,33 +6,50 @@ import (
 	"fmt"
 )
 
-// Lines renders a published record as the canonical lines the LC-9
-// controls compare with their complete expectations. Error texts are not
-// in the lines (only whether a real result is nil); the not-admitted and
+// Lines renders a published record as canonical display lines. Error texts
+// are not in them (only whether a real result is nil); the not-admitted and
 // cleanup-unknown reasons are, since they are the protocol's own fixed
-// texts. Nothing is filtered: every descriptor, both reads, the reap, the
-// pidfd (on Linux), the request, the expiry, lateness, terminality and the
-// item 11 judgement each have a line.
+// texts. Nothing is filtered: every admission and skipped action, the Cmd,
+// every descriptor with its release and held object, both reads, the reap,
+// the pidfd (on Linux), the request, the expiry, the panic, lateness,
+// terminality and the item 11 judgement each have a line.
+//
+// The display lines do not carry an error's source or kind; the structured
+// fault set does (Snapshot.Faults, rendered by FaultLines), and a judgement
+// must consume it too (Review 154 B-154-4).
 func Lines(s Snapshot) []string {
 	class := "class " + orDash(s.Class)
 	if s.Phase != "" {
 		class += " phase " + s.Phase
 	}
 	out := []string{class, "state " + s.State}
+	for _, a := range s.Admissions {
+		out = append(out, "admission "+a.Point+" "+admittedText(a.Admitted))
+	}
+	for _, k := range s.Skipped {
+		out = append(out, "skipped "+k)
+	}
 	switch {
+	case !s.StartCalled:
+		out = append(out, "start not-initiated")
+	case !s.StartReturned:
+		out = append(out, "start not-returned")
 	case s.StartErr != "":
 		out = append(out, "start error")
-	case s.State == StStarted || s.State == StWaited:
-		out = append(out, "start ok")
 	default:
-		out = append(out, "start none")
+		out = append(out, "start ok")
 	}
+	out = append(out, "cmd held "+yesNo(s.CmdHeld))
 	for i, d := range s.Desc {
 		l := DescNames[i] + " " + d.State
 		if d.State == DescClosed {
 			l += " " + okOrError(d.CloseErr)
 		}
-		out = append(out, l)
+		obj := "none"
+		if d.Held {
+			obj = "held"
+		}
+		out = append(out, l+" release "+d.Release+" object "+obj)
 		for range d.Injected {
 			out = append(out, DescNames[i]+" injected")
 		}
@@ -62,6 +79,8 @@ func Lines(s Snapshot) []string {
 	switch {
 	case !s.WaitCalled:
 		out = append(out, "wait not-called")
+	case !s.WaitReturned:
+		out = append(out, "wait not-returned")
 	case s.Exit == nil:
 		out = append(out, "wait no-state")
 	default:
@@ -85,11 +104,27 @@ func Lines(s Snapshot) []string {
 	for _, u := range s.Unknown {
 		out = append(out, "cleanup-unknown "+u)
 	}
+	if s.Panic != "" {
+		out = append(out, "panic yes")
+	} else {
+		out = append(out, "panic no")
+	}
 	for _, x := range []struct {
 		name string
 		v    bool
 	}{{"expired", s.Expired}, {"late", hasLate(s.Events)}, {"terminal", s.Terminal}, {"success", s.Success}} {
 		out = append(out, x.name+" "+yesNo(x.v))
+	}
+	return out
+}
+
+// FaultLines renders the structured fault set, one line per fault, in the
+// record's order: "fault <site> <source> <kind>", kind given by the
+// caller's classification of the error value (Review 154 B-154-4).
+func FaultLines(s Snapshot, kind func(error) string) []string {
+	out := make([]string, 0, len(s.Faults))
+	for _, f := range s.Faults {
+		out = append(out, "fault "+f.Site+" "+f.Source+" "+kind(f.Err))
 	}
 	return out
 }

@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -14,9 +15,13 @@ import (
 )
 
 // The regressions of Review 154 (review-resolution §202, table "回归与预期").
-// R1-a, R1-b, R1-c, R2-a, R2-b and R2-c are written against the fields the
-// old implementation (8e228f8) already has, so they also run on it, where
-// they are expected to fail.
+// The cores of R1-a, R1-b, R1-c, R2-a, R2-b and R2-c were written against
+// the fields the old implementation (8e228f8) already has and ran on it
+// first (regression-first code point 2cdbc1d), where they failed; the
+// checks of the new observable state (admissions, skipped actions, held
+// objects, release, faults, panic stage) were added with the fix. R1-d,
+// R1-e and R2-d to R2-f need the new seams or state and never ran on the
+// old implementation.
 
 var t154 = time.Date(2026, 11, 16, 0, 0, 0, 0, time.UTC)
 
@@ -110,6 +115,63 @@ func TestR154AdmitEntry(t *testing.T) {
 	if r.Started || r.Succeeded(w) || n != 0 {
 		t.Errorf("started %v succeeded %v pipes %d; lines %q", r.Started, r.Succeeded(w), n, Lines(s))
 	}
+	wantRefusal(t, s, PointEntry, nil, []string{PointStdout, PointStderr, PointStart})
+	if s.CmdHeld || s.Desc[StdoutR].Held || s.Desc[StdoutW].Held {
+		t.Errorf("objects held without an admitted acquisition; lines %q", Lines(s))
+	}
+}
+
+// wantRefusal checks a refusal at point after the admitted points, and the
+// actions not executed.
+func wantRefusal(t *testing.T, s Snapshot, point string, admitted, skipped []string) {
+	t.Helper()
+	var got []string
+	for _, a := range s.Admissions {
+		got = append(got, a.Point+" "+admittedText(a.Admitted))
+	}
+	want := []string{PointEntry + " admitted"}
+	if point == PointEntry {
+		want = nil
+	}
+	for _, p := range admitted {
+		want = append(want, p+" admitted")
+	}
+	want = append(want, point+" refused")
+	if strings.Join(got, ";") != strings.Join(want, ";") || strings.Join(s.Skipped, ";") != strings.Join(skipped, ";") ||
+		s.State != StNotAdmitted || s.Class != "A" || s.Phase != "not-admitted" || s.StartCalled || s.Success || !s.Terminal {
+		t.Errorf("admissions %q (want %q), skipped %q (want %q); lines %q", got, want, s.Skipped, skipped, Lines(s))
+	}
+}
+
+func lateEvent(s Snapshot, what string) bool {
+	for _, e := range s.Events {
+		if e.What == what {
+			return e.Late
+		}
+	}
+	return false
+}
+
+func released(t *testing.T, s Snapshot, ds ...int) {
+	t.Helper()
+	for _, d := range ds {
+		if s.Desc[d].Release != ReleaseConfirmed || !s.Desc[d].Held {
+			t.Errorf("%s: release %s held %v, want confirmed and held", DescNames[d], s.Desc[d].Release, s.Desc[d].Held)
+		}
+	}
+}
+
+func wantPanic(t *testing.T, s Snapshot, class, phase string) {
+	t.Helper()
+	n := 0
+	for _, f := range s.Faults {
+		if f.Site == "panic" && f.Source == SourcePanic {
+			n++
+		}
+	}
+	if s.Class != class || s.Phase != phase || s.Panic == "" || n != 1 || !s.Terminal || s.Success {
+		t.Errorf("class %s phase %s panic %q (%d faults); want %s %s; lines %q", s.Class, s.Phase, s.Panic, n, class, phase, Lines(s))
+	}
 }
 
 // TestR154AdmitPipeCrossesD is R1-b: the first pipe's call returns after D;
@@ -155,6 +217,11 @@ func TestR154AdmitPipeCrossesD(t *testing.T) {
 		t.Errorf("the second pipe was built %d times after D", n)
 	}
 	closedOK(t, s, StdoutR, StdoutW)
+	wantRefusal(t, s, PointStderr, []string{PointStdout}, []string{PointStderr, PointStart})
+	released(t, s, StdoutR, StdoutW)
+	if !lateEvent(s, "stdout pipe built") || s.Desc[StderrR].State != DescNone || s.Desc[StderrW].Held || s.CmdHeld {
+		t.Errorf("the admitted pipe's late result, or a stderr pipe or a Cmd; lines %q", Lines(s))
+	}
 }
 
 // TestR154AdmitStartNotInitiated is R1-c: the Cmd is complete when the
@@ -187,6 +254,14 @@ func TestR154AdmitStartNotInitiated(t *testing.T) {
 			t.Errorf("%s: done %v eof %v", StreamNames[i], o.Done, o.EOF)
 		}
 	}
+	wantRefusal(t, s, PointStart, []string{PointStdout, PointStderr}, []string{PointStart})
+	released(t, s, StdoutW, StderrW, StdoutR, StderrR)
+	reg.mu.Lock()
+	cmd := reg.recs[0].cmd
+	reg.mu.Unlock()
+	if !s.CmdHeld || cmd == nil || cmd.Process != nil || s.ProcessHeld {
+		t.Errorf("the Cmd must be held and not started; lines %q", Lines(s))
+	}
 }
 
 // TestR154CmdHeldAfterStartFailure is R2-a: a start failure of class C
@@ -207,6 +282,9 @@ func TestR154CmdHeldAfterStartFailure(t *testing.T) {
 	if s.Class != "C" || cmd == nil || cmd.Path != cs.Exe || cmd.Process != nil {
 		t.Errorf("class %s; cmd held %v; lines %q", s.Class, cmd != nil, Lines(s))
 	}
+	if !s.CmdHeld || !s.StartCalled || !s.StartReturned || len(s.Faults) != 1 || s.Faults[0].Site != "start" || s.Faults[0].Source != SourceOperation || s.Faults[0].Err == nil {
+		t.Errorf("snapshot: cmd held %v, start %v/%v, faults %+v", s.CmdHeld, s.StartCalled, s.StartReturned, s.Faults)
+	}
 }
 
 // TestR154PanicAfterHandover is R2-b: a panic in the start task after the
@@ -226,6 +304,11 @@ func TestR154PanicAfterHandover(t *testing.T) {
 	closedOK(t, s, StdoutW, StderrW, StdoutR, StderrR)
 	if s.Success {
 		t.Error("a panic must not be a success")
+	}
+	released(t, s, StdoutW, StderrW, StdoutR, StderrR)
+	wantPanic(t, s, "A", "panic-before-start")
+	if !s.CmdHeld || s.StartCalled {
+		t.Errorf("cmd held %v start called %v", s.CmdHeld, s.StartCalled)
 	}
 }
 
@@ -250,5 +333,10 @@ func TestR154PanicBetweenPipes(t *testing.T) {
 	closedOK(t, s, StdoutR, StdoutW)
 	if s.Success {
 		t.Error("a panic must not be a success")
+	}
+	released(t, s, StdoutR, StdoutW)
+	wantPanic(t, s, "A", "panic-before-start")
+	if s.Desc[StderrR].State != DescNone || s.Desc[StderrW].State != DescNone {
+		t.Errorf("stderr ends: %s %s", s.Desc[StderrR].State, s.Desc[StderrW].State)
 	}
 }
