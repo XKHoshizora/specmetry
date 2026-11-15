@@ -124,6 +124,30 @@ jobs:
         run: |
           set -euo pipefail
           go test -race -count=1 -v ./... 2>&1 | tee "$RUNNER_TEMP/c9-tool-test-out/race.log"
+      - name: "B: put the real GOROOT's bin first on PATH (Windows)"
+        # Runs 43680105408 and 43680692609: on windows-latest, setup-go's
+        # GOROOT C:\hostedtoolcache\windows\go\1.27.3\x64 is a junction to
+        # D:\...; Go 1.27.3's filepath.EvalSymlinks fails for every path
+        # below a junction (path/filepath/symlink.go:90-93 returns ENOTDIR,
+        # which is ERROR_PATH_NOT_FOUND on Windows), so the A1-a guard
+        # refuses that candidate. The guard is unchanged: as §12.14 item 1
+        # asks of a local run, the real GOROOT's bin is put first on PATH
+        # here, so exec.LookPath finds the same go.exe at its real path
+        # and the guard checks it as before. Nothing else changes.
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $goroot = Split-Path -Parent (Split-Path -Parent (Get-Command go).Source)
+          $i = Get-Item -LiteralPath $goroot -Force
+          "GOROOT on PATH: $goroot ($($i.LinkType))"
+          if ($i.LinkType -eq 'Junction') {
+            $bin = Join-Path ($i.Target | Select-Object -First 1) 'bin'
+            "the junction's target bin: $bin"
+            (Get-FileHash -Algorithm SHA256 (Join-Path $bin 'go.exe')).Hash
+            Add-Content -Path $env:GITHUB_PATH -Value $bin
+          } else {
+            "no junction: PATH unchanged"
+          }
       - name: "B: real calls on fixture modules (only after A)"
         working-directory: prototype/c9evidence
         env:
@@ -131,6 +155,8 @@ jobs:
           C9EVIDENCE_OUT: ${{ runner.temp }}/c9-tool-test-out/realcall
         run: |
           set -euo pipefail
+          echo "go on PATH $(command -v go)"
+          go version
           go test -tags c9evidence_realcall -count=1 -v ./internal/realcall/ 2>&1 | tee "$RUNNER_TEMP/c9-tool-test-out/realcall.log"
       - name: Residual processes (observation only)
         if: always()
