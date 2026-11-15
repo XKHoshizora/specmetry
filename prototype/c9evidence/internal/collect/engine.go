@@ -344,7 +344,7 @@ func rawCall(r CallResult) map[string]any {
 		"started": r.Started, "start_error": r.StartErr, "reaped": r.Reaped, "exit_code": r.ExitCode,
 		"stdout": r.Stdout, "stdout_sha256": sha(r.Stdout), "stdout_eof": r.StdoutEOF,
 		"stderr": r.Stderr, "stderr_sha256": sha(r.Stderr), "stderr_eof": r.StderrEOF,
-		"control_failures": r.Failures, "injected": r.Injected,
+		"control_failures": r.Failures, "injected": r.Injected, "control": r.Control,
 		"start": r.Start.Format(time.RFC3339Nano), "end": r.End.Format(time.RFC3339Nano),
 	}
 }
