@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/XKHoshizora/specmetry/prototype/c9evidence/internal/job"
+	"github.com/XKHoshizora/specmetry/prototype/c9evidence/internal/pseudo"
 )
 
 var current *job.Job
@@ -17,6 +18,9 @@ var current *job.Job
 // the writer before m.Run, and exits only with the closeout's exit status
 // (plan §5.4, §6.4, §7.1).
 func TestMain(m *testing.M) {
+	// Re-executed as LC-9's pseudo-tool, the binary only acts as it and
+	// exits; it takes no deadline.
+	pseudo.MaybeRun()
 	start := time.Now()
 	cfg, err := job.FormalConfig(start)
 	if err == nil {

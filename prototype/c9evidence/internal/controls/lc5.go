@@ -377,18 +377,3 @@ func LC8() []Variant {
 		},
 	}
 }
-
-// LC9 is the control-protocol control (plan §5.2 LC-9). It needs the
-// pseudo-tool (a re-execution of the test binary), which phase 1 does not
-// authorize (LE-5 ①), and the control protocol of §12.14, which phase 1
-// does not implement. It is applicable on all three platforms, so it is
-// recorded as applicable and not executed: a miss (plan §5.1), and every
-// formal run's conclusion is invalid until it exists.
-func LC9() []Variant {
-	return []Variant{{
-		Control: "LC-9", Name: "control protocol (pseudo-tool)", Applies: always,
-		Run: func(*Env) Outcome {
-			return Outcome{NotExecuted: "phase 1: the pseudo-tool is not authorized (LE-5 ①) and the §12.14 control protocol is not implemented"}
-		},
-	}}
-}
