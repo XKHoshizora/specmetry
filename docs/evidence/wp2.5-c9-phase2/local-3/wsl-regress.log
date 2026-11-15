@@ -1,0 +1,55 @@
+# command: GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go test -c (toolctl, controls); run in WSL with -test.v -test.count=1 -test.run 'TestR154' (pseudo-tools only; no real call)
+# env: GOTOOLCHAIN=local GOPROXY=off GOWORK=off GOFLAGS=
+# toolchain: /c/Users/hoshi/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/bin/go.exe
+# toolchain sha256: 83b7ba66215e696414fa49462d0db2da4f4cf15c7bebd42f0b189fa04866999d
+# go version: go version go1.27.3 windows/amd64
+# HEAD: 2cdbc1dec9177191b729b241b98ea6d5cedd06e5
+# tree: 68790ae83a644423eafef1942351e0ed060b228d
+# tool module subtree: 396064f678d5be5b81bedb027208f1771a163d2c
+# worktree before: 1 changed paths
+# started: 2026-11-15T16:28:48Z
+# wsl kernel: 6.18.33.2-microsoft-standard-WSL2
+# toolctl.test sha256: 3a0b9205d364cbc57f0bf8c99163e32becd77123d8eeab90cebc599f4edaae53
+# controls.test sha256: bf81646590172f5bdf053ef54608fb645782c0fdcbef397e395a3394f6f12b34
+=== package toolctl
+=== RUN   TestR154AdmitEntry
+    regress154_test.go:106: a process was started: state waited pid 2615 wait-called true; lines ["class B" "state waited" "start ok" "stdout-w closed ok" "stdout-r closed ok" "stderr-w closed ok" "stderr-r closed ok" "stdout eof kept 0 sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" "stderr eof kept 0 sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" "wait exit 0" "pidfd closed ok closes 1" "request pidfd none sends 0" "expired no" "late no" "terminal yes" "success yes"]
+    regress154_test.go:111: started true succeeded true pipes 2; lines ["class B" "state waited" "start ok" "stdout-w closed ok" "stdout-r closed ok" "stderr-w closed ok" "stderr-r closed ok" "stdout eof kept 0 sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" "stderr eof kept 0 sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" "wait exit 0" "pidfd closed ok closes 1" "request pidfd none sends 0" "expired no" "late no" "terminal yes" "success yes"]
+--- FAIL: TestR154AdmitEntry (0.00s)
+=== RUN   TestR154AdmitPipeCrossesD
+    regress154_test.go:150: a process was started: state waited pid 2621 wait-called true; lines ["class B" "state waited" "start ok" "stdout-w closed ok" "stdout-r closed ok" "stderr-w closed ok" "stderr-r closed ok" "stdout eof kept 0 sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" "stderr eof kept 0 sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" "wait exit 0" "pidfd closed ok closes 1" "request pidfd none sends 0" "not-admitted outside the request window [W, D)" "cleanup-unknown no termination was sent and the reap is not published" "expired yes" "late yes" "terminal yes" "success no"]
+    regress154_test.go:155: the second pipe was built 1 times after D
+--- FAIL: TestR154AdmitPipeCrossesD (0.00s)
+=== RUN   TestR154AdmitStartNotInitiated
+    regress154_test.go:183: a process was started: state waited pid 2626 wait-called true; lines ["class B" "state waited" "start ok" "stdout-w closed ok" "stdout-r closed ok" "stderr-w closed ok" "stderr-r closed ok" "stdout eof kept 0 sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" "stderr eof kept 0 sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" "wait exit -1" "pidfd closed ok closes 1" "request pidfd done sends 1 ok" "expired yes" "late yes" "terminal yes" "success no"]
+--- FAIL: TestR154AdmitStartNotInitiated (0.00s)
+=== RUN   TestR154CmdHeldAfterStartFailure
+    regress154_test.go:208: class C; cmd held false; lines ["class C phase start" "state start-failed" "start error" "stdout-w closed ok" "stdout-r closed ok" "stderr-w closed ok" "stderr-r closed ok" "stdout eof kept 0 sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" "stderr eof kept 0 sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" "wait not-called" "pidfd none closes 0" "request pidfd none sends 0" "expired no" "late no" "terminal yes" "success no"]
+--- FAIL: TestR154CmdHeldAfterStartFailure (0.00s)
+=== RUN   TestR154PanicAfterHandover
+    regress154_test.go:220: R2-b: Invoke did not return within the guard
+--- FAIL: TestR154PanicAfterHandover (20.00s)
+=== RUN   TestR154PanicBetweenPipes
+    regress154_test.go:250: stdout-r: open "", want closed with a nil result; lines ["class C phase std-panic" "state starting" "start none" "stdout-w open" "stdout-r open" "stderr-w none" "stderr-r none" "stdout not-started" "stderr not-started" "wait not-called" "pidfd unpublished closes 0" "request pidfd none sends 0" "expired no" "late no" "terminal yes" "success no"]
+    regress154_test.go:250: stdout-w: open "", want closed with a nil result; lines ["class C phase std-panic" "state starting" "start none" "stdout-w open" "stdout-r open" "stderr-w none" "stderr-r none" "stdout not-started" "stderr not-started" "wait not-called" "pidfd unpublished closes 0" "request pidfd none sends 0" "expired no" "late no" "terminal yes" "success no"]
+--- FAIL: TestR154PanicBetweenPipes (0.00s)
+FAIL
+toolctl exit 1:
+=== package controls
+=== RUN   TestR154CloseRealErrorOtherSource
+    regress154_test.go:60: close-real-error: hit []
+    regress154_test.go:61: a real close error at the planned site was taken for the planned seam fault: hit
+--- FAIL: TestR154CloseRealErrorOtherSource (0.00s)
+=== RUN   TestR154CloseRealErrorElsewhere
+    regress154_test.go:77: close-real-error: miss [results differ from the complete expectation:
+          got  ["class B" "decision fail" "expired no" "late no" "pidfd closed ok closes 1" "request pidfd none sends 0" "start ok" "state waited" "stderr eof kept 0 sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" "stderr-r closed ok" "stderr-w closed error" "stdout eof kept 0 sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" "stdout-r closed error" "stdout-r injected" "stdout-w closed ok" "success no" "terminal yes" "wait exit 0"]
+          want ["class B" "decision fail" "expired no" "late no" "pidfd closed ok closes 1" "request pidfd none sends 0" "start ok" "state waited" "stderr eof kept 0 sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" "stderr-r closed ok" "stderr-w closed ok" "stdout eof kept 0 sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" "stdout-r closed error" "stdout-r injected" "stdout-w closed ok" "success no" "terminal yes" "wait exit 0"]]
+--- PASS: TestR154CloseRealErrorElsewhere (0.00s)
+=== RUN   TestR154RequestOtherKind
+    regress154_test.go:96: blocked-send: hit []
+    regress154_test.go:97: a request error of another kind was taken for the expected one: hit
+--- FAIL: TestR154RequestOtherKind (0.00s)
+FAIL
+controls exit 1:
+# exit: 1
+# finished: 2026-11-15T16:29:10Z
