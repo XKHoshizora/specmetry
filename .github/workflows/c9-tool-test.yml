@@ -1,0 +1,133 @@
+name: C-9 tool test (phase 2)
+
+# The test workflow of the C-9 evidence tool's phase 2
+# (docs/wp2.5-c9-evidence-phase2.md; review-resolution §200). It runs ONLY
+# when the dedicated test branch c9test/phase2 is pushed: there is no
+# pull_request, workflow_dispatch or schedule trigger, so the implementation
+# PR, master and every other branch never run it. It is not the formal
+# evidence run: it never analyses the repository R, and the formal
+# workflow c9-evidence.yml and its evidence/ run branches are untouched.
+#
+# On each GitHub-hosted runner (a dedicated environment destroyed after the
+# job), step A verifies the control protocol and the pseudo-tools (LE-5 ①);
+# step B, the three reviewed real Go calls on temporary fixture modules
+# (LE-5 ②), runs only when every step before it succeeded. The tests'
+# outputs are kept as an artifact; the residual processes are printed as
+# an observation only, never as evidence of cleanup.
+on:
+  push:
+    branches:
+      - c9test/phase2
+
+permissions:
+  contents: read
+
+concurrency:
+  group: c9-tool-test-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: C-9 tool test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    # An outer backstop only.
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash
+    env:
+      GOTOOLCHAIN: local
+      GOFLAGS: ""
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-go@v7.0.0
+        with:
+          go-version: 1.27.3
+          cache: false
+      - name: Check the checkout and print its identity
+        run: |
+          set -euo pipefail
+          head=$(git rev-parse HEAD)
+          if [ "$head" != "$GITHUB_SHA" ]; then
+            echo "HEAD $head is not GITHUB_SHA $GITHUB_SHA" >&2
+            exit 1
+          fi
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "the worktree is not clean" >&2
+            exit 1
+          fi
+          echo "HEAD $head"
+          echo "tree $(git rev-parse 'HEAD^{tree}')"
+          echo "tool module subtree $(git rev-parse HEAD:prototype/c9evidence)"
+          echo "workflow blob $(git rev-parse HEAD:.github/workflows/c9-tool-test.yml)"
+          echo "GITHUB_REF $GITHUB_REF"
+          echo "GITHUB_WORKFLOW_REF $GITHUB_WORKFLOW_REF"
+          echo "GITHUB_WORKFLOW_SHA $GITHUB_WORKFLOW_SHA"
+          echo "RUNNER_ENVIRONMENT $RUNNER_ENVIRONMENT"
+          go version
+          gobin=$(command -v go)
+          echo "go on PATH $gobin"
+          if command -v sha256sum >/dev/null; then sha256sum "$gobin"; else shasum -a 256 "$gobin"; fi
+          mkdir -p "$RUNNER_TEMP/c9-tool-test-out"
+      - name: Prepare the tool module's dependencies
+        working-directory: prototype/c9evidence
+        run: |
+          set -euo pipefail
+          go mod download
+          go mod verify
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "the module download changed the worktree" >&2
+            exit 1
+          fi
+      - name: "A: vet, format and compile the formal entry (not run)"
+        working-directory: prototype/c9evidence
+        run: |
+          set -euo pipefail
+          go vet ./...
+          go vet -tags c9evidence_run ./...
+          go vet -tags c9evidence_realcall ./...
+          # Formatting once, on Linux (the Windows checkout may convert
+          # line endings).
+          if [ "$RUNNER_OS" = "Linux" ]; then test -z "$(gofmt -l .)"; fi
+          go test -tags c9evidence_run -c -o "$RUNNER_TEMP/run.test" ./run/
+          echo "formal entry compiled; it is not run"
+      - name: "A: unit tests, the control protocol and LC-9 with pseudo-tools"
+        working-directory: prototype/c9evidence
+        run: |
+          set -euo pipefail
+          go test -count=1 -v ./... 2>&1 | tee "$RUNNER_TEMP/c9-tool-test-out/unit.log"
+      - name: "A: the same tests with -race (Linux)"
+        if: runner.os == 'Linux'
+        working-directory: prototype/c9evidence
+        run: |
+          set -euo pipefail
+          go test -race -count=1 -v ./... 2>&1 | tee "$RUNNER_TEMP/c9-tool-test-out/race.log"
+      - name: "B: real calls on fixture modules (only after A)"
+        working-directory: prototype/c9evidence
+        env:
+          C9EVIDENCE_REALCALL: "1"
+          C9EVIDENCE_OUT: ${{ runner.temp }}/c9-tool-test-out/realcall
+        run: |
+          set -euo pipefail
+          go test -tags c9evidence_realcall -count=1 -v ./internal/realcall/ 2>&1 | tee "$RUNNER_TEMP/c9-tool-test-out/realcall.log"
+      - name: Residual processes (observation only)
+        if: always()
+        run: |
+          set -uo pipefail
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            tasklist //V | grep -iE '(^| )(go|.*\.test)\.exe' || echo "no go or test process"
+          else
+            ps -eo pid,ppid,etime,comm,args | grep -E '[/ ](go|[a-z]+\.test)( |$)' | grep -v grep || echo "no go or test process"
+          fi
+      - name: Upload the outputs
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: c9-tool-test-${{ matrix.os }}
+          path: ${{ runner.temp }}/c9-tool-test-out
+          retention-days: 90
+          if-no-files-found: warn
