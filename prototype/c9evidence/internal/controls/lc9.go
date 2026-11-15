@@ -117,6 +117,24 @@ type lc9Case struct {
 	drive   func(c *lc9Run)
 	exitAny bool // the exit status is recorded, not compared
 	want    func(goos string) []string
+	// realClose and realSend replace the real operation a seam calls; only
+	// the regressions of Review 154 set them (nil: the real operation).
+	realClose func(d int, f *os.File) error
+	realSend  func(fd int) error
+}
+
+func (c *lc9Run) realClose(d int, f *os.File) error {
+	if c.k.realClose != nil {
+		return c.k.realClose(d, f)
+	}
+	return f.Close()
+}
+
+func (c *lc9Run) realSend(fd int) error {
+	if c.k.realSend != nil {
+		return c.k.realSend(fd)
+	}
+	return toolctl.RealSendKill(fd)
 }
 
 func (c *lc9Run) problem(s string) {
@@ -695,9 +713,9 @@ func lc9Cases() []lc9Case {
 		},
 		{
 			name: "close-real-error", mode: pseudo.Silent,
-			seams: func(_ *lc9Run, s *toolctl.Seams) {
+			seams: func(c *lc9Run, s *toolctl.Seams) {
 				s.CloseFile = func(_, d int, f *os.File) error {
-					err := f.Close()
+					err := c.realClose(d, f)
 					if d == toolctl.StdoutR && err == nil {
 						return errSeamClose
 					}
@@ -822,7 +840,7 @@ func lc9Cases() []lc9Case {
 			seams: func(c *lc9Run, s *toolctl.Seams) {
 				s.SendSignal = func(_, fd int) error {
 					c.gates["send"].wait()
-					return toolctl.RealSendKill(fd)
+					return c.realSend(fd)
 				}
 			},
 			drive: func(c *lc9Run) {
