@@ -1,6 +1,6 @@
 # WP2.5 第三批：C-9 限定取证工具第二阶段的实施与测试记录
 
-> 状态：**第二阶段的实施登记（写代码之前写定；2026-11-15，review-resolution §200）**。本文的 §1 ~ §8 在第一行代码之前提交；实现、测试、失败与证据在之后追加的各节中记录，不改写本登记。独立 PR，不合并；Auto-fix、Auto-merge 保持关闭。
+> 状态：**第二阶段的实施登记（写代码之前写定；2026-11-15，review-resolution §200）**。本文的 §1 ~ §8 在第一行代码之前提交；实现、测试、失败与证据在之后追加的各节中记录，不改写本登记。独立 PR，不合并；Auto-fix、Auto-merge 保持关闭。之后：实施完成，固定代码点 `ed84d09` 的三平台测试 run 43681144176 success，结果、偏离与发现见 §9（review-resolution §201；待独立审查）。
 >
 > - 依据：负责人 2026-11-15 的决定（§200）；[限定取证计划](wp2.5-c9-limited-evidence-plan.md) §2.3 的 E-10 (ii)、§2.4 的 LE-5、§5.2 的 LC-9；[实施计划](wp2.5-implementation-plan.md) §12.6、§12.12（“工具的控制协议”与“输出不关闭的拒绝路径”）、§12.14 第 1 ~ 13 条；[第一阶段的实现记录](wp2.5-c9-evidence-tool.md)。
 > - 本轮**不**授权：对真实仓库 R 的正式采集；正式运行分支（`evidence/` 之下的任何分支）、N2 的决定与正式运行的 C / T；宣布任何 G 项满足、批准精确例外；第三批的生产实施；WP2.5 / M2 的验收。
@@ -169,3 +169,122 @@
 - 限定前提被打破（例如观测到三种调用产生了后代）、规格冲突、出现须接受的新风险，或必须扩大实施范围时：报告并等待决定。
 - `go.sum` 中出现根模块 `go.sum` 第 46、47 行之外的新行：停下报告。
 - 最终常规 CI 失败：保留结果并报告，不自行重跑。
+
+## 9. 实施与测试的结果（2026-11-15；固定代码点 `ed84d09`，待独立审查）
+
+本节在实施之后追加；§1 ~ §8 的登记没有改写。登记中写错或在实施中偏离的地方，在 §9.2 逐项列出。
+
+### 9.1 提交与固定代码点
+
+| 提交 | 内容 |
+|---|---|
+| `8a21e46` | 本登记（§1 ~ §8）与 review-resolution §200；写代码之前提交 |
+| `28969bc` | `internal/toolctl`（控制协议与真实调用者）、`internal/pseudo`（伪工具）、`CallResult.Control`；工具模块依赖 `golang.org/x/sys` v0.49.0 |
+| `2676c2c` | LC-9 的变体（`internal/controls/lc9.go`）；作业把登记表接入收尾；正式入口的接线；`TestJobEveryControl` 代替第一阶段的 `TestJobPhase1IsInvalid` |
+| `267012b` | 夹具上的真实调用测试（`internal/realcall`）与测试 workflow（`.github/workflows/c9-tool-test.yml`）；第 1 次测试运行的代码点 |
+| `3fc444c` | 第 1 次运行与本机验证 1 的证据（只改 `docs/`） |
+| `f1b4058` | 守卫记录 `LookPath` 的原始结果；RC-0 诊断；RC-3 的测试缺陷修正；Windows 的路径观测步骤；第 2 次运行的代码点 |
+| `8f6010c` | 第 2 次运行的证据（只改 `docs/`） |
+| `ed84d09` | 两个第一阶段 chain 测试的前提；Windows 步骤 B 之前的 PATH 安排；**第 3 次运行的固定代码点** |
+| `9453eb2` | 第 3 次运行与本机验证 2 的证据（只改 `docs/`） |
+
+- **固定代码点** `ed84d091f3d352d46cdf525880998ba6ef569b91`：树 `65c53940869b9ef28b525966d85eaecaa97a0c62`，工具模块子树 `c943f922827282e2868ef4da84fe8e370f96f126`，测试 workflow 的 blob `4387acdc683a2014c235f3991bf854a30d6c7c2c`。之后的提交只改 `docs/`：最终 HEAD 的工具模块子树与测试 workflow 的 blob 都与固定代码点相同。
+- 专用测试分支 `c9test/phase2` 停在 `ed84d09`。`ci.yml`、`c9-evidence.yml`、根模块的 `go.mod` 与 `go.sum` 都没有改动；没有建立 `evidence/` 之下的任何分支。
+- 工具模块的 `go.mod` 只 `require` `golang.org/x/mod` v0.42.0 与 `golang.org/x/sys` v0.49.0；`go.sum` 恰好是根模块 `go.sum` 的第 42、43、46、47 行，没有其他新行（以固定工具链的 `go mod tidy`、`GOPROXY=off` 生成，只用本机缓存）。
+
+### 9.2 实现与 §4 的对照；偏离与更正
+
+| §4 | 实现（`internal/toolctl/toolctl.go`） |
+|---|---|
+| 1 登记表 | `register` 在 `regMu` 之下建立记录并计入启动任务，之后才启动它；记录的字段见 `Record`；全部记录持有到进程结束，`Failures` 只追加 |
+| 2 描述符 | `startTask` 先建两个管道，再在同一次锁下移交读端并计入两个读取任务；第二个管道失败时由 `closeDesc` 关闭第一个管道的两端，A 类（`pipe`）；`Start` 之后关闭两个写端；`readTask` 停止读取之后关闭自己的读端一次 |
+| 3 启动与回收 | `exec.Command`；`cmd.Err` 非 nil 或 `Path` 为空时 A 类（`precondition`），其余启动失败 C 类（`start`）、不调用 `Wait`；Linux 上 `Start` 之后、`Wait` 之前 `PidfdOpen`；唯一的一次 `Wait` 之后在同一次锁下发布结果、复制 `ProcessState`（B 类；为 nil 时 C 类 `wait`）并封闭 pidfd；启动任务中的 panic 由它恢复，C 类 `std-panic` |
+| 4 父端 | `Invoke` 只在锁下读记录，按记录的 `changed` 与 `W` 的计时器等待；进入终态即返回副本，到 `W` 即 `expire` 后返回失败的副本 |
+| 5 到期与终止 | `expire` → `reserveLocked`（规则 1）→ `requestTask`（规则 5）；pidfd 或进程尚未发布时由登记表持有的 `expiryTask` 在窗口之内重试；`closePidfd` 在请求为已预留或运行中时等待（规则 3、4、8）；Windows 以已发布的 `*os.Process` `Kill` 一次；darwin 记清理未知；Linux 上 `signal.Ignored(SIGCHLD)` 为真时登记表拒绝运行 |
+| 6 ~ 9 | 晚到的结果作为事件追加（`Event.Late`）；`successLocked` 是第 11 条；`InjectClose` 只在真实结果发布之后追加；作业以 `Terminal` 与 `Problems` 接入收尾，问题进入结论的第 2 级（`verdict.Inputs.ToolProblems`） |
+| 10 输出的上限 | `DefaultLimit` = 64 MiB，每一路分别计算（提请审查的选择，未改） |
+| 11、12 | 接缝与伪工具的模式如登记；伪工具只在 `m.Run` 之前由 `pseudo.MaybeRun` 识别 |
+
+偏离、补充与更正（都在实施中发现，逐项保留）：
+
+1. **LC-9 的变体数**：§6.2 列了 19 个，实现了 20 个。新增 `start-failure-not-executable`：以夹具中一个存在、但不是可执行文件的文件启动，三个平台都是 C 类（`start`）的启动失败（Unix 上 fork 之后 exec 失败，Windows 上 `CreateProcess` 失败）。§6.2 的 19 个都按原预期实现。
+2. **`start-failure` 在 Windows 上的类**：§6.2 写作 C 类，结果也是 C 类，但依据须补充：可执行文件名带 `.exe`。固定 Go 1.27.3 的 `exec.Command` 对 Windows 上的绝对路径调用 `lookExtensions`（`os/exec/exec.go:466` ~ `480`），后者对已知的扩展名直接接受、不看文件是否存在（`os/exec/lp_windows.go:85` ~ `91`），所以 `cmd.Err` 为 nil，`CreateProcess` 失败，C 类。没有已知的扩展名时，查找先失败，`cmd.Err` 非 nil，按 §12.6 应为 A ②。实现中第一次写的“Windows 为 A”预期是错的，本机运行即不命中，已在写入代码点之前改正。
+3. **登记的笔误**：§6.2 normal-eof 一行最初写作“4 个参数”，在写代码之前改正为 5 个参数（第 4 个是 T2），随登记提交。
+4. **规范行**：晚到只记为 `late yes / no`，不逐项列出（逐项会随调度变化）；overflow 变体不比较退出码（`wait exit *`），因为它之后的写入得到 SIGPIPE 还是写入错误，取决于平台与时机。
+5. **RC-0**：新增的诊断测试（§6.3 没有列出），不启动进程、不判定，只记录 `exec.LookPath("go")`、它的绝对形式、`EvalSymlinks` 的结果，以及每个路径分量的 `Lstat`、`Readlink` 与 `EvalSymlinks`。
+6. **守卫的记录**（第一阶段的文件 `internal/collect/guard.go`）：`GuardValues` 增加 `Found`（`LookPath` 的原始结果，为空时省略，所以构造的值与它们的记录字节不变），解析失败的错误写出这一路径。守卫的规则不变。
+7. **测试 workflow 在 Windows 步骤 B 之前的 PATH 安排**：见 §9.5 的 F-1。只在测试 workflow 中，只影响步骤 B。
+8. **第一阶段的 chain 测试**：`manifestCloseLate`（`TestCase2a…`、`TestCase2b…` 共用）在调用者把时钟推过 `D` 之前，等待诊断任务三行快照行的写入结果。见 §9.5 的 F-3。只改测试，chain 的代码不变。
+9. **作业测试**：第一阶段的 `TestJobPhase1IsInvalid`（LC-9 不命中，所以结论 1）在 LC-9 实现之后不再成立，改为 `TestJobEveryControl`（全部对照与假调用者，结论 4、退出 0）；另增 `TestJobToolProblems`（以替身检验登记表的问题进入第 2 级）。
+10. **RC-1 ~ RC-3 的截止**：每个配置或用例用自己的登记表与截止，不是正式运行共享的 120 秒；RC-4 用作业自己的 `D`。
+
+### 9.3 三次测试运行（`c9-tool-test.yml`，每次都是 attempt 1，没有重跑）
+
+| 运行 | 代码点 | Ubuntu | macOS | Windows | 证据 |
+|---|---|---|---|---|---|
+| 43680105408 | `267012b` | success | success | **failure**：步骤 B 中 A1-a 守卫拒绝候选，RC-1 ~ RC-4 没有真实调用；RC-3 另有测试缺陷（在 goroutine 中 `t.Fatalf`） | [ci-43680105408](evidence/wp2.5-c9-phase2/ci-43680105408/README.md) |
+| 43680692609 | `f1b4058` | **failure**：`-race` 一步中第一阶段的 chain 测试空指针 panic，步骤 B 被跳过 | success | **failure**：同上的守卫失败；RC-0 取得逐分量的事实 | [ci-43680692609](evidence/wp2.5-c9-phase2/ci-43680692609/README.md) |
+| 43681144176 | `ed84d09` | **success** | **success** | **success** | [ci-43681144176](evidence/wp2.5-c9-phase2/ci-43681144176/README.md) |
+
+- 每次失败之后都先保留证据、分析原因，再在新的代码点上修复与验证；没有以重跑同一代码点代替修复，也没有删除旧的失败记录。
+- 本机验证：[local-1](evidence/wp2.5-c9-phase2/local-1/README.md)（`267012b`）与 [local-2](evidence/wp2.5-c9-phase2/local-2/README.md)（`ed84d09`）。Windows 原生 486 个 PASS、0 FAIL，1 个已知 SKIP（本机不能创建符号链接）；WSL 中交叉编译的 Linux 二进制 487 个 PASS、0 FAIL；只有伪工具与接缝，没有真实调用。
+
+### 9.4 固定代码点的结果（run 43681144176）
+
+| 项 | Ubuntu | macOS | Windows |
+|---|---|---|---|
+| 步骤 A：vet（三种标签集合）、格式、正式入口只编译 | 成立 | 成立 | 成立 |
+| 步骤 A：单元测试 | 12 个包，487 PASS / 0 FAIL / 0 SKIP | 同左 | 同左 |
+| 步骤 A：`-race` | 487 PASS / 0 FAIL，没有数据竞争告警 | — | — |
+| LC-9 | 20 个命中 | 11 个命中，9 个不适用 | 11 个命中，9 个不适用 |
+| RC-1 | 两个配置的 28 项检查全部成立，K 一致，发现为零；六次调用都满足第 11 条 | 同左 | 同左 |
+| RC-2 | 超量；读端关闭为 nil；`go` 因 SIGPIPE 结束 | 同左 | 超量；读端关闭为 nil；`go` 退出 0 |
+| RC-3 | 经 pidfd 请求一次（nil），SIGKILL；pidfd 关闭一次 | 不发请求，清理未知；`go` 自己完成，晚到的回收 | `Kill` 一次（nil），退出码 1 |
+| RC-4 | 结论 4、退出 0（0.58 s） | 结论 4、退出 0（0.80 s） | 结论 4、退出 0（0.78 s） |
+| 残留进程的观测 | 没有 `go` 或测试进程 | 同左 | 同左 |
+
+- 守卫的候选：Ubuntu `/opt/hostedtoolcache/go/1.27.3/x64/bin/go`，macOS `/Users/runner/hostedtoolcache/go/1.27.3/arm64/bin/go`，Windows `D:\hostedtoolcache\windows\go\1.27.3\x64\bin\go.exe`（F-1 的 PATH 安排之后）；`VERSION` 与 `GOVERSION` 都是 go1.27.3，`GOROOT` 与候选的根相同；可执行文件的 SHA-256 与身份步骤打印的相同。
+- RC-4 是夹具上的演练：它说明登记表、收尾与 `D` 的出口在真实调用下接得上，不是正式取证，也不说明 R 上的 120 秒预算够用。
+
+### 9.5 发现
+
+- **F-1：Windows runner 上守卫的候选经过 junction**（实际执行 + 静态依据）。setup-go 在 windows-latest 上的 GOROOT `C:\hostedtoolcache\windows\go\1.27.3\x64` 是指向 `D:\hostedtoolcache\windows\go\1.27.3\x64` 的 junction。固定 Go 1.27.3 中，junction 的 `Lstat` 模式为 `ModeIrregular`、没有 `ModeDir`（`os/types_windows.go` 的 `mode`，Go 1.23 起的 `winsymlink`）；`walkSymlinks` 遇到不是符号链接、也不是目录的中间分量即返回 `syscall.ENOTDIR`（`path/filepath/symlink.go:90` ~ `93`），Windows 上它就是 `ERROR_PATH_NOT_FOUND`（`syscall/zerrors_windows.go:9`）。所以 §12.14 第 1 条的守卫对这一安装的 `go.exe` 必然失败（J-1）。
+  - 守卫的规则没有改。测试 workflow 在 Windows 的步骤 B 之前，把 junction 的目标 `bin` 放到 PATH 最前（§12.14 第 1 条对本地运行的要求同样是让真实 GOROOT 的 `bin` 先被找到），守卫照常核对同一份 `go.exe`（SHA-256 相同）。
+  - **对正式运行的影响**（未处理，待负责人决定）：`c9-evidence.yml` 没有改，它在 windows-latest 上会得到同样的 A1-a 失败，Windows 作业的结论只能是 2。可选的处置：在正式 workflow 中做同样的 PATH 安排，或修订守卫的解析方法；都须另经审查与决定，可以与 N2 一起处理。本轮不处理。
+- **F-2：实施计划 §12.12 闸门表中“以绝对路径启动不存在的文件（三个平台）”的 C 类**（静态依据，§9.2 第 2 项）：只在 Windows 上的文件名带已知扩展名时成立；不带时 `cmd.Err` 先被设置，按 §12.6 应为 A ②。这影响第三批 `procgate` 测试的写法，本轮不处理，只登记。
+- **F-3：第一阶段 chain 测试的前提**（实际执行）：`-race` 下 2a 在第 121 行读取写者尚未发布的关闭结果。原因是测试没有保证诊断任务在 `D` 之前写完快照行；诊断任务在 `D` 之后仍有待写的行时走到期出口，这符合它的规则。修正只在测试中加入这一前提（§9.2 第 8 项）。第 1 次运行的 `-race` 中同一测试通过，所以这是取决于调度的测试缺陷；修正之后的一次 `-race` 运行通过，不等于全部调度都已覆盖。
+- **F-4：RC-3 在 darwin 上**：到期时不发请求、只记清理未知，`go list` 之后自己完成（标准输出 27998 字节）并被晚到地回收。这次没有残留，但这只是观测；darwin 上工具进程可能在测试进程结束之后继续运行的限制不变。
+
+### 9.6 T2 的参数传递
+
+| 平台 | 实际执行 | 静态依据 |
+|---|---|---|
+| Linux | RC-1：两个配置的第 2 种调用，参数数组 5 个元素，第 4 个为 T2（688 字节，SHA-256 `5dfab1fd…2ad7`），输出合上下文文本 v1，B2 成立；LC-9 normal-eof：Go 子进程收到的第 4 个参数的字节数与 SHA-256 等于 T2 | `os/exec/exec.go:744` 以 `c.argv()`（`:535` ~ `540`，即 `Cmd.Args`）调用 `os.StartProcess`；`os/exec_posix.go:55` 调用 `syscall.StartProcess`；`syscall/exec_unix.go:162` 以 `SlicePtrFromStrings` 把每个参数复制为一个以 NUL 结尾的字节串（`:84` ~ `98`，参数中有 NUL 即 `EINVAL`），`:208` 交给子进程；Linux 子进程以 `SYS_EXECVE` 传入这个数组（`syscall/exec_linux.go:673`）。没有 shell，也没有拆分 |
+| macOS | 同上（两个配置） | 同一路径，子进程经 libc 的 `execve`（`syscall/exec_libc2.go:284`） |
+| Windows | 同上（两个配置；PATH 安排之后） | 第一阶段已核对的命令行拼接与拆分（限定取证计划 §1.2 第 2 项） |
+
+输出的校验仍不认证 cmd/go 收到的就是原模板（方法记录 §3.3.1）。
+
+### 9.7 证据的类别
+
+| 类别 | 本轮的内容 |
+|---|---|
+| 接缝 / 模拟 | LC-9 的假时钟与闸门（固定交错的顺序）；注入的关闭错误；接缝制造的管道、读取、关闭与 `PidfdOpen` 的错误；阻塞的关闭与发送；RC-3 中 `Wait` 之前的钩子；`TestJobToolProblems` 的登记表替身 |
+| 实际执行 | 伪工具与持有者 H 是真实的子进程（三个 runner 与本机）；夹具上的 `go env`、`go list` 是真实的工具调用（三个 runner，RC-1 ~ RC-4）；Linux 上经 pidfd 的 SIGKILL（LC-9 与 RC-3）、Windows 上的 `Kill`、darwin 上不发请求，都是实际的平台路径；Ubuntu 上 `-race` 的运行 |
+| 静态依据 | §9.6 的参数传递；§9.2 第 2 项与 F-2 的 `lookExtensions`；F-1 的 junction 与 `EvalSymlinks` |
+| 未验证 | §9.8 |
+
+### 9.8 没有覆盖、没有运行或仍保留的
+
+- 登记表在 `SIGCHLD` 被忽略时的拒绝、启动任务中标准库的 panic（C 类 `std-panic`）、`Wait` 返回而 `ProcessState` 为 nil（C 类 `wait`）：有代码，没有构造的测试。
+- 正式入口只编译与 vet，没有运行；`c9-evidence.yml` 没有改，它的注释仍写着第一阶段的状态；R 没有被分析；正式运行的 120 秒预算没有测量。
+- E-10 (ii) 仍是负责人为本阶段测试接受的限定前提，不是证明；“没有观测到残留进程”不是清理的证据。
+- `-race` 只在 Linux 上运行；本机没有 `-race`。各用例的交错是接缝固定的顺序，不是全部调度的覆盖。
+- 夹具只依赖 `golang.org/x/mod`；第三方的扫描与类型检查只覆盖它与它的标准库闭包。
+- 真实的孤儿领养与后代清理没有覆盖：H 是测试自己的直接子进程。
+- F-1 的 PATH 安排只在测试 workflow 中。
+
+### 9.9 交接
+
+- 固定代码点 `ed84d09` 与本节的证据交独立审查。
+- 之后须负责人决定的：F-1 在正式 workflow 中的处置（可以与 N2 一起）；正式运行的授权（N2、C / T）。本轮不建立正式运行分支，不运行正式取证。

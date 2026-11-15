@@ -12933,3 +12933,35 @@ macOS 13+、Intel 的支持承诺与已批准的产品决定不变；没有新�
 - E-10 (ii) 只为本阶段的测试接受（限定前提，不是证明）；LE-5 ① 与 ② 获授权；第二阶段的实施开始，尚无实现与测试结果。
 - 正式取证、正式运行分支、N2 与正式运行的 C / T 都未授权；没有清单，也没有被批准的 h_list；G-1 ~ G-6 都没有满足；T-2、L-b1b、原始路径的运行风险与发送信号的风险没有被接受；T-4、T-5 待决。
 - 第三批的生产实施、链接验证的执行、WP2.5 / M2 的验收都未授权。
+
+## 201．第二阶段的实施与测试：固定代码点 `ed84d09`，三平台测试 run 43681144176 success（待独立审查）
+
+**依据**：§200 的授权（本节只登记实施与测试的结果，不是新的决定）。
+
+**实施**（在独立分支 `test/wp2.5-c9-evidence-phase2` 上；登记 `8a21e46` 先于代码）：
+
+- 实施计划 §12.14 第 3 ~ 13 条的控制协议与真实调用者（`prototype/c9evidence/internal/toolctl`）；伪工具（`internal/pseudo`）；LC-9 的 20 个变体（11 个三平台适用，9 个 pidfd 的变体只在 Linux 适用）；作业把登记表接入收尾（第 13 条）；正式入口改用真实调用者（只编译与 vet，不运行）；夹具上的真实调用测试 RC-0 ~ RC-4（`internal/realcall`，构建标签与运行环境的门控）；测试 workflow `.github/workflows/c9-tool-test.yml`（只由 `c9test/phase2` 的 push 触发，固定 Go 1.27.3）。
+- 工具模块依赖 `golang.org/x/sys` v0.49.0；`go.sum` 恰好是根模块 `go.sum` 的第 42、43、46、47 行。
+- `ci.yml`、`c9-evidence.yml`、根模块的代码、`go.mod`、`go.sum` 都没有改；没有建立 `evidence/` 之下的分支；没有对 R 运行采集。
+
+**测试运行**（每次 attempt 1，没有重跑；证据在 `docs/evidence/wp2.5-c9-phase2/`）：
+
+| 运行 | 代码点 | 结果 |
+|---|---|---|
+| 43680105408 | `267012b` | Ubuntu、macOS success；Windows failure：A1-a 守卫拒绝经过 junction 的候选，RC-3 另有测试缺陷 |
+| 43680692609 | `f1b4058` | macOS success；Ubuntu failure：`-race` 下第一阶段 chain 测试的前提缺失；Windows failure：同上的守卫，RC-0 取得逐分量的事实 |
+| 43681144176 | `ed84d09` | **三个平台 success**：步骤 A（含 LC-9；Ubuntu 的 `-race` 487 PASS、没有数据竞争告警），步骤 B 的 RC-0 ~ RC-4 都通过；RC-4 的作业演练在三个平台都是结论 4、退出 0 |
+
+本机验证：local-1（`267012b`）、local-2（`ed84d09`），Windows 原生与 WSL 中的 Linux 二进制都通过（只有伪工具与接缝）。
+
+**发现**（详见 [第二阶段记录](wp2.5-c9-evidence-phase2.md) §9.5）：
+
+- F-1：setup-go 在 windows-latest 上的 GOROOT 经过 junction，固定 Go 1.27.3 的 `filepath.EvalSymlinks` 对它之下的路径必然失败，§12.14 第 1 条的守卫因此拒绝候选。守卫规则没有改；测试 workflow 在 Windows 的步骤 B 之前把 junction 的目标 `bin` 放到 PATH 最前。未改的 `c9-evidence.yml` 在 Windows 上会遇到同样的失败：处置待负责人决定（可以与 N2 一起）。
+- F-2：§12.12 闸门表中“以绝对路径启动不存在的文件（三个平台）为 C 类”只在 Windows 上的文件名带已知扩展名时成立；只登记。
+- F-3：第一阶段两个 chain 测试缺少“诊断任务在 `D` 之前写完快照行”的前提，`-race` 暴露；只改测试。
+- F-4：darwin 上到期之后 `go list` 自己完成、晚到地回收；只是观测。
+
+**状态**：
+
+- 固定代码点 `ed84d091f3d352d46cdf525880998ba6ef569b91`（工具模块子树 `c943f922827282e2868ef4da84fe8e370f96f126`，测试 workflow 的 blob `4387acdc683a2014c235f3991bf854a30d6c7c2c`）与证据待独立审查；PR 不合并。
+- E-10 (ii) 仍只是为本阶段测试接受的限定前提；正式取证、正式运行分支、N2 与正式运行的 C / T 都未授权；G-1 ~ G-6 都没有满足；精确例外没有批准；第三批的生产实施与 WP2.5 / M2 的验收都未授权。
