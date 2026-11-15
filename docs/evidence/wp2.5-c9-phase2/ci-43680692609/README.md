@@ -2,7 +2,7 @@
 
 | 项 | 值 |
 |---|---|
-| workflow | `.github/workflows/c9-tool-test.yml`（这一代码点的 blob 见 `job-*.log` 的身份步骤） |
+| workflow | `.github/workflows/c9-tool-test.yml`，blob `6b38ea8526bf12b69a0b611d1da878b5250f3c8d` |
 | 运行 | run 43680692609，attempt 1，`push` 到 `c9test/phase2`，**failure**；没有重跑 |
 | 代码点 | `f1b405848127fd7e4cdd2985a5c3a5664dac5f8e`，工具模块子树 `aab881f5758cb4809610a420da8da70839ad0631`（相对第 1 次运行：守卫记录 `LookPath` 的原始结果并写进错误；新增 RC-0 诊断；RC-3 在测试 goroutine 中取得调用规格；Windows 的路径观测步骤） |
 | 工具链 | 三个 runner 都是 setup-go 安装的 go1.27.3，路径与 SHA-256 同第 1 次运行 |

@@ -1,0 +1,35 @@
+# command: go vet ./... ; vet -tags c9evidence_run ./... ; vet -tags c9evidence_realcall ./... (GOOS linux, darwin, windows); gofmt -l ; go mod verify ; go test -tags c9evidence_run -c ./run/ (compile only)
+# env: GOTOOLCHAIN=local GOPROXY=off GOWORK=off GOFLAGS=
+# toolchain: /c/Users/hoshi/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/bin/go.exe
+# toolchain sha256: 83b7ba66215e696414fa49462d0db2da4f4cf15c7bebd42f0b189fa04866999d
+# go version: go version go1.27.3 windows/amd64
+# HEAD: ed84d091f3d352d46cdf525880998ba6ef569b91
+# tree: 65c53940869b9ef28b525966d85eaecaa97a0c62
+# tool module subtree: c943f922827282e2868ef4da84fe8e370f96f126
+# worktree before: 0 changed paths
+# started: 2026-11-15T05:30:23Z
+## GOOS=linux tags=
+## exit 0
+## GOOS=linux tags=c9evidence_run
+## exit 0
+## GOOS=linux tags=c9evidence_realcall
+## exit 0
+## GOOS=darwin tags=
+## exit 0
+## GOOS=darwin tags=c9evidence_run
+## exit 0
+## GOOS=darwin tags=c9evidence_realcall
+## exit 0
+## GOOS=windows tags=
+## exit 0
+## GOOS=windows tags=c9evidence_run
+## exit 0
+## GOOS=windows tags=c9evidence_realcall
+## exit 0
+## gofmt -l
+## go mod verify
+all modules verified
+## exit 0
+## compile the formal entry (not run)
+## exit 0
+# finished: 2026-11-15T05:30:38Z
