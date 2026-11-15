@@ -1,0 +1,10 @@
+05ca4e23ba2bfe777f4902a5de8bd19d32cabd84d1d15eb0b6aa530c492dbb4f *./ARTIFACTS.sha256
+aa2c0dd0991b304e07e070d7c82cd9ad18bc456fd1aed737988ec09286f46be9 *./README.md
+cb067b8ae752c6f61377a23ab59affb101dae485aef35f74f64a076b8de29cfc *./c9-tool-test-macos-latest.tar.gz
+3f26c40cc7e83b3b0dda6e2bcfa159d058bf594cfc312bda57af1cdbbda4c77a *./c9-tool-test-ubuntu-latest.tar.gz
+8ddafc32f372a4bfa0104bc51cb1211c22f6efcd75811c1b55c23d1a1903b765 *./c9-tool-test-windows-latest.tar.gz
+10ce0bed894fa76a496e85c592f6eacc1215677174e93c89f9c4c4e0fd7fffa7 *./job-macos.log
+d826338ed5598c4fce1f0addf65134461230f57e8f4fa6747644ac47d75667a7 *./job-ubuntu.log
+76dbc7bc5cfb8a96121bcb9cbf77b493a56b06ce0cd0c44e70631a47c582bbce *./job-windows.log
+0afed7dcea526122ad6c1d744056e06c03d543ff08ccb818eecfc9f455b747bc *./jobs.json
+85da4ed4437ea78f2cb6c7bdee5516dea4d7df1d5052bc3a1702ae135d551943 *./run.json
