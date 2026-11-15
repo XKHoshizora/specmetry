@@ -5,7 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/XKHoshizora/specmetry/prototype/c9evidence/internal/chain"
@@ -31,8 +32,15 @@ import (
 // interleavings and inject; the process start, the reads, the reap and the
 // termination are real. The outer layer saves the decision Invoke returned,
 // then releases what the case holds (the pseudo-tool's stdin, the gates, the
-// holder H) and judges only once the call is terminal; the complete
+// holder H) and judges only once the call and H are terminal; the complete
 // expectations below are written independently of toolctl.
+//
+// The judgement consumes the structured fault set (Review 154 B-154-4):
+// every error the protocol recorded, by site and source, with its kind
+// given by the error's identity (a planned seam fault, an injection and a
+// real error never compare equal); every real result a seam replaced; and
+// H's faults. Each is a line of the complete expectation, so an unexpected
+// real error, or a planned fault whose source did not happen, is a miss.
 
 // lc9Guard bounds each real-time wait of the outer layer. It is a backstop
 // against a defect, not a budget: a case that hits it is not terminal or
@@ -48,6 +56,46 @@ var (
 	errNoExecPath = errors.New("os.Executable failed")
 )
 
+// faultKind is an error's kind by its identity, never by its text: the
+// planned seam faults and the injection each have their own kind, apart
+// from every real error.
+func faultKind(err error) string {
+	switch {
+	case err == nil:
+		return "ok"
+	case errors.Is(err, errSeamPipe):
+		return "seam-pipe"
+	case errors.Is(err, errSeamRead):
+		return "seam-read"
+	case errors.Is(err, errSeamClose):
+		return "seam-close"
+	case errors.Is(err, errSeamPidfd):
+		return "seam-pidfd"
+	case errors.Is(err, errInjected):
+		return "injected"
+	case errors.Is(err, ErrNotAdmitted):
+		return "not-admitted"
+	}
+	var ee *exec.ExitError
+	if errors.As(err, &ee) {
+		return "exit-status"
+	}
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return "not-exist"
+	case errors.Is(err, fs.ErrPermission):
+		return "permission"
+	}
+	var en syscall.Errno
+	if errors.As(err, &en) {
+		if en == syscall.ESRCH {
+			return "ESRCH"
+		}
+		return "errno " + strconv.FormatUint(uint64(en), 10)
+	}
+	return "other"
+}
+
 type gate struct {
 	entered, open chan struct{}
 	eo, oo        sync.Once
@@ -61,24 +109,6 @@ func (g *gate) wait() {
 }
 
 func (g *gate) release() { g.oo.Do(func() { close(g.open) }) }
-
-// holder is the controlled output holder H (§12.12): the test's own direct
-// child, never the tool's descendant.
-type holder struct {
-	mu                     sync.Mutex
-	relW                   *os.File
-	started, ready, waited bool
-	closed                 bool // the outer cleanup ran: H is never started after it
-	exit                   int
-	errs                   []string
-	done                   chan struct{} // closed when H's one Wait returned
-}
-
-func (h *holder) err(s string) {
-	h.mu.Lock()
-	h.errs = append(h.errs, s)
-	h.mu.Unlock()
-}
 
 type lc9Run struct {
 	e        *Env
@@ -94,33 +124,36 @@ type lc9Run struct {
 	returned chan struct{}
 	res      collect.CallResult
 	extra    []string
-	problems []string
-	prepErr  error
 	h        *holder
 	fx       *fixture
 	mu       sync.Mutex
+	problems []string
+	prepErr  error
+	saved    bool    // the tested decision was saved (before any release)
+	seamLog  []Fault // what the seams replaced
 }
 
 type lc9Case struct {
-	name    string
-	linux   bool // only on Linux: the pidfd exists only there (§12.14 item 8)
-	mode    string
-	stdin   bool
-	limit   int64
-	bytes   int
-	gates   []string
-	hooks   map[string]string // hook point -> gate
-	holder  bool              // the case starts the output holder H
-	absent  bool              // start an absolute path that does not exist
-	badExe  bool              // start an existing file that is not an executable
-	seams   func(c *lc9Run, s *toolctl.Seams)
-	drive   func(c *lc9Run)
-	exitAny bool // the exit status is recorded, not compared
-	want    func(goos string) []string
-	// realClose and realSend replace the real operation a seam calls; only
-	// the regressions of Review 154 set them (nil: the real operation).
-	realClose func(d int, f *os.File) error
-	realSend  func(fd int) error
+	name   string
+	linux  bool // only on Linux: the pidfd exists only there (§12.14 item 8)
+	mode   string
+	stdin  bool
+	limit  int64
+	bytes  int
+	gates  []string
+	hooks  map[string]string // hook point -> gate
+	holder bool              // the case starts the output holder H
+	absent bool              // start an absolute path that does not exist
+	badExe bool              // start an existing file that is not an executable
+	seams  func(c *lc9Run, s *toolctl.Seams)
+	drive  func(c *lc9Run)
+	want   func(goos string) []string
+	// realClose and realSend replace the real operation a seam calls, and
+	// holderSeams H's operations; only the regressions of Review 154 set
+	// them (nil: the real operations).
+	realClose   func(d int, f *os.File) error
+	realSend    func(fd int) error
+	holderSeams func(h *holder)
 }
 
 func (c *lc9Run) realClose(d int, f *os.File) error {
@@ -137,10 +170,33 @@ func (c *lc9Run) realSend(fd int) error {
 	return toolctl.RealSendKill(fd)
 }
 
+// seam records what a seam did at a site in place of the real operation:
+// the real result it hid ("not-called" when it did not call it) and what
+// it returned.
+func (c *lc9Run) seam(site, real string, returned error) {
+	c.mu.Lock()
+	c.seamLog = append(c.seamLog, Fault{Site: site, Source: "seam", Kind: "real " + real + " returned " + faultKind(returned)})
+	c.mu.Unlock()
+}
+
 func (c *lc9Run) problem(s string) {
 	c.mu.Lock()
 	c.problems = append(c.problems, s)
 	c.mu.Unlock()
+}
+
+func (c *lc9Run) prepFail(err error) {
+	c.mu.Lock()
+	if c.prepErr == nil {
+		c.prepErr = err
+	}
+	c.mu.Unlock()
+}
+
+func (c *lc9Run) decisionSaved() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.saved
 }
 
 func (c *lc9Run) note(s string) { c.extra = append(c.extra, s) }
@@ -248,7 +304,10 @@ func (k lc9Case) run(e *Env) Outcome {
 		c.gates[g] = newGate()
 	}
 	if k.holder {
-		c.h = &holder{done: make(chan struct{}), exit: -2}
+		c.h = newHolder(c)
+		if k.holderSeams != nil {
+			k.holderSeams(c.h)
+		}
 	}
 	if k.stdin {
 		if err := step(e, "prepare LC-9 "+k.name+": stdin pipe", func() error {
@@ -315,41 +374,46 @@ func (k lc9Case) run(e *Env) Outcome {
 		lines = append(lines, "decision not-returned")
 	}
 	lines = append(lines, c.extra...)
+	// The decision is saved (copied) before anything is released.
+	c.mu.Lock()
+	c.saved = true
+	c.mu.Unlock()
 	cerr := c.cleanup()
 	sn := c.snap()
-	for _, l := range toolctl.Lines(sn) {
-		if k.exitAny && strings.HasPrefix(l, "wait exit ") {
-			l = "wait exit *"
-		}
-		lines = append(lines, l)
+	lines = append(lines, toolctl.Lines(sn)...)
+	inst := &Instance{Extra: map[string]any{"call": sn}}
+	for _, f := range sn.Faults {
+		inst.Faults = append(inst.Faults, Fault{Site: f.Site, Source: f.Source, Kind: faultKind(f.Err), Detail: f.Detail})
 	}
+	c.mu.Lock()
+	inst.Faults = append(inst.Faults, c.seamLog...)
+	c.mu.Unlock()
+	terminal := sn.Terminal
 	if h := c.h; h != nil {
-		h.mu.Lock()
-		lines = append(lines, fmt.Sprintf("holder started %s ready %s waited %s exit %d", yesNo(h.started), yesNo(h.ready), yesNo(h.waited), h.exit))
-		h.mu.Unlock()
+		hl := h.lines()
+		lines = append(lines, hl...)
+		inst.Faults = append(inst.Faults, h.faultSet()...)
+		terminal = terminal && h.terminal()
+		inst.Extra["holder"] = hl
+	}
+	for _, f := range inst.Faults {
+		lines = append(lines, f.Line())
 	}
 	c.mu.Lock()
 	for _, p := range c.problems {
 		lines = append(lines, "problem "+p)
 	}
+	prepErr := c.prepErr
 	c.mu.Unlock()
-	inst := &Instance{Extra: map[string]any{"call": sn, "decision_lines": lines}}
-	if h := c.h; h != nil {
-		h.mu.Lock()
-		inst.Extra["holder_errors"] = append([]string(nil), h.errs...)
-		h.mu.Unlock()
-	}
+	inst.Extra["decision_lines"] = lines
 	var entered []string
 	if len(sn.Events) > 0 && sn.Events[0].What == "registered" {
 		entered = []string{"toolctl registration"}
 	}
-	c.mu.Lock()
-	prepErr := c.prepErr
-	c.mu.Unlock()
 	if prepErr != nil {
-		return Outcome{PrepErr: prepErr, Instance: inst, Terminal: sn.Terminal, CleanupErr: cerr}
+		return Outcome{PrepErr: prepErr, Instance: inst, Terminal: terminal, CleanupErr: cerr}
 	}
-	return Outcome{Entered: entered, Lines: lines, Instance: inst, Terminal: sn.Terminal, CleanupErr: cerr}
+	return Outcome{Entered: entered, Lines: lines, Instance: inst, Terminal: terminal, CleanupErr: cerr}
 }
 
 func (c *lc9Run) closeStdinR() error {
@@ -360,7 +424,7 @@ func (c *lc9Run) closeStdinR() error {
 }
 
 // cleanup releases everything the case holds and waits, within the guard,
-// until the call is terminal; the decision was saved before.
+// until H and the call are terminal; the decision was saved before.
 func (c *lc9Run) cleanup() error {
 	var errs []error
 	for _, g := range c.gates {
@@ -370,24 +434,9 @@ func (c *lc9Run) cleanup() error {
 		errs = append(errs, err)
 	}
 	if h := c.h; h != nil {
-		h.mu.Lock()
-		h.closed = true
-		relW, started := h.relW, h.started
-		h.relW = nil
-		h.mu.Unlock()
-		if relW != nil {
-			if err := cleanupStep(c.e, "LC-9 "+c.k.name+": release the holder", relW.Close); err != nil {
-				errs = append(errs, err)
-			}
-		}
-		if started {
-			ch, stop := guardCh()
-			select {
-			case <-h.done:
-			case <-ch:
-				errs = append(errs, errors.New("the holder's Wait did not return: its state is unknown"))
-			}
-			stop()
+		h.stop()
+		if !h.waitTerminal(lc9Guard) {
+			errs = append(errs, errors.New("the holder is not terminal within the guard: held as unknown"))
 		}
 	}
 	ch, stop := guardCh()
@@ -406,107 +455,6 @@ func (c *lc9Run) cleanup() error {
 	return errors.Join(errs...)
 }
 
-// startHolder starts H in the after-handover seam: before the pseudo-tool
-// starts and before the start task closes its copy of the stdout write end
-// (§12.12). H inherits that write end as its stdout and never writes to it;
-// its stderr is the ready pipe, its stdin the release pipe.
-func (c *lc9Run) startHolder(stdoutW *os.File) {
-	h := c.h
-	fail := func(err error) {
-		c.mu.Lock()
-		if c.prepErr == nil {
-			c.prepErr = err
-		}
-		c.mu.Unlock()
-	}
-	h.mu.Lock()
-	closed := h.closed
-	h.mu.Unlock()
-	if closed {
-		fail(errors.New("the holder was not started: the outer cleanup already ran"))
-		return
-	}
-	exe, err := os.Executable()
-	if err != nil {
-		fail(err)
-		return
-	}
-	var readyR, readyW, relR, relW *os.File
-	if err := step(c.e, "prepare LC-9 "+c.k.name+": holder pipes", func() error {
-		var err error
-		if readyR, readyW, err = os.Pipe(); err != nil {
-			return err
-		}
-		relR, relW, err = os.Pipe()
-		return err
-	}); err != nil {
-		fail(err)
-		return
-	}
-	cmd := exec.Command(exe)
-	cmd.Env = append(os.Environ(), pseudo.EnvMode+"="+pseudo.Hold)
-	cmd.Stdout, cmd.Stderr, cmd.Stdin = stdoutW, readyW, relR
-	serr := step(c.e, "prepare LC-9 "+c.k.name+": start the holder", cmd.Start)
-	h.mu.Lock()
-	h.relW = relW
-	h.started = serr == nil
-	h.mu.Unlock()
-	if serr != nil {
-		fail(serr)
-	} else {
-		go func() {
-			werr := cmd.Wait()
-			h.mu.Lock()
-			if cmd.ProcessState != nil {
-				h.exit = cmd.ProcessState.ExitCode()
-			}
-			if werr != nil {
-				h.errs = append(h.errs, "wait: "+werr.Error())
-			}
-			h.waited = cmd.ProcessState != nil
-			h.mu.Unlock()
-			close(h.done)
-		}()
-	}
-	for _, f := range []*os.File{readyW, relR} {
-		if err := cleanupStep(c.e, "LC-9 "+c.k.name+": close the parent's copy of a holder pipe end", f.Close); err != nil {
-			h.err(err.Error())
-		}
-	}
-	if serr != nil {
-		if err := cleanupStep(c.e, "LC-9 "+c.k.name+": close the ready pipe", readyR.Close); err != nil {
-			h.err(err.Error())
-		}
-		return
-	}
-	got := make(chan string, 1)
-	go func() {
-		b := make([]byte, len(pseudo.ReadyLine))
-		n, err := io.ReadFull(readyR, b)
-		if err != nil {
-			h.err("ready: " + err.Error())
-		}
-		got <- string(b[:n])
-		if err := cleanupStep(c.e, "LC-9 "+c.k.name+": close the ready pipe", readyR.Close); err != nil {
-			h.err(err.Error())
-		}
-	}()
-	ch, stop := guardCh()
-	defer stop()
-	select {
-	case s := <-got:
-		h.mu.Lock()
-		h.ready = s == pseudo.ReadyLine
-		ready := h.ready
-		h.mu.Unlock()
-		if !ready {
-			fail(fmt.Errorf("the holder is not ready: %q", s))
-		}
-	case <-ch:
-		fail(errors.New("the holder did not report ready within the guard"))
-	}
-}
-
 // The expected lines, written independently of toolctl.
 
 const emptySHA = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -517,31 +465,61 @@ func shaOf(b []byte) string {
 }
 
 type lc9Want struct {
-	decision string
-	extra    []string
-	class    string
-	state    string
-	start    string
-	desc     [4]string
-	injected [4]int
-	out      [2]string
-	wait     string
-	pidfd    string // Linux only
-	req      string // after "request <mode> "
-	notAdmit []string
-	unknown  []string
-	expired  bool
-	late     bool
-	success  bool
-	tail     []string
+	decision   string
+	extra      []string
+	class      string
+	state      string
+	admissions []string // the points admitted, in order (nil: all four)
+	start      string
+	cmd        bool
+	desc       [4]string
+	injected   [4]int
+	out        [2]string
+	wait       string
+	pidfd      string // Linux only
+	req        string // after "request <mode> "
+	notAdmit   []string
+	unknown    []string
+	expired    bool
+	late       bool
+	success    bool
+	holder     []string
+	faults     []string // "<site> <source> <kind>"
+	tail       []string
+}
+
+var allPoints = []string{"entry", "stdout pipe", "stderr pipe", "start"}
+
+// descLine is a descriptor's expected line: its close state and, from it,
+// what is known of its release and whether the record holds the object.
+func descLine(name, st string) string {
+	switch st {
+	case "closed ok":
+		return name + " closed ok release confirmed object held"
+	case "closed error":
+		return name + " closed error release unknown object held"
+	case "closing":
+		return name + " closing release pending object held"
+	case "none":
+		return name + " none release none object none"
+	}
+	return name + " " + st + " (unknown expectation)"
 }
 
 func (w lc9Want) lines(goos string) []string {
 	out := []string{"decision " + w.decision}
 	out = append(out, w.extra...)
-	out = append(out, "class "+w.class, "state "+w.state, "start "+w.start)
+	out = append(out, "class "+w.class, "state "+w.state)
+	adm := w.admissions
+	if adm == nil {
+		adm = allPoints
+	}
+	for _, p := range adm {
+		out = append(out, "admission "+p+" admitted")
+	}
+	out = append(out, "start "+w.start, "cmd held "+yesNo(w.cmd))
 	for i, d := range w.desc {
-		out = append(out, toolctl.DescNames[i]+" "+d)
+		out = append(out, descLine(toolctl.DescNames[i], d))
 		for range w.injected[i] {
 			out = append(out, toolctl.DescNames[i]+" injected")
 		}
@@ -562,7 +540,11 @@ func (w lc9Want) lines(goos string) []string {
 	for _, u := range w.unknown {
 		out = append(out, "cleanup-unknown "+u)
 	}
-	out = append(out, "expired "+yesNo(w.expired), "late "+yesNo(w.late), "terminal yes", "success "+yesNo(w.success))
+	out = append(out, "panic no", "expired "+yesNo(w.expired), "late "+yesNo(w.late), "terminal yes", "success "+yesNo(w.success))
+	out = append(out, w.holder...)
+	for _, f := range w.faults {
+		out = append(out, "fault "+f)
+	}
 	return append(out, w.tail...)
 }
 
@@ -577,7 +559,7 @@ const darwinUnknown = "no termination request on this platform (darwin: os/wait_
 // healthy is the expectation of a pseudo-tool that exited 0 and was reaped
 // before W, with nothing written.
 func healthy() lc9Want {
-	return lc9Want{decision: "success", class: "B", state: "waited", start: "ok", desc: closedOK, out: [2]string{eofEmpty, eofEmpty},
+	return lc9Want{decision: "success", class: "B", state: "waited", start: "ok", cmd: true, desc: closedOK, out: [2]string{eofEmpty, eofEmpty},
 		wait: "exit 0", pidfd: "closed ok closes 1", req: "none sends 0", success: true}
 }
 
@@ -607,7 +589,7 @@ func lc9Cases() []lc9Case {
 	echo := []byte(pseudo.EchoOutput(echoArgs))
 	t2line := fmt.Sprintf("arg 4 %d %s", spec.T2Len, spec.T2SHA256)
 	x4k := []byte(strings.Repeat("x", 4096))
-	reqKill := func(goos, linux, windows, other string) string {
+	byOS := func(goos, linux, windows, other string) string {
 		switch goos {
 		case "linux":
 			return linux
@@ -615,6 +597,15 @@ func lc9Cases() []lc9Case {
 			return windows
 		}
 		return other
+	}
+	// killedWait: the process was ended by the termination request (Linux:
+	// SIGKILL through the pidfd; Windows: Kill, exit code 1); its one Wait
+	// returns an *exec.ExitError. darwin sends no request.
+	killedWait := func(goos string) []string {
+		if goos == "linux" || goos == "windows" {
+			return []string{"wait operation exit-status"}
+		}
+		return nil
 	}
 	return []lc9Case{
 		{
@@ -632,18 +623,20 @@ func lc9Cases() []lc9Case {
 		},
 		{
 			name: "half-construction", mode: pseudo.Silent,
-			seams: func(_ *lc9Run, s *toolctl.Seams) {
+			seams: func(c *lc9Run, s *toolctl.Seams) {
 				s.Pipe = func(_, n int) (*os.File, *os.File, error) {
 					if n == 1 {
+						c.seam("pipe stderr", "not-called", errSeamPipe)
 						return nil, nil, errSeamPipe
 					}
 					return os.Pipe()
 				}
 			},
 			want: func(goos string) []string {
-				w := lc9Want{decision: "fail", class: "A phase pipe", state: "start-failed", start: "error",
+				w := lc9Want{decision: "fail", class: "A phase pipe", state: "start-failed", admissions: allPoints[:3], start: "not-initiated",
 					desc: [4]string{"closed ok", "closed ok", "none", "none"}, out: [2]string{"not-started", "not-started"},
-					wait: "not-called", pidfd: "none closes 0", req: "none sends 0"}
+					wait: "not-called", pidfd: "none closes 0", req: "none sends 0",
+					faults: []string{"pipe stderr operation seam-pipe", "pipe stderr seam real not-called returned seam-pipe"}}
 				return w.lines(goos)
 			},
 		},
@@ -656,25 +649,36 @@ func lc9Cases() []lc9Case {
 				// at the file (os/exec/exec.go:466 ~ 480 and lp_windows.go),
 				// so Cmd.Err stays nil and CreateProcess fails; without a
 				// known extension the lookup would fail first and §12.6's
-				// A ② would apply.
-				w := lc9Want{decision: "fail", class: "C phase start", state: "start-failed", start: "error", desc: closedOK,
-					out: [2]string{eofEmpty, eofEmpty}, wait: "not-called", pidfd: "none closes 0", req: "none sends 0"}
+				// A ② would apply. The real error is "does not exist" on
+				// every platform.
+				w := lc9Want{decision: "fail", class: "C phase start", state: "start-failed", start: "error", cmd: true, desc: closedOK,
+					out: [2]string{eofEmpty, eofEmpty}, wait: "not-called", pidfd: "none closes 0", req: "none sends 0",
+					faults: []string{"start operation not-exist"}}
 				return w.lines(goos)
 			},
 		},
 		{
 			name: "start-failure-not-executable", mode: pseudo.Silent, badExe: true,
 			want: func(goos string) []string {
-				w := lc9Want{decision: "fail", class: "C phase start", state: "start-failed", start: "error", desc: closedOK,
-					out: [2]string{eofEmpty, eofEmpty}, wait: "not-called", pidfd: "none closes 0", req: "none sends 0"}
+				// The real error: execve's EACCES on Linux and darwin (a
+				// file without the execute permission); on Windows
+				// CreateProcess's ERROR_EXE_MACHINE_TYPE_MISMATCH (216) for
+				// a file that is not a PE image (observed on the local
+				// Windows 11 x64; an x64 Windows has no 16-bit subsystem to
+				// run it as a DOS program). The first expectation written,
+				// ERROR_BAD_EXE_FORMAT (193), did not hold locally.
+				w := lc9Want{decision: "fail", class: "C phase start", state: "start-failed", start: "error", cmd: true, desc: closedOK,
+					out: [2]string{eofEmpty, eofEmpty}, wait: "not-called", pidfd: "none closes 0", req: "none sends 0",
+					faults: []string{"start operation " + byOS(goos, "permission", "errno 216", "permission")}}
 				return w.lines(goos)
 			},
 		},
 		{
 			name: "read-error", mode: pseudo.Silent,
-			seams: func(_ *lc9Run, s *toolctl.Seams) {
+			seams: func(c *lc9Run, s *toolctl.Seams) {
 				s.Read = func(_, stream int, f *os.File, p []byte) (int, error) {
 					if stream == 0 {
+						c.seam("read stdout", "not-called", errSeamRead)
 						return 0, errSeamRead
 					}
 					return f.Read(p)
@@ -683,15 +687,26 @@ func lc9Cases() []lc9Case {
 			want: func(goos string) []string {
 				w := failed(healthy())
 				w.out[0] = "read-error kept 0 sha256 " + emptySHA
+				w.faults = []string{"read stdout operation seam-read", "read stdout seam real not-called returned seam-read"}
 				return w.lines(goos)
 			},
 		},
 		{
-			name: "overflow", mode: pseudo.Flood, bytes: 1 << 20, limit: 4096, exitAny: true,
+			name: "overflow", mode: pseudo.Flood, bytes: 1 << 20, limit: 4096,
 			want: func(goos string) []string {
+				// After the read end is closed, the pseudo-tool's next write
+				// gets EPIPE: on Unix the Go runtime then ends it with
+				// SIGPIPE (a write to a broken pipe on fd 1, os/signal's
+				// documentation), so its Wait returns an *exec.ExitError
+				// and the exit code is -1; on Windows the write error is
+				// ignored and it exits 0. 1 MiB never fits a pipe buffer,
+				// so a write after the close always happens.
 				w := failed(healthy())
 				w.out[0] = fmt.Sprintf("overflow kept %d sha256 %s", len(x4k), shaOf(x4k))
-				w.wait = "exit *"
+				if goos != "windows" {
+					w.wait = "exit -1"
+					w.faults = []string{"wait operation exit-status"}
+				}
 				return w.lines(goos)
 			},
 		},
@@ -708,6 +723,7 @@ func lc9Cases() []lc9Case {
 			want: func(goos string) []string {
 				w := failed(healthy())
 				w.injected[toolctl.StdoutR] = 1
+				w.faults = []string{"close stdout-r injected injected"}
 				return w.lines(goos)
 			},
 		},
@@ -716,9 +732,17 @@ func lc9Cases() []lc9Case {
 			seams: func(c *lc9Run, s *toolctl.Seams) {
 				s.CloseFile = func(_, d int, f *os.File) error {
 					err := c.realClose(d, f)
-					if d == toolctl.StdoutR && err == nil {
+					if d != toolctl.StdoutR {
+						return err
+					}
+					// The planned fault presupposes that the real Close
+					// returned nil; otherwise the real result is returned
+					// as it came and the plan is not applied.
+					if err == nil {
+						c.seam("close stdout-r", "ok", errSeamClose)
 						return errSeamClose
 					}
+					c.seam("close stdout-r", faultKind(err), err)
 					return err
 				}
 				s.InjectClose = func(_, d int) error {
@@ -732,6 +756,7 @@ func lc9Cases() []lc9Case {
 				w := failed(healthy())
 				w.desc[toolctl.StdoutR] = "closed error"
 				w.injected[toolctl.StdoutR] = 1
+				w.faults = []string{"close stdout-r operation seam-close", "close stdout-r injected injected", "close stdout-r seam real ok returned seam-close"}
 				return w.lines(goos)
 			},
 		},
@@ -751,11 +776,12 @@ func lc9Cases() []lc9Case {
 			},
 			want: func(goos string) []string {
 				w := expired(healthy())
-				w.wait = reqKill(goos, "exit -1", "exit 1", "exit 0")
-				w.req = reqKill(goos, "done sends 1 ok", "done sends 1 ok", "none sends 0")
+				w.wait = byOS(goos, "exit -1", "exit 1", "exit 0")
+				w.req = byOS(goos, "done sends 1 ok", "done sends 1 ok", "none sends 0")
 				if goos != "linux" && goos != "windows" {
 					w.unknown = []string{darwinUnknown}
 				}
+				w.faults = killedWait(goos)
 				return w.lines(goos)
 			},
 		},
@@ -808,15 +834,19 @@ func lc9Cases() []lc9Case {
 			want: func(goos string) []string {
 				w := expired(healthy())
 				w.extra = []string{"at-return stdout done no"}
-				w.tail = []string{"holder started yes ready yes waited yes exit 0"}
+				w.holder = []string{"holder start started", "holder ready ok", "holder wait done exit 0", "holder release by-cleanup after-saved-decision yes",
+					"holder ready-r closed ok", "holder ready-w closed ok", "holder rel-r closed ok", "holder rel-w closed ok", "holder tasks 0"}
 				return w.lines(goos)
 			},
 		},
 		// Linux only: the pidfd state machine (§12.14 item 9 and its table).
 		{
 			name: "pidfd-open-failed", linux: true, mode: pseudo.Block, stdin: true,
-			seams: func(_ *lc9Run, s *toolctl.Seams) {
-				s.PidfdOpen = func(int, int) (int, error) { return -1, errSeamPidfd }
+			seams: func(c *lc9Run, s *toolctl.Seams) {
+				s.PidfdOpen = func(int, int) (int, error) {
+					c.seam("pidfd open", "not-called", errSeamPidfd)
+					return -1, errSeamPidfd
+				}
 			},
 			drive: func(c *lc9Run) {
 				if !c.until("the pidfd open failed", func(s toolctl.Snapshot) bool {
@@ -832,6 +862,7 @@ func lc9Cases() []lc9Case {
 				w.pidfd, w.req = "open-failed closes 0", "none sends 0"
 				w.notAdmit = []string{"the pidfd could not be opened"}
 				w.unknown = []string{"no termination was sent and the reap is not published"}
+				w.faults = []string{"pidfd open operation seam-pidfd", "pidfd open seam real not-called returned seam-pidfd"}
 				return w.lines(goos)
 			},
 		},
@@ -863,9 +894,12 @@ func lc9Cases() []lc9Case {
 				}
 			},
 			want: func(goos string) []string {
+				// The request runs after the process was reaped: the real
+				// pidfd_send_signal returns ESRCH, and no other kind.
 				w := expired(healthy())
 				w.extra = []string{"returned while the request runs running", "while-blocked pidfd closing request running"}
 				w.req = "done sends 1 error"
+				w.faults = []string{"request operation ESRCH"}
 				return w.lines(goos)
 			},
 		},
@@ -905,6 +939,7 @@ func lc9Cases() []lc9Case {
 				w := expired(healthy())
 				w.extra = []string{"closer waits pidfd closing request reserved"}
 				w.req = "done sends 1 error"
+				w.faults = []string{"request operation ESRCH"}
 				return w.lines(goos)
 			},
 		},
@@ -962,6 +997,7 @@ func lc9Cases() []lc9Case {
 				w := expired(healthy())
 				w.extra = []string{"at-return pidfd unpublished request none"}
 				w.wait, w.req = "exit -1", "done sends 1 ok"
+				w.faults = killedWait(goos)
 				return w.lines(goos)
 			},
 		},

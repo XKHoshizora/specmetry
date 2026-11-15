@@ -141,8 +141,26 @@ type Instance struct {
 	Calls   []collect.CallResult `json:",omitempty"`
 	Records []string             `json:",omitempty"`
 	Refused []judge.Failure      `json:",omitempty"`
-	Extra   map[string]any       `json:",omitempty"`
+	// Faults is the instance's structured fault set (Review 154 B-154-4):
+	// every error with its site, source and kind. A variant that uses it
+	// renders it into its lines, so the judgement consumes it.
+	Faults []Fault        `json:",omitempty"`
+	Extra  map[string]any `json:",omitempty"`
 }
+
+// Fault is one entry of a tested instance's structured fault set: where it
+// happened, its source (for example the operation's own result, an
+// injection, a seam's record of what it replaced, the holder's operation)
+// and its kind by the error's identity, not its text.
+type Fault struct {
+	Site   string
+	Source string
+	Kind   string
+	Detail string `json:",omitempty"`
+}
+
+// Line is the fault's canonical line; the free-text detail is not in it.
+func (f Fault) Line() string { return "fault " + f.Site + " " + f.Source + " " + f.Kind }
 
 // instanceOf starts an instance from one check registry.
 func instanceOf(ck *judge.Checks) *Instance {

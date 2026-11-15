@@ -5,6 +5,7 @@ package realcall
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -206,9 +207,10 @@ func TestRC1Collect(t *testing.T) {
 				t.Errorf("registry: %d records, failures %v, pending %v", len(snaps), fails, pend)
 			}
 			for _, s := range snaps {
-				if !s.Success || !s.Terminal {
-					t.Errorf("call %d %s: success %v terminal %v %v", s.ID, s.Kind, s.Success, s.Terminal, s.Failures)
+				if !s.Success || !s.Terminal || len(s.Faults) > 0 {
+					t.Errorf("call %d %s: success %v terminal %v %v faults %q", s.ID, s.Kind, s.Success, s.Terminal, s.Failures, faultSet(s))
 				}
+				healthyControl(t, s, toolctl.StdoutW, toolctl.StdoutR, toolctl.StderrW, toolctl.StderrR)
 			}
 			// T2 as one argument (the actual evidence of this platform):
 			// the second call's argument array holds T2 whole at index 3.
@@ -276,12 +278,73 @@ func TestRC2Overflow(t *testing.T) {
 		t.Fatal("not terminal")
 	}
 	s, _ := reg.Snapshot(1)
-	evidence(t, "rc2-overflow.json", map[string]any{"result": r, "snapshot": s, "lines": toolctl.Lines(s)})
-	if r.Succeeded(reg.W()) || !s.Out[0].Overflow || s.Desc[toolctl.StdoutR].State != toolctl.DescClosed || s.Desc[toolctl.StdoutR].CloseErr != "" ||
-		s.State != toolctl.StWaited || s.Class != "B" || s.Success {
+	faults := faultSet(s)
+	evidence(t, "rc2-overflow.json", map[string]any{"result": r, "snapshot": s, "lines": toolctl.Lines(s), "faults": faults})
+	t.Logf("%v %q", toolctl.Lines(s), faults)
+	if r.Succeeded(reg.W()) || !s.Out[0].Overflow || s.State != toolctl.StWaited || s.Class != "B" || s.Success || s.Expired {
 		t.Errorf("snapshot %v", toolctl.Lines(s))
 	}
-	t.Logf("%v", toolctl.Lines(s))
+	// Review 154 B-154-4: the whole fault set is consumed. Besides the
+	// overflow (the protocol's own finding), the only fault allowed is the
+	// tool's own reap result, and only as follows (§12.14 item 4: a write
+	// after the read end was closed may get EPIPE or SIGPIPE; that is the
+	// tool's own result): on Unix, either go was ended by SIGPIPE (its Wait
+	// returns an *exec.ExitError) or it had written everything before the
+	// close and exited 0; on Windows the write error does not end go, which
+	// exits 0. Any other fault is a failure.
+	ended := s.Exit != nil && s.Exit.Code == -1 && s.Exit.String == "signal: broken pipe" && slices.Equal(faults, []string{"wait operation exit-status"})
+	clean := s.Exit != nil && s.Exit.Code == 0 && len(faults) == 0
+	if runtime.GOOS == "windows" && !clean || runtime.GOOS != "windows" && !ended && !clean {
+		t.Errorf("reap %+v faults %q: not one of the expected outcomes", s.Exit, faults)
+	}
+	healthyControl(t, s, toolctl.StdoutW, toolctl.StdoutR, toolctl.StderrW, toolctl.StderrR)
+	if o := s.Out[1]; !o.Done || !o.EOF || o.ReadErr != "" || o.Overflow || s.Out[0].ReadErr != "" {
+		t.Errorf("reads %+v %+v", s.Out[0], o)
+	}
+	if s.Req.State != toolctl.ReqNone || len(s.Unknown) > 0 || len(s.NotAdmit) > 0 || len(s.Injected) > 0 {
+		t.Errorf("request %+v unknown %q not-admitted %q injected %q", s.Req, s.Unknown, s.NotAdmit, s.Injected)
+	}
+}
+
+// faultSet is the record's structured fault set as "<site> <source>
+// <kind>", the kind "exit-status" for an *exec.ExitError and "other" for
+// anything else (every other fault is unexpected here).
+func faultSet(s toolctl.Snapshot) []string {
+	var out []string
+	for _, f := range s.Faults {
+		k := "other"
+		var ee *exec.ExitError
+		if errors.As(f.Err, &ee) {
+			k = "exit-status"
+		}
+		out = append(out, f.Site+" "+f.Source+" "+k)
+	}
+	return out
+}
+
+// healthyControl checks what every real call here must have, whatever its
+// outcome: the four admissions admitted and nothing skipped; the Cmd and
+// the process held; each named descriptor closed once with a nil result
+// (its release confirmed) and its object held; no panic; Linux's pidfd
+// closed once with a nil result.
+func healthyControl(t *testing.T, s toolctl.Snapshot, ds ...int) {
+	t.Helper()
+	if len(s.Admissions) != 4 || len(s.Skipped) > 0 || !s.CmdHeld || !s.ProcessHeld || s.Panic != "" {
+		t.Errorf("admissions %+v skipped %q cmd %v process %v panic %q", s.Admissions, s.Skipped, s.CmdHeld, s.ProcessHeld, s.Panic)
+	}
+	for _, a := range s.Admissions {
+		if !a.Admitted {
+			t.Errorf("admission %s refused", a.Point)
+		}
+	}
+	for _, d := range ds {
+		if x := s.Desc[d]; x.State != toolctl.DescClosed || x.CloseErr != "" || x.Release != toolctl.ReleaseConfirmed || !x.Held || len(x.Injected) > 0 {
+			t.Errorf("%s: %+v", toolctl.DescNames[d], x)
+		}
+	}
+	if s.Mode == toolctl.ModePidfd && (s.Pidfd.State != toolctl.PidfdClosed || s.Pidfd.CloseErr != "" || s.Pidfd.Closes != 1) {
+		t.Errorf("pidfd %+v", s.Pidfd)
+	}
 }
 
 // TestRC3Expiry is RC-3: the third call is held after Start and before its
@@ -326,25 +389,44 @@ func TestRC3Expiry(t *testing.T) {
 	ronce.Do(func() { close(release) })
 	terminal := reg.WaitTerminal(1, after(120*time.Second))
 	s, _ := reg.Snapshot(1)
-	evidence(t, "rc3-expiry.json", map[string]any{"result": r, "snapshot": s, "lines": toolctl.Lines(s), "terminal": terminal})
-	t.Logf("%v", toolctl.Lines(s))
+	faults := faultSet(s)
+	evidence(t, "rc3-expiry.json", map[string]any{"result": r, "snapshot": s, "lines": toolctl.Lines(s), "terminal": terminal, "faults": faults})
+	t.Logf("%v %q", toolctl.Lines(s), faults)
 	if !terminal {
 		t.Fatal("not terminal")
 	}
-	if r.Succeeded(reg.W()) || !s.Expired || s.Success {
-		t.Errorf("result %v", r.Failures)
+	if r.Succeeded(reg.W()) || !s.Expired || s.Success || s.State != toolctl.StWaited || s.Class != "B" || s.Exit == nil {
+		t.Fatalf("result %v; lines %v", r.Failures, toolctl.Lines(s))
 	}
-	switch reg.Mode() {
-	case toolctl.ModePidfd, toolctl.ModeKill:
-		if s.Req.State != toolctl.ReqDone || s.Req.Sends != 1 {
-			t.Errorf("request %+v", s.Req)
+	healthyControl(t, s, toolctl.StdoutW, toolctl.StdoutR, toolctl.StderrW, toolctl.StderrR)
+	for i, o := range s.Out {
+		if !o.Done || !o.EOF || o.ReadErr != "" || o.Overflow {
+			t.Errorf("%s: %+v", toolctl.StreamNames[i], o)
 		}
-		if reg.Mode() == toolctl.ModePidfd && (s.Pidfd.State != toolctl.PidfdClosed || s.Pidfd.Closes != 1) {
-			t.Errorf("pidfd %+v", s.Pidfd)
+	}
+	if len(s.NotAdmit) > 0 || len(s.Injected) > 0 {
+		t.Errorf("not-admitted %q injected %q", s.NotAdmit, s.Injected)
+	}
+	// Review 154 B-154-4: the results by platform, explicit, and the whole
+	// fault set. The request is made right after Start, while go is still
+	// running (its Wait is held), so it ends go: Linux through the pidfd
+	// (SIGKILL), Windows by Kill (exit code 1); each Wait then returns an
+	// *exec.ExitError and nothing else is a fault. darwin sends nothing: the
+	// cleanup is unknown and go finishes by itself with exit code 0.
+	switch reg.Mode() {
+	case toolctl.ModePidfd:
+		if s.Req.State != toolctl.ReqDone || s.Req.Sends != 1 || s.Req.Err != "" || s.Exit.Code != -1 || s.Exit.String != "signal: killed" ||
+			!slices.Equal(faults, []string{"wait operation exit-status"}) || len(s.Unknown) > 0 {
+			t.Errorf("request %+v exit %+v faults %q unknown %q", s.Req, s.Exit, faults, s.Unknown)
+		}
+	case toolctl.ModeKill:
+		if s.Req.State != toolctl.ReqDone || s.Req.Sends != 1 || s.Req.Err != "" || s.Exit.Code != 1 ||
+			!slices.Equal(faults, []string{"wait operation exit-status"}) || len(s.Unknown) > 0 {
+			t.Errorf("request %+v exit %+v faults %q unknown %q", s.Req, s.Exit, faults, s.Unknown)
 		}
 	default:
-		if s.Req.State != toolctl.ReqNone || s.Req.Sends != 0 || len(s.Unknown) != 1 {
-			t.Errorf("request %+v unknown %v", s.Req, s.Unknown)
+		if s.Req.State != toolctl.ReqNone || s.Req.Sends != 0 || len(s.Unknown) != 1 || s.Exit.Code != 0 || len(faults) != 0 {
+			t.Errorf("request %+v unknown %v exit %+v faults %q", s.Req, s.Unknown, s.Exit, faults)
 		}
 	}
 }
