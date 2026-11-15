@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -111,6 +112,54 @@ func evidence(t *testing.T, name string, v any) {
 }
 
 func hostConfig() spec.Config { return spec.Config{GOOS: runtime.GOOS, GOARCH: runtime.GOARCH} }
+
+func errText(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
+}
+
+// TestRC0GuardPath is a diagnostic of the A1-a guard's input on this
+// runner: what exec.LookPath("go") finds, its absolute form, what
+// filepath.EvalSymlinks makes of it, and each component's Lstat mode and
+// Readlink result. It starts no process and judges nothing.
+func TestRC0GuardPath(t *testing.T) {
+	found, err := exec.LookPath("go")
+	out := map[string]any{"lookpath": found, "lookpath_error": errText(err)}
+	abs, aerr := filepath.Abs(found)
+	out["abs"], out["abs_error"] = abs, errText(aerr)
+	ev, everr := filepath.EvalSymlinks(abs)
+	out["evalsymlinks"], out["evalsymlinks_error"] = ev, errText(everr)
+	var comps []map[string]any
+	for p := abs; p != ""; p = filepath.Dir(p) {
+		c := map[string]any{"path": p}
+		if fi, err := os.Lstat(p); err != nil {
+			c["lstat_error"] = err.Error()
+		} else {
+			c["mode"] = fi.Mode().String()
+		}
+		if l, err := os.Readlink(p); err == nil {
+			c["readlink"] = l
+		} else {
+			c["readlink_error"] = err.Error()
+		}
+		if e, err := filepath.EvalSymlinks(p); err == nil {
+			c["evalsymlinks"] = e
+		} else {
+			c["evalsymlinks_error"] = err.Error()
+		}
+		comps = append(comps, c)
+		if filepath.Dir(p) == p {
+			break
+		}
+	}
+	out["components"] = comps
+	out["GODEBUG"] = os.Getenv("GODEBUG")
+	evidence(t, "rc0-guard-path.json", out)
+	b, _ := json.MarshalIndent(out, "", "  ")
+	t.Logf("%s", b)
+}
 
 // TestRC1Collect is RC-1: the full stages A and B, the scan and K on the
 // fixture for both configurations of this GOOS, with the real caller, the
@@ -252,8 +301,11 @@ func TestRC3Expiry(t *testing.T) {
 			}
 		},
 	}})
+	// The spec (and its guard) is taken here, on the test goroutine: a
+	// failed guard must stop the test, not a background goroutine.
+	cs := listSpec(t, fx)
 	got := make(chan collect.CallResult, 1)
-	go func() { got <- reg.Invoke(listSpec(t, fx)) }()
+	go func() { got <- reg.Invoke(cs) }()
 	select {
 	case <-entered:
 	case <-time.After(60 * time.Second):

@@ -73,6 +73,24 @@ jobs:
           echo "go on PATH $gobin"
           if command -v sha256sum >/dev/null; then sha256sum "$gobin"; else shasum -a 256 "$gobin"; fi
           mkdir -p "$RUNNER_TEMP/c9-tool-test-out"
+      - name: Windows path of go (observation only)
+        # The A1-a guard resolves exec.LookPath("go") with
+        # filepath.EvalSymlinks; this prints each component of that path
+        # as Windows sees it. It decides nothing.
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $go = (Get-Command go).Source
+          "go $go"
+          $p = $go
+          while ($p) {
+            $i = Get-Item -LiteralPath $p -Force
+            "{0} | {1} | {2} | {3}" -f $i.FullName, $i.Attributes, $i.LinkType, ($i.Target -join ',')
+            $p = Split-Path -Parent $p
+          }
+          Get-Volume | Format-Table -AutoSize | Out-String -Width 220
+          Get-Partition | Format-Table -AutoSize | Out-String -Width 220
+          exit 0
       - name: Prepare the tool module's dependencies
         working-directory: prototype/c9evidence
         run: |
