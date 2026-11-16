@@ -113,7 +113,7 @@ func TestR154HolderHalfBuilt(t *testing.T) {
 		t.Fatalf("prep error %v terminal %v", c.prepErr, c.h.terminal())
 	}
 	wantHolder(t, c, []string{"holder start failed", "holder ready none", "holder wait none", "holder release none after-saved-decision no",
-		"holder ready-r closed ok", "holder ready-w closed ok", "holder rel-r none", "holder rel-w none", "holder tasks 0"},
+		"holder ready-r closed ok release confirmed", "holder ready-w closed ok release confirmed", "holder rel-r none", "holder rel-w none", "holder tasks 0"},
 		[]string{"fault holder release pipe real other"})
 	if p := opsWith(outer, "holder"); len(p) != 4 || !strings.HasSuffix(p[0], "holder ready pipe") || !strings.HasSuffix(p[1], "holder release pipe") {
 		t.Errorf("outer operations %q", p)
@@ -145,7 +145,7 @@ func TestR154HolderSecondPipeRefused(t *testing.T) {
 		t.Fatalf("prep error %v terminal %v", c.prepErr, c.h.terminal())
 	}
 	wantHolder(t, c, []string{"holder start failed", "holder ready none", "holder wait none", "holder release none after-saved-decision no",
-		"holder ready-r closed ok", "holder ready-w closed ok", "holder rel-r none", "holder rel-w none", "holder tasks 0"},
+		"holder ready-r closed ok release confirmed", "holder ready-w closed ok release confirmed", "holder rel-r none", "holder rel-w none", "holder tasks 0"},
 		[]string{"fault holder release pipe admission not-admitted"})
 }
 
@@ -181,8 +181,8 @@ func TestR154HolderLateStart(t *testing.T) {
 	if !c.h.waitTerminal(lc9Guard) {
 		t.Fatalf("not terminal: %q", c.h.lines())
 	}
-	wantHolder(t, c, []string{"holder start started", "holder ready ok", "holder wait done exit 0", "holder release by-start after-saved-decision yes",
-		"holder ready-r closed ok", "holder ready-w closed ok", "holder rel-r closed ok", "holder rel-w closed ok", "holder tasks 0"}, nil)
+	wantHolder(t, c, []string{"holder start started", "holder ready ok", "holder wait done exited 0 reap confirmed", "holder release by-start after-saved-decision yes",
+		"holder ready-r closed ok release confirmed", "holder ready-w closed ok release confirmed", "holder rel-r closed ok release confirmed", "holder rel-w closed ok release confirmed", "holder tasks 0"}, nil)
 	if c.prepErr != nil {
 		t.Errorf("prep error %v", c.prepErr)
 	}
@@ -223,8 +223,8 @@ func TestR154HolderReadyCloseNotDone(t *testing.T) {
 	if !c.h.waitTerminal(lc9Guard) {
 		t.Fatalf("not terminal after the release: %q", c.h.lines())
 	}
-	wantHolder(t, c, []string{"holder start started", "holder ready ok", "holder wait done exit 0", "holder release by-cleanup after-saved-decision yes",
-		"holder ready-r closed ok", "holder ready-w closed ok", "holder rel-r closed ok", "holder rel-w closed ok", "holder tasks 0"}, nil)
+	wantHolder(t, c, []string{"holder start started", "holder ready ok", "holder wait done exited 0 reap confirmed", "holder release by-cleanup after-saved-decision yes",
+		"holder ready-r closed ok release confirmed", "holder ready-w closed ok release confirmed", "holder rel-r closed ok release confirmed", "holder rel-w closed ok release confirmed", "holder tasks 0"}, nil)
 }
 
 // TestR154HolderErrorJudged is R3-e: in the whole output-not-closed

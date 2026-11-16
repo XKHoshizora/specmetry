@@ -157,6 +157,7 @@ type Fault struct {
 	Source string
 	Kind   string
 	Detail string `json:",omitempty"`
+	Err    error  `json:"-"` // the original error value, kept (Review 155 B-154-2/3-R-H); nil for a seam's record
 }
 
 // Line is the fault's canonical line; the free-text detail is not in it.

@@ -9,7 +9,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/XKHoshizora/specmetry/prototype/c9evidence/internal/keep"
 	"github.com/XKHoshizora/specmetry/prototype/c9evidence/internal/pseudo"
+	"github.com/XKHoshizora/specmetry/prototype/c9evidence/internal/toolctl"
 )
 
 // The controlled output holder H of LC-9's output-not-closed variant
@@ -26,6 +28,14 @@ import (
 // close has returned, and a started H was released and waited. H is the
 // test's direct child, never the tool's descendant; no PID action is ever
 // taken on it.
+//
+// Review 155 (B-154-2/3-R-H, review-resolution §204): H is handed to the
+// process-lifetime owner (package keep) when it is made, so its ends, its
+// Cmd, its original errors and what is known of each end's release and of
+// its reap stay reachable until the test process ends, after the LC-9 run
+// returned and every task of H ended. Each end keeps what is known of its
+// release (held, pending, confirmed, unknown); the one Wait keeps its
+// original error, the reap's knowledge and the end's identity.
 
 // The holder's start states.
 const (
@@ -49,10 +59,19 @@ const (
 	endNotAdmitted = "not-admitted" // the close was refused: the end stays open and held; never retried
 )
 
+// What is known of an end's release.
+const (
+	relHeld      = "held"      // acquired and open (also after a refused close); its object is held
+	relPending   = "pending"   // the close was initiated and has not returned
+	relConfirmed = "confirmed" // the real Close returned nil
+	relUnknown   = "unknown"   // the real Close returned an error; never retried
+)
+
 type hend struct {
-	f     *os.File
-	state string
-	err   error
+	f       *os.File
+	state   string
+	err     error // the real Close result, kept
+	release string
 }
 
 type holder struct {
@@ -67,9 +86,12 @@ type holder struct {
 	saved   bool   // the release came after the tested decision was saved
 	ready   string // none, running, ok, wrong, error
 	wait    string // none, running, done
-	exit    int
-	tasks   int // the necessary tasks still running: the ready task, the one Wait, each close in flight
+	waitErr error  // the one Wait's original error, kept
+	reap    string // none, running, confirmed (a ProcessState), unknown (none)
+	end     string // the end's identity (toolctl.ExitKind)
+	tasks   int    // the necessary tasks still running: the ready task, the one Wait, each close in flight
 	faults  []Fault
+	owner   keep.Entry // H's entry in the process owner
 
 	// The regressions replace these (nil: the real operations).
 	pipeOp     func(n int) (*os.File, *os.File, error)
@@ -77,8 +99,14 @@ type holder struct {
 	afterStart func() // after H's Start returned, before its result is published
 }
 
+// kindHolder is H's kind in the process owner's records.
+const kindHolder = "lc9 holder"
+
 func newHolder(c *lc9Run) *holder {
-	return &holder{c: c, changed: make(chan struct{}), start: hNone, ends: map[string]*hend{}, release: "none", ready: "none", wait: "none", exit: -2}
+	h := &holder{c: c, changed: make(chan struct{}), start: hNone, ends: map[string]*hend{}, release: "none", ready: "none", wait: "none", reap: "none"}
+	// Handed to the process-lifetime owner before any work (B-154-2/3-R-H).
+	h.owner = keep.Hold(kindHolder, c.k.name, h)
+	return h
 }
 
 func (h *holder) publishLocked() {
@@ -94,7 +122,7 @@ func holderSource(err error) string {
 }
 
 func (h *holder) faultLocked(site string, err error) {
-	h.faults = append(h.faults, Fault{Site: "holder " + site, Source: holderSource(err), Kind: faultKind(err), Detail: err.Error()})
+	h.faults = append(h.faults, Fault{Site: "holder " + site, Source: holderSource(err), Kind: faultKind(err), Detail: err.Error(), Err: err})
 }
 
 func (h *holder) pipe(n int) (*os.File, *os.File, error) {
@@ -142,8 +170,8 @@ func (h *holder) buildPipe(n int) error {
 		r, w, err := h.pipe(n)
 		if err == nil {
 			h.mu.Lock()
-			h.ends[names[0]] = &hend{f: r, state: endOpen}
-			h.ends[names[1]] = &hend{f: w, state: endOpen}
+			h.ends[names[0]] = &hend{f: r, state: endOpen, release: relHeld}
+			h.ends[names[1]] = &hend{f: w, state: endOpen, release: relHeld}
 			h.publishLocked()
 			h.mu.Unlock()
 		}
@@ -168,17 +196,20 @@ func (h *holder) closeEnd(name string) {
 		h.mu.Unlock()
 		return
 	}
-	e.state = endClosing
+	e.state, e.release = endClosing, relPending
 	h.tasks++
 	h.publishLocked()
 	h.mu.Unlock()
 	err := cleanupStep(h.c.e, "LC-9 "+h.c.k.name+": close the holder's "+name, func() error { return h.closeFile(name, e.f) })
 	h.mu.Lock()
 	h.tasks--
-	if errors.Is(err, ErrNotAdmitted) {
-		e.state = endNotAdmitted
-	} else {
-		e.state, e.err = endClosed, err
+	switch {
+	case errors.Is(err, ErrNotAdmitted):
+		e.state, e.release = endNotAdmitted, relHeld
+	case err != nil:
+		e.state, e.err, e.release = endClosed, err, relUnknown
+	default:
+		e.state, e.release = endClosed, relConfirmed
 	}
 	if err != nil {
 		h.faultLocked("close "+name, err)
@@ -264,7 +295,7 @@ func (c *lc9Run) startHolder(stdoutW *os.File) {
 		h.faultLocked("start", serr)
 	} else {
 		h.start = hStarted
-		h.wait, h.ready = "running", "running"
+		h.wait, h.ready, h.reap = "running", "running", "running"
 		h.tasks += 2 // the one Wait and the ready reader, counted before they start
 		if h.stopped && h.release == "none" {
 			// The cleanup stopped while Start was in flight: the start path
@@ -339,9 +370,10 @@ func (h *holder) readyTask() {
 func (h *holder) waitTask(cmd *exec.Cmd) {
 	werr := cmd.Wait()
 	h.mu.Lock()
-	h.wait = "done"
-	if ps := cmd.ProcessState; ps != nil {
-		h.exit = ps.ExitCode()
+	h.wait, h.waitErr, h.end = "done", werr, toolctl.ExitKindOf(cmd.ProcessState)
+	h.reap = "unknown"
+	if cmd.ProcessState != nil {
+		h.reap = "confirmed"
 	}
 	if werr != nil {
 		h.faultLocked("wait", werr)
@@ -412,7 +444,7 @@ func (h *holder) lines() []string {
 	out := []string{"holder start " + h.start, "holder ready " + h.ready}
 	w := "holder wait " + h.wait
 	if h.wait == "done" {
-		w += fmt.Sprintf(" exit %d", h.exit)
+		w += " " + h.end + " reap " + h.reap
 	}
 	out = append(out, w, "holder release "+h.release+" after-saved-decision "+yesNo(h.saved))
 	for _, n := range hEndNames {
@@ -429,7 +461,7 @@ func (h *holder) lines() []string {
 				l += " error"
 			}
 		}
-		out = append(out, l)
+		out = append(out, l+" release "+e.release)
 	}
 	return append(out, fmt.Sprintf("holder tasks %d", h.tasks))
 }

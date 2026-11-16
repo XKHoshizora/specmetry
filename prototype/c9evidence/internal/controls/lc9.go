@@ -18,6 +18,7 @@ import (
 
 	"github.com/XKHoshizora/specmetry/prototype/c9evidence/internal/chain"
 	"github.com/XKHoshizora/specmetry/prototype/c9evidence/internal/collect"
+	"github.com/XKHoshizora/specmetry/prototype/c9evidence/internal/keep"
 	"github.com/XKHoshizora/specmetry/prototype/c9evidence/internal/pseudo"
 	"github.com/XKHoshizora/specmetry/prototype/c9evidence/internal/spec"
 	"github.com/XKHoshizora/specmetry/prototype/c9evidence/internal/toolctl"
@@ -41,6 +42,16 @@ import (
 // real error never compare equal); every real result a seam replaced; and
 // H's faults. Each is a line of the complete expectation, so an unexpected
 // real error, or a planned fault whose source did not happen, is a miss.
+//
+// Review 155 (review-resolution §204): an end's identity is judged, not
+// only its code (B-154-4-R-S): the reap line and the kind of an
+// *exec.ExitError carry "exited <code>" or "signaled <name>", so a SIGTERM
+// end never matches an expected SIGPIPE end and a normal exit never
+// matches a signal end. And each run, its registry and H are handed to the
+// process-lifetime owner (package keep) when they are made (B-154-2/3-R-H):
+// after run returned its outcome they stay reachable, with their actual
+// objects, original errors and knowledge, until the test process ends; the
+// outcome names their entries.
 
 // lc9Guard bounds each real-time wait of the outer layer. It is a backstop
 // against a defect, not a budget: a case that hits it is not terminal or
@@ -78,7 +89,8 @@ func faultKind(err error) string {
 	}
 	var ee *exec.ExitError
 	if errors.As(err, &ee) {
-		return "exit-status"
+		// The end's identity, not only the type (B-154-4-R-S).
+		return "exit-status " + toolctl.ExitKindOf(ee.ProcessState)
 	}
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
@@ -131,7 +143,11 @@ type lc9Run struct {
 	prepErr  error
 	saved    bool    // the tested decision was saved (before any release)
 	seamLog  []Fault // what the seams replaced
+	owner    keep.Entry
 }
+
+// kindInstance is an LC-9 run's kind in the process owner's records.
+const kindInstance = "lc9 instance"
 
 type lc9Case struct {
 	name   string
@@ -300,6 +316,10 @@ func (k lc9Case) run(e *Env) Outcome {
 	t0 := time.Date(2026, 11, 15, 0, 0, 0, 0, time.UTC)
 	c := &lc9Run{e: e, k: k, clock: chain.NewFakeClock(t0), W: t0.Add(100 * time.Second), D: t0.Add(110 * time.Second),
 		gates: map[string]*gate{}, returned: make(chan struct{})}
+	// The run is handed to the process-lifetime owner before anything is
+	// prepared (B-154-2/3-R-H): with it, its registry, H, the pseudo-tool's
+	// stdin pipe and the fixture stay reachable after run returned.
+	c.owner = keep.Hold(kindInstance, k.name, c)
 	for _, g := range k.gates {
 		c.gates[g] = newGate()
 	}
@@ -353,7 +373,7 @@ func (k lc9Case) run(e *Env) Outcome {
 	if k.seams != nil {
 		k.seams(c, s)
 	}
-	c.reg = toolctl.New(toolctl.Options{Clock: c.clock, W: c.W, D: c.D, Limit: k.limit, Seams: s})
+	c.reg = toolctl.New(toolctl.Options{Clock: c.clock, W: c.W, D: c.D, Limit: k.limit, Seams: s, Name: "LC-9 " + k.name})
 	cfg := spec.Config{GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}
 	cs := collect.CallSpec{Config: cfg, Kind: spec.CallContext, Exe: exe, Args: spec.Args(spec.CallContext), Dir: e.TempRoot, Env: spec.ToolEnv(cfg)}
 	go func() {
@@ -382,8 +402,15 @@ func (k lc9Case) run(e *Env) Outcome {
 	sn := c.snap()
 	lines = append(lines, toolctl.Lines(sn)...)
 	inst := &Instance{Extra: map[string]any{"call": sn}}
+	// Where the original objects went: their entries in the process owner
+	// (not judged lines: the numbers follow the order of the runs).
+	owner := map[string]int{"instance": c.owner.Seq, "registry": c.reg.Owner().Seq}
+	if c.h != nil {
+		owner["holder"] = c.h.owner.Seq
+	}
+	inst.Extra["owner"] = owner
 	for _, f := range sn.Faults {
-		inst.Faults = append(inst.Faults, Fault{Site: f.Site, Source: f.Source, Kind: faultKind(f.Err), Detail: f.Detail})
+		inst.Faults = append(inst.Faults, Fault{Site: f.Site, Source: f.Source, Kind: faultKind(f.Err), Detail: f.Detail, Err: f.Err})
 	}
 	c.mu.Lock()
 	inst.Faults = append(inst.Faults, c.seamLog...)
@@ -560,7 +587,7 @@ const darwinUnknown = "no termination request on this platform (darwin: os/wait_
 // before W, with nothing written.
 func healthy() lc9Want {
 	return lc9Want{decision: "success", class: "B", state: "waited", start: "ok", cmd: true, desc: closedOK, out: [2]string{eofEmpty, eofEmpty},
-		wait: "exit 0", pidfd: "closed ok closes 1", req: "none sends 0", success: true}
+		wait: "exited 0", pidfd: "closed ok closes 1", req: "none sends 0", success: true}
 }
 
 func expired(w lc9Want) lc9Want {
@@ -598,12 +625,16 @@ func lc9Cases() []lc9Case {
 		}
 		return other
 	}
-	// killedWait: the process was ended by the termination request (Linux:
-	// SIGKILL through the pidfd; Windows: Kill, exit code 1); its one Wait
-	// returns an *exec.ExitError. darwin sends no request.
+	// killedEnd and killedWait: the process was ended by the termination
+	// request: Linux, SIGKILL through the pidfd; Windows, Kill
+	// (TerminateProcess with the exit code 1). Its one Wait returns an
+	// *exec.ExitError with that end. darwin sends no request: the
+	// pseudo-tool exits 0 when its stdin is released (Review 155
+	// B-154-4-R-S: the end's identity, not only a non-zero code).
+	killedEnd := func(goos string) string { return byOS(goos, "signaled SIGKILL", "exited 1", "exited 0") }
 	killedWait := func(goos string) []string {
 		if goos == "linux" || goos == "windows" {
-			return []string{"wait operation exit-status"}
+			return []string{"wait operation exit-status " + killedEnd(goos)}
 		}
 		return nil
 	}
@@ -698,14 +729,16 @@ func lc9Cases() []lc9Case {
 				// gets EPIPE: on Unix the Go runtime then ends it with
 				// SIGPIPE (a write to a broken pipe on fd 1, os/signal's
 				// documentation), so its Wait returns an *exec.ExitError
-				// and the exit code is -1; on Windows the write error is
-				// ignored and it exits 0. 1 MiB never fits a pipe buffer,
-				// so a write after the close always happens.
+				// for that signal (Review 155: the signal is judged, not
+				// only the code -1 that every signal end has); on Windows
+				// the write error is ignored and it exits 0. 1 MiB never
+				// fits a pipe buffer, so a write after the close always
+				// happens.
 				w := failed(healthy())
 				w.out[0] = fmt.Sprintf("overflow kept %d sha256 %s", len(x4k), shaOf(x4k))
 				if goos != "windows" {
-					w.wait = "exit -1"
-					w.faults = []string{"wait operation exit-status"}
+					w.wait = "signaled SIGPIPE"
+					w.faults = []string{"wait operation exit-status signaled SIGPIPE"}
 				}
 				return w.lines(goos)
 			},
@@ -776,7 +809,7 @@ func lc9Cases() []lc9Case {
 			},
 			want: func(goos string) []string {
 				w := expired(healthy())
-				w.wait = byOS(goos, "exit -1", "exit 1", "exit 0")
+				w.wait = killedEnd(goos)
 				w.req = byOS(goos, "done sends 1 ok", "done sends 1 ok", "none sends 0")
 				if goos != "linux" && goos != "windows" {
 					w.unknown = []string{darwinUnknown}
@@ -834,8 +867,9 @@ func lc9Cases() []lc9Case {
 			want: func(goos string) []string {
 				w := expired(healthy())
 				w.extra = []string{"at-return stdout done no"}
-				w.holder = []string{"holder start started", "holder ready ok", "holder wait done exit 0", "holder release by-cleanup after-saved-decision yes",
-					"holder ready-r closed ok", "holder ready-w closed ok", "holder rel-r closed ok", "holder rel-w closed ok", "holder tasks 0"}
+				w.holder = []string{"holder start started", "holder ready ok", "holder wait done exited 0 reap confirmed",
+					"holder release by-cleanup after-saved-decision yes", "holder ready-r closed ok release confirmed", "holder ready-w closed ok release confirmed",
+					"holder rel-r closed ok release confirmed", "holder rel-w closed ok release confirmed", "holder tasks 0"}
 				return w.lines(goos)
 			},
 		},
@@ -996,7 +1030,7 @@ func lc9Cases() []lc9Case {
 			want: func(goos string) []string {
 				w := expired(healthy())
 				w.extra = []string{"at-return pidfd unpublished request none"}
-				w.wait, w.req = "exit -1", "done sends 1 ok"
+				w.wait, w.req = killedEnd(goos), "done sends 1 ok"
 				w.faults = killedWait(goos)
 				return w.lines(goos)
 			},

@@ -16,6 +16,15 @@
 // handled by the stage it reached; and every error an operation returned is
 // kept as a structured fault, apart from the display lines.
 //
+// Review 155 (review-resolution §204): every registry is handed to the
+// process-lifetime owner (package keep) when it is made, so the records,
+// their actual objects, their original errors and what is known of their
+// release and reap stay reachable until the test process ends, after the
+// caller returned and every task ended (B-154-2/3-R-H); and the copy of a
+// reap keeps the end's identity, a normal exit with its code or the end by
+// a signal with the signal's name, which the display lines and the
+// structured faults carry (B-154-4-R-S).
+//
 // It is the only code of the tool that starts a process. It is used for
 // the three reviewed calls (E-10 (ii) accepted for phase 2's tests only)
 // and, through the seams, for the pseudo-tools of LC-9.
@@ -34,6 +43,7 @@ import (
 
 	"github.com/XKHoshizora/specmetry/prototype/c9evidence/internal/chain"
 	"github.com/XKHoshizora/specmetry/prototype/c9evidence/internal/collect"
+	"github.com/XKHoshizora/specmetry/prototype/c9evidence/internal/keep"
 )
 
 // DefaultLimit is the output limit of each stream (§12.14 item 4 fixes no
@@ -188,11 +198,40 @@ type Request struct {
 	Late  bool
 }
 
-// Exit is the copy of the ProcessState this call's Wait returned.
+// Exit is the copy of the ProcessState this call's Wait returned. On Unix
+// the code of a signal end is -1 whatever the signal (os/exec_posix.go);
+// Signaled and Signal keep which signal it was (B-154-4-R-S). Windows has
+// no signals: every end is an exit with its code.
 type Exit struct {
-	Code   int
-	Exited bool
-	String string
+	Code     int
+	Exited   bool
+	Signaled bool
+	Signal   string // the signal's name (e.g. SIGPIPE) when Signaled
+	String   string
+}
+
+// ExitKind is an end's canonical identity: "exited <code>", "signaled
+// <name>", or "other <code>" when it is neither (never after a Wait on the
+// supported platforms); "no-state" for a nil copy.
+func ExitKind(e *Exit) string {
+	switch {
+	case e == nil:
+		return "no-state"
+	case e.Signaled:
+		return "signaled " + e.Signal
+	case e.Exited:
+		return fmt.Sprintf("exited %d", e.Code)
+	}
+	return fmt.Sprintf("other %d", e.Code)
+}
+
+// ExitKindOf is the identity of a ProcessState's end ("no-state" for nil).
+func ExitKindOf(ps *os.ProcessState) string {
+	if ps == nil {
+		return "no-state"
+	}
+	e := exitOf(ps)
+	return ExitKind(&e)
 }
 
 // Event is one publication, in order.
@@ -220,6 +259,7 @@ type Fault struct {
 	Source string
 	Detail string
 	Late   bool
+	Exit   *Exit `json:",omitempty"` // the end's identity of an *exec.ExitError (B-154-4-R-S)
 	Err    error `json:"-"`
 }
 
@@ -325,7 +365,11 @@ type Options struct {
 	W, D  time.Time
 	Limit int64 // per stream; 0 is DefaultLimit
 	Seams *Seams
+	Name  string // the registry's name in the process owner's records (optional)
 }
+
+// KindRegistry is a registry's kind in the process owner's records.
+const KindRegistry = "toolctl registry"
 
 // Registry holds every call of one owner (the job, or one test case).
 type Registry struct {
@@ -335,7 +379,8 @@ type Registry struct {
 	mode    string
 	recs    []*Record
 	changed chan struct{}
-	refusal string // set when the registry refuses every call
+	refusal string     // set when the registry refuses every call
+	owner   keep.Entry // the registry's entry in the process owner
 }
 
 // New makes a registry. On Linux it refuses every call when SIGCHLD is
@@ -351,8 +396,16 @@ func New(o Options) *Registry {
 	if platformMode == ModePidfd && sigchldIgnored() {
 		r.refusal = "SIGCHLD is ignored: the pidfd's premise (no automatic reaping, §12.14 item 8) does not hold"
 	}
+	// The registry is handed to the process-lifetime owner before anyone
+	// uses it (B-154-2/3-R-H): every record and every responsibility it
+	// will hold is reachable until the test process ends, after its
+	// caller returned and its tasks ended. It is never released.
+	r.owner = keep.Hold(KindRegistry, o.Name, r)
 	return r
 }
+
+// Owner is the registry's entry in the process-lifetime owner.
+func (r *Registry) Owner() keep.Entry { return r.owner }
 
 // Mode is the platform's termination mode.
 func (r *Registry) Mode() string { return r.mode }
@@ -393,7 +446,13 @@ func (r *Registry) lateLocked() bool { return !r.o.Clock.Now().Before(r.o.W) }
 func (r *Registry) failLocked(rec *Record, s string) { rec.Failures = append(rec.Failures, s) }
 
 func (r *Registry) faultLocked(rec *Record, site, source string, err error) {
-	rec.Faults = append(rec.Faults, Fault{Site: site, Source: source, Detail: errText(err), Late: r.lateLocked(), Err: err})
+	f := Fault{Site: site, Source: source, Detail: errText(err), Late: r.lateLocked(), Err: err}
+	var ee *exec.ExitError
+	if errors.As(err, &ee) && ee.ProcessState != nil {
+		e := exitOf(ee.ProcessState)
+		f.Exit = &e
+	}
+	rec.Faults = append(rec.Faults, f)
 }
 
 // admitLocked is the admission of one new action (B-154-1; §12.14 "准入"
@@ -730,7 +789,8 @@ func (r *Registry) startTask(rec *Record) {
 		r.faultLocked(rec, "wait", SourceOperation, werr)
 	}
 	if ps := cmd.ProcessState; ps != nil {
-		rec.Class, rec.Exit = "B", &Exit{Code: ps.ExitCode(), Exited: ps.Exited(), String: ps.String()}
+		e := exitOf(ps)
+		rec.Class, rec.Exit = "B", &e
 	} else {
 		rec.Class, rec.Phase = "C", "wait"
 		r.failLocked(rec, "wait returned without a process state (class C, wait): "+errText(werr))
@@ -1171,7 +1231,7 @@ func (r *Registry) requestTask(rec *Record, fd int, p *os.Process) {
 
 // successLocked is §12.14 item 11 for one record.
 func (r *Registry) successLocked(rec *Record) bool {
-	if rec.Tasks != 0 || rec.State != StWaited || rec.Class != "B" || rec.Exit == nil || rec.Exit.Code != 0 {
+	if rec.Tasks != 0 || rec.State != StWaited || rec.Class != "B" || ExitKind(rec.Exit) != "exited 0" {
 		return false
 	}
 	for _, d := range rec.Desc {
@@ -1262,8 +1322,8 @@ func (r *Registry) problemsLocked(rec *Record) []string {
 	for _, u := range rec.Unknown {
 		out = append(out, "cleanup unknown: "+u)
 	}
-	if rec.Tasks == 0 && rec.State == StWaited && rec.Class == "B" && rec.Exit != nil && rec.Exit.Code != 0 {
-		out = append(out, fmt.Sprintf("exit code %d", rec.Exit.Code))
+	if rec.Tasks == 0 && rec.State == StWaited && rec.Class == "B" && rec.Exit != nil && ExitKind(rec.Exit) != "exited 0" {
+		out = append(out, "the tool's end: "+ExitKind(rec.Exit))
 	}
 	for i, o := range rec.Out {
 		if o.Done && !o.EOF && o.ReadErr == "" && !o.Overflow {

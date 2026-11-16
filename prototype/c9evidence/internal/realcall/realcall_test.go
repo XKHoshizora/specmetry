@@ -5,7 +5,6 @@ package realcall
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -291,9 +290,11 @@ func TestRC2Overflow(t *testing.T) {
 	// tool's own result): on Unix, either go was ended by SIGPIPE (its Wait
 	// returns an *exec.ExitError) or it had written everything before the
 	// close and exited 0; on Windows the write error does not end go, which
-	// exits 0. Any other fault is a failure.
-	ended := s.Exit != nil && s.Exit.Code == -1 && s.Exit.String == "signal: broken pipe" && slices.Equal(faults, []string{"wait operation exit-status"})
-	clean := s.Exit != nil && s.Exit.Code == 0 && len(faults) == 0
+	// exits 0. Any other fault is a failure. Review 155 B-154-4-R-S: the
+	// end is judged by its structured identity (the signal's name), not by
+	// its code or text.
+	ended := toolctl.ExitKind(s.Exit) == "signaled SIGPIPE" && slices.Equal(faults, []string{"wait operation exit-status signaled SIGPIPE"})
+	clean := toolctl.ExitKind(s.Exit) == "exited 0" && len(faults) == 0
 	if runtime.GOOS == "windows" && !clean || runtime.GOOS != "windows" && !ended && !clean {
 		t.Errorf("reap %+v faults %q: not one of the expected outcomes", s.Exit, faults)
 	}
@@ -304,22 +305,6 @@ func TestRC2Overflow(t *testing.T) {
 	if s.Req.State != toolctl.ReqNone || len(s.Unknown) > 0 || len(s.NotAdmit) > 0 || len(s.Injected) > 0 {
 		t.Errorf("request %+v unknown %q not-admitted %q injected %q", s.Req, s.Unknown, s.NotAdmit, s.Injected)
 	}
-}
-
-// faultSet is the record's structured fault set as "<site> <source>
-// <kind>", the kind "exit-status" for an *exec.ExitError and "other" for
-// anything else (every other fault is unexpected here).
-func faultSet(s toolctl.Snapshot) []string {
-	var out []string
-	for _, f := range s.Faults {
-		k := "other"
-		var ee *exec.ExitError
-		if errors.As(f.Err, &ee) {
-			k = "exit-status"
-		}
-		out = append(out, f.Site+" "+f.Source+" "+k)
-	}
-	return out
 }
 
 // healthyControl checks what every real call here must have, whatever its
@@ -347,9 +332,12 @@ func healthyControl(t *testing.T, s toolctl.Snapshot, ds ...int) {
 	}
 }
 
-// TestRC3Expiry is RC-3: the third call is held after Start and before its
-// one Wait while the fake clock reaches W; the platform's termination is
-// decided and recorded; then Wait proceeds.
+// TestRC3Expiry is RC-3: the start task of the third call is held after
+// Start and before its one Wait while the fake clock reaches W; the
+// platform's termination is decided and recorded; then Wait proceeds. The
+// hold stops the parent, not go: go may finish by itself before the
+// request (Review 155 B-154-4-R-C). The facts are recorded apart and judged
+// by judgeRC3 (rc3_test.go) against the legal branches only.
 func TestRC3Expiry(t *testing.T) {
 	fx := fixture(t)
 	clk := chain.NewFakeClock(time.Date(2026, 11, 15, 0, 0, 0, 0, time.UTC))
@@ -389,45 +377,20 @@ func TestRC3Expiry(t *testing.T) {
 	ronce.Do(func() { close(release) })
 	terminal := reg.WaitTerminal(1, after(120*time.Second))
 	s, _ := reg.Snapshot(1)
-	faults := faultSet(s)
-	evidence(t, "rc3-expiry.json", map[string]any{"result": r, "snapshot": s, "lines": toolctl.Lines(s), "terminal": terminal, "faults": faults})
-	t.Logf("%v %q", toolctl.Lines(s), faults)
+	succeeded := r.Succeeded(reg.W())
+	facts := rc3Facts(s, succeeded)
+	evidence(t, "rc3-expiry.json", map[string]any{"result": r, "snapshot": s, "lines": toolctl.Lines(s), "terminal": terminal, "facts": facts})
+	t.Logf("%v %q", toolctl.Lines(s), faultSet(s))
+	t.Logf("RC-3 branch %q problems %q", facts["branch"], facts["problems"])
 	if !terminal {
 		t.Fatal("not terminal")
 	}
-	if r.Succeeded(reg.W()) || !s.Expired || s.Success || s.State != toolctl.StWaited || s.Class != "B" || s.Exit == nil {
-		t.Fatalf("result %v; lines %v", r.Failures, toolctl.Lines(s))
-	}
+	// What every real call here must have, whatever the branch.
 	healthyControl(t, s, toolctl.StdoutW, toolctl.StdoutR, toolctl.StderrW, toolctl.StderrR)
-	for i, o := range s.Out {
-		if !o.Done || !o.EOF || o.ReadErr != "" || o.Overflow {
-			t.Errorf("%s: %+v", toolctl.StreamNames[i], o)
-		}
-	}
-	if len(s.NotAdmit) > 0 || len(s.Injected) > 0 {
-		t.Errorf("not-admitted %q injected %q", s.NotAdmit, s.Injected)
-	}
-	// Review 154 B-154-4: the results by platform, explicit, and the whole
-	// fault set. The request is made right after Start, while go is still
-	// running (its Wait is held), so it ends go: Linux through the pidfd
-	// (SIGKILL), Windows by Kill (exit code 1); each Wait then returns an
-	// *exec.ExitError and nothing else is a fault. darwin sends nothing: the
-	// cleanup is unknown and go finishes by itself with exit code 0.
-	switch reg.Mode() {
-	case toolctl.ModePidfd:
-		if s.Req.State != toolctl.ReqDone || s.Req.Sends != 1 || s.Req.Err != "" || s.Exit.Code != -1 || s.Exit.String != "signal: killed" ||
-			!slices.Equal(faults, []string{"wait operation exit-status"}) || len(s.Unknown) > 0 {
-			t.Errorf("request %+v exit %+v faults %q unknown %q", s.Req, s.Exit, faults, s.Unknown)
-		}
-	case toolctl.ModeKill:
-		if s.Req.State != toolctl.ReqDone || s.Req.Sends != 1 || s.Req.Err != "" || s.Exit.Code != 1 ||
-			!slices.Equal(faults, []string{"wait operation exit-status"}) || len(s.Unknown) > 0 {
-			t.Errorf("request %+v exit %+v faults %q unknown %q", s.Req, s.Exit, faults, s.Unknown)
-		}
-	default:
-		if s.Req.State != toolctl.ReqNone || s.Req.Sends != 0 || len(s.Unknown) != 1 || s.Exit.Code != 0 || len(faults) != 0 {
-			t.Errorf("request %+v unknown %v exit %+v faults %q", s.Req, s.Unknown, s.Exit, faults)
-		}
+	// Review 155 B-154-4-R-C: one of the legal branches, by the facts
+	// recorded apart; never a liveness drawn from the held Wait.
+	if branch, why := judgeRC3(s, succeeded); branch == "" {
+		t.Errorf("RC-3 in no legal branch: %q", why)
 	}
 }
 

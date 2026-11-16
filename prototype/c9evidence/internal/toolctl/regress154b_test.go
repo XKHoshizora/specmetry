@@ -116,14 +116,23 @@ func TestR154AdmittedStartReturnsLate(t *testing.T) {
 		s.State != StWaited || s.Class != "B" || !s.Expired || s.Success {
 		t.Errorf("lines %q", Lines(s))
 	}
+	// S7 (Review 155, review-resolution §204): the pseudo-tool is alive
+	// until the request (it blocks on the stdin the test holds), so the end
+	// is the request's, by its identity: Linux SIGKILL through the pidfd,
+	// Windows the exit code 1 of TerminateProcess (the old assertion asked
+	// only for a non-zero code).
 	switch reg.Mode() {
 	case ModePidfd, ModeKill:
-		if s.Req.State != ReqDone || s.Req.Sends != 1 || s.Req.Err != "" || s.Exit == nil || s.Exit.Code == 0 {
-			t.Errorf("request %+v exit %+v", s.Req, s.Exit)
+		want := "signaled SIGKILL"
+		if reg.Mode() == ModeKill {
+			want = "exited 1"
+		}
+		if s.Req.State != ReqDone || s.Req.Sends != 1 || s.Req.Err != "" || ExitKind(s.Exit) != want {
+			t.Errorf("request %+v end %s, want %s", s.Req, ExitKind(s.Exit), want)
 		}
 	default:
-		if s.Req.State != ReqNone || len(s.Unknown) != 1 || s.Exit == nil || s.Exit.Code != 0 {
-			t.Errorf("request %+v unknown %q exit %+v", s.Req, s.Unknown, s.Exit)
+		if s.Req.State != ReqNone || len(s.Unknown) != 1 || ExitKind(s.Exit) != "exited 0" {
+			t.Errorf("request %+v unknown %q end %s", s.Req, s.Unknown, ExitKind(s.Exit))
 		}
 	}
 }

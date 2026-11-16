@@ -84,7 +84,8 @@ func Lines(s Snapshot) []string {
 	case s.Exit == nil:
 		out = append(out, "wait no-state")
 	default:
-		out = append(out, fmt.Sprintf("wait exit %d", s.Exit.Code))
+		// The end's identity, not only its code (Review 155 B-154-4-R-S).
+		out = append(out, "wait "+ExitKind(s.Exit))
 	}
 	if s.Mode == ModePidfd {
 		l := "pidfd " + s.Pidfd.State
