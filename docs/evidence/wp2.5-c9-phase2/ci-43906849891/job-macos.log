@@ -1,0 +1,1676 @@
+﻿2026-11-16T16:23:02.3760990Z Current runner version: '2.338.2'
+2026-11-16T16:23:02.3793940Z ##[group]Runner Image Provisioner
+2026-11-16T16:23:02.3794520Z Hosted Compute Agent
+2026-11-16T16:23:02.3794910Z Version: 20261028.624
+2026-11-16T16:23:02.3795310Z Commit: 54898b74c23fde5556c9b3c3a2290865feef0dfe
+2026-11-16T16:23:02.3795860Z Build Date: 2026-10-28T21:51:42Z
+2026-11-16T16:23:02.3796320Z Worker ID: {ca76c7a9-94bb-4752-a035-27c676ee8dd1}
+2026-11-16T16:23:02.3796880Z Region: westus
+2026-11-16T16:23:02.3797230Z Cloud: MacCloud
+2026-11-16T16:23:02.3797590Z ##[endgroup]
+2026-11-16T16:23:02.3798520Z ##[group]Operating System
+2026-11-16T16:23:02.3798920Z macOS
+2026-11-16T16:23:02.3799260Z 26.7.2
+2026-11-16T16:23:02.3799580Z 25G332
+2026-11-16T16:23:02.3800070Z ##[endgroup]
+2026-11-16T16:23:02.3800420Z ##[group]Runner Image
+2026-11-16T16:23:02.3800810Z Image: macos-26-arm64
+2026-11-16T16:23:02.3801180Z Version: 20261102.0473.1
+2026-11-16T16:23:02.3802030Z Included Software: https://github.com/actions/runner-images/blob/macos-26-arm64/20261102.0473/images/macos/macos-26-arm64-Readme.md
+2026-11-16T16:23:02.3803080Z Image Release: https://github.com/actions/runner-images/releases/tag/macos-26-arm64%2F20261102.0473
+2026-11-16T16:23:02.3803730Z ##[endgroup]
+2026-11-16T16:23:02.3804440Z ##[group]GITHUB_TOKEN Permissions
+2026-11-16T16:23:02.3805600Z Contents: read
+2026-11-16T16:23:02.3805950Z Metadata: read
+2026-11-16T16:23:02.3806300Z ##[endgroup]
+2026-11-16T16:23:02.3807690Z Secret source: Actions
+2026-11-16T16:23:02.3808320Z Cache mode: write
+2026-11-16T16:23:02.3808820Z Prepare workflow directory
+2026-11-16T16:23:02.4167960Z Prepare all required actions
+2026-11-16T16:23:02.4237450Z Getting action download info
+2026-11-16T16:23:02.6130160Z Download action repository 'actions/checkout@v7.0.1' (SHA:3d3c42e5aac5ba805825da76410c181273ba90b1)
+2026-11-16T16:23:02.9922070Z Download action repository 'actions/setup-go@v7.0.0' (SHA:b7ad1dad31e06c5925ef5d2fc7ad053ef454303e)
+2026-11-16T16:23:04.0105080Z Download action repository 'actions/upload-artifact@v7.0.2' (SHA:cf430e030ddbb5b0abf93d22962f4752f3646cd9)
+2026-11-16T16:23:04.2229690Z Complete job name: C-9 tool test (macos-latest)
+2026-11-16T16:23:04.2852700Z ##[group]Run actions/checkout@v7.0.1
+2026-11-16T16:23:04.2853350Z with:
+2026-11-16T16:23:04.2853690Z   repository: XKHoshizora/specmetry
+2026-11-16T16:23:04.2856470Z   token: ***
+2026-11-16T16:23:04.2856790Z   ssh-strict: true
+2026-11-16T16:23:04.2857140Z   ssh-user: git
+2026-11-16T16:23:04.2857550Z   persist-credentials: true
+2026-11-16T16:23:04.2857910Z   clean: true
+2026-11-16T16:23:04.2858240Z   sparse-checkout-cone-mode: true
+2026-11-16T16:23:04.2858680Z   fetch-depth: 1
+2026-11-16T16:23:04.2859000Z   fetch-tags: false
+2026-11-16T16:23:04.2859330Z   show-progress: true
+2026-11-16T16:23:04.2859670Z   lfs: false
+2026-11-16T16:23:04.2859990Z   submodules: false
+2026-11-16T16:23:04.2860320Z   set-safe-directory: true
+2026-11-16T16:23:04.2860710Z   allow-unsafe-pr-checkout: false
+2026-11-16T16:23:04.2861250Z env:
+2026-11-16T16:23:04.2861560Z   GOTOOLCHAIN: local
+2026-11-16T16:23:04.2861950Z   GOFLAGS: 
+2026-11-16T16:23:04.2862250Z ##[endgroup]
+2026-11-16T16:23:04.7861500Z Syncing repository: XKHoshizora/specmetry
+2026-11-16T16:23:04.7862990Z ##[group]Getting Git version info
+2026-11-16T16:23:04.7863610Z Working directory is '/Users/runner/work/specmetry/specmetry'
+2026-11-16T16:23:04.7880190Z [command]/opt/homebrew/bin/git version
+2026-11-16T16:23:04.8476270Z git version 2.56.0
+2026-11-16T16:23:04.8488830Z ##[endgroup]
+2026-11-16T16:23:04.8495370Z Copying '/Users/runner/.gitconfig' to '/Users/runner/work/_temp/464ed68f-7c08-41ca-91d1-412499a91f1e/.gitconfig'
+2026-11-16T16:23:04.8504920Z Temporarily overriding HOME='/Users/runner/work/_temp/464ed68f-7c08-41ca-91d1-412499a91f1e' before making global git config changes
+2026-11-16T16:23:04.8507720Z Adding repository directory to the temporary git global config as a safe directory
+2026-11-16T16:23:04.8511260Z [command]/opt/homebrew/bin/git config --global --add safe.directory /Users/runner/work/specmetry/specmetry
+2026-11-16T16:23:04.8645940Z Deleting the contents of '/Users/runner/work/specmetry/specmetry'
+2026-11-16T16:23:04.8649300Z ##[group]Determining repository object format
+2026-11-16T16:23:04.8651340Z ##[endgroup]
+2026-11-16T16:23:04.8653010Z ##[group]Initializing the repository
+2026-11-16T16:23:04.8654600Z [command]/opt/homebrew/bin/git init /Users/runner/work/specmetry/specmetry
+2026-11-16T16:23:04.8987200Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-11-16T16:23:04.8989820Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-11-16T16:23:04.8992020Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-11-16T16:23:04.8993630Z hint: call:
+2026-11-16T16:23:04.8994590Z hint:
+2026-11-16T16:23:04.8995740Z hint: 	git config --global init.defaultBranch <name>
+2026-11-16T16:23:04.8997020Z hint:
+2026-11-16T16:23:04.8998280Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-11-16T16:23:04.9000410Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-11-16T16:23:04.9001990Z hint:
+2026-11-16T16:23:04.9002960Z hint: 	git branch -m <name>
+2026-11-16T16:23:04.9004050Z hint:
+2026-11-16T16:23:04.9005400Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-11-16T16:23:04.9007780Z Initialized empty Git repository in /Users/runner/work/specmetry/specmetry/.git/
+2026-11-16T16:23:04.9021070Z [command]/opt/homebrew/bin/git remote add origin https://github.com/XKHoshizora/specmetry
+2026-11-16T16:23:04.9147400Z ##[endgroup]
+2026-11-16T16:23:04.9149250Z ##[group]Disabling automatic garbage collection
+2026-11-16T16:23:04.9152770Z [command]/opt/homebrew/bin/git config --local gc.auto 0
+2026-11-16T16:23:04.9264630Z ##[endgroup]
+2026-11-16T16:23:04.9266640Z ##[group]Setting up auth
+2026-11-16T16:23:04.9267830Z Removing SSH command configuration
+2026-11-16T16:23:04.9269630Z [command]/opt/homebrew/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-11-16T16:23:04.9389530Z [command]/opt/homebrew/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-11-16T16:23:05.0843610Z Removing HTTP extra header
+2026-11-16T16:23:05.0846080Z [command]/opt/homebrew/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-11-16T16:23:05.0968150Z [command]/opt/homebrew/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-11-16T16:23:05.2503230Z Removing includeIf entries pointing to credentials config files
+2026-11-16T16:23:05.2605110Z [command]/opt/homebrew/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-11-16T16:23:05.2914090Z [command]/opt/homebrew/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-11-16T16:23:05.4094300Z [command]/opt/homebrew/bin/git config --file /Users/runner/work/_temp/git-credentials-08da9707-e42d-41d7-9d7c-9b7e13979920.config http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-11-16T16:23:05.4176140Z [command]/opt/homebrew/bin/git config --local includeIf.gitdir:/Users/runner/work/specmetry/specmetry/.git.path /Users/runner/work/_temp/git-credentials-08da9707-e42d-41d7-9d7c-9b7e13979920.config
+2026-11-16T16:23:05.4246200Z [command]/opt/homebrew/bin/git config --local includeIf.gitdir:/Users/runner/work/specmetry/specmetry/.git/worktrees/*.path /Users/runner/work/_temp/git-credentials-08da9707-e42d-41d7-9d7c-9b7e13979920.config
+2026-11-16T16:23:05.4329490Z [command]/opt/homebrew/bin/git config --local includeIf.gitdir:/github/workspace/.git.path /github/runner_temp/git-credentials-08da9707-e42d-41d7-9d7c-9b7e13979920.config
+2026-11-16T16:23:05.4416510Z [command]/opt/homebrew/bin/git config --local includeIf.gitdir:/github/workspace/.git/worktrees/*.path /github/runner_temp/git-credentials-08da9707-e42d-41d7-9d7c-9b7e13979920.config
+2026-11-16T16:23:05.4488320Z ##[endgroup]
+2026-11-16T16:23:05.4490970Z ##[group]Fetching the repository
+2026-11-16T16:23:05.4497200Z [command]/opt/homebrew/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +5e6c3a4b93b5189c807bee4d179494e837a02b30:refs/remotes/origin/c9test/phase2
+2026-11-16T16:23:09.4436260Z From https://github.com/XKHoshizora/specmetry
+2026-11-16T16:23:09.4443220Z  * [new ref]         5e6c3a4b93b5189c807bee4d179494e837a02b30 -> origin/c9test/phase2
+2026-11-16T16:23:09.4479150Z [command]/opt/homebrew/bin/git branch --list --remote origin/c9test/phase2
+2026-11-16T16:23:09.4647490Z   origin/c9test/phase2
+2026-11-16T16:23:09.4670050Z [command]/opt/homebrew/bin/git rev-parse refs/remotes/origin/c9test/phase2
+2026-11-16T16:23:09.4755380Z 5e6c3a4b93b5189c807bee4d179494e837a02b30
+2026-11-16T16:23:09.4958310Z ##[endgroup]
+2026-11-16T16:23:09.4990510Z ##[group]Determining the checkout info
+2026-11-16T16:23:09.4994870Z ##[endgroup]
+2026-11-16T16:23:09.5024880Z [command]/opt/homebrew/bin/git sparse-checkout disable
+2026-11-16T16:23:09.5166090Z [command]/opt/homebrew/bin/git config --local --unset-all extensions.worktreeConfig
+2026-11-16T16:23:09.5388120Z ##[group]Checking out the ref
+2026-11-16T16:23:09.5503470Z [command]/opt/homebrew/bin/git checkout --progress --force -B c9test/phase2 refs/remotes/origin/c9test/phase2
+2026-11-16T16:23:09.7249390Z Switched to a new branch 'c9test/phase2'
+2026-11-16T16:23:09.7340650Z branch 'c9test/phase2' set up to track 'origin/c9test/phase2'.
+2026-11-16T16:23:09.7464980Z ##[endgroup]
+2026-11-16T16:23:09.7466720Z [command]/opt/homebrew/bin/git log -1 --format=%H
+2026-11-16T16:23:09.7467110Z 5e6c3a4b93b5189c807bee4d179494e837a02b30
+2026-11-16T16:23:09.7920760Z ##[group]Run actions/setup-go@v7.0.0
+2026-11-16T16:23:09.7922390Z with:
+2026-11-16T16:23:09.7922610Z   go-version: 1.27.3
+2026-11-16T16:23:09.7922830Z   cache: false
+2026-11-16T16:23:09.7923070Z   check-latest: false
+2026-11-16T16:23:09.7925240Z   token: ***
+2026-11-16T16:23:09.7925430Z env:
+2026-11-16T16:23:09.7925620Z   GOTOOLCHAIN: local
+2026-11-16T16:23:09.7925880Z   GOFLAGS: 
+2026-11-16T16:23:09.7926120Z ##[endgroup]
+2026-11-16T16:23:09.9939680Z Setup go version spec 1.27.3
+2026-11-16T16:23:09.9959980Z Attempting to download 1.27.3...
+2026-11-16T16:23:11.0966220Z matching 1.27.3...
+2026-11-16T16:23:11.0988270Z Acquiring 1.27.3 from https://github.com/actions/go-versions/releases/download/1.27.3-39437817176/go-1.27.3-darwin-arm64.tar.gz
+2026-11-16T16:23:12.0553750Z Extracting Go...
+2026-11-16T16:23:12.0736870Z [command]/usr/bin/tar xz -C /Users/runner/work/_temp/a3d3a8b4-e237-479f-b2fb-c20859137434 -f /Users/runner/work/_temp/42ce261d-02bf-4e5a-b7af-8589c4711ec6
+2026-11-16T16:23:15.3300530Z Successfully extracted go to /Users/runner/work/_temp/a3d3a8b4-e237-479f-b2fb-c20859137434
+2026-11-16T16:23:15.3301870Z Adding to the cache ...
+2026-11-16T16:23:26.5484240Z Successfully cached go to /Users/runner/hostedtoolcache/go/1.27.3/arm64
+2026-11-16T16:23:26.5485740Z Added go to the path
+2026-11-16T16:23:26.5486340Z Successfully set up Go version 1.27.3
+2026-11-16T16:23:26.7805690Z go version go1.27.3 darwin/arm64
+2026-11-16T16:23:26.7806180Z 
+2026-11-16T16:23:26.7807560Z ##[group]go env
+2026-11-16T16:23:29.1956270Z AR='ar'
+2026-11-16T16:23:29.1957090Z CC='clang'
+2026-11-16T16:23:29.1957330Z CGO_CFLAGS='-O2 -g'
+2026-11-16T16:23:29.1957720Z CGO_CPPFLAGS=''
+2026-11-16T16:23:29.1957970Z CGO_CXXFLAGS='-O2 -g'
+2026-11-16T16:23:29.1958410Z CGO_ENABLED='1'
+2026-11-16T16:23:29.1958770Z CGO_FFLAGS='-O2 -g'
+2026-11-16T16:23:29.1959300Z CGO_LDFLAGS='-O2 -g'
+2026-11-16T16:23:29.1959590Z CXX='clang++'
+2026-11-16T16:23:29.1959940Z GCCGO='gccgo'
+2026-11-16T16:23:29.1960190Z GO111MODULE=''
+2026-11-16T16:23:29.1960760Z GOARCH='arm64'
+2026-11-16T16:23:29.1961020Z GOARM64='v8.0'
+2026-11-16T16:23:29.1961360Z GOAUTH='netrc'
+2026-11-16T16:23:29.1961600Z GOBIN='/Users/runner/go/bin'
+2026-11-16T16:23:29.1973480Z GOCACHE='/Users/runner/Library/Caches/go-build'
+2026-11-16T16:23:29.1974380Z GOCACHEPROG=''
+2026-11-16T16:23:29.1975220Z GODEBUG=''
+2026-11-16T16:23:29.1976160Z GOENV='/Users/runner/Library/Application Support/go/env'
+2026-11-16T16:23:29.1977080Z GOEXE=''
+2026-11-16T16:23:29.1977930Z GOEXPERIMENT=''
+2026-11-16T16:23:29.1978570Z GOFIPS140='off'
+2026-11-16T16:23:29.1979420Z GOFLAGS=''
+2026-11-16T16:23:29.1981890Z GOGCCFLAGS='-fPIC -arch arm64 -pthread -fno-caret-diagnostics -Qunused-arguments -fmessage-length=0 -ffile-prefix-map=/var/folders/h5/t85nd63d71x27_8gl5gw3l_w0000gn/T/go-build352990480=/tmp/go-build -gno-record-gcc-switches -fno-common'
+2026-11-16T16:23:29.1984610Z GOHOSTARCH='arm64'
+2026-11-16T16:23:29.1985280Z GOHOSTOS='darwin'
+2026-11-16T16:23:29.1986050Z GOINSECURE=''
+2026-11-16T16:23:29.1987170Z GOMOD='/Users/runner/work/specmetry/specmetry/go.mod'
+2026-11-16T16:23:29.1988230Z GOMODCACHE='/Users/runner/go/pkg/mod'
+2026-11-16T16:23:29.1989260Z GONOPROXY=''
+2026-11-16T16:23:29.1989550Z GONOSUMDB=''
+2026-11-16T16:23:29.1990010Z GOOS='darwin'
+2026-11-16T16:23:29.1990390Z GOPACKAGESDRIVER=''
+2026-11-16T16:23:29.1990790Z GOPATH='/Users/runner/go'
+2026-11-16T16:23:29.1991070Z GOPRIVATE=''
+2026-11-16T16:23:29.1991590Z GOPROXY='https://proxy.golang.org,direct'
+2026-11-16T16:23:29.1992620Z GOROOT='/Users/runner/hostedtoolcache/go/1.27.3/arm64'
+2026-11-16T16:23:29.1994150Z GOSUMDB='sum.golang.org'
+2026-11-16T16:23:29.1995060Z GOTELEMETRY='local'
+2026-11-16T16:23:29.1996030Z GOTELEMETRYDIR='/Users/runner/Library/Application Support/go/telemetry'
+2026-11-16T16:23:29.1996990Z GOTMPDIR=''
+2026-11-16T16:23:29.1997290Z GOTOOLCHAIN='local'
+2026-11-16T16:23:29.1998130Z GOTOOLDIR='/Users/runner/hostedtoolcache/go/1.27.3/arm64/pkg/tool/darwin_arm64'
+2026-11-16T16:23:29.1998630Z GOVCS=''
+2026-11-16T16:23:29.2000560Z GOVERSION='go1.27.3'
+2026-11-16T16:23:29.2000890Z GOWORK=''
+2026-11-16T16:23:29.2001250Z PKG_CONFIG='pkg-config'
+2026-11-16T16:23:29.2001500Z 
+2026-11-16T16:23:29.2052130Z ##[endgroup]
+2026-11-16T16:23:29.2281440Z ##[group]Run set -euo pipefail
+2026-11-16T16:23:29.2281880Z [36;1mset -euo pipefail[0m
+2026-11-16T16:23:29.2282190Z [36;1mhead=$(git rev-parse HEAD)[0m
+2026-11-16T16:23:29.2282570Z [36;1mif [ "$head" != "$GITHUB_SHA" ]; then[0m
+2026-11-16T16:23:29.2282900Z [36;1m  echo "HEAD $head is not GITHUB_SHA $GITHUB_SHA" >&2[0m
+2026-11-16T16:23:29.2283200Z [36;1m  exit 1[0m
+2026-11-16T16:23:29.2283350Z [36;1mfi[0m
+2026-11-16T16:23:29.2283740Z [36;1mif [ -n "$(git status --porcelain)" ]; then[0m
+2026-11-16T16:23:29.2284120Z [36;1m  echo "the worktree is not clean" >&2[0m
+2026-11-16T16:23:29.2284460Z [36;1m  exit 1[0m
+2026-11-16T16:23:29.2284640Z [36;1mfi[0m
+2026-11-16T16:23:29.2284940Z [36;1mecho "HEAD $head"[0m
+2026-11-16T16:23:29.2285320Z [36;1mecho "tree $(git rev-parse 'HEAD^{tree}')"[0m
+2026-11-16T16:23:29.2285820Z [36;1mecho "tool module subtree $(git rev-parse HEAD:prototype/c9evidence)"[0m
+2026-11-16T16:23:29.2286590Z [36;1mecho "workflow blob $(git rev-parse HEAD:.github/workflows/c9-tool-test.yml)"[0m
+2026-11-16T16:23:29.2287090Z [36;1mecho "GITHUB_REF $GITHUB_REF"[0m
+2026-11-16T16:23:29.2287570Z [36;1mecho "GITHUB_WORKFLOW_REF $GITHUB_WORKFLOW_REF"[0m
+2026-11-16T16:23:29.2288000Z [36;1mecho "GITHUB_WORKFLOW_SHA $GITHUB_WORKFLOW_SHA"[0m
+2026-11-16T16:23:29.2288340Z [36;1mecho "RUNNER_ENVIRONMENT $RUNNER_ENVIRONMENT"[0m
+2026-11-16T16:23:29.2288640Z [36;1mgo version[0m
+2026-11-16T16:23:29.2288870Z [36;1mgobin=$(command -v go)[0m
+2026-11-16T16:23:29.2289220Z [36;1mecho "go on PATH $gobin"[0m
+2026-11-16T16:23:29.2289570Z [36;1mif command -v sha256sum >/dev/null; then sha256sum "$gobin"; else shasum -a 256 "$gobin"; fi[0m
+2026-11-16T16:23:29.2289970Z [36;1mmkdir -p "$RUNNER_TEMP/c9-tool-test-out"[0m
+2026-11-16T16:23:29.2524080Z shell: /bin/bash --noprofile --norc -e -o pipefail {0}
+2026-11-16T16:23:29.2524440Z env:
+2026-11-16T16:23:29.2524750Z   GOTOOLCHAIN: local
+2026-11-16T16:23:29.2524910Z   GOFLAGS: 
+2026-11-16T16:23:29.2525130Z ##[endgroup]
+2026-11-16T16:23:30.0225950Z HEAD 5e6c3a4b93b5189c807bee4d179494e837a02b30
+2026-11-16T16:23:30.0366170Z tree b6ac8721dedcd6d152aaab4facf74cb7f616e2b6
+2026-11-16T16:23:30.0623440Z tool module subtree 755ffc0c2465959fa5528d07b5c079154e8e4feb
+2026-11-16T16:23:30.0803120Z workflow blob 4387acdc683a2014c235f3991bf854a30d6c7c2c
+2026-11-16T16:23:30.0806070Z GITHUB_REF refs/heads/c9test/phase2
+2026-11-16T16:23:30.0819770Z GITHUB_WORKFLOW_REF XKHoshizora/specmetry/.github/workflows/c9-tool-test.yml@refs/heads/c9test/phase2
+2026-11-16T16:23:30.0932350Z GITHUB_WORKFLOW_SHA 5e6c3a4b93b5189c807bee4d179494e837a02b30
+2026-11-16T16:23:30.0957150Z RUNNER_ENVIRONMENT github-hosted
+2026-11-16T16:23:30.1058820Z go version go1.27.3 darwin/arm64
+2026-11-16T16:23:30.1106160Z go on PATH /Users/runner/hostedtoolcache/go/1.27.3/arm64/bin/go
+2026-11-16T16:23:30.1479810Z aa355b078a81158d418079a3f8c776719eb99cc6f527e39ffa3250c66566aafb  /Users/runner/hostedtoolcache/go/1.27.3/arm64/bin/go
+2026-11-16T16:23:30.1671860Z ##[group]Run set -euo pipefail
+2026-11-16T16:23:30.1672920Z [36;1mset -euo pipefail[0m
+2026-11-16T16:23:30.1673640Z [36;1mgo mod download[0m
+2026-11-16T16:23:30.1674220Z [36;1mgo mod verify[0m
+2026-11-16T16:23:30.1674980Z [36;1mif [ -n "$(git status --porcelain)" ]; then[0m
+2026-11-16T16:23:30.1675860Z [36;1m  echo "the module download changed the worktree" >&2[0m
+2026-11-16T16:23:30.1676660Z [36;1m  exit 1[0m
+2026-11-16T16:23:30.1677120Z [36;1mfi[0m
+2026-11-16T16:23:30.1755880Z shell: /bin/bash --noprofile --norc -e -o pipefail {0}
+2026-11-16T16:23:30.1756170Z env:
+2026-11-16T16:23:30.1756390Z   GOTOOLCHAIN: local
+2026-11-16T16:23:30.1756570Z   GOFLAGS: 
+2026-11-16T16:23:30.1756710Z ##[endgroup]
+2026-11-16T16:23:31.4325670Z all modules verified
+2026-11-16T16:23:31.4512300Z ##[group]Run set -euo pipefail
+2026-11-16T16:23:31.4512570Z [36;1mset -euo pipefail[0m
+2026-11-16T16:23:31.4512760Z [36;1mgo vet ./...[0m
+2026-11-16T16:23:31.4512970Z [36;1mgo vet -tags c9evidence_run ./...[0m
+2026-11-16T16:23:31.4513240Z [36;1mgo vet -tags c9evidence_realcall ./...[0m
+2026-11-16T16:23:31.4513600Z [36;1m# Formatting once, on Linux (the Windows checkout may convert[0m
+2026-11-16T16:23:31.4513910Z [36;1m# line endings).[0m
+2026-11-16T16:23:31.4514160Z [36;1mif [ "$RUNNER_OS" = "Linux" ]; then test -z "$(gofmt -l .)"; fi[0m
+2026-11-16T16:23:31.4514560Z [36;1mgo test -tags c9evidence_run -c -o "$RUNNER_TEMP/run.test" ./run/[0m
+2026-11-16T16:23:31.4514900Z [36;1mecho "formal entry compiled; it is not run"[0m
+2026-11-16T16:23:31.4549110Z shell: /bin/bash --noprofile --norc -e -o pipefail {0}
+2026-11-16T16:23:31.4549380Z env:
+2026-11-16T16:23:31.4549540Z   GOTOOLCHAIN: local
+2026-11-16T16:23:31.4549700Z   GOFLAGS: 
+2026-11-16T16:23:31.4549910Z ##[endgroup]
+2026-11-16T16:23:52.9943840Z formal entry compiled; it is not run
+2026-11-16T16:23:53.0074890Z ##[group]Run set -euo pipefail
+2026-11-16T16:23:53.0075540Z [36;1mset -euo pipefail[0m
+2026-11-16T16:23:53.0076000Z [36;1mgo test -count=1 -v ./... 2>&1 | tee "$RUNNER_TEMP/c9-tool-test-out/unit.log"[0m
+2026-11-16T16:23:53.0128900Z shell: /bin/bash --noprofile --norc -e -o pipefail {0}
+2026-11-16T16:23:53.0133050Z env:
+2026-11-16T16:23:53.0133250Z   GOTOOLCHAIN: local
+2026-11-16T16:23:53.0133560Z   GOFLAGS: 
+2026-11-16T16:23:53.0133770Z ##[endgroup]
+2026-11-16T16:23:54.3579030Z === RUN   TestMRunReturnsAfterD
+2026-11-16T16:23:54.3579760Z === RUN   TestMRunReturnsAfterD/at-D-incomplete
+2026-11-16T16:23:54.3680720Z === RUN   TestMRunReturnsAfterD/after-D-incomplete
+2026-11-16T16:23:54.3782530Z === RUN   TestMRunReturnsAfterD/level1
+2026-11-16T16:23:54.3885160Z === RUN   TestMRunReturnsAfterD/m.Run-nonzero
+2026-11-16T16:23:54.3987360Z --- PASS: TestMRunReturnsAfterD (0.00s)
+2026-11-16T16:23:54.4088570Z     --- PASS: TestMRunReturnsAfterD/at-D-incomplete (0.00s)
+2026-11-16T16:23:54.4194770Z     --- PASS: TestMRunReturnsAfterD/after-D-incomplete (0.00s)
+2026-11-16T16:23:54.4299230Z     --- PASS: TestMRunReturnsAfterD/level1 (0.00s)
+2026-11-16T16:23:54.4399360Z     --- PASS: TestMRunReturnsAfterD/m.Run-nonzero (0.00s)
+2026-11-16T16:23:54.4501620Z === RUN   TestSnapshotWaitReachesW
+2026-11-16T16:23:54.4602290Z --- PASS: TestSnapshotWaitReachesW (0.00s)
+2026-11-16T16:23:54.4713170Z === RUN   TestMRunAfterWDoesNotWait
+2026-11-16T16:23:54.4819590Z --- PASS: TestMRunAfterWDoesNotWait (0.00s)
+2026-11-16T16:23:54.4920770Z === RUN   TestSnapshotWaitsForTerminalRecords
+2026-11-16T16:23:54.5035650Z --- PASS: TestSnapshotWaitsForTerminalRecords (0.00s)
+2026-11-16T16:23:54.5138270Z === RUN   TestOuterOperationsCap
+2026-11-16T16:23:54.5257070Z === RUN   TestOuterOperationsCap/failed
+2026-11-16T16:23:54.5363170Z === RUN   TestOuterOperationsCap/unknown
+2026-11-16T16:23:54.5565840Z === RUN   TestOuterOperationsCap/second-result
+2026-11-16T16:23:54.5665400Z --- PASS: TestOuterOperationsCap (0.00s)
+2026-11-16T16:23:54.5767600Z     --- PASS: TestOuterOperationsCap/failed (0.00s)
+2026-11-16T16:23:54.5859110Z     --- PASS: TestOuterOperationsCap/unknown (0.00s)
+2026-11-16T16:23:54.5860080Z     --- PASS: TestOuterOperationsCap/second-result (0.00s)
+2026-11-16T16:23:54.5860660Z === RUN   TestToolDefectsAreLevelOne
+2026-11-16T16:23:54.5861160Z === RUN   TestToolDefectsAreLevelOne/log-defect
+2026-11-16T16:23:54.5861710Z === RUN   TestToolDefectsAreLevelOne/bad-closeout-record
+2026-11-16T16:23:54.5862350Z === RUN   TestToolDefectsAreLevelOne/caller-out-of-range
+2026-11-16T16:23:54.5862800Z === RUN   TestToolDefectsAreLevelOne/m.Run-nonzero
+2026-11-16T16:23:54.5863250Z --- PASS: TestToolDefectsAreLevelOne (0.00s)
+2026-11-16T16:23:54.5863760Z     --- PASS: TestToolDefectsAreLevelOne/log-defect (0.00s)
+2026-11-16T16:23:54.5864330Z     --- PASS: TestToolDefectsAreLevelOne/bad-closeout-record (0.00s)
+2026-11-16T16:23:54.5864910Z     --- PASS: TestToolDefectsAreLevelOne/caller-out-of-range (0.00s)
+2026-11-16T16:23:54.5865420Z     --- PASS: TestToolDefectsAreLevelOne/m.Run-nonzero (0.00s)
+2026-11-16T16:23:54.5865830Z === RUN   TestCloseoutConfigDefects
+2026-11-16T16:23:54.5866150Z === RUN   TestCloseoutConfigDefects/no-writer
+2026-11-16T16:23:54.5866580Z === RUN   TestCloseoutConfigDefects/writer-not-started
+2026-11-16T16:23:54.5866930Z === RUN   TestCloseoutConfigDefects/twice
+2026-11-16T16:23:54.5867380Z === RUN   TestCloseoutConfigDefects/unknown-closeout-file
+2026-11-16T16:23:54.5867810Z === RUN   TestCloseoutConfigDefects/second-writer
+2026-11-16T16:23:54.5868200Z --- PASS: TestCloseoutConfigDefects (0.00s)
+2026-11-16T16:23:54.5868720Z     --- PASS: TestCloseoutConfigDefects/no-writer (0.00s)
+2026-11-16T16:23:54.5869250Z     --- PASS: TestCloseoutConfigDefects/writer-not-started (0.00s)
+2026-11-16T16:23:54.5869770Z     --- PASS: TestCloseoutConfigDefects/twice (0.00s)
+2026-11-16T16:23:54.5870240Z     --- PASS: TestCloseoutConfigDefects/unknown-closeout-file (0.00s)
+2026-11-16T16:23:54.5871810Z     --- PASS: TestCloseoutConfigDefects/second-writer (0.00s)
+2026-11-16T16:23:54.5872170Z === RUN   TestFormats
+2026-11-16T16:23:54.5872510Z --- PASS: TestFormats (0.00s)
+2026-11-16T16:23:54.5872840Z === RUN   TestRealFileSystemAndClock
+2026-11-16T16:23:54.5873260Z --- PASS: TestRealFileSystemAndClock (0.00s)
+2026-11-16T16:23:54.5873610Z === RUN   TestLog
+2026-11-16T16:23:54.5873830Z --- PASS: TestLog (0.00s)
+2026-11-16T16:23:54.5874190Z === RUN   TestFakeClock
+2026-11-16T16:23:54.5874480Z --- PASS: TestFakeClock (0.00s)
+2026-11-16T16:23:54.5874870Z === RUN   TestRealClockTimer
+2026-11-16T16:23:54.5875210Z --- PASS: TestRealClockTimer (0.00s)
+2026-11-16T16:23:54.5875590Z === RUN   TestExitCode
+2026-11-16T16:23:54.5875840Z --- PASS: TestExitCode (0.00s)
+2026-11-16T16:23:54.5876210Z === RUN   TestB1472ManifestCreateThenExpiry
+2026-11-16T16:23:54.5876610Z --- PASS: TestB1472ManifestCreateThenExpiry (0.00s)
+2026-11-16T16:23:54.5876990Z === RUN   TestB1472ManifestWriteThenExpiry
+2026-11-16T16:23:54.5877280Z --- PASS: TestB1472ManifestWriteThenExpiry (0.00s)
+2026-11-16T16:23:54.5898240Z === RUN   TestB1472ManifestCloseFails
+2026-11-16T16:23:54.5899890Z --- PASS: TestB1472ManifestCloseFails (0.00s)
+2026-11-16T16:23:54.5900900Z === RUN   TestB1472RecordCloseFailsKeepsTheHandle
+2026-11-16T16:23:54.5903040Z --- PASS: TestB1472RecordCloseFailsKeepsTheHandle (0.00s)
+2026-11-16T16:23:54.5904190Z === RUN   TestB1472NormalCloseReleases
+2026-11-16T16:23:54.5904970Z --- PASS: TestB1472NormalCloseReleases (0.00s)
+2026-11-16T16:23:54.5905720Z === RUN   TestB148AdmitOp
+2026-11-16T16:23:54.5906460Z --- PASS: TestB148AdmitOp (0.00s)
+2026-11-16T16:23:54.5907320Z === RUN   TestCase1SnapshotWaitHitsWParentResumesAfterD
+2026-11-16T16:23:54.5908600Z --- PASS: TestCase1SnapshotWaitHitsWParentResumesAfterD (0.00s)
+2026-11-16T16:23:54.5909490Z === RUN   TestCase2aManifestCloseLateParentFirst
+2026-11-16T16:23:54.5910390Z --- PASS: TestCase2aManifestCloseLateParentFirst (0.00s)
+2026-11-16T16:23:54.5911510Z === RUN   TestCase2bManifestCloseLateWriterFirst
+2026-11-16T16:23:54.5912710Z --- PASS: TestCase2bManifestCloseLateWriterFirst (0.00s)
+2026-11-16T16:23:54.5913730Z === RUN   TestCase3AllTimelyParentWakesAfterD
+2026-11-16T16:23:54.5914610Z --- PASS: TestCase3AllTimelyParentWakesAfterD (0.00s)
+2026-11-16T16:23:54.5915690Z === RUN   TestCase4aTerminatorBeforeDParentFirst
+2026-11-16T16:23:54.5916570Z --- PASS: TestCase4aTerminatorBeforeDParentFirst (0.00s)
+2026-11-16T16:23:54.5917540Z === RUN   TestCase4bTerminatorBeforeDDiagFirst
+2026-11-16T16:23:54.5918390Z --- PASS: TestCase4bTerminatorBeforeDDiagFirst (0.00s)
+2026-11-16T16:23:54.5919510Z === RUN   TestCase5HashLineReturnsAfterD
+2026-11-16T16:23:54.5920640Z --- PASS: TestCase5HashLineReturnsAfterD (0.00s)
+2026-11-16T16:23:54.5921590Z === RUN   TestCase6WriterWriteFails
+2026-11-16T16:23:54.5922230Z --- PASS: TestCase6WriterWriteFails (0.00s)
+2026-11-16T16:23:54.5923010Z === RUN   TestCase6DiagnosticWriteFails
+2026-11-16T16:23:54.5926740Z === RUN   TestCase6DiagnosticWriteFails/consistent-with-candidates
+2026-11-16T16:23:54.5927240Z === RUN   TestCase6DiagnosticWriteFails/inconsistent-with-candidates
+2026-11-16T16:23:54.5927710Z === RUN   TestCase6DiagnosticWriteFails/incomplete
+2026-11-16T16:23:54.5928060Z === RUN   TestCase6DiagnosticWriteFails/invalid
+2026-11-16T16:23:54.5928500Z --- PASS: TestCase6DiagnosticWriteFails (0.00s)
+2026-11-16T16:23:54.5929120Z     --- PASS: TestCase6DiagnosticWriteFails/consistent-with-candidates (0.00s)
+2026-11-16T16:23:54.5929750Z     --- PASS: TestCase6DiagnosticWriteFails/inconsistent-with-candidates (0.00s)
+2026-11-16T16:23:54.5930480Z     --- PASS: TestCase6DiagnosticWriteFails/incomplete (0.00s)
+2026-11-16T16:23:54.5930990Z     --- PASS: TestCase6DiagnosticWriteFails/invalid (0.00s)
+2026-11-16T16:23:54.5931310Z === RUN   TestCase7ProvisionalOneOrTwoNeverImproves
+2026-11-16T16:23:54.5931710Z === RUN   TestCase7ProvisionalOneOrTwoNeverImproves/invalid
+2026-11-16T16:23:54.5932250Z === RUN   TestCase7ProvisionalOneOrTwoNeverImproves/incomplete
+2026-11-16T16:23:54.5933080Z --- PASS: TestCase7ProvisionalOneOrTwoNeverImproves (0.00s)
+2026-11-16T16:23:54.5933700Z     --- PASS: TestCase7ProvisionalOneOrTwoNeverImproves/invalid (0.00s)
+2026-11-16T16:23:54.5934290Z     --- PASS: TestCase7ProvisionalOneOrTwoNeverImproves/incomplete (0.00s)
+2026-11-16T16:23:54.5934740Z === RUN   TestFinalConsumptionKeepsWaitingBeforeD
+2026-11-16T16:23:54.5935230Z === RUN   TestFinalConsumptionKeepsWaitingBeforeD/consistent-with-candidates
+2026-11-16T16:23:54.5935710Z === RUN   TestFinalConsumptionKeepsWaitingBeforeD/incomplete
+2026-11-16T16:23:54.5936110Z --- PASS: TestFinalConsumptionKeepsWaitingBeforeD (0.00s)
+2026-11-16T16:23:54.5936650Z     --- PASS: TestFinalConsumptionKeepsWaitingBeforeD/consistent-with-candidates (0.00s)
+2026-11-16T16:23:54.5937330Z     --- PASS: TestFinalConsumptionKeepsWaitingBeforeD/incomplete (0.00s)
+2026-11-16T16:23:54.5937800Z === RUN   TestProvisionalOneExpiresUnchanged
+2026-11-16T16:23:54.5938150Z --- PASS: TestProvisionalOneExpiresUnchanged (0.00s)
+2026-11-16T16:23:54.5938450Z === RUN   TestDiagnosticBlocksPastD
+2026-11-16T16:23:54.5938680Z --- PASS: TestDiagnosticBlocksPastD (0.00s)
+2026-11-16T16:23:54.5939030Z === RUN   TestWriterMkdirFails
+2026-11-16T16:23:54.5939300Z --- PASS: TestWriterMkdirFails (0.00s)
+2026-11-16T16:23:54.5939880Z === RUN   TestWriterKthCreateFails
+2026-11-16T16:23:54.5940180Z === RUN   TestWriterKthCreateFails/1
+2026-11-16T16:23:54.5940520Z === RUN   TestWriterKthCreateFails/2
+2026-11-16T16:23:54.5940740Z === RUN   TestWriterKthCreateFails/3
+2026-11-16T16:23:54.5940970Z === RUN   TestWriterKthCreateFails/4
+2026-11-16T16:23:54.5941340Z --- PASS: TestWriterKthCreateFails (0.00s)
+2026-11-16T16:23:54.5941650Z     --- PASS: TestWriterKthCreateFails/1 (0.00s)
+2026-11-16T16:23:54.5941970Z     --- PASS: TestWriterKthCreateFails/2 (0.00s)
+2026-11-16T16:23:54.5942290Z     --- PASS: TestWriterKthCreateFails/3 (0.00s)
+2026-11-16T16:23:54.5942750Z     --- PASS: TestWriterKthCreateFails/4 (0.00s)
+2026-11-16T16:23:54.5943070Z === RUN   TestWriterPartialWriteFails
+2026-11-16T16:23:54.5943450Z --- PASS: TestWriterPartialWriteFails (0.00s)
+2026-11-16T16:23:54.5943810Z === RUN   TestWriterRecordCloseFails
+2026-11-16T16:23:54.5944120Z --- PASS: TestWriterRecordCloseFails (0.00s)
+2026-11-16T16:23:54.5944440Z === RUN   TestWriterManifestFailures
+2026-11-16T16:23:54.5944740Z === RUN   TestWriterManifestFailures/create
+2026-11-16T16:23:54.5944980Z === RUN   TestWriterManifestFailures/write
+2026-11-16T16:23:54.5945220Z === RUN   TestWriterManifestFailures/close
+2026-11-16T16:23:54.5945590Z --- PASS: TestWriterManifestFailures (0.00s)
+2026-11-16T16:23:54.5946060Z     --- PASS: TestWriterManifestFailures/create (0.00s)
+2026-11-16T16:23:54.5946520Z     --- PASS: TestWriterManifestFailures/write (0.00s)
+2026-11-16T16:23:54.5946870Z     --- PASS: TestWriterManifestFailures/close (0.00s)
+2026-11-16T16:23:54.5947200Z === RUN   TestWriterExpiresMidway
+2026-11-16T16:23:54.5948150Z     writer_test.go:208: exit expired-final, last final branch "b"
+2026-11-16T16:23:54.5948530Z --- PASS: TestWriterExpiresMidway (0.00s)
+2026-11-16T16:23:54.5948840Z === RUN   TestSealNoEndlessAppend
+2026-11-16T16:23:54.5949200Z --- PASS: TestSealNoEndlessAppend (0.00s)
+2026-11-16T16:23:54.5949540Z === RUN   TestQualificationAtExactlyDIsLate
+2026-11-16T16:23:54.5949970Z --- PASS: TestQualificationAtExactlyDIsLate (0.00s)
+2026-11-16T16:23:54.5950340Z === RUN   TestLatchNeverResetsAndLateNeverRestores
+2026-11-16T16:23:54.5950700Z --- PASS: TestLatchNeverResetsAndLateNeverRestores (0.00s)
+2026-11-16T16:23:54.5950950Z PASS
+2026-11-16T16:23:54.5951310Z ok  	github.com/XKHoshizora/specmetry/prototype/c9evidence/internal/chain	0.017s
+2026-11-16T16:23:54.5951640Z === RUN   TestGuard
+2026-11-16T16:23:54.5951800Z --- PASS: TestGuard (0.01s)
+2026-11-16T16:23:54.5952030Z === RUN   TestVerifyProvenanceHealthy
+2026-11-16T16:23:54.5952280Z --- PASS: TestVerifyProvenanceHealthy (0.00s)
+2026-11-16T16:23:54.5952550Z === RUN   TestVerifyProvenanceRejects
+2026-11-16T16:23:54.5952800Z --- PASS: TestVerifyProvenanceRejects (0.00s)
+2026-11-16T16:23:54.5953320Z === RUN   TestVerifyProvenanceRejectsASemanticSwap
+2026-11-16T16:23:54.5953670Z --- PASS: TestVerifyProvenanceRejectsASemanticSwap (0.00s)
+2026-11-16T16:23:54.5953980Z === RUN   TestB1473ReadAndCloseErrorsBothKeptByA4
+2026-11-16T16:23:54.5954310Z --- PASS: TestB1473ReadAndCloseErrorsBothKeptByA4 (0.00s)
+2026-11-16T16:23:54.5954650Z === RUN   TestB1473ReadAndCloseErrorsBothKeptByTheGuard
+2026-11-16T16:23:54.5955020Z --- PASS: TestB1473ReadAndCloseErrorsBothKeptByTheGuard (0.00s)
+2026-11-16T16:23:54.5955290Z PASS
+2026-11-16T16:23:54.5955590Z ok  	github.com/XKHoshizora/specmetry/prototype/c9evidence/internal/collect	0.017s
+2026-11-16T16:23:54.5955930Z === RUN   TestRepoDirs
+2026-11-16T16:23:54.5956110Z --- PASS: TestRepoDirs (0.00s)
+2026-11-16T16:23:54.5956310Z === RUN   TestRepoSteps
+2026-11-16T16:23:54.5956540Z === RUN   TestRepoSteps/healthy_with_the_exception
+2026-11-16T16:23:54.5956890Z === RUN   TestRepoSteps/healthy_without_exceptions_(LC-6_baseline)
+2026-11-16T16:23:54.5957300Z === RUN   TestRepoSteps/a_!nowebui_file_with_exec_(Review_126_counterexample)
+2026-11-16T16:23:54.5957720Z === RUN   TestRepoSteps/a_cgo_file
+2026-11-16T16:23:54.5957980Z === RUN   TestRepoSteps/a_file_importing_C
+2026-11-16T16:23:54.5958410Z === RUN   TestRepoSteps/exception_changed_one_byte
+2026-11-16T16:23:54.5958700Z === RUN   TestRepoSteps/exception_with_another_import
+2026-11-16T16:23:54.5959010Z === RUN   TestRepoSteps/exception_missing
+2026-11-16T16:23:54.5959370Z === RUN   TestRepoSteps/production-only_file_with_a_non-standard_import
+2026-11-16T16:23:54.5959710Z === RUN   TestRepoSteps/listed_files_differ
+2026-11-16T16:23:54.5959950Z --- PASS: TestRepoSteps (0.04s)
+2026-11-16T16:23:54.5960350Z     --- PASS: TestRepoSteps/healthy_with_the_exception (0.00s)
+2026-11-16T16:23:54.5960880Z     --- PASS: TestRepoSteps/healthy_without_exceptions_(LC-6_baseline) (0.01s)
+2026-11-16T16:23:54.5961440Z     --- PASS: TestRepoSteps/a_!nowebui_file_with_exec_(Review_126_counterexample) (0.00s)
+2026-11-16T16:23:54.5961860Z     --- PASS: TestRepoSteps/a_cgo_file (0.00s)
+2026-11-16T16:23:54.5962210Z     --- PASS: TestRepoSteps/a_file_importing_C (0.00s)
+2026-11-16T16:23:54.5962610Z     --- PASS: TestRepoSteps/exception_changed_one_byte (0.00s)
+2026-11-16T16:23:54.5963040Z     --- PASS: TestRepoSteps/exception_with_another_import (0.00s)
+2026-11-16T16:23:54.5963440Z     --- PASS: TestRepoSteps/exception_missing (0.00s)
+2026-11-16T16:23:54.5963920Z     --- PASS: TestRepoSteps/production-only_file_with_a_non-standard_import (0.01s)
+2026-11-16T16:23:54.5964370Z     --- PASS: TestRepoSteps/listed_files_differ (0.00s)
+2026-11-16T16:23:54.5964650Z === RUN   TestThirdPartyAndStd
+2026-11-16T16:23:54.5964870Z --- PASS: TestThirdPartyAndStd (0.00s)
+2026-11-16T16:23:54.5965100Z === RUN   TestAdmissionAndReadFailures
+2026-11-16T16:23:54.5965380Z --- PASS: TestAdmissionAndReadFailures (0.00s)
+2026-11-16T16:23:54.5965620Z === RUN   TestConstraint
+2026-11-16T16:23:54.5965810Z --- PASS: TestConstraint (0.00s)
+2026-11-16T16:23:54.5966080Z PASS
+2026-11-16T16:23:54.5966450Z ok  	github.com/XKHoshizora/specmetry/prototype/c9evidence/internal/cond	0.063s
+2026-11-16T16:23:55.4433250Z === RUN   TestControlsWithoutTypeCheck
+2026-11-16T16:23:55.4438040Z --- PASS: TestControlsWithoutTypeCheck (0.02s)
+2026-11-16T16:23:55.4439330Z === RUN   TestLC9
+2026-11-16T16:23:55.4442470Z     controls_test.go:75: LC-9 normal-eof: hit
+2026-11-16T16:23:55.4443420Z     controls_test.go:75: LC-9 half-construction: hit
+2026-11-16T16:23:55.4447320Z     controls_test.go:75: LC-9 start-failure: hit
+2026-11-16T16:23:55.4449240Z     controls_test.go:75: LC-9 start-failure-not-executable: hit
+2026-11-16T16:23:55.4450010Z     controls_test.go:75: LC-9 read-error: hit
+2026-11-16T16:23:55.4450590Z     controls_test.go:75: LC-9 overflow: hit
+2026-11-16T16:23:55.4456040Z     controls_test.go:75: LC-9 close-injected: hit
+2026-11-16T16:23:55.4456850Z     controls_test.go:75: LC-9 close-real-error: hit
+2026-11-16T16:23:55.4457490Z     controls_test.go:75: LC-9 expiry: hit
+2026-11-16T16:23:55.4458510Z     controls_test.go:75: LC-9 blocked-close: hit
+2026-11-16T16:23:55.4459200Z     controls_test.go:75: LC-9 output-not-closed: hit
+2026-11-16T16:23:55.4459910Z     controls_test.go:75: LC-9 pidfd-open-failed: not-applicable
+2026-11-16T16:23:55.4460740Z     controls_test.go:75: LC-9 blocked-send: not-applicable
+2026-11-16T16:23:55.4510010Z     controls_test.go:75: LC-9 sealed-before-reserve: not-applicable
+2026-11-16T16:23:55.4511440Z     controls_test.go:75: LC-9 reserved-then-sealed-in-window: not-applicable
+2026-11-16T16:23:55.4520990Z     controls_test.go:75: LC-9 reserved-then-sealed-out-of-window: not-applicable
+2026-11-16T16:23:55.4521870Z     controls_test.go:75: LC-9 wait-first: not-applicable
+2026-11-16T16:23:55.4522420Z     controls_test.go:75: LC-9 pidfd-late-publish: not-applicable
+2026-11-16T16:23:55.4523290Z     controls_test.go:75: LC-9 abandoned-before-wait: not-applicable
+2026-11-16T16:23:55.4530670Z     controls_test.go:75: LC-9 closing-old-snapshot: not-applicable
+2026-11-16T16:23:55.4586910Z --- PASS: TestLC9 (0.09s)
+2026-11-16T16:23:55.4596440Z === RUN   TestJudgeRules
+2026-11-16T16:23:55.4653190Z --- PASS: TestJudgeRules (0.00s)
+2026-11-16T16:23:55.4657950Z === RUN   TestLC4
+2026-11-16T16:23:55.4789210Z     lc4_test.go:20: 77 LC-4 variants
+2026-11-16T16:23:55.4918990Z --- PASS: TestLC4 (0.00s)
+2026-11-16T16:23:55.5062210Z === RUN   TestLC5
+2026-11-16T16:23:55.5192170Z --- PASS: TestLC5 (0.03s)
+2026-11-16T16:23:55.5213530Z === RUN   TestLC7AllGOOS
+2026-11-16T16:23:55.5218580Z --- PASS: TestLC7AllGOOS (0.00s)
+2026-11-16T16:23:55.5319610Z === RUN   TestB1474SameClassAtTheWrongSiteIsAMiss
+2026-11-16T16:23:55.5358710Z --- PASS: TestB1474SameClassAtTheWrongSiteIsAMiss (0.00s)
+2026-11-16T16:23:55.5459090Z === RUN   TestB1474OnlyTheSiteDiffersIsAMiss
+2026-11-16T16:23:55.5468140Z --- PASS: TestB1474OnlyTheSiteDiffersIsAMiss (0.00s)
+2026-11-16T16:23:55.5575250Z === RUN   TestB1474ExtraRealFailureIsNotFiltered
+2026-11-16T16:23:55.5680290Z --- PASS: TestB1474ExtraRealFailureIsNotFiltered (0.00s)
+2026-11-16T16:23:55.5761110Z === RUN   TestB1474InstanceKeepsWholeResults
+2026-11-16T16:23:55.5832310Z --- PASS: TestB1474InstanceKeepsWholeResults (0.00s)
+2026-11-16T16:23:55.5837150Z === RUN   TestN1472TargetTagsReachTheConsumer
+2026-11-16T16:23:55.5868210Z === RUN   TestN1472TargetTagsReachTheConsumer/tag_carried_and_file_listed
+2026-11-16T16:23:55.5875210Z === RUN   TestN1472TargetTagsReachTheConsumer/tag_not_carried,_file_listed
+2026-11-16T16:23:55.5898090Z === RUN   TestN1472TargetTagsReachTheConsumer/tag_not_carried,_file_not_listed
+2026-11-16T16:23:55.5905810Z --- PASS: TestN1472TargetTagsReachTheConsumer (0.02s)
+2026-11-16T16:23:55.6007400Z     --- PASS: TestN1472TargetTagsReachTheConsumer/tag_carried_and_file_listed (0.01s)
+2026-11-16T16:23:55.6110070Z     --- PASS: TestN1472TargetTagsReachTheConsumer/tag_not_carried,_file_listed (0.00s)
+2026-11-16T16:23:55.6122590Z     --- PASS: TestN1472TargetTagsReachTheConsumer/tag_not_carried,_file_not_listed (0.00s)
+2026-11-16T16:23:55.6165940Z === RUN   TestB148RefusalsInTheOuterJudgement
+2026-11-16T16:23:55.6179640Z --- PASS: TestB148RefusalsInTheOuterJudgement (0.00s)
+2026-11-16T16:23:55.6280610Z === RUN   TestR154CloseRealErrorOtherSource
+2026-11-16T16:23:55.6382070Z     regress154_test.go:60: close-real-error: miss [results differ from the complete expectation:
+2026-11-16T16:23:55.6489180Z           got  ["admission entry admitted" "admission start admitted" "admission stderr pipe admitted" "admission stdout pipe admitted" "class B" "cmd held yes" "decision fail" "expired no" "fault close stdout-r injected injected" "fault close stdout-r operation other" "fault close stdout-r seam real other returned other" "late no" "panic no" "request none none sends 0" "start ok" "state waited" "stderr eof kept 0 sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" "stderr-r closed ok release confirmed object held" "stderr-w closed ok release confirmed object held" "stdout eof kept 0 sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" "stdout-r closed error release unknown object held" "stdout-r injected" "stdout-w closed ok release confirmed object held" "success no" "terminal yes" "wait exited 0"]
+2026-11-16T16:23:55.6597750Z           want ["admission entry admitted" "admission start admitted" "admission stderr pipe admitted" "admission stdout pipe admitted" "class B" "cmd held yes" "decision fail" "expired no" "fault close stdout-r injected injected" "fault close stdout-r operation seam-close" "fault close stdout-r seam real ok returned seam-close" "late no" "panic no" "request none none sends 0" "start ok" "state waited" "stderr eof kept 0 sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" "stderr-r closed ok release confirmed object held" "stderr-w closed ok release confirmed object held" "stdout eof kept 0 sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" "stdout-r closed error release unknown object held" "stdout-r injected" "stdout-w closed ok release confirmed object held" "success no" "terminal yes" "wait exited 0"]]
+2026-11-16T16:23:55.6709040Z --- PASS: TestR154CloseRealErrorOtherSource (0.01s)
+2026-11-16T16:23:55.6811260Z === RUN   TestR154CloseRealErrorElsewhere
+2026-11-16T16:23:55.6912960Z     regress154_test.go:77: close-real-error: miss [results differ from the complete expectation:
+2026-11-16T16:23:55.7020950Z           got  ["admission entry admitted" "admission start admitted" "admission stderr pipe admitted" "admission stdout pipe admitted" "class B" "cmd held yes" "decision fail" "expired no" "fault close stderr-w operation other" "fault close stdout-r injected injected" "fault close stdout-r operation seam-close" "fault close stdout-r seam real ok returned seam-close" "late no" "panic no" "request none none sends 0" "start ok" "state waited" "stderr eof kept 0 sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" "stderr-r closed ok release confirmed object held" "stderr-w closed error release unknown object held" "stdout eof kept 0 sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" "stdout-r closed error release unknown object held" "stdout-r injected" "stdout-w closed ok release confirmed object held" "success no" "terminal yes" "wait exited 0"]
+2026-11-16T16:23:55.7130580Z           want ["admission entry admitted" "admission start admitted" "admission stderr pipe admitted" "admission stdout pipe admitted" "class B" "cmd held yes" "decision fail" "expired no" "fault close stdout-r injected injected" "fault close stdout-r operation seam-close" "fault close stdout-r seam real ok returned seam-close" "late no" "panic no" "request none none sends 0" "start ok" "state waited" "stderr eof kept 0 sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" "stderr-r closed ok release confirmed object held" "stderr-w closed ok release confirmed object held" "stdout eof kept 0 sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" "stdout-r closed error release unknown object held" "stdout-r injected" "stdout-w closed ok release confirmed object held" "success no" "terminal yes" "wait exited 0"]]
+2026-11-16T16:23:55.7237910Z --- PASS: TestR154CloseRealErrorElsewhere (0.01s)
+2026-11-16T16:23:55.7354510Z === RUN   TestR154RequestOtherKind
+2026-11-16T16:23:55.7462140Z     regress154_test.go:87: the pidfd exists only on Linux
+2026-11-16T16:23:55.7563250Z --- SKIP: TestR154RequestOtherKind (0.00s)
+2026-11-16T16:23:55.7665480Z === RUN   TestR154HolderHalfBuilt
+2026-11-16T16:23:55.7777470Z --- PASS: TestR154HolderHalfBuilt (0.00s)
+2026-11-16T16:23:55.7901340Z === RUN   TestR154HolderSecondPipeRefused
+2026-11-16T16:23:55.8009330Z --- PASS: TestR154HolderSecondPipeRefused (0.00s)
+2026-11-16T16:23:55.8118710Z === RUN   TestR154HolderLateStart
+2026-11-16T16:23:55.8223120Z --- PASS: TestR154HolderLateStart (0.01s)
+2026-11-16T16:23:55.8326340Z === RUN   TestR154HolderReadyCloseNotDone
+2026-11-16T16:23:55.8428780Z --- PASS: TestR154HolderReadyCloseNotDone (0.31s)
+2026-11-16T16:23:55.8546390Z === RUN   TestR154HolderErrorJudged
+2026-11-16T16:23:55.8648460Z --- PASS: TestR154HolderErrorJudged (0.01s)
+2026-11-16T16:23:55.8776260Z === RUN   TestR155HolderOutlivesTheVariant
+2026-11-16T16:23:55.8890120Z --- PASS: TestR155HolderOutlivesTheVariant (0.02s)
+2026-11-16T16:23:55.9002110Z === RUN   TestR155OverflowOtherSignal
+2026-11-16T16:23:55.9103760Z     regress155_test.go:143: overflow: miss [results differ from the complete expectation:
+2026-11-16T16:23:55.9213130Z           got  ["admission entry admitted" "admission start admitted" "admission stderr pipe admitted" "admission stdout pipe admitted" "class B" "cmd held yes" "decision fail" "expired no" "fault wait operation exit-status signaled SIGTERM" "late no" "panic no" "request none none sends 0" "start ok" "state waited" "stderr eof kept 0 sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" "stderr-r closed ok release confirmed object held" "stderr-w closed ok release confirmed object held" "stdout overflow kept 4096 sha256 a2e659dacb4691e887ac0139f8893d04764ee197d70fb73d3190d56113d18e3e" "stdout-r closed ok release confirmed object held" "stdout-w closed ok release confirmed object held" "success no" "terminal yes" "wait signaled SIGTERM"]
+2026-11-16T16:23:55.9333980Z           want ["admission entry admitted" "admission start admitted" "admission stderr pipe admitted" "admission stdout pipe admitted" "class B" "cmd held yes" "decision fail" "expired no" "fault wait operation exit-status signaled SIGPIPE" "late no" "panic no" "request none none sends 0" "start ok" "state waited" "stderr eof kept 0 sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" "stderr-r closed ok release confirmed object held" "stderr-w closed ok release confirmed object held" "stdout overflow kept 4096 sha256 a2e659dacb4691e887ac0139f8893d04764ee197d70fb73d3190d56113d18e3e" "stdout-r closed ok release confirmed object held" "stdout-w closed ok release confirmed object held" "success no" "terminal yes" "wait signaled SIGPIPE"]]
+2026-11-16T16:23:55.9441280Z --- PASS: TestR155OverflowOtherSignal (0.01s)
+2026-11-16T16:23:55.9542360Z === RUN   TestR155OverflowNormalExit
+2026-11-16T16:23:55.9649510Z     regress155_test.go:160: overflow: miss [results differ from the complete expectation:
+2026-11-16T16:23:55.9757110Z           got  ["admission entry admitted" "admission start admitted" "admission stderr pipe admitted" "admission stdout pipe admitted" "class B" "cmd held yes" "decision fail" "expired no" "fault wait operation exit-status exited 141" "late no" "panic no" "request none none sends 0" "start ok" "state waited" "stderr eof kept 0 sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" "stderr-r closed ok release confirmed object held" "stderr-w closed ok release confirmed object held" "stdout overflow kept 4096 sha256 a2e659dacb4691e887ac0139f8893d04764ee197d70fb73d3190d56113d18e3e" "stdout-r closed ok release confirmed object held" "stdout-w closed ok release confirmed object held" "success no" "terminal yes" "wait exited 141"]
+2026-11-16T16:23:55.9870770Z           want ["admission entry admitted" "admission start admitted" "admission stderr pipe admitted" "admission stdout pipe admitted" "class B" "cmd held yes" "decision fail" "expired no" "fault wait operation exit-status signaled SIGPIPE" "late no" "panic no" "request none none sends 0" "start ok" "state waited" "stderr eof kept 0 sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" "stderr-r closed ok release confirmed object held" "stderr-w closed ok release confirmed object held" "stdout overflow kept 4096 sha256 a2e659dacb4691e887ac0139f8893d04764ee197d70fb73d3190d56113d18e3e" "stdout-r closed ok release confirmed object held" "stdout-w closed ok release confirmed object held" "success no" "terminal yes" "wait signaled SIGPIPE"]]
+2026-11-16T16:23:55.9978080Z --- PASS: TestR155OverflowNormalExit (0.01s)
+2026-11-16T16:23:56.0079920Z === RUN   TestR155OverflowExtraRealError
+2026-11-16T16:23:56.0181970Z     regress155_test.go:184: overflow: miss [results differ from the complete expectation:
+2026-11-16T16:23:56.0290370Z           got  ["admission entry admitted" "admission start admitted" "admission stderr pipe admitted" "admission stdout pipe admitted" "class B" "cmd held yes" "decision fail" "expired no" "fault close stderr-r operation other" "fault wait operation exit-status signaled SIGPIPE" "late no" "panic no" "request none none sends 0" "start ok" "state waited" "stderr eof kept 0 sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" "stderr-r closed error release unknown object held" "stderr-w closed ok release confirmed object held" "stdout overflow kept 4096 sha256 a2e659dacb4691e887ac0139f8893d04764ee197d70fb73d3190d56113d18e3e" "stdout-r closed ok release confirmed object held" "stdout-w closed ok release confirmed object held" "success no" "terminal yes" "wait signaled SIGPIPE"]
+2026-11-16T16:23:56.0399300Z           want ["admission entry admitted" "admission start admitted" "admission stderr pipe admitted" "admission stdout pipe admitted" "class B" "cmd held yes" "decision fail" "expired no" "fault wait operation exit-status signaled SIGPIPE" "late no" "panic no" "request none none sends 0" "start ok" "state waited" "stderr eof kept 0 sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" "stderr-r closed ok release confirmed object held" "stderr-w closed ok release confirmed object held" "stdout overflow kept 4096 sha256 a2e659dacb4691e887ac0139f8893d04764ee197d70fb73d3190d56113d18e3e" "stdout-r closed ok release confirmed object held" "stdout-w closed ok release confirmed object held" "success no" "terminal yes" "wait signaled SIGPIPE"]]
+2026-11-16T16:23:56.0504650Z --- PASS: TestR155OverflowExtraRealError (0.01s)
+2026-11-16T16:23:56.0605890Z === RUN   TestR155ExpiryOtherSignal
+2026-11-16T16:23:56.0707290Z     regress155_test.go:204: the pidfd exists only on Linux
+2026-11-16T16:23:56.0809100Z --- SKIP: TestR155ExpiryOtherSignal (0.00s)
+2026-11-16T16:23:56.0911320Z === RUN   TestR155OwnerHoldsTheHolder
+2026-11-16T16:23:56.1012810Z --- PASS: TestR155OwnerHoldsTheHolder (0.02s)
+2026-11-16T16:23:56.1114150Z === RUN   TestR155OverflowSIGPIPEHit
+2026-11-16T16:23:56.1215450Z     regress155b_test.go:78: overflow: hit []
+2026-11-16T16:23:56.1320720Z --- PASS: TestR155OverflowSIGPIPEHit (0.01s)
+2026-11-16T16:23:56.1431720Z === RUN   TestR155ExitKindLines
+2026-11-16T16:23:56.1556020Z     regress155b_test.go:102: overflow: miss [results differ from the complete expectation:
+2026-11-16T16:23:56.1683630Z           got  ["admission entry admitted" "admission start admitted" "admission stderr pipe admitted" "admission stdout pipe admitted" "class B" "cmd held yes" "decision fail" "expired no" "fault wait operation exit-status exited 141" "late no" "panic no" "request none none sends 0" "start ok" "state waited" "stderr eof kept 0 sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" "stderr-r closed ok release confirmed object held" "stderr-w closed ok release confirmed object held" "stdout overflow kept 4096 sha256 a2e659dacb4691e887ac0139f8893d04764ee197d70fb73d3190d56113d18e3e" "stdout-r closed ok release confirmed object held" "stdout-w closed ok release confirmed object held" "success no" "terminal yes" "wait exited 141"]
+2026-11-16T16:23:56.1837610Z           want ["admission entry admitted" "admission start admitted" "admission stderr pipe admitted" "admission stdout pipe admitted" "class B" "cmd held yes" "decision fail" "expired no" "fault wait operation exit-status signaled SIGPIPE" "late no" "panic no" "request none none sends 0" "start ok" "state waited" "stderr eof kept 0 sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" "stderr-r closed ok release confirmed object held" "stderr-w closed ok release confirmed object held" "stdout overflow kept 4096 sha256 a2e659dacb4691e887ac0139f8893d04764ee197d70fb73d3190d56113d18e3e" "stdout-r closed ok release confirmed object held" "stdout-w closed ok release confirmed object held" "success no" "terminal yes" "wait signaled SIGPIPE"]]
+2026-11-16T16:23:56.1910210Z     regress155b_test.go:102: overflow: miss [results differ from the complete expectation:
+2026-11-16T16:23:56.1962510Z           got  ["admission entry admitted" "admission start admitted" "admission stderr pipe admitted" "admission stdout pipe admitted" "class B" "cmd held yes" "decision fail" "expired no" "fault wait operation exit-status signaled SIGTERM" "late no" "panic no" "request none none sends 0" "start ok" "state waited" "stderr eof kept 0 sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" "stderr-r closed ok release confirmed object held" "stderr-w closed ok release confirmed object held" "stdout overflow kept 4096 sha256 a2e659dacb4691e887ac0139f8893d04764ee197d70fb73d3190d56113d18e3e" "stdout-r closed ok release confirmed object held" "stdout-w closed ok release confirmed object held" "success no" "terminal yes" "wait signaled SIGTERM"]
+2026-11-16T16:23:56.1973420Z           want ["admission entry admitted" "admission start admitted" "admission stderr pipe admitted" "admission stdout pipe admitted" "class B" "cmd held yes" "decision fail" "expired no" "fault wait operation exit-status signaled SIGPIPE" "late no" "panic no" "request none none sends 0" "start ok" "state waited" "stderr eof kept 0 sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" "stderr-r closed ok release confirmed object held" "stderr-w closed ok release confirmed object held" "stdout overflow kept 4096 sha256 a2e659dacb4691e887ac0139f8893d04764ee197d70fb73d3190d56113d18e3e" "stdout-r closed ok release confirmed object held" "stdout-w closed ok release confirmed object held" "success no" "terminal yes" "wait signaled SIGPIPE"]]
+2026-11-16T16:23:56.1976480Z     regress155b_test.go:102: overflow: hit []
+2026-11-16T16:23:56.1976870Z --- PASS: TestR155ExitKindLines (0.02s)
+2026-11-16T16:23:56.1977400Z PASS
+2026-11-16T16:23:56.1977760Z ok  	github.com/XKHoshizora/specmetry/prototype/c9evidence/internal/controls	0.616s
+2026-11-16T16:23:56.1978190Z === RUN   TestContextFixtureIsT2Output
+2026-11-16T16:23:56.1978790Z --- PASS: TestContextFixtureIsT2Output (0.00s)
+2026-11-16T16:23:56.1979180Z === RUN   TestContextRoundTripThroughT2
+2026-11-16T16:23:56.1979520Z --- PASS: TestContextRoundTripThroughT2 (0.00s)
+2026-11-16T16:23:56.1980050Z === RUN   TestContextSyntaxErrors
+2026-11-16T16:23:56.1980360Z === RUN   TestContextSyntaxErrors/header-wrong
+2026-11-16T16:23:56.1980680Z === RUN   TestContextSyntaxErrors/header-only
+2026-11-16T16:23:56.1981280Z === RUN   TestContextSyntaxErrors/header-no-lf
+2026-11-16T16:23:56.1981630Z === RUN   TestContextSyntaxErrors/cr-inside-value
+2026-11-16T16:23:56.1982090Z === RUN   TestContextSyntaxErrors/trailing-space
+2026-11-16T16:23:56.1982610Z === RUN   TestContextSyntaxErrors/leading-space
+2026-11-16T16:23:56.1982940Z === RUN   TestContextSyntaxErrors/tab-separator
+2026-11-16T16:23:56.1983260Z === RUN   TestContextSyntaxErrors/name-only
+2026-11-16T16:23:56.1983770Z === RUN   TestContextSyntaxErrors/empty-value
+2026-11-16T16:23:56.1984120Z === RUN   TestContextSyntaxErrors/lowercase-name
+2026-11-16T16:23:56.1984450Z === RUN   TestContextSyntaxErrors/order-swapped
+2026-11-16T16:23:56.1984960Z === RUN   TestContextSyntaxErrors/single-quoted
+2026-11-16T16:23:56.1985310Z === RUN   TestContextSyntaxErrors/backquoted
+2026-11-16T16:23:56.1985630Z === RUN   TestContextSyntaxErrors/unterminated
+2026-11-16T16:23:56.1986230Z === RUN   TestContextSyntaxErrors/trailing-after-quote
+2026-11-16T16:23:56.1986620Z === RUN   TestContextSyntaxErrors/octal-escape
+2026-11-16T16:23:56.1987060Z === RUN   TestContextSyntaxErrors/unicode-escape-printable
+2026-11-16T16:23:56.1987550Z === RUN   TestContextSyntaxErrors/upper-hex
+2026-11-16T16:23:56.1987860Z === RUN   TestContextSyntaxErrors/raw-tab
+2026-11-16T16:23:56.1988160Z === RUN   TestContextSyntaxErrors/bool-True
+2026-11-16T16:23:56.1988620Z === RUN   TestContextSyntaxErrors/bool-quoted
+2026-11-16T16:23:56.1989000Z === RUN   TestContextSyntaxErrors/count-negative
+2026-11-16T16:23:56.1989320Z === RUN   TestContextSyntaxErrors/count-plus
+2026-11-16T16:23:56.1990080Z === RUN   TestContextSyntaxErrors/count-hex
+2026-11-16T16:23:56.1990440Z === RUN   TestContextSyntaxErrors/count-overflow
+2026-11-16T16:23:56.1990960Z === RUN   TestContextSyntaxErrors/count-huge-short
+2026-11-16T16:23:56.1991380Z === RUN   TestContextSyntaxErrors/element-unquoted
+2026-11-16T16:23:56.1991960Z === RUN   TestContextSyntaxErrors/element-noncanonical
+2026-11-16T16:23:56.1992540Z === RUN   TestContextSyntaxErrors/element-two-spaces
+2026-11-16T16:23:56.1992890Z === RUN   TestContextSyntaxErrors/element-dash-only
+2026-11-16T16:23:56.1993240Z === RUN   TestContextSyntaxErrors/element-dash-space
+2026-11-16T16:23:56.1993770Z === RUN   TestContextSyntaxErrors/end-wrong
+2026-11-16T16:23:56.1994130Z === RUN   TestContextSyntaxErrors/end-with-space
+2026-11-16T16:23:56.1994470Z === RUN   TestContextSyntaxErrors/after-end-blank
+2026-11-16T16:23:56.1995030Z === RUN   TestContextSyntaxErrors/after-end-header-no-lf
+2026-11-16T16:23:56.1995400Z === RUN   TestContextSyntaxErrors/truncated-in-list
+2026-11-16T16:23:56.1995800Z === RUN   TestContextSyntaxErrors/truncated-mid-line
+2026-11-16T16:23:56.1996280Z === RUN   TestContextSyntaxErrors/bom
+2026-11-16T16:23:56.1996570Z --- PASS: TestContextSyntaxErrors (0.00s)
+2026-11-16T16:23:56.1997330Z     --- PASS: TestContextSyntaxErrors/header-wrong (0.00s)
+2026-11-16T16:23:56.1997950Z     --- PASS: TestContextSyntaxErrors/header-only (0.00s)
+2026-11-16T16:23:56.1998400Z     --- PASS: TestContextSyntaxErrors/header-no-lf (0.00s)
+2026-11-16T16:23:56.1998960Z     --- PASS: TestContextSyntaxErrors/cr-inside-value (0.00s)
+2026-11-16T16:23:56.1999530Z     --- PASS: TestContextSyntaxErrors/trailing-space (0.00s)
+2026-11-16T16:23:56.1999990Z     --- PASS: TestContextSyntaxErrors/leading-space (0.00s)
+2026-11-16T16:23:56.2000730Z     --- PASS: TestContextSyntaxErrors/tab-separator (0.00s)
+2026-11-16T16:23:56.2001670Z     --- PASS: TestContextSyntaxErrors/name-only (0.00s)
+2026-11-16T16:23:56.2002260Z     --- PASS: TestContextSyntaxErrors/empty-value (0.00s)
+2026-11-16T16:23:56.2002820Z     --- PASS: TestContextSyntaxErrors/lowercase-name (0.00s)
+2026-11-16T16:23:56.2003480Z     --- PASS: TestContextSyntaxErrors/order-swapped (0.00s)
+2026-11-16T16:23:56.2017240Z     --- PASS: TestContextSyntaxErrors/single-quoted (0.00s)
+2026-11-16T16:23:56.2018890Z     --- PASS: TestContextSyntaxErrors/backquoted (0.00s)
+2026-11-16T16:23:56.2019360Z     --- PASS: TestContextSyntaxErrors/unterminated (0.00s)
+2026-11-16T16:23:56.2020100Z     --- PASS: TestContextSyntaxErrors/trailing-after-quote (0.00s)
+2026-11-16T16:23:56.2021440Z     --- PASS: TestContextSyntaxErrors/octal-escape (0.00s)
+2026-11-16T16:23:56.2022080Z     --- PASS: TestContextSyntaxErrors/unicode-escape-printable (0.00s)
+2026-11-16T16:23:56.2022770Z     --- PASS: TestContextSyntaxErrors/upper-hex (0.00s)
+2026-11-16T16:23:56.2023280Z     --- PASS: TestContextSyntaxErrors/raw-tab (0.00s)
+2026-11-16T16:23:56.2023960Z     --- PASS: TestContextSyntaxErrors/bool-True (0.00s)
+2026-11-16T16:23:56.2024420Z     --- PASS: TestContextSyntaxErrors/bool-quoted (0.00s)
+2026-11-16T16:23:56.2025170Z     --- PASS: TestContextSyntaxErrors/count-negative (0.00s)
+2026-11-16T16:23:56.2025620Z     --- PASS: TestContextSyntaxErrors/count-plus (0.00s)
+2026-11-16T16:23:56.2026290Z     --- PASS: TestContextSyntaxErrors/count-hex (0.00s)
+2026-11-16T16:23:56.2026740Z     --- PASS: TestContextSyntaxErrors/count-overflow (0.00s)
+2026-11-16T16:23:56.2027440Z     --- PASS: TestContextSyntaxErrors/count-huge-short (0.00s)
+2026-11-16T16:23:56.2027930Z     --- PASS: TestContextSyntaxErrors/element-unquoted (0.00s)
+2026-11-16T16:23:56.2028650Z     --- PASS: TestContextSyntaxErrors/element-noncanonical (0.00s)
+2026-11-16T16:23:56.2029200Z     --- PASS: TestContextSyntaxErrors/element-two-spaces (0.00s)
+2026-11-16T16:23:56.2029980Z     --- PASS: TestContextSyntaxErrors/element-dash-only (0.00s)
+2026-11-16T16:23:56.2030530Z     --- PASS: TestContextSyntaxErrors/element-dash-space (0.00s)
+2026-11-16T16:23:56.2031210Z     --- PASS: TestContextSyntaxErrors/end-wrong (0.00s)
+2026-11-16T16:23:56.2032060Z     --- PASS: TestContextSyntaxErrors/end-with-space (0.00s)
+2026-11-16T16:23:56.2032720Z     --- PASS: TestContextSyntaxErrors/after-end-blank (0.00s)
+2026-11-16T16:23:56.2033240Z     --- PASS: TestContextSyntaxErrors/after-end-header-no-lf (0.00s)
+2026-11-16T16:23:56.2034220Z     --- PASS: TestContextSyntaxErrors/truncated-in-list (0.00s)
+2026-11-16T16:23:56.2034710Z     --- PASS: TestContextSyntaxErrors/truncated-mid-line (0.00s)
+2026-11-16T16:23:56.2035370Z     --- PASS: TestContextSyntaxErrors/bom (0.00s)
+2026-11-16T16:23:56.2035880Z === RUN   TestContextErrorMessage
+2026-11-16T16:23:56.2036120Z --- PASS: TestContextErrorMessage (0.00s)
+2026-11-16T16:23:56.2036410Z === RUN   TestEnvEncoderOutput
+2026-11-16T16:23:56.2038420Z --- PASS: TestEnvEncoderOutput (0.00s)
+2026-11-16T16:23:56.2038700Z === RUN   TestEnvErrors
+2026-11-16T16:23:56.2038880Z === RUN   TestEnvErrors/no-names
+2026-11-16T16:23:56.2039090Z === RUN   TestEnvErrors/repeated-name
+2026-11-16T16:23:56.2039340Z === RUN   TestEnvErrors/empty-object
+2026-11-16T16:23:56.2039640Z === RUN   TestEnvErrors/missing-in-names-order
+2026-11-16T16:23:56.2039900Z === RUN   TestEnvErrors/null-before-type
+2026-11-16T16:23:56.2040150Z === RUN   TestEnvErrors/missing-before-type
+2026-11-16T16:23:56.2040720Z === RUN   TestEnvErrors/key-before-missing
+2026-11-16T16:23:56.2040980Z === RUN   TestEnvErrors/case-of-requested
+2026-11-16T16:23:56.2041200Z === RUN   TestEnvErrors/bool-value
+2026-11-16T16:23:56.2041410Z === RUN   TestEnvErrors/array-value
+2026-11-16T16:23:56.2041620Z === RUN   TestEnvErrors/object-value
+2026-11-16T16:23:56.2041830Z === RUN   TestEnvErrors/odd-key-path
+2026-11-16T16:23:56.2042080Z === RUN   TestEnvErrors/compact-ok-then-tab
+2026-11-16T16:23:56.2042400Z === RUN   TestEnvErrors/second-object-after-space
+2026-11-16T16:23:56.2042670Z === RUN   TestEnvErrors/string-top-level
+2026-11-16T16:23:56.2042890Z === RUN   TestEnvErrors/unclosed
+2026-11-16T16:23:56.2043150Z === RUN   TestEnvErrors/trailing-comma
+2026-11-16T16:23:56.2043420Z --- PASS: TestEnvErrors (0.00s)
+2026-11-16T16:23:56.2043740Z     --- PASS: TestEnvErrors/no-names (0.00s)
+2026-11-16T16:23:56.2044130Z     --- PASS: TestEnvErrors/repeated-name (0.00s)
+2026-11-16T16:23:56.2044530Z     --- PASS: TestEnvErrors/empty-object (0.00s)
+2026-11-16T16:23:56.2045110Z     --- PASS: TestEnvErrors/missing-in-names-order (0.00s)
+2026-11-16T16:23:56.2045580Z     --- PASS: TestEnvErrors/null-before-type (0.00s)
+2026-11-16T16:23:56.2045950Z     --- PASS: TestEnvErrors/missing-before-type (0.00s)
+2026-11-16T16:23:56.2046890Z     --- PASS: TestEnvErrors/key-before-missing (0.00s)
+2026-11-16T16:23:56.2048210Z     --- PASS: TestEnvErrors/case-of-requested (0.00s)
+2026-11-16T16:23:56.2049080Z     --- PASS: TestEnvErrors/bool-value (0.00s)
+2026-11-16T16:23:56.2049890Z     --- PASS: TestEnvErrors/array-value (0.00s)
+2026-11-16T16:23:56.2050740Z     --- PASS: TestEnvErrors/object-value (0.00s)
+2026-11-16T16:23:56.2051730Z     --- PASS: TestEnvErrors/odd-key-path (0.00s)
+2026-11-16T16:23:56.2053140Z     --- PASS: TestEnvErrors/compact-ok-then-tab (0.00s)
+2026-11-16T16:23:56.2062190Z     --- PASS: TestEnvErrors/second-object-after-space (0.00s)
+2026-11-16T16:23:56.2062730Z     --- PASS: TestEnvErrors/string-top-level (0.00s)
+2026-11-16T16:23:56.2063070Z     --- PASS: TestEnvErrors/unclosed (0.00s)
+2026-11-16T16:23:56.2063390Z     --- PASS: TestEnvErrors/trailing-comma (0.00s)
+2026-11-16T16:23:56.2063690Z === RUN   TestEnvEmptyIsObtained
+2026-11-16T16:23:56.2063910Z --- PASS: TestEnvEmptyIsObtained (0.00s)
+2026-11-16T16:23:56.2064180Z === RUN   TestEnvErrorOffsets
+2026-11-16T16:23:56.2064450Z --- PASS: TestEnvErrorOffsets (0.00s)
+2026-11-16T16:23:56.2064710Z === RUN   TestGoSumHealthy
+2026-11-16T16:23:56.2065020Z --- PASS: TestGoSumHealthy (0.00s)
+2026-11-16T16:23:56.2066040Z === RUN   TestEmptyGoModHash
+2026-11-16T16:23:56.2066250Z --- PASS: TestEmptyGoModHash (0.00s)
+2026-11-16T16:23:56.2066470Z === RUN   TestGoSumEachProblem
+2026-11-16T16:23:56.2066690Z === RUN   TestGoSumEachProblem/two-fields
+2026-11-16T16:23:56.2067220Z === RUN   TestGoSumEachProblem/four-fields
+2026-11-16T16:23:56.2067490Z === RUN   TestGoSumEachProblem/one-field
+2026-11-16T16:23:56.2067740Z === RUN   TestGoSumEachProblem/other-algorithm
+2026-11-16T16:23:56.2068020Z === RUN   TestGoSumEachProblem/no-prefix
+2026-11-16T16:23:56.2068390Z === RUN   TestGoSumEachProblem/uppercase-prefix
+2026-11-16T16:23:56.2068680Z === RUN   TestGoSumEachProblem/empty-gomod-hash
+2026-11-16T16:23:56.2068990Z === RUN   TestGoSumEachProblem/conflict
+2026-11-16T16:23:56.2069280Z === RUN   TestGoSumEachProblem/conflict-gomod
+2026-11-16T16:23:56.2069600Z --- PASS: TestGoSumEachProblem (0.00s)
+2026-11-16T16:23:56.2069930Z     --- PASS: TestGoSumEachProblem/two-fields (0.00s)
+2026-11-16T16:23:56.2070280Z     --- PASS: TestGoSumEachProblem/four-fields (0.00s)
+2026-11-16T16:23:56.2070630Z     --- PASS: TestGoSumEachProblem/one-field (0.00s)
+2026-11-16T16:23:56.2071000Z     --- PASS: TestGoSumEachProblem/other-algorithm (0.00s)
+2026-11-16T16:23:56.2071360Z     --- PASS: TestGoSumEachProblem/no-prefix (0.00s)
+2026-11-16T16:23:56.2071740Z     --- PASS: TestGoSumEachProblem/uppercase-prefix (0.00s)
+2026-11-16T16:23:56.2072190Z     --- PASS: TestGoSumEachProblem/empty-gomod-hash (0.00s)
+2026-11-16T16:23:56.2072880Z     --- PASS: TestGoSumEachProblem/conflict (0.00s)
+2026-11-16T16:23:56.2073350Z     --- PASS: TestGoSumEachProblem/conflict-gomod (0.00s)
+2026-11-16T16:23:56.2073680Z === RUN   TestGoSumAllProblemsKept
+2026-11-16T16:23:56.2073910Z --- PASS: TestGoSumAllProblemsKept (0.00s)
+2026-11-16T16:23:56.2074160Z === RUN   TestGoSumDuplicateIsNotConflict
+2026-11-16T16:23:56.2074430Z --- PASS: TestGoSumDuplicateIsNotConflict (0.00s)
+2026-11-16T16:23:56.2074690Z === RUN   TestGoSumBadLineTaintsKey
+2026-11-16T16:23:56.2074910Z --- PASS: TestGoSumBadLineTaintsKey (0.00s)
+2026-11-16T16:23:56.2075160Z === RUN   TestGoSumCRLF
+2026-11-16T16:23:56.2075340Z --- PASS: TestGoSumCRLF (0.00s)
+2026-11-16T16:23:56.2075580Z === RUN   TestGoSumLineCounting
+2026-11-16T16:23:56.2075840Z --- PASS: TestGoSumLineCounting (0.00s)
+2026-11-16T16:23:56.2076070Z === RUN   TestGoSumZeroValueIsSafe
+2026-11-16T16:23:56.2076300Z --- PASS: TestGoSumZeroValueIsSafe (0.00s)
+2026-11-16T16:23:56.2076550Z === RUN   TestStringsAgreeWithEncodingJSON
+2026-11-16T16:23:56.2076810Z --- PASS: TestStringsAgreeWithEncodingJSON (0.00s)
+2026-11-16T16:23:56.2077070Z === RUN   TestSyntaxRejections
+2026-11-16T16:23:56.2077290Z --- PASS: TestSyntaxRejections (0.00s)
+2026-11-16T16:23:56.2077510Z === RUN   TestNumbersAndLiterals
+2026-11-16T16:23:56.2077730Z --- PASS: TestNumbersAndLiterals (0.00s)
+2026-11-16T16:23:56.2077940Z === RUN   TestDepthLimit
+2026-11-16T16:23:56.2078130Z --- PASS: TestDepthLimit (0.00s)
+2026-11-16T16:23:56.2078390Z === RUN   TestMembersKeepOrderRawKeysAndDuplicates
+2026-11-16T16:23:56.2078780Z --- PASS: TestMembersKeepOrderRawKeysAndDuplicates (0.00s)
+2026-11-16T16:23:56.2079080Z === RUN   TestListEncoderOutput
+2026-11-16T16:23:56.2079290Z --- PASS: TestListEncoderOutput (0.00s)
+2026-11-16T16:23:56.2079590Z === RUN   TestPackageSchemaIsListFields
+2026-11-16T16:23:56.2079890Z --- PASS: TestPackageSchemaIsListFields (0.00s)
+2026-11-16T16:23:56.2080140Z === RUN   TestListErrors
+2026-11-16T16:23:56.2080380Z === RUN   TestListErrors/origin-unknown
+2026-11-16T16:23:56.2080740Z === RUN   TestListErrors/origin-null
+2026-11-16T16:23:56.2080970Z === RUN   TestListErrors/replace-unknown
+2026-11-16T16:23:56.2081200Z === RUN   TestListErrors/replace-null
+2026-11-16T16:23:56.2081440Z === RUN   TestListErrors/module-error-unknown
+2026-11-16T16:23:56.2081690Z === RUN   TestListErrors/module-error-case
+2026-11-16T16:23:56.2081960Z === RUN   TestListErrors/depserrors-null-element
+2026-11-16T16:23:56.2082250Z === RUN   TestListErrors/depserrors-element-string
+2026-11-16T16:23:56.2082500Z === RUN   TestListErrors/depserrors-object
+2026-11-16T16:23:56.2082730Z === RUN   TestListErrors/depserrors-dup
+2026-11-16T16:23:56.2082980Z === RUN   TestListErrors/importstack-number
+2026-11-16T16:23:56.2083460Z === RUN   TestListErrors/importstack-null
+2026-11-16T16:23:56.2083730Z === RUN   TestListErrors/importmap-null-value
+2026-11-16T16:23:56.2084050Z === RUN   TestListErrors/importmap-array
+2026-11-16T16:23:56.2084330Z === RUN   TestListErrors/versions-string
+2026-11-16T16:23:56.2084630Z === RUN   TestListErrors/main-string
+2026-11-16T16:23:56.2084930Z === RUN   TestListErrors/time-number
+2026-11-16T16:23:56.2085150Z === RUN   TestListErrors/time-no-zone
+2026-11-16T16:23:56.2085390Z === RUN   TestListErrors/escaped-field-key
+2026-11-16T16:23:56.2085630Z === RUN   TestListErrors/unrequested-field
+2026-11-16T16:23:56.2085860Z === RUN   TestListErrors/unrequested-case
+2026-11-16T16:23:56.2086110Z === RUN   TestListErrors/dup-after-type-error
+2026-11-16T16:23:56.2086380Z === RUN   TestListErrors/null-in-second-record
+2026-11-16T16:23:56.2086650Z === RUN   TestListErrors/number-top-level
+2026-11-16T16:23:56.2086880Z === RUN   TestListErrors/bad-literal
+2026-11-16T16:23:56.2087100Z === RUN   TestListErrors/lone-surrogate
+2026-11-16T16:23:56.2087330Z === RUN   TestListErrors/invalid-utf8
+2026-11-16T16:23:56.2087540Z === RUN   TestListErrors/control-byte
+2026-11-16T16:23:56.2087760Z === RUN   TestListErrors/missing-comma
+2026-11-16T16:23:56.2088010Z === RUN   TestListErrors/garbage-between
+2026-11-16T16:23:56.2088550Z --- PASS: TestListErrors (0.00s)
+2026-11-16T16:23:56.2088940Z     --- PASS: TestListErrors/origin-unknown (0.00s)
+2026-11-16T16:23:56.2089330Z     --- PASS: TestListErrors/origin-null (0.00s)
+2026-11-16T16:23:56.2089770Z     --- PASS: TestListErrors/replace-unknown (0.00s)
+2026-11-16T16:23:56.2090210Z     --- PASS: TestListErrors/replace-null (0.00s)
+2026-11-16T16:23:56.2090580Z     --- PASS: TestListErrors/module-error-unknown (0.00s)
+2026-11-16T16:23:56.2090940Z     --- PASS: TestListErrors/module-error-case (0.00s)
+2026-11-16T16:23:56.2091330Z     --- PASS: TestListErrors/depserrors-null-element (0.00s)
+2026-11-16T16:23:56.2091760Z     --- PASS: TestListErrors/depserrors-element-string (0.00s)
+2026-11-16T16:23:56.2092240Z     --- PASS: TestListErrors/depserrors-object (0.00s)
+2026-11-16T16:23:56.2092670Z     --- PASS: TestListErrors/depserrors-dup (0.00s)
+2026-11-16T16:23:56.2093110Z     --- PASS: TestListErrors/importstack-number (0.00s)
+2026-11-16T16:23:56.2093470Z     --- PASS: TestListErrors/importstack-null (0.00s)
+2026-11-16T16:23:56.2093860Z     --- PASS: TestListErrors/importmap-null-value (0.00s)
+2026-11-16T16:23:56.2094250Z     --- PASS: TestListErrors/importmap-array (0.00s)
+2026-11-16T16:23:56.2094670Z     --- PASS: TestListErrors/versions-string (0.00s)
+2026-11-16T16:23:56.2095000Z     --- PASS: TestListErrors/main-string (0.00s)
+2026-11-16T16:23:56.2095400Z     --- PASS: TestListErrors/time-number (0.00s)
+2026-11-16T16:23:56.2095770Z     --- PASS: TestListErrors/time-no-zone (0.00s)
+2026-11-16T16:23:56.2096210Z     --- PASS: TestListErrors/escaped-field-key (0.00s)
+2026-11-16T16:23:56.2096650Z     --- PASS: TestListErrors/unrequested-field (0.00s)
+2026-11-16T16:23:56.2097100Z     --- PASS: TestListErrors/unrequested-case (0.00s)
+2026-11-16T16:23:56.2097620Z     --- PASS: TestListErrors/dup-after-type-error (0.00s)
+2026-11-16T16:23:56.2119370Z     --- PASS: TestListErrors/null-in-second-record (0.00s)
+2026-11-16T16:23:56.2120030Z     --- PASS: TestListErrors/number-top-level (0.00s)
+2026-11-16T16:23:56.2120460Z     --- PASS: TestListErrors/bad-literal (0.00s)
+2026-11-16T16:23:56.2120840Z     --- PASS: TestListErrors/lone-surrogate (0.00s)
+2026-11-16T16:23:56.2121230Z     --- PASS: TestListErrors/invalid-utf8 (0.00s)
+2026-11-16T16:23:56.2121630Z     --- PASS: TestListErrors/control-byte (0.00s)
+2026-11-16T16:23:56.2122050Z     --- PASS: TestListErrors/missing-comma (0.00s)
+2026-11-16T16:23:56.2122420Z     --- PASS: TestListErrors/garbage-between (0.00s)
+2026-11-16T16:23:56.2122750Z === RUN   TestNestedOmissionsAreZero
+2026-11-16T16:23:56.2123010Z --- PASS: TestNestedOmissionsAreZero (0.00s)
+2026-11-16T16:23:56.2123300Z === RUN   TestListAcceptsStreamWhitespace
+2026-11-16T16:23:56.2123660Z --- PASS: TestListAcceptsStreamWhitespace (0.00s)
+2026-11-16T16:23:56.2124530Z === RUN   TestNoPanicOnTruncationsAndMutations
+2026-11-16T16:23:56.2124920Z --- PASS: TestNoPanicOnTruncationsAndMutations (0.20s)
+2026-11-16T16:23:56.2125230Z === RUN   TestNoPanicOnRandomBytes
+2026-11-16T16:23:56.2125510Z --- PASS: TestNoPanicOnRandomBytes (0.01s)
+2026-11-16T16:23:56.2125810Z === RUN   TestTruncatedHealthyOutputsFail
+2026-11-16T16:23:56.2126080Z --- PASS: TestTruncatedHealthyOutputsFail (0.02s)
+2026-11-16T16:23:56.2126380Z === RUN   TestLC4Variants
+2026-11-16T16:23:56.2126610Z === RUN   TestLC4Variants/env.healthy
+2026-11-16T16:23:56.2126900Z === RUN   TestLC4Variants/env.healthy-escapes
+2026-11-16T16:23:56.2127180Z === RUN   TestLC4Variants/env.missing-key
+2026-11-16T16:23:56.2127430Z === RUN   TestLC4Variants/env.extra-key
+2026-11-16T16:23:56.2127710Z === RUN   TestLC4Variants/env.case-key
+2026-11-16T16:23:56.2127950Z === RUN   TestLC4Variants/env.escaped-key
+2026-11-16T16:23:56.2128170Z === RUN   TestLC4Variants/env.null
+2026-11-16T16:23:56.2128400Z === RUN   TestLC4Variants/env.duplicate-key
+2026-11-16T16:23:56.2128640Z === RUN   TestLC4Variants/env.type-mismatch
+2026-11-16T16:23:56.2128880Z === RUN   TestLC4Variants/env.trailing
+2026-11-16T16:23:56.2129600Z === RUN   TestLC4Variants/env.crlf-end
+2026-11-16T16:23:56.2131220Z === RUN   TestLC4Variants/env.second-object
+2026-11-16T16:23:56.2131870Z === RUN   TestLC4Variants/env.no-final-lf
+2026-11-16T16:23:56.2132510Z === RUN   TestLC4Variants/env.leading-space
+2026-11-16T16:23:56.2132790Z === RUN   TestLC4Variants/env.top-level-array
+2026-11-16T16:23:56.2133050Z === RUN   TestLC4Variants/env.malformed
+2026-11-16T16:23:56.2133350Z === RUN   TestLC4Variants/env.zero-bytes
+2026-11-16T16:23:56.2133620Z === RUN   TestLC4Variants/ctx.healthy
+2026-11-16T16:23:56.2133920Z === RUN   TestLC4Variants/ctx.healthy-escapes
+2026-11-16T16:23:56.2134260Z === RUN   TestLC4Variants/ctx.order-and-duplicates
+2026-11-16T16:23:56.2134580Z === RUN   TestLC4Variants/ctx.syntax-only
+2026-11-16T16:23:56.2134820Z === RUN   TestLC4Variants/ctx.missing-end
+2026-11-16T16:23:56.2135050Z === RUN   TestLC4Variants/ctx.count-short
+2026-11-16T16:23:56.2135280Z === RUN   TestLC4Variants/ctx.count-long
+2026-11-16T16:23:56.2135520Z === RUN   TestLC4Variants/ctx.noncanonical-x41
+2026-11-16T16:23:56.2135770Z === RUN   TestLC4Variants/ctx.crlf
+2026-11-16T16:23:56.2135990Z === RUN   TestLC4Variants/ctx.two-texts
+2026-11-16T16:23:56.2136220Z === RUN   TestLC4Variants/ctx.extra-line
+2026-11-16T16:23:56.2136440Z === RUN   TestLC4Variants/ctx.cgo-zero
+2026-11-16T16:23:56.2136650Z === RUN   TestLC4Variants/ctx.zero-bytes
+2026-11-16T16:23:56.2136890Z === RUN   TestLC4Variants/ctx.after-end
+2026-11-16T16:23:56.2137200Z === RUN   TestLC4Variants/ctx.no-final-lf
+2026-11-16T16:23:56.2137460Z === RUN   TestLC4Variants/ctx.blank-line
+2026-11-16T16:23:56.2138000Z === RUN   TestLC4Variants/ctx.double-space
+2026-11-16T16:23:56.2138280Z === RUN   TestLC4Variants/ctx.unquoted
+2026-11-16T16:23:56.2138520Z === RUN   TestLC4Variants/ctx.invalid-escape
+2026-11-16T16:23:56.2138760Z === RUN   TestLC4Variants/ctx.leading-zero
+2026-11-16T16:23:56.2139010Z === RUN   TestLC4Variants/ctx.element-no-space
+2026-11-16T16:23:56.2139260Z === RUN   TestLC4Variants/ctx.json-shaped
+2026-11-16T16:23:56.2139480Z === RUN   TestLC4Variants/list.std
+2026-11-16T16:23:56.2139690Z === RUN   TestLC4Variants/list.main
+2026-11-16T16:23:56.2139900Z === RUN   TestLC4Variants/list.dep
+2026-11-16T16:23:56.2140110Z === RUN   TestLC4Variants/list.stream
+2026-11-16T16:23:56.2140330Z === RUN   TestLC4Variants/list.no-module
+2026-11-16T16:23:56.2140630Z === RUN   TestLC4Variants/list.dep-omissions
+2026-11-16T16:23:56.2140910Z === RUN   TestLC4Variants/list.std-with-module
+2026-11-16T16:23:56.2141160Z === RUN   TestLC4Variants/list.error-fields
+2026-11-16T16:23:56.2141420Z === RUN   TestLC4Variants/list.module-all-fields
+2026-11-16T16:23:56.2141710Z === RUN   TestLC4Variants/list.importmap-case
+2026-11-16T16:23:56.2141990Z === RUN   TestLC4Variants/list.empty-array
+2026-11-16T16:23:56.2142700Z === RUN   TestLC4Variants/list.extra-key
+2026-11-16T16:23:56.2143000Z === RUN   TestLC4Variants/list.extra-module-key
+2026-11-16T16:23:56.2143290Z === RUN   TestLC4Variants/list.extra-packageerror-key
+2026-11-16T16:23:56.2143550Z === RUN   TestLC4Variants/list.case-key
+2026-11-16T16:23:56.2143790Z === RUN   TestLC4Variants/list.case-module-key
+2026-11-16T16:23:56.2144040Z === RUN   TestLC4Variants/list.null-module
+2026-11-16T16:23:56.2144280Z === RUN   TestLC4Variants/list.null-nested
+2026-11-16T16:23:56.2144510Z === RUN   TestLC4Variants/list.null-element
+2026-11-16T16:23:56.2147490Z === RUN   TestLC4Variants/list.duplicate-key
+2026-11-16T16:23:56.2147940Z === RUN   TestLC4Variants/list.duplicate-module-key
+2026-11-16T16:23:56.2148360Z === RUN   TestLC4Variants/list.duplicate-importmap-key
+2026-11-16T16:23:56.2148710Z === RUN   TestLC4Variants/list.type-standard-string
+2026-11-16T16:23:56.2149020Z === RUN   TestLC4Variants/list.type-gofiles-string
+2026-11-16T16:23:56.2149370Z === RUN   TestLC4Variants/list.type-imports-element
+2026-11-16T16:23:56.2149660Z === RUN   TestLC4Variants/list.type-importmap-value
+2026-11-16T16:23:56.2149940Z === RUN   TestLC4Variants/list.type-module-array
+2026-11-16T16:23:56.2150240Z === RUN   TestLC4Variants/list.type-module-error-string
+2026-11-16T16:23:56.2150770Z === RUN   TestLC4Variants/list.type-time
+2026-11-16T16:23:56.2151010Z === RUN   TestLC4Variants/list.type-number
+2026-11-16T16:23:56.2151300Z === RUN   TestLC4Variants/list.order-keys-before-types
+2026-11-16T16:23:56.2151570Z === RUN   TestLC4Variants/list.trailing
+2026-11-16T16:23:56.2151800Z === RUN   TestLC4Variants/list.trailing-array
+2026-11-16T16:23:56.2152040Z === RUN   TestLC4Variants/list.malformed
+2026-11-16T16:23:56.2152280Z === RUN   TestLC4Variants/list.second-malformed
+2026-11-16T16:23:56.2152540Z === RUN   TestLC4Variants/list.top-level-array
+2026-11-16T16:23:56.2152790Z === RUN   TestLC4Variants/list.zero-bytes
+2026-11-16T16:23:56.2153030Z === RUN   TestLC4Variants/list.whitespace-only
+2026-11-16T16:23:56.2153270Z --- PASS: TestLC4Variants (0.00s)
+2026-11-16T16:23:56.2153570Z     --- PASS: TestLC4Variants/env.healthy (0.00s)
+2026-11-16T16:23:56.2153960Z     --- PASS: TestLC4Variants/env.healthy-escapes (0.00s)
+2026-11-16T16:23:56.2154390Z     --- PASS: TestLC4Variants/env.missing-key (0.00s)
+2026-11-16T16:23:56.2154720Z     --- PASS: TestLC4Variants/env.extra-key (0.00s)
+2026-11-16T16:23:56.2155050Z     --- PASS: TestLC4Variants/env.case-key (0.00s)
+2026-11-16T16:23:56.2155390Z     --- PASS: TestLC4Variants/env.escaped-key (0.00s)
+2026-11-16T16:23:56.2155760Z     --- PASS: TestLC4Variants/env.null (0.00s)
+2026-11-16T16:23:56.2156200Z     --- PASS: TestLC4Variants/env.duplicate-key (0.00s)
+2026-11-16T16:23:56.2156660Z     --- PASS: TestLC4Variants/env.type-mismatch (0.00s)
+2026-11-16T16:23:56.2157000Z     --- PASS: TestLC4Variants/env.trailing (0.00s)
+2026-11-16T16:23:56.2157330Z     --- PASS: TestLC4Variants/env.crlf-end (0.00s)
+2026-11-16T16:23:56.2157680Z     --- PASS: TestLC4Variants/env.second-object (0.00s)
+2026-11-16T16:23:56.2158130Z     --- PASS: TestLC4Variants/env.no-final-lf (0.00s)
+2026-11-16T16:23:56.2158540Z     --- PASS: TestLC4Variants/env.leading-space (0.00s)
+2026-11-16T16:23:56.2158950Z     --- PASS: TestLC4Variants/env.top-level-array (0.00s)
+2026-11-16T16:23:56.2159390Z     --- PASS: TestLC4Variants/env.malformed (0.00s)
+2026-11-16T16:23:56.2159790Z     --- PASS: TestLC4Variants/env.zero-bytes (0.00s)
+2026-11-16T16:23:56.2160150Z     --- PASS: TestLC4Variants/ctx.healthy (0.00s)
+2026-11-16T16:23:56.2160600Z     --- PASS: TestLC4Variants/ctx.healthy-escapes (0.00s)
+2026-11-16T16:23:56.2160990Z     --- PASS: TestLC4Variants/ctx.order-and-duplicates (0.00s)
+2026-11-16T16:23:56.2161370Z     --- PASS: TestLC4Variants/ctx.syntax-only (0.00s)
+2026-11-16T16:23:56.2161760Z     --- PASS: TestLC4Variants/ctx.missing-end (0.00s)
+2026-11-16T16:23:56.2162120Z     --- PASS: TestLC4Variants/ctx.count-short (0.00s)
+2026-11-16T16:23:56.2162470Z     --- PASS: TestLC4Variants/ctx.count-long (0.00s)
+2026-11-16T16:23:56.2163410Z     --- PASS: TestLC4Variants/ctx.noncanonical-x41 (0.00s)
+2026-11-16T16:23:56.2163910Z     --- PASS: TestLC4Variants/ctx.crlf (0.00s)
+2026-11-16T16:23:56.2164270Z     --- PASS: TestLC4Variants/ctx.two-texts (0.00s)
+2026-11-16T16:23:56.2164620Z     --- PASS: TestLC4Variants/ctx.extra-line (0.00s)
+2026-11-16T16:23:56.2164970Z     --- PASS: TestLC4Variants/ctx.cgo-zero (0.00s)
+2026-11-16T16:23:56.2165320Z     --- PASS: TestLC4Variants/ctx.zero-bytes (0.00s)
+2026-11-16T16:23:56.2165650Z     --- PASS: TestLC4Variants/ctx.after-end (0.00s)
+2026-11-16T16:23:56.2166000Z     --- PASS: TestLC4Variants/ctx.no-final-lf (0.00s)
+2026-11-16T16:23:56.2166340Z     --- PASS: TestLC4Variants/ctx.blank-line (0.00s)
+2026-11-16T16:23:56.2166690Z     --- PASS: TestLC4Variants/ctx.double-space (0.00s)
+2026-11-16T16:23:56.2167040Z     --- PASS: TestLC4Variants/ctx.unquoted (0.00s)
+2026-11-16T16:23:56.2167490Z     --- PASS: TestLC4Variants/ctx.invalid-escape (0.00s)
+2026-11-16T16:23:56.2167900Z     --- PASS: TestLC4Variants/ctx.leading-zero (0.00s)
+2026-11-16T16:23:56.2168330Z     --- PASS: TestLC4Variants/ctx.element-no-space (0.00s)
+2026-11-16T16:23:56.2168700Z     --- PASS: TestLC4Variants/ctx.json-shaped (0.00s)
+2026-11-16T16:23:56.2169020Z     --- PASS: TestLC4Variants/list.std (0.00s)
+2026-11-16T16:23:56.2169450Z     --- PASS: TestLC4Variants/list.main (0.00s)
+2026-11-16T16:23:56.2169780Z     --- PASS: TestLC4Variants/list.dep (0.00s)
+2026-11-16T16:23:56.2170170Z     --- PASS: TestLC4Variants/list.stream (0.00s)
+2026-11-16T16:23:56.2170590Z     --- PASS: TestLC4Variants/list.no-module (0.00s)
+2026-11-16T16:23:56.2170960Z     --- PASS: TestLC4Variants/list.dep-omissions (0.00s)
+2026-11-16T16:23:56.2171330Z     --- PASS: TestLC4Variants/list.std-with-module (0.00s)
+2026-11-16T16:23:56.2171700Z     --- PASS: TestLC4Variants/list.error-fields (0.00s)
+2026-11-16T16:23:56.2172080Z     --- PASS: TestLC4Variants/list.module-all-fields (0.00s)
+2026-11-16T16:23:56.2172560Z     --- PASS: TestLC4Variants/list.importmap-case (0.00s)
+2026-11-16T16:23:56.2172920Z     --- PASS: TestLC4Variants/list.empty-array (0.00s)
+2026-11-16T16:23:56.2173270Z     --- PASS: TestLC4Variants/list.extra-key (0.00s)
+2026-11-16T16:23:56.2173730Z     --- PASS: TestLC4Variants/list.extra-module-key (0.00s)
+2026-11-16T16:23:56.2174780Z     --- PASS: TestLC4Variants/list.extra-packageerror-key (0.00s)
+2026-11-16T16:23:56.2175190Z     --- PASS: TestLC4Variants/list.case-key (0.00s)
+2026-11-16T16:23:56.2175550Z     --- PASS: TestLC4Variants/list.case-module-key (0.00s)
+2026-11-16T16:23:56.2175910Z     --- PASS: TestLC4Variants/list.null-module (0.00s)
+2026-11-16T16:23:56.2176310Z     --- PASS: TestLC4Variants/list.null-nested (0.00s)
+2026-11-16T16:23:56.2177050Z     --- PASS: TestLC4Variants/list.null-element (0.00s)
+2026-11-16T16:23:56.2177480Z     --- PASS: TestLC4Variants/list.duplicate-key (0.00s)
+2026-11-16T16:23:56.2177950Z     --- PASS: TestLC4Variants/list.duplicate-module-key (0.00s)
+2026-11-16T16:23:56.2178520Z     --- PASS: TestLC4Variants/list.duplicate-importmap-key (0.00s)
+2026-11-16T16:23:56.2179020Z     --- PASS: TestLC4Variants/list.type-standard-string (0.00s)
+2026-11-16T16:23:56.2179440Z     --- PASS: TestLC4Variants/list.type-gofiles-string (0.00s)
+2026-11-16T16:23:56.2179870Z     --- PASS: TestLC4Variants/list.type-imports-element (0.00s)
+2026-11-16T16:23:56.2180290Z     --- PASS: TestLC4Variants/list.type-importmap-value (0.00s)
+2026-11-16T16:23:56.2180720Z     --- PASS: TestLC4Variants/list.type-module-array (0.00s)
+2026-11-16T16:23:56.2181250Z     --- PASS: TestLC4Variants/list.type-module-error-string (0.00s)
+2026-11-16T16:23:56.2181680Z     --- PASS: TestLC4Variants/list.type-time (0.00s)
+2026-11-16T16:23:56.2182230Z     --- PASS: TestLC4Variants/list.type-number (0.00s)
+2026-11-16T16:23:56.2182670Z     --- PASS: TestLC4Variants/list.order-keys-before-types (0.00s)
+2026-11-16T16:23:56.2183140Z     --- PASS: TestLC4Variants/list.trailing (0.00s)
+2026-11-16T16:23:56.2183510Z     --- PASS: TestLC4Variants/list.trailing-array (0.00s)
+2026-11-16T16:23:56.2184120Z     --- PASS: TestLC4Variants/list.malformed (0.00s)
+2026-11-16T16:23:56.2184500Z     --- PASS: TestLC4Variants/list.second-malformed (0.00s)
+2026-11-16T16:23:56.2184890Z     --- PASS: TestLC4Variants/list.top-level-array (0.00s)
+2026-11-16T16:23:56.2185290Z     --- PASS: TestLC4Variants/list.zero-bytes (0.00s)
+2026-11-16T16:23:56.2185710Z     --- PASS: TestLC4Variants/list.whitespace-only (0.00s)
+2026-11-16T16:23:56.2185970Z === RUN   TestLC4VariantTable
+2026-11-16T16:23:56.2186170Z --- PASS: TestLC4VariantTable (0.00s)
+2026-11-16T16:23:56.2186400Z === RUN   TestLC4DocListsEveryVariant
+2026-11-16T16:23:56.2186650Z --- PASS: TestLC4DocListsEveryVariant (0.00s)
+2026-11-16T16:23:56.2186910Z === RUN   TestV34HealthyValues
+2026-11-16T16:23:56.2187170Z --- PASS: TestV34HealthyValues (0.00s)
+2026-11-16T16:23:56.2189330Z === RUN   TestMatchRejectsWrongOutcomes
+2026-11-16T16:23:56.2189690Z --- PASS: TestMatchRejectsWrongOutcomes (0.00s)
+2026-11-16T16:23:56.2190560Z PASS
+2026-11-16T16:23:56.2190900Z ok  	github.com/XKHoshizora/specmetry/prototype/c9evidence/internal/decode	0.260s
+2026-11-16T16:23:58.3481930Z === RUN   TestJobConsistent
+2026-11-16T16:23:58.3482420Z --- PASS: TestJobConsistent (0.07s)
+2026-11-16T16:23:58.3482760Z === RUN   TestJobEveryControl
+2026-11-16T16:23:58.3483630Z --- PASS: TestJobEveryControl (0.12s)
+2026-11-16T16:23:58.3483880Z === RUN   TestJobStoppedInvoker
+2026-11-16T16:23:58.3484140Z --- PASS: TestJobStoppedInvoker (0.04s)
+2026-11-16T16:23:58.3484390Z === RUN   TestJobWithoutR
+2026-11-16T16:23:58.3484590Z --- PASS: TestJobWithoutR (0.05s)
+2026-11-16T16:23:58.3484840Z === RUN   TestJobMRunNonzero
+2026-11-16T16:23:58.3485040Z --- PASS: TestJobMRunNonzero (0.05s)
+2026-11-16T16:23:58.3485300Z === RUN   TestJobDomainsNotRun
+2026-11-16T16:23:58.3485600Z --- PASS: TestJobDomainsNotRun (0.00s)
+2026-11-16T16:23:58.3485860Z === RUN   TestJobBadT2
+2026-11-16T16:23:58.3486060Z --- PASS: TestJobBadT2 (0.04s)
+2026-11-16T16:23:58.3486340Z === RUN   TestB1471ParentLeavesAStuckAnalysisAtW
+2026-11-16T16:23:58.3486720Z --- PASS: TestB1471ParentLeavesAStuckAnalysisAtW (0.00s)
+2026-11-16T16:23:58.3487160Z === RUN   TestB1474DerivedRecordsNameResolvableParents
+2026-11-16T16:23:58.3487570Z --- PASS: TestB1474DerivedRecordsNameResolvableParents (0.08s)
+2026-11-16T16:23:58.3487920Z === RUN   TestB1474ControlRecordsKeepSites
+2026-11-16T16:23:58.3488190Z --- PASS: TestB1474ControlRecordsKeepSites (0.01s)
+2026-11-16T16:23:58.3488470Z === RUN   TestB1471HealthyTimely
+2026-11-16T16:23:58.3488680Z --- PASS: TestB1471HealthyTimely (0.06s)
+2026-11-16T16:23:58.3488950Z === RUN   TestB1471LastUnitCompletesAfterW
+2026-11-16T16:23:58.3489230Z --- PASS: TestB1471LastUnitCompletesAfterW (0.01s)
+2026-11-16T16:23:58.3489510Z === RUN   TestB1471RealErrorAfterTheParentStopped
+2026-11-16T16:23:58.3489820Z --- PASS: TestB1471RealErrorAfterTheParentStopped (0.01s)
+2026-11-16T16:23:58.3490170Z === RUN   TestB1471DExitReachable
+2026-11-16T16:23:58.3491230Z --- PASS: TestB1471DExitReachable (0.21s)
+2026-11-16T16:23:58.3492340Z === RUN   TestB1474FRecordsKeepInstances
+2026-11-16T16:23:58.3492630Z --- PASS: TestB1474FRecordsKeepInstances (0.02s)
+2026-11-16T16:23:58.3492960Z === RUN   TestB1474BrokenProvenanceIsInvalid
+2026-11-16T16:23:58.3493280Z --- PASS: TestB1474BrokenProvenanceIsInvalid (0.04s)
+2026-11-16T16:23:58.3493570Z === RUN   TestN1473WRecord
+2026-11-16T16:23:58.3493770Z --- PASS: TestN1473WRecord (0.00s)
+2026-11-16T16:23:58.3494000Z === RUN   TestN1471LC1UsesTheModulesToCheck
+2026-11-16T16:23:58.3494290Z --- PASS: TestN1471LC1UsesTheModulesToCheck (0.00s)
+2026-11-16T16:23:58.3494600Z === RUN   TestB148RaStuckVerificationParentStillCloses
+2026-11-16T16:23:58.3494970Z --- PASS: TestB148RaStuckVerificationParentStillCloses (0.01s)
+2026-11-16T16:23:58.3495300Z === RUN   TestB148RaStuckVerificationExpiredParent
+2026-11-16T16:23:58.3495610Z --- PASS: TestB148RaStuckVerificationExpiredParent (0.01s)
+2026-11-16T16:23:58.3495970Z === RUN   TestB148RaLateVerificationSuccessDoesNotRestore
+2026-11-16T16:23:58.3496720Z --- PASS: TestB148RaLateVerificationSuccessDoesNotRestore (0.02s)
+2026-11-16T16:23:58.3497150Z === RUN   TestB148RaLateVerificationErrorIsConsumed
+2026-11-16T16:23:58.3497690Z --- PASS: TestB148RaLateVerificationErrorIsConsumed (0.01s)
+2026-11-16T16:23:58.3498070Z === RUN   TestB148RaHealthyVerifiedOnceByTheWork
+2026-11-16T16:23:58.3498400Z --- PASS: TestB148RaHealthyVerifiedOnceByTheWork (0.01s)
+2026-11-16T16:23:58.3498770Z === RUN   TestB148RaExpiredParentDoesNotVerify
+2026-11-16T16:23:58.3499160Z --- PASS: TestB148RaExpiredParentDoesNotVerify (0.02s)
+2026-11-16T16:23:58.3511340Z === RUN   TestB148RaBrokenRecordBeforeTheVerification
+2026-11-16T16:23:58.3511790Z --- PASS: TestB148RaBrokenRecordBeforeTheVerification (0.02s)
+2026-11-16T16:23:58.3512230Z === RUN   TestB148RbAbandonedThenCompletedBeforeFinish
+2026-11-16T16:23:58.3512720Z --- PASS: TestB148RbAbandonedThenCompletedBeforeFinish (0.01s)
+2026-11-16T16:23:58.3513150Z === RUN   TestB148RbTimelyWorkParentLate
+2026-11-16T16:23:58.3513510Z --- PASS: TestB148RbTimelyWorkParentLate (0.13s)
+2026-11-16T16:23:58.3513850Z === RUN   TestB148RbWorkDoneAtOrAfterW
+2026-11-16T16:23:58.3514180Z --- PASS: TestB148RbWorkDoneAtOrAfterW (0.03s)
+2026-11-16T16:23:58.3514490Z === RUN   TestB148RcLateWorkCreatesNoRoot
+2026-11-16T16:23:58.3515060Z --- PASS: TestB148RcLateWorkCreatesNoRoot (0.00s)
+2026-11-16T16:23:58.3515390Z === RUN   TestB148RcAnalysisReturnsAfterD
+2026-11-16T16:23:58.3515680Z --- PASS: TestB148RcAnalysisReturnsAfterD (0.00s)
+2026-11-16T16:23:58.3515990Z === RUN   TestB148RcCleanupBetweenWAndD
+2026-11-16T16:23:58.3516320Z --- PASS: TestB148RcCleanupBetweenWAndD (0.01s)
+2026-11-16T16:23:58.3516650Z === RUN   TestB148RcPrepareAndCleanupFailuresAreRecorded
+2026-11-16T16:23:58.3517030Z --- PASS: TestB148RcPrepareAndCleanupFailuresAreRecorded (0.01s)
+2026-11-16T16:23:58.3517360Z === RUN   TestB148RcHealthyPrepareAndCleanup
+2026-11-16T16:23:58.3517640Z --- PASS: TestB148RcHealthyPrepareAndCleanup (0.01s)
+2026-11-16T16:23:58.3517960Z === RUN   TestB148RaPublishedVerificationCoversEveryRecord
+2026-11-16T16:23:58.3518340Z --- PASS: TestB148RaPublishedVerificationCoversEveryRecord (0.01s)
+2026-11-16T16:23:58.3518700Z === RUN   TestB148RaStuckVerificationIsPending
+2026-11-16T16:23:58.3519000Z --- PASS: TestB148RaStuckVerificationIsPending (0.01s)
+2026-11-16T16:23:58.3519410Z === RUN   TestB148RaLateSuccessIsNotTimely
+2026-11-16T16:23:58.3519830Z --- PASS: TestB148RaLateSuccessIsNotTimely (0.01s)
+2026-11-16T16:23:58.3520190Z === RUN   TestB148RaLateVerificationErrorHeldAfterFinish
+2026-11-16T16:23:58.3520580Z --- PASS: TestB148RaLateVerificationErrorHeldAfterFinish (0.01s)
+2026-11-16T16:23:58.3520950Z === RUN   TestB148RaAppendedAfterTheVerificationIsADefect
+2026-11-16T16:23:58.3521360Z --- PASS: TestB148RaAppendedAfterTheVerificationIsADefect (0.01s)
+2026-11-16T16:23:58.3521720Z === RUN   TestB148RaBrokenRecordFoundByTheWork
+2026-11-16T16:23:58.3522940Z --- PASS: TestB148RaBrokenRecordFoundByTheWork (0.01s)
+2026-11-16T16:23:58.3523330Z === RUN   TestB148RbLC1AndWorkQualification
+2026-11-16T16:23:58.3523680Z --- PASS: TestB148RbLC1AndWorkQualification (0.01s)
+2026-11-16T16:23:58.3524010Z === RUN   TestB148RcRefusedPreparationIsRecordedApart
+2026-11-16T16:23:58.3524360Z --- PASS: TestB148RcRefusedPreparationIsRecordedApart (0.00s)
+2026-11-16T16:23:58.3524690Z === RUN   TestB148RcRefusedCleanupKeepsTheHold
+2026-11-16T16:23:58.3524990Z --- PASS: TestB148RcRefusedCleanupKeepsTheHold (0.01s)
+2026-11-16T16:23:58.3525290Z === RUN   TestB148RcFailureIsNotARefusal
+2026-11-16T16:23:58.3525830Z --- PASS: TestB148RcFailureIsNotARefusal (0.01s)
+2026-11-16T16:23:58.3526140Z === RUN   TestB148RcHealthyHoldsReleased
+2026-11-16T16:23:58.3526420Z --- PASS: TestB148RcHealthyHoldsReleased (0.01s)
+2026-11-16T16:23:58.3526730Z === RUN   TestB149MkdirTempReturnsAfterD
+2026-11-16T16:23:58.3526990Z --- PASS: TestB149MkdirTempReturnsAfterD (0.00s)
+2026-11-16T16:23:58.3527320Z === RUN   TestB149MkdirAllCrossesW
+2026-11-16T16:23:58.3527600Z --- PASS: TestB149MkdirAllCrossesW (0.00s)
+2026-11-16T16:23:58.3527850Z === RUN   TestB149WriteCrossesW
+2026-11-16T16:23:58.3528500Z --- PASS: TestB149WriteCrossesW (0.00s)
+2026-11-16T16:23:58.3529860Z === RUN   TestB149RemoveCrossesW
+2026-11-16T16:23:58.3530170Z --- PASS: TestB149RemoveCrossesW (0.00s)
+2026-11-16T16:23:58.3530500Z === RUN   TestB149StepAtWIsRefusedCleanupAdmitted
+2026-11-16T16:23:58.3530820Z --- PASS: TestB149StepAtWIsRefusedCleanupAdmitted (0.00s)
+2026-11-16T16:23:58.3531160Z === RUN   TestB149RealFailureKeptApartFromRefusal
+2026-11-16T16:23:58.3531480Z --- PASS: TestB149RealFailureKeptApartFromRefusal (0.01s)
+2026-11-16T16:23:58.3531780Z === RUN   TestB149HealthyStepsAllDone
+2026-11-16T16:23:58.3532070Z --- PASS: TestB149HealthyStepsAllDone (0.03s)
+2026-11-16T16:23:58.3532380Z === RUN   TestB149StepOpsHealthy
+2026-11-16T16:23:58.3532710Z --- PASS: TestB149StepOpsHealthy (0.02s)
+2026-11-16T16:23:58.3532970Z === RUN   TestB149RefusedStepIsNamed
+2026-11-16T16:23:58.3533290Z --- PASS: TestB149RefusedStepIsNamed (0.00s)
+2026-11-16T16:23:58.3533630Z === RUN   TestB149RemoveThenMkdirSteps
+2026-11-16T16:23:58.3534040Z --- PASS: TestB149RemoveThenMkdirSteps (0.00s)
+2026-11-16T16:23:58.3534340Z === RUN   TestB149LC2ChangeSteps
+2026-11-16T16:23:58.3534580Z --- PASS: TestB149LC2ChangeSteps (0.01s)
+2026-11-16T16:23:58.3535060Z === RUN   TestB151RegisteredNotYetCalled
+2026-11-16T16:23:58.3535400Z --- PASS: TestB151RegisteredNotYetCalled (0.21s)
+2026-11-16T16:23:58.3535690Z === RUN   TestB151CallEnteredBeforeStarted
+2026-11-16T16:23:58.3536040Z --- PASS: TestB151CallEnteredBeforeStarted (0.31s)
+2026-11-16T16:23:58.3536380Z === RUN   TestB151StartedButNotReturned
+2026-11-16T16:23:58.3536690Z --- PASS: TestB151StartedButNotReturned (0.35s)
+2026-11-16T16:23:58.3537070Z === RUN   TestB151LateReturnKeepsTheOriginalFinal
+2026-11-16T16:23:58.3537550Z --- PASS: TestB151LateReturnKeepsTheOriginalFinal (0.21s)
+2026-11-16T16:23:58.3537910Z === RUN   TestB151NeverIssuedCleanupIssuesOnce
+2026-11-16T16:23:58.3538300Z --- PASS: TestB151NeverIssuedCleanupIssuesOnce (0.01s)
+2026-11-16T16:23:58.3538710Z === RUN   TestB151ControlsNormalAndExpiryBeforeTheSeal
+2026-11-16T16:23:58.3539050Z === RUN   TestB151ControlsNormalAndExpiryBeforeTheSeal/normal
+2026-11-16T16:23:58.3539510Z === RUN   TestB151ControlsNormalAndExpiryBeforeTheSeal/expiry_before_the_seal
+2026-11-16T16:23:58.3540220Z --- PASS: TestB151ControlsNormalAndExpiryBeforeTheSeal (0.02s)
+2026-11-16T16:23:58.3540750Z     --- PASS: TestB151ControlsNormalAndExpiryBeforeTheSeal/normal (0.01s)
+2026-11-16T16:23:58.3541380Z     --- PASS: TestB151ControlsNormalAndExpiryBeforeTheSeal/expiry_before_the_seal (0.01s)
+2026-11-16T16:23:58.3541870Z === RUN   TestB152HandshakeWaitsForALaggingWriter
+2026-11-16T16:23:58.3542280Z --- PASS: TestB152HandshakeWaitsForALaggingWriter (0.21s)
+2026-11-16T16:23:58.3542660Z === RUN   TestB152WriterExpiredByItselfNeedsNoWake
+2026-11-16T16:23:58.3543010Z --- PASS: TestB152WriterExpiredByItselfNeedsNoWake (0.02s)
+2026-11-16T16:23:58.3543340Z === RUN   TestJobToolProblems
+2026-11-16T16:23:58.3543620Z === RUN   TestJobToolProblems/clean
+2026-11-16T16:23:58.3543920Z === RUN   TestJobToolProblems/failure
+2026-11-16T16:23:58.3544230Z === RUN   TestJobToolProblems/pending
+2026-11-16T16:23:58.3544500Z --- PASS: TestJobToolProblems (0.21s)
+2026-11-16T16:23:58.3544870Z     --- PASS: TestJobToolProblems/clean (0.06s)
+2026-11-16T16:23:58.3545280Z     --- PASS: TestJobToolProblems/failure (0.09s)
+2026-11-16T16:23:58.3545720Z     --- PASS: TestJobToolProblems/pending (0.05s)
+2026-11-16T16:23:58.3546060Z PASS
+2026-11-16T16:23:58.3547550Z ok  	github.com/XKHoshizora/specmetry/prototype/c9evidence/internal/job	2.882s
+2026-11-16T16:23:58.3548040Z === RUN   TestChecksRules
+2026-11-16T16:23:58.3548290Z --- PASS: TestChecksRules (0.00s)
+2026-11-16T16:23:58.3548570Z === RUN   TestAccAndSetIfUnset
+2026-11-16T16:23:58.3548840Z --- PASS: TestAccAndSetIfUnset (0.00s)
+2026-11-16T16:23:58.3549100Z PASS
+2026-11-16T16:23:58.3549460Z ok  	github.com/XKHoshizora/specmetry/prototype/c9evidence/internal/judge	0.008s
+2026-11-16T16:23:58.3549870Z === RUN   TestHoldKeepsUntilTheProcessEnds
+2026-11-16T16:23:58.3550420Z --- PASS: TestHoldKeepsUntilTheProcessEnds (0.00s)
+2026-11-16T16:23:58.3550710Z PASS
+2026-11-16T16:23:58.3551060Z ok  	github.com/XKHoshizora/specmetry/prototype/c9evidence/internal/keep	0.014s
+2026-11-16T16:23:58.3551440Z === RUN   TestTakeHealthy
+2026-11-16T16:23:58.3551710Z --- PASS: TestTakeHealthy (0.00s)
+2026-11-16T16:23:58.3551960Z === RUN   TestTakeNegatives
+2026-11-16T16:23:58.3552250Z === RUN   TestTakeNegatives/one_byte_changed
+2026-11-16T16:23:58.3552550Z === RUN   TestTakeNegatives/one_more_file
+2026-11-16T16:23:58.3552870Z === RUN   TestTakeNegatives/symbolic_link
+2026-11-16T16:23:58.3553180Z --- PASS: TestTakeNegatives (0.00s)
+2026-11-16T16:23:58.3553650Z     --- PASS: TestTakeNegatives/one_byte_changed (0.00s)
+2026-11-16T16:23:58.3554170Z     --- PASS: TestTakeNegatives/one_more_file (0.00s)
+2026-11-16T16:23:58.3554570Z     --- PASS: TestTakeNegatives/symbolic_link (0.00s)
+2026-11-16T16:23:58.3554880Z === RUN   TestTakeFaults
+2026-11-16T16:23:58.3555110Z === RUN   TestTakeFaults/open
+2026-11-16T16:23:58.3555400Z === RUN   TestTakeFaults/read
+2026-11-16T16:23:58.3555660Z === RUN   TestTakeFaults/close
+2026-11-16T16:23:58.3556830Z === RUN   TestTakeFaults/handle
+2026-11-16T16:23:58.3557230Z --- PASS: TestTakeFaults (0.00s)
+2026-11-16T16:23:58.3557550Z     --- PASS: TestTakeFaults/open (0.00s)
+2026-11-16T16:23:58.3557850Z     --- PASS: TestTakeFaults/read (0.00s)
+2026-11-16T16:23:58.3558180Z     --- PASS: TestTakeFaults/close (0.00s)
+2026-11-16T16:23:58.3558540Z     --- PASS: TestTakeFaults/handle (0.00s)
+2026-11-16T16:23:58.3559860Z === RUN   TestControlledRead
+2026-11-16T16:23:58.3560710Z === RUN   TestControlledRead/healthy_and_same_bytes
+2026-11-16T16:23:58.3561590Z === RUN   TestControlledRead/name_not_in_M
+2026-11-16T16:23:58.3562340Z === RUN   TestControlledRead/reread_differs
+2026-11-16T16:23:58.3563170Z === RUN   TestControlledRead/handle_not_regular
+2026-11-16T16:23:58.3564090Z === RUN   TestControlledRead/injection_after_a_real_nil_close
+2026-11-16T16:23:58.3565560Z === RUN   TestControlledRead/real_close_error_is_never_replaced_by_an_injection
+2026-11-16T16:23:58.3566610Z === RUN   TestControlledRead/view_and_locate
+2026-11-16T16:23:58.3568540Z --- PASS: TestControlledRead (0.01s)
+2026-11-16T16:23:58.3569060Z     --- PASS: TestControlledRead/healthy_and_same_bytes (0.00s)
+2026-11-16T16:23:58.3569540Z     --- PASS: TestControlledRead/name_not_in_M (0.00s)
+2026-11-16T16:23:58.3569990Z     --- PASS: TestControlledRead/reread_differs (0.00s)
+2026-11-16T16:23:58.3570490Z     --- PASS: TestControlledRead/handle_not_regular (0.00s)
+2026-11-16T16:23:58.3571100Z     --- PASS: TestControlledRead/injection_after_a_real_nil_close (0.00s)
+2026-11-16T16:23:58.3571750Z     --- PASS: TestControlledRead/real_close_error_is_never_replaced_by_an_injection (0.00s)
+2026-11-16T16:23:58.3572310Z     --- PASS: TestControlledRead/view_and_locate (0.00s)
+2026-11-16T16:23:58.3572580Z PASS
+2026-11-16T16:23:58.3572950Z ok  	github.com/XKHoshizora/specmetry/prototype/c9evidence/internal/modsnap	0.024s
+2026-11-16T16:23:58.3573630Z ?   	github.com/XKHoshizora/specmetry/prototype/c9evidence/internal/pseudo	[no test files]
+2026-11-16T16:23:58.3574070Z === RUN   TestRC3Branches
+2026-11-16T16:23:58.3574340Z === RUN   TestRC3Branches/linux_ended_by_the_request
+2026-11-16T16:23:58.3574640Z === RUN   TestRC3Branches/linux_exited_before_the_request
+2026-11-16T16:23:58.3575010Z === RUN   TestRC3Branches/linux_request_error_ESRCH
+2026-11-16T16:23:58.3575330Z === RUN   TestRC3Branches/linux_another_signal
+2026-11-16T16:23:58.3575690Z === RUN   TestRC3Branches/linux_a_normal_non-zero_exit
+2026-11-16T16:23:58.3576010Z === RUN   TestRC3Branches/linux_an_extra_fault
+2026-11-16T16:23:58.3576360Z === RUN   TestRC3Branches/linux_an_extra_cleanup_unknown
+2026-11-16T16:23:58.3576650Z === RUN   TestRC3Branches/linux_no_request
+2026-11-16T16:23:58.3576990Z === RUN   TestRC3Branches/linux_counted_as_a_success
+2026-11-16T16:23:58.3577300Z === RUN   TestRC3Branches/linux_not_expired
+2026-11-16T16:23:58.3578040Z === RUN   TestRC3Branches/linux_nothing_late
+2026-11-16T16:23:58.3578340Z === RUN   TestRC3Branches/linux_reap_not_returned
+2026-11-16T16:23:58.3578950Z === RUN   TestRC3Branches/windows_ended_by_the_request
+2026-11-16T16:23:58.3579640Z === RUN   TestRC3Branches/windows_exited_before_the_request
+2026-11-16T16:23:58.3580220Z === RUN   TestRC3Branches/windows_access_denied_but_exit_1
+2026-11-16T16:23:58.3580600Z === RUN   TestRC3Branches/windows_Kill_nil_but_exit_0
+2026-11-16T16:23:58.3581030Z === RUN   TestRC3Branches/windows_another_request_error
+2026-11-16T16:23:58.3581390Z === RUN   TestRC3Branches/windows_exit_2
+2026-11-16T16:23:58.3581780Z === RUN   TestRC3Branches/darwin_no_request
+2026-11-16T16:23:58.3582110Z === RUN   TestRC3Branches/darwin_a_normal_non-zero_exit
+2026-11-16T16:23:58.3582470Z === RUN   TestRC3Branches/darwin_a_request
+2026-11-16T16:23:58.3582770Z === RUN   TestRC3Branches/darwin_no_cleanup_unknown
+2026-11-16T16:23:58.3583070Z === RUN   TestRC3Branches/darwin_a_read_error
+2026-11-16T16:23:58.3583420Z --- PASS: TestRC3Branches (0.00s)
+2026-11-16T16:23:58.3583870Z     --- PASS: TestRC3Branches/linux_ended_by_the_request (0.00s)
+2026-11-16T16:23:58.3584430Z     --- PASS: TestRC3Branches/linux_exited_before_the_request (0.00s)
+2026-11-16T16:23:58.3585110Z     --- PASS: TestRC3Branches/linux_request_error_ESRCH (0.00s)
+2026-11-16T16:23:58.3585590Z     --- PASS: TestRC3Branches/linux_another_signal (0.00s)
+2026-11-16T16:23:58.3586040Z     --- PASS: TestRC3Branches/linux_a_normal_non-zero_exit (0.00s)
+2026-11-16T16:23:58.3586520Z     --- PASS: TestRC3Branches/linux_an_extra_fault (0.00s)
+2026-11-16T16:23:58.3586950Z     --- PASS: TestRC3Branches/linux_an_extra_cleanup_unknown (0.00s)
+2026-11-16T16:23:58.3587440Z     --- PASS: TestRC3Branches/linux_no_request (0.00s)
+2026-11-16T16:23:58.3587870Z     --- PASS: TestRC3Branches/linux_counted_as_a_success (0.00s)
+2026-11-16T16:23:58.3588340Z     --- PASS: TestRC3Branches/linux_not_expired (0.00s)
+2026-11-16T16:23:58.3588730Z     --- PASS: TestRC3Branches/linux_nothing_late (0.00s)
+2026-11-16T16:23:58.3589170Z     --- PASS: TestRC3Branches/linux_reap_not_returned (0.00s)
+2026-11-16T16:23:58.3590650Z     --- PASS: TestRC3Branches/windows_ended_by_the_request (0.00s)
+2026-11-16T16:23:58.3591220Z     --- PASS: TestRC3Branches/windows_exited_before_the_request (0.00s)
+2026-11-16T16:23:58.3591770Z     --- PASS: TestRC3Branches/windows_access_denied_but_exit_1 (0.00s)
+2026-11-16T16:23:58.3592280Z     --- PASS: TestRC3Branches/windows_Kill_nil_but_exit_0 (0.00s)
+2026-11-16T16:23:58.3592790Z     --- PASS: TestRC3Branches/windows_another_request_error (0.00s)
+2026-11-16T16:23:58.3593270Z     --- PASS: TestRC3Branches/windows_exit_2 (0.00s)
+2026-11-16T16:23:58.3593740Z     --- PASS: TestRC3Branches/darwin_no_request (0.00s)
+2026-11-16T16:23:58.3594250Z     --- PASS: TestRC3Branches/darwin_a_normal_non-zero_exit (0.00s)
+2026-11-16T16:23:58.3594670Z     --- PASS: TestRC3Branches/darwin_a_request (0.00s)
+2026-11-16T16:23:58.3595150Z     --- PASS: TestRC3Branches/darwin_no_cleanup_unknown (0.00s)
+2026-11-16T16:23:58.3595700Z     --- PASS: TestRC3Branches/darwin_a_read_error (0.00s)
+2026-11-16T16:23:58.3596000Z PASS
+2026-11-16T16:23:58.3596310Z ok  	github.com/XKHoshizora/specmetry/prototype/c9evidence/internal/realcall	0.019s
+2026-11-16T16:23:58.3596690Z === RUN   TestT2Binding
+2026-11-16T16:23:58.3596870Z --- PASS: TestT2Binding (0.00s)
+2026-11-16T16:23:58.3597080Z === RUN   TestT2MatchesDocuments
+2026-11-16T16:23:58.3597340Z --- PASS: TestT2MatchesDocuments (0.00s)
+2026-11-16T16:23:58.3597600Z === RUN   TestArgs
+2026-11-16T16:23:58.3597780Z --- PASS: TestArgs (0.00s)
+2026-11-16T16:23:58.3597980Z === RUN   TestCandidateCounts
+2026-11-16T16:23:58.3598200Z --- PASS: TestCandidateCounts (0.00s)
+2026-11-16T16:23:58.3598460Z PASS
+2026-11-16T16:23:58.3598760Z ok  	github.com/XKHoshizora/specmetry/prototype/c9evidence/internal/spec	0.012s
+2026-11-16T16:23:58.3599090Z === RUN   TestR154AdmitEntry
+2026-11-16T16:23:58.3599300Z --- PASS: TestR154AdmitEntry (0.00s)
+2026-11-16T16:23:58.3599710Z === RUN   TestR154AdmitPipeCrossesD
+2026-11-16T16:23:58.3601080Z --- PASS: TestR154AdmitPipeCrossesD (0.00s)
+2026-11-16T16:23:58.3601430Z === RUN   TestR154AdmitStartNotInitiated
+2026-11-16T16:23:58.3601750Z --- PASS: TestR154AdmitStartNotInitiated (0.00s)
+2026-11-16T16:23:58.3602030Z === RUN   TestR154CmdHeldAfterStartFailure
+2026-11-16T16:23:58.3602290Z --- PASS: TestR154CmdHeldAfterStartFailure (0.00s)
+2026-11-16T16:23:58.3602560Z === RUN   TestR154PanicAfterHandover
+2026-11-16T16:23:58.3602860Z --- PASS: TestR154PanicAfterHandover (0.00s)
+2026-11-16T16:23:58.3603140Z === RUN   TestR154PanicBetweenPipes
+2026-11-16T16:23:58.3603420Z --- PASS: TestR154PanicBetweenPipes (0.00s)
+2026-11-16T16:23:58.3603730Z === RUN   TestR154AdmitDelayedStartTask
+2026-11-16T16:23:58.3604000Z --- PASS: TestR154AdmitDelayedStartTask (0.00s)
+2026-11-16T16:23:58.3604320Z === RUN   TestR154AdmittedStartReturnsLate
+2026-11-16T16:23:58.3604620Z --- PASS: TestR154AdmittedStartReturnsLate (0.01s)
+2026-11-16T16:23:58.3604930Z === RUN   TestR154ObjectsHeld
+2026-11-16T16:23:58.3605210Z === RUN   TestR154ObjectsHeld/half-built
+2026-11-16T16:23:58.3605540Z === RUN   TestR154ObjectsHeld/after-the-read
+2026-11-16T16:23:58.3605780Z --- PASS: TestR154ObjectsHeld (0.01s)
+2026-11-16T16:23:58.3606400Z     --- PASS: TestR154ObjectsHeld/half-built (0.00s)
+2026-11-16T16:23:58.3606830Z     --- PASS: TestR154ObjectsHeld/after-the-read (0.01s)
+2026-11-16T16:23:58.3607140Z === RUN   TestR154PanicInStart
+2026-11-16T16:23:58.3607360Z --- PASS: TestR154PanicInStart (0.00s)
+2026-11-16T16:23:58.3607630Z === RUN   TestR154PanicBeforeWait
+2026-11-16T16:23:58.3607890Z --- PASS: TestR154PanicBeforeWait (0.01s)
+2026-11-16T16:23:58.3609690Z === RUN   TestR155RegistryOutlivesItsCaller
+2026-11-16T16:23:58.3610080Z --- PASS: TestR155RegistryOutlivesItsCaller (0.01s)
+2026-11-16T16:23:58.3610380Z === RUN   TestR155ExitedBeforeRequest
+2026-11-16T16:23:58.3611070Z     regress155_test.go:106: the pidfd exists only on Linux
+2026-11-16T16:23:58.3611440Z --- SKIP: TestR155ExitedBeforeRequest (0.00s)
+2026-11-16T16:23:58.3611710Z === RUN   TestR155OwnerHoldsR2F
+2026-11-16T16:23:58.3611920Z --- PASS: TestR155OwnerHoldsR2F (0.01s)
+2026-11-16T16:23:58.3612140Z === RUN   TestConcurrentCalls
+2026-11-16T16:23:58.3612410Z --- PASS: TestConcurrentCalls (0.02s)
+2026-11-16T16:23:58.3612700Z === RUN   TestExpiredCallStaysHeld
+2026-11-16T16:23:58.3612930Z --- PASS: TestExpiredCallStaysHeld (0.01s)
+2026-11-16T16:23:58.3613160Z === RUN   TestLinesOfAStartFailure
+2026-11-16T16:23:58.3613400Z --- PASS: TestLinesOfAStartFailure (0.00s)
+2026-11-16T16:23:58.3613640Z PASS
+2026-11-16T16:23:58.3613990Z ok  	github.com/XKHoshizora/specmetry/prototype/c9evidence/internal/toolctl	0.085s
+2026-11-16T16:23:58.3614410Z === RUN   TestAdmissionRefusedAtFile
+2026-11-16T16:23:58.3614730Z --- PASS: TestAdmissionRefusedAtFile (0.00s)
+2026-11-16T16:23:58.3615080Z === RUN   TestAdmissionRefusedAtPackage
+2026-11-16T16:23:58.3615420Z --- PASS: TestAdmissionRefusedAtPackage (0.00s)
+2026-11-16T16:23:58.3622730Z === RUN   TestSelfCheck
+2026-11-16T16:23:58.3623030Z --- PASS: TestSelfCheck (0.00s)
+2026-11-16T16:23:58.3623230Z === RUN   TestLC7
+2026-11-16T16:23:58.3623400Z === RUN   TestLC7/linux/amd64
+2026-11-16T16:23:58.3623620Z === RUN   TestLC7/darwin/arm64
+2026-11-16T16:23:58.3623860Z --- PASS: TestLC7 (0.00s)
+2026-11-16T16:23:58.3624110Z     --- PASS: TestLC7/linux/amd64 (0.00s)
+2026-11-16T16:23:58.3624390Z     --- PASS: TestLC7/darwin/arm64 (0.00s)
+2026-11-16T16:23:58.3624590Z === RUN   TestOtherForms
+2026-11-16T16:23:58.3624810Z --- PASS: TestOtherForms (0.00s)
+2026-11-16T16:23:58.3625070Z === RUN   TestWindowsX1AndSignals
+2026-11-16T16:23:58.3625330Z --- PASS: TestWindowsX1AndSignals (0.00s)
+2026-11-16T16:23:58.3625620Z === RUN   TestOffPlatformReference
+2026-11-16T16:23:58.3625850Z --- PASS: TestOffPlatformReference (0.00s)
+2026-11-16T16:23:58.3626120Z === RUN   TestUnsafe
+2026-11-16T16:23:58.3626330Z === RUN   TestUnsafe/linux/amd64
+2026-11-16T16:23:58.3626570Z === RUN   TestUnsafe/linux/arm64
+2026-11-16T16:23:58.3627030Z --- PASS: TestUnsafe (0.00s)
+2026-11-16T16:23:58.3627370Z     --- PASS: TestUnsafe/linux/amd64 (0.00s)
+2026-11-16T16:23:58.3628820Z     --- PASS: TestUnsafe/linux/arm64 (0.00s)
+2026-11-16T16:23:58.3629130Z === RUN   TestUnsafeAsSourceIsNotUnsafe
+2026-11-16T16:23:58.3629430Z --- PASS: TestUnsafeAsSourceIsNotUnsafe (0.00s)
+2026-11-16T16:23:58.3629710Z === RUN   TestImportC
+2026-11-16T16:23:58.3629960Z --- PASS: TestImportC (0.00s)
+2026-11-16T16:23:58.3630230Z === RUN   TestImportNotInImports
+2026-11-16T16:23:58.3630500Z --- PASS: TestImportNotInImports (0.00s)
+2026-11-16T16:23:58.3630790Z === RUN   TestImportMap
+2026-11-16T16:23:58.3631030Z === RUN   TestImportMap/mapped
+2026-11-16T16:23:58.3631230Z === RUN   TestImportMap/no_map
+2026-11-16T16:23:58.3631470Z === RUN   TestImportMap/map_outside_Imports
+2026-11-16T16:23:58.3631720Z === RUN   TestImportMap/Imports_outside_table
+2026-11-16T16:23:58.3631960Z --- PASS: TestImportMap (0.00s)
+2026-11-16T16:23:58.3632230Z     --- PASS: TestImportMap/mapped (0.00s)
+2026-11-16T16:23:58.3632540Z     --- PASS: TestImportMap/no_map (0.00s)
+2026-11-16T16:23:58.3632870Z     --- PASS: TestImportMap/map_outside_Imports (0.00s)
+2026-11-16T16:23:58.3633260Z     --- PASS: TestImportMap/Imports_outside_table (0.00s)
+2026-11-16T16:23:58.3633650Z === RUN   TestCycle
+2026-11-16T16:23:58.3633810Z --- PASS: TestCycle (0.00s)
+2026-11-16T16:23:58.3633990Z === RUN   TestTypeErrors
+2026-11-16T16:23:58.3634180Z --- PASS: TestTypeErrors (0.00s)
+2026-11-16T16:23:58.3634380Z === RUN   TestLanguageVersion
+2026-11-16T16:23:58.3634600Z === RUN   TestLanguageVersion/empty_is_go1.16
+2026-11-16T16:23:58.3634980Z === RUN   TestLanguageVersion/go1.16_rejects_generics
+2026-11-16T16:23:58.3635270Z === RUN   TestLanguageVersion/1.27_is_go1.27
+2026-11-16T16:23:58.3635520Z === RUN   TestLanguageVersion/1.27.3_is_go1.27
+2026-11-16T16:23:58.3635790Z === RUN   TestLanguageVersion/1.27.4_is_above_go1.27.3
+2026-11-16T16:23:58.3636070Z === RUN   TestLanguageVersion/1.28_is_above
+2026-11-16T16:23:58.3636400Z === RUN   TestLanguageVersion/not_a_version
+2026-11-16T16:23:58.3636760Z === RUN   TestLanguageVersion/nil_module,_not_standard
+2026-11-16T16:23:58.3637130Z === RUN   TestLanguageVersion/standard_is_the_toolchain's
+2026-11-16T16:23:58.3637460Z --- PASS: TestLanguageVersion (0.00s)
+2026-11-16T16:23:58.3637840Z     --- PASS: TestLanguageVersion/empty_is_go1.16 (0.00s)
+2026-11-16T16:23:58.3638370Z     --- PASS: TestLanguageVersion/go1.16_rejects_generics (0.00s)
+2026-11-16T16:23:58.3638850Z     --- PASS: TestLanguageVersion/1.27_is_go1.27 (0.00s)
+2026-11-16T16:23:58.3639230Z     --- PASS: TestLanguageVersion/1.27.3_is_go1.27 (0.00s)
+2026-11-16T16:23:58.3639700Z     --- PASS: TestLanguageVersion/1.27.4_is_above_go1.27.3 (0.00s)
+2026-11-16T16:23:58.3640080Z     --- PASS: TestLanguageVersion/1.28_is_above (0.00s)
+2026-11-16T16:23:58.3640440Z     --- PASS: TestLanguageVersion/not_a_version (0.00s)
+2026-11-16T16:23:58.3640840Z     --- PASS: TestLanguageVersion/nil_module,_not_standard (0.00s)
+2026-11-16T16:23:58.3641310Z     --- PASS: TestLanguageVersion/standard_is_the_toolchain's (0.00s)
+2026-11-16T16:23:58.3641630Z === RUN   TestDeclarationsOnly
+2026-11-16T16:23:58.3641840Z --- PASS: TestDeclarationsOnly (0.00s)
+2026-11-16T16:23:58.3642060Z === RUN   TestByteSourceError
+2026-11-16T16:23:58.3642270Z --- PASS: TestByteSourceError (0.00s)
+2026-11-16T16:23:58.3642490Z === RUN   TestImportSetMismatch
+2026-11-16T16:23:58.3642700Z --- PASS: TestImportSetMismatch (0.00s)
+2026-11-16T16:23:58.3642930Z === RUN   TestMainPackagesNotChecked
+2026-11-16T16:23:58.3643170Z --- PASS: TestMainPackagesNotChecked (0.00s)
+2026-11-16T16:23:58.3643440Z === RUN   TestPackageNameAndFiles
+2026-11-16T16:23:58.3643720Z --- PASS: TestPackageNameAndFiles (0.00s)
+2026-11-16T16:23:58.3643950Z === RUN   TestSetupFailures
+2026-11-16T16:23:58.3644140Z === RUN   TestSetupFailures/no_source
+2026-11-16T16:23:58.3644380Z === RUN   TestSetupFailures/no_admit
+2026-11-16T16:23:58.3644650Z === RUN   TestSetupFailures/unknown_GOOS
+2026-11-16T16:23:58.3645070Z === RUN   TestSetupFailures/toolchain
+2026-11-16T16:23:58.3645310Z === RUN   TestSetupFailures/sizes_nil
+2026-11-16T16:23:58.3645610Z === RUN   TestSetupFailures/duplicate
+2026-11-16T16:23:58.3645860Z === RUN   TestSetupFailures/kind
+2026-11-16T16:23:58.3646110Z --- PASS: TestSetupFailures (0.00s)
+2026-11-16T16:23:58.3646480Z     --- PASS: TestSetupFailures/no_source (0.00s)
+2026-11-16T16:23:58.3646890Z     --- PASS: TestSetupFailures/no_admit (0.00s)
+2026-11-16T16:23:58.3647230Z     --- PASS: TestSetupFailures/unknown_GOOS (0.00s)
+2026-11-16T16:23:58.3647560Z     --- PASS: TestSetupFailures/toolchain (0.00s)
+2026-11-16T16:23:58.3647880Z     --- PASS: TestSetupFailures/sizes_nil (0.00s)
+2026-11-16T16:23:58.3648210Z     --- PASS: TestSetupFailures/duplicate (0.00s)
+2026-11-16T16:23:58.3648540Z     --- PASS: TestSetupFailures/kind (0.00s)
+2026-11-16T16:23:58.3648780Z === RUN   TestDeterministic
+2026-11-16T16:23:58.3649050Z --- PASS: TestDeterministic (0.00s)
+2026-11-16T16:23:58.3649290Z === RUN   TestUnsafeNotStandard
+2026-11-16T16:23:58.3649500Z --- PASS: TestUnsafeNotStandard (0.00s)
+2026-11-16T16:23:58.3649860Z === RUN   TestB1473ParseErrorKeptWhenTheNextFileIsRefused
+2026-11-16T16:23:58.3650300Z --- PASS: TestB1473ParseErrorKeptWhenTheNextFileIsRefused (0.00s)
+2026-11-16T16:23:58.3650870Z === RUN   TestB1473ConstraintErrorKeptWhenTheNextFileIsRefused
+2026-11-16T16:23:58.3651280Z --- PASS: TestB1473ConstraintErrorKeptWhenTheNextFileIsRefused (0.00s)
+2026-11-16T16:23:58.3651650Z === RUN   TestB1473VersionErrorKeptWhenAFileIsRefused
+2026-11-16T16:23:58.3652030Z --- PASS: TestB1473VersionErrorKeptWhenAFileIsRefused (0.00s)
+2026-11-16T16:23:58.3652410Z === RUN   TestB1473BudgetOnlyHealthyControl
+2026-11-16T16:23:58.3652670Z --- PASS: TestB1473BudgetOnlyHealthyControl (0.00s)
+2026-11-16T16:23:58.3652950Z === RUN   TestConstraintLineAfterABlockComment
+2026-11-16T16:23:58.3653360Z --- PASS: TestConstraintLineAfterABlockComment (0.00s)
+2026-11-16T16:23:58.3653690Z === RUN   TestConstraintLine
+2026-11-16T16:23:58.3653900Z === RUN   TestConstraintLine/none
+2026-11-16T16:23:58.3654100Z === RUN   TestConstraintLine/one
+2026-11-16T16:23:58.3654300Z === RUN   TestConstraintLine/crlf
+2026-11-16T16:23:58.3654500Z === RUN   TestConstraintLine/two
+2026-11-16T16:23:58.3654720Z === RUN   TestConstraintLine/two_separated
+2026-11-16T16:23:58.3654960Z === RUN   TestConstraintLine/after_copyright
+2026-11-16T16:23:58.3655240Z === RUN   TestConstraintLine/no_blank_line_before_package
+2026-11-16T16:23:58.3655510Z === RUN   TestConstraintLine/no_final_newline
+2026-11-16T16:23:58.3655750Z === RUN   TestConstraintLine/tab_separated
+2026-11-16T16:23:58.3655990Z === RUN   TestConstraintLine/raw_bytes_kept
+2026-11-16T16:23:58.3656240Z === RUN   TestConstraintLine/not_a_go:build_line
+2026-11-16T16:23:58.3656500Z === RUN   TestConstraintLine/inside_block_comment
+2026-11-16T16:23:58.3656780Z === RUN   TestConstraintLine/second_inside_block_comment
+2026-11-16T16:23:58.3657080Z === RUN   TestConstraintLine/after_closed_block_comment
+2026-11-16T16:23:58.3657390Z === RUN   TestConstraintLine/after_block_comment_on_the_line
+2026-11-16T16:23:58.3657710Z === RUN   TestConstraintLine/after_the_header
+2026-11-16T16:23:58.3658040Z === RUN   TestConstraintLine/second_after_the_header
+2026-11-16T16:23:58.3658400Z === RUN   TestConstraintLine/text_after_block_comment_ends_header
+2026-11-16T16:23:58.3658790Z === RUN   TestConstraintLine/plus_build_is_not_go:build
+2026-11-16T16:23:58.3659050Z --- PASS: TestConstraintLine (0.00s)
+2026-11-16T16:23:58.3659340Z     --- PASS: TestConstraintLine/none (0.00s)
+2026-11-16T16:23:58.3659720Z     --- PASS: TestConstraintLine/one (0.00s)
+2026-11-16T16:23:58.3660030Z     --- PASS: TestConstraintLine/crlf (0.00s)
+2026-11-16T16:23:58.3660390Z     --- PASS: TestConstraintLine/two (0.00s)
+2026-11-16T16:23:58.3660770Z     --- PASS: TestConstraintLine/two_separated (0.00s)
+2026-11-16T16:23:58.3661170Z     --- PASS: TestConstraintLine/after_copyright (0.00s)
+2026-11-16T16:23:58.3661660Z     --- PASS: TestConstraintLine/no_blank_line_before_package (0.00s)
+2026-11-16T16:23:58.3662300Z     --- PASS: TestConstraintLine/no_final_newline (0.00s)
+2026-11-16T16:23:58.3662760Z     --- PASS: TestConstraintLine/tab_separated (0.00s)
+2026-11-16T16:23:58.3663190Z     --- PASS: TestConstraintLine/raw_bytes_kept (0.00s)
+2026-11-16T16:23:58.3663590Z     --- PASS: TestConstraintLine/not_a_go:build_line (0.00s)
+2026-11-16T16:23:58.3664060Z     --- PASS: TestConstraintLine/inside_block_comment (0.00s)
+2026-11-16T16:23:58.3664570Z     --- PASS: TestConstraintLine/second_inside_block_comment (0.00s)
+2026-11-16T16:23:58.3665010Z     --- PASS: TestConstraintLine/after_closed_block_comment (0.00s)
+2026-11-16T16:23:58.3665490Z     --- PASS: TestConstraintLine/after_block_comment_on_the_line (0.00s)
+2026-11-16T16:23:58.3665920Z     --- PASS: TestConstraintLine/after_the_header (0.00s)
+2026-11-16T16:23:58.3666310Z     --- PASS: TestConstraintLine/second_after_the_header (0.00s)
+2026-11-16T16:23:58.3666790Z     --- PASS: TestConstraintLine/text_after_block_comment_ends_header (0.00s)
+2026-11-16T16:23:58.3667370Z     --- PASS: TestConstraintLine/plus_build_is_not_go:build (0.00s)
+2026-11-16T16:23:58.3667720Z === RUN   TestLinePositionsAndConstraint
+2026-11-16T16:23:58.3668050Z --- PASS: TestLinePositionsAndConstraint (0.00s)
+2026-11-16T16:23:58.3668460Z === RUN   TestPrefilterHit
+2026-11-16T16:23:58.3668660Z --- PASS: TestPrefilterHit (0.00s)
+2026-11-16T16:23:58.3668860Z === RUN   TestStripBodies
+2026-11-16T16:23:58.3669050Z --- PASS: TestStripBodies (0.00s)
+2026-11-16T16:23:58.3669270Z === RUN   TestStripBodiesCounterExamples
+2026-11-16T16:23:58.3669540Z The following panic happened checking types near:
+2026-11-16T16:23:58.3669810Z 	s2.go:5:5
+2026-11-16T16:23:58.3669990Z --- PASS: TestStripBodiesCounterExamples (0.00s)
+2026-11-16T16:23:58.3670200Z PASS
+2026-11-16T16:23:58.3670490Z ok  	github.com/XKHoshizora/specmetry/prototype/c9evidence/internal/typecheck	0.018s
+2026-11-16T16:23:58.3670830Z === RUN   TestDecide
+2026-11-16T16:23:58.3670990Z --- PASS: TestDecide (0.00s)
+2026-11-16T16:23:58.3671150Z PASS
+2026-11-16T16:23:58.3671430Z ok  	github.com/XKHoshizora/specmetry/prototype/c9evidence/internal/verdict	0.008s
+2026-11-16T16:23:58.3671910Z ?   	github.com/XKHoshizora/specmetry/prototype/c9evidence/run	[no test files]
+2026-11-16T16:23:58.3964230Z ##[group]Run set -euo pipefail
+2026-11-16T16:23:58.3964530Z [36;1mset -euo pipefail[0m
+2026-11-16T16:23:58.3964760Z [36;1mecho "go on PATH $(command -v go)"[0m
+2026-11-16T16:23:58.3965020Z [36;1mgo version[0m
+2026-11-16T16:23:58.3965470Z [36;1mgo test -tags c9evidence_realcall -count=1 -v ./internal/realcall/ 2>&1 | tee "$RUNNER_TEMP/c9-tool-test-out/realcall.log"[0m
+2026-11-16T16:23:58.4019390Z shell: /bin/bash --noprofile --norc -e -o pipefail {0}
+2026-11-16T16:23:58.4019650Z env:
+2026-11-16T16:23:58.4019790Z   GOTOOLCHAIN: local
+2026-11-16T16:23:58.4019940Z   GOFLAGS: 
+2026-11-16T16:23:58.4020070Z   C9EVIDENCE_REALCALL: 1
+2026-11-16T16:23:58.4020320Z   C9EVIDENCE_OUT: /Users/runner/work/_temp/c9-tool-test-out/realcall
+2026-11-16T16:23:58.4020590Z ##[endgroup]
+2026-11-16T16:23:58.4480730Z go on PATH /Users/runner/hostedtoolcache/go/1.27.3/arm64/bin/go
+2026-11-16T16:23:58.4643820Z go version go1.27.3 darwin/arm64
+2026-11-16T16:23:59.0848960Z === RUN   TestRC3Branches
+2026-11-16T16:23:59.0948890Z === RUN   TestRC3Branches/linux_ended_by_the_request
+2026-11-16T16:23:59.0996560Z === RUN   TestRC3Branches/linux_exited_before_the_request
+2026-11-16T16:23:59.1065500Z === RUN   TestRC3Branches/linux_request_error_ESRCH
+2026-11-16T16:23:59.1094270Z === RUN   TestRC3Branches/linux_another_signal
+2026-11-16T16:23:59.1125470Z === RUN   TestRC3Branches/linux_a_normal_non-zero_exit
+2026-11-16T16:23:59.1147220Z === RUN   TestRC3Branches/linux_an_extra_fault
+2026-11-16T16:23:59.1153530Z === RUN   TestRC3Branches/linux_an_extra_cleanup_unknown
+2026-11-16T16:23:59.1169890Z === RUN   TestRC3Branches/linux_no_request
+2026-11-16T16:23:59.1194300Z === RUN   TestRC3Branches/linux_counted_as_a_success
+2026-11-16T16:23:59.1210980Z === RUN   TestRC3Branches/linux_not_expired
+2026-11-16T16:23:59.1234910Z === RUN   TestRC3Branches/linux_nothing_late
+2026-11-16T16:23:59.1236540Z === RUN   TestRC3Branches/linux_reap_not_returned
+2026-11-16T16:23:59.1237670Z === RUN   TestRC3Branches/windows_ended_by_the_request
+2026-11-16T16:23:59.1239020Z === RUN   TestRC3Branches/windows_exited_before_the_request
+2026-11-16T16:23:59.1240830Z === RUN   TestRC3Branches/windows_access_denied_but_exit_1
+2026-11-16T16:23:59.1241980Z === RUN   TestRC3Branches/windows_Kill_nil_but_exit_0
+2026-11-16T16:23:59.1243000Z === RUN   TestRC3Branches/windows_another_request_error
+2026-11-16T16:23:59.1243990Z === RUN   TestRC3Branches/windows_exit_2
+2026-11-16T16:23:59.1245540Z === RUN   TestRC3Branches/darwin_no_request
+2026-11-16T16:23:59.1246020Z === RUN   TestRC3Branches/darwin_a_normal_non-zero_exit
+2026-11-16T16:23:59.1246570Z === RUN   TestRC3Branches/darwin_a_request
+2026-11-16T16:23:59.1246880Z === RUN   TestRC3Branches/darwin_no_cleanup_unknown
+2026-11-16T16:23:59.1247290Z === RUN   TestRC3Branches/darwin_a_read_error
+2026-11-16T16:23:59.1247640Z --- PASS: TestRC3Branches (0.00s)
+2026-11-16T16:23:59.1248140Z     --- PASS: TestRC3Branches/linux_ended_by_the_request (0.00s)
+2026-11-16T16:23:59.1248720Z     --- PASS: TestRC3Branches/linux_exited_before_the_request (0.00s)
+2026-11-16T16:23:59.1249620Z     --- PASS: TestRC3Branches/linux_request_error_ESRCH (0.00s)
+2026-11-16T16:23:59.1250240Z     --- PASS: TestRC3Branches/linux_another_signal (0.00s)
+2026-11-16T16:23:59.1250780Z     --- PASS: TestRC3Branches/linux_a_normal_non-zero_exit (0.00s)
+2026-11-16T16:23:59.1251310Z     --- PASS: TestRC3Branches/linux_an_extra_fault (0.00s)
+2026-11-16T16:23:59.1251810Z     --- PASS: TestRC3Branches/linux_an_extra_cleanup_unknown (0.00s)
+2026-11-16T16:23:59.1252280Z     --- PASS: TestRC3Branches/linux_no_request (0.00s)
+2026-11-16T16:23:59.1252750Z     --- PASS: TestRC3Branches/linux_counted_as_a_success (0.00s)
+2026-11-16T16:23:59.1253240Z     --- PASS: TestRC3Branches/linux_not_expired (0.00s)
+2026-11-16T16:23:59.1253680Z     --- PASS: TestRC3Branches/linux_nothing_late (0.00s)
+2026-11-16T16:23:59.1255070Z     --- PASS: TestRC3Branches/linux_reap_not_returned (0.00s)
+2026-11-16T16:23:59.1257670Z     --- PASS: TestRC3Branches/windows_ended_by_the_request (0.00s)
+2026-11-16T16:23:59.1258990Z     --- PASS: TestRC3Branches/windows_exited_before_the_request (0.00s)
+2026-11-16T16:23:59.1260330Z     --- PASS: TestRC3Branches/windows_access_denied_but_exit_1 (0.00s)
+2026-11-16T16:23:59.1261470Z     --- PASS: TestRC3Branches/windows_Kill_nil_but_exit_0 (0.00s)
+2026-11-16T16:23:59.1262600Z     --- PASS: TestRC3Branches/windows_another_request_error (0.00s)
+2026-11-16T16:23:59.1263620Z     --- PASS: TestRC3Branches/windows_exit_2 (0.00s)
+2026-11-16T16:23:59.1265290Z     --- PASS: TestRC3Branches/darwin_no_request (0.00s)
+2026-11-16T16:23:59.1266340Z     --- PASS: TestRC3Branches/darwin_a_normal_non-zero_exit (0.00s)
+2026-11-16T16:23:59.1267340Z     --- PASS: TestRC3Branches/darwin_a_request (0.00s)
+2026-11-16T16:23:59.1268400Z     --- PASS: TestRC3Branches/darwin_no_cleanup_unknown (0.00s)
+2026-11-16T16:23:59.1269390Z     --- PASS: TestRC3Branches/darwin_a_read_error (0.00s)
+2026-11-16T16:23:59.1270100Z === RUN   TestRC0GuardPath
+2026-11-16T16:23:59.1270850Z     realcall_test.go:161: {
+2026-11-16T16:23:59.1271550Z           "GODEBUG": "",
+2026-11-16T16:23:59.1272620Z           "abs": "/Users/runner/hostedtoolcache/go/1.27.3/arm64/bin/go",
+2026-11-16T16:23:59.1273520Z           "abs_error": "",
+2026-11-16T16:23:59.1274170Z           "components": [
+2026-11-16T16:23:59.1274690Z             {
+2026-11-16T16:23:59.1276050Z               "evalsymlinks": "/Users/runner/hostedtoolcache/go/1.27.3/arm64/bin/go",
+2026-11-16T16:23:59.1277130Z               "mode": "-rwxr-xr-x",
+2026-11-16T16:23:59.1278570Z               "path": "/Users/runner/hostedtoolcache/go/1.27.3/arm64/bin/go",
+2026-11-16T16:23:59.1280750Z               "readlink_error": "readlink /Users/runner/hostedtoolcache/go/1.27.3/arm64/bin/go: invalid argument"
+2026-11-16T16:23:59.1281950Z             },
+2026-11-16T16:23:59.1282440Z             {
+2026-11-16T16:23:59.1283810Z               "evalsymlinks": "/Users/runner/hostedtoolcache/go/1.27.3/arm64/bin",
+2026-11-16T16:23:59.1284900Z               "mode": "drwxr-xr-x",
+2026-11-16T16:23:59.1286200Z               "path": "/Users/runner/hostedtoolcache/go/1.27.3/arm64/bin",
+2026-11-16T16:23:59.1288320Z               "readlink_error": "readlink /Users/runner/hostedtoolcache/go/1.27.3/arm64/bin: invalid argument"
+2026-11-16T16:23:59.1289410Z             },
+2026-11-16T16:23:59.1289900Z             {
+2026-11-16T16:23:59.1291250Z               "evalsymlinks": "/Users/runner/hostedtoolcache/go/1.27.3/arm64",
+2026-11-16T16:23:59.1292300Z               "mode": "drwxr-xr-x",
+2026-11-16T16:23:59.1293550Z               "path": "/Users/runner/hostedtoolcache/go/1.27.3/arm64",
+2026-11-16T16:23:59.1295580Z               "readlink_error": "readlink /Users/runner/hostedtoolcache/go/1.27.3/arm64: invalid argument"
+2026-11-16T16:23:59.1296770Z             },
+2026-11-16T16:23:59.1297270Z             {
+2026-11-16T16:23:59.1298420Z               "evalsymlinks": "/Users/runner/hostedtoolcache/go/1.27.3",
+2026-11-16T16:23:59.1299440Z               "mode": "drwxr-xr-x",
+2026-11-16T16:23:59.1301000Z               "path": "/Users/runner/hostedtoolcache/go/1.27.3",
+2026-11-16T16:23:59.1302860Z               "readlink_error": "readlink /Users/runner/hostedtoolcache/go/1.27.3: invalid argument"
+2026-11-16T16:23:59.1303860Z             },
+2026-11-16T16:23:59.1304350Z             {
+2026-11-16T16:23:59.1305440Z               "evalsymlinks": "/Users/runner/hostedtoolcache/go",
+2026-11-16T16:23:59.1306590Z               "mode": "drwxr-xr-x",
+2026-11-16T16:23:59.1307730Z               "path": "/Users/runner/hostedtoolcache/go",
+2026-11-16T16:23:59.1309500Z               "readlink_error": "readlink /Users/runner/hostedtoolcache/go: invalid argument"
+2026-11-16T16:23:59.1310460Z             },
+2026-11-16T16:23:59.1310940Z             {
+2026-11-16T16:23:59.1312000Z               "evalsymlinks": "/Users/runner/hostedtoolcache",
+2026-11-16T16:23:59.1312990Z               "mode": "drwxr-xr-x",
+2026-11-16T16:23:59.1314100Z               "path": "/Users/runner/hostedtoolcache",
+2026-11-16T16:23:59.1316400Z               "readlink_error": "readlink /Users/runner/hostedtoolcache: invalid argument"
+2026-11-16T16:23:59.1317410Z             },
+2026-11-16T16:23:59.1317910Z             {
+2026-11-16T16:23:59.1319210Z               "evalsymlinks": "/Users/runner",
+2026-11-16T16:23:59.1320200Z               "mode": "drwxr-x---",
+2026-11-16T16:23:59.1321040Z               "path": "/Users/runner",
+2026-11-16T16:23:59.1322480Z               "readlink_error": "readlink /Users/runner: invalid argument"
+2026-11-16T16:23:59.1323360Z             },
+2026-11-16T16:23:59.1323910Z             {
+2026-11-16T16:23:59.1324630Z               "evalsymlinks": "/Users",
+2026-11-16T16:23:59.1325480Z               "mode": "drwxr-xr-x",
+2026-11-16T16:23:59.1326580Z               "path": "/Users",
+2026-11-16T16:23:59.1327230Z               "readlink_error": "readlink /Users: invalid argument"
+2026-11-16T16:23:59.1327560Z             },
+2026-11-16T16:23:59.1327740Z             {
+2026-11-16T16:23:59.1328110Z               "evalsymlinks": "/",
+2026-11-16T16:23:59.1328470Z               "mode": "drwxr-xr-x",
+2026-11-16T16:23:59.1328780Z               "path": "/",
+2026-11-16T16:23:59.1329250Z               "readlink_error": "readlink /: invalid argument"
+2026-11-16T16:23:59.1329540Z             }
+2026-11-16T16:23:59.1329710Z           ],
+2026-11-16T16:23:59.1330230Z           "evalsymlinks": "/Users/runner/hostedtoolcache/go/1.27.3/arm64/bin/go",
+2026-11-16T16:23:59.1330680Z           "evalsymlinks_error": "",
+2026-11-16T16:23:59.1331270Z           "lookpath": "/Users/runner/hostedtoolcache/go/1.27.3/arm64/bin/go",
+2026-11-16T16:23:59.1331690Z           "lookpath_error": ""
+2026-11-16T16:23:59.1331880Z         }
+2026-11-16T16:23:59.1332060Z --- PASS: TestRC0GuardPath (0.00s)
+2026-11-16T16:23:59.1332310Z === RUN   TestRC1Collect
+2026-11-16T16:23:59.1332620Z === RUN   TestRC1Collect/darwin-arm64
+2026-11-16T16:23:59.4608620Z     realcall_test.go:192: darwin/arm64: 377.258833ms
+2026-11-16T16:23:59.4609180Z === RUN   TestRC1Collect/darwin-amd64
+2026-11-16T16:23:59.7196050Z     realcall_test.go:192: darwin/amd64: 254.686416ms
+2026-11-16T16:23:59.7199080Z --- PASS: TestRC1Collect (0.64s)
+2026-11-16T16:23:59.7199970Z     --- PASS: TestRC1Collect/darwin-arm64 (0.38s)
+2026-11-16T16:23:59.7200860Z     --- PASS: TestRC1Collect/darwin-amd64 (0.26s)
+2026-11-16T16:23:59.7201280Z === RUN   TestRC2Overflow
+2026-11-16T16:23:59.7724970Z     realcall_test.go:282: [class B state waited admission entry admitted admission stdout pipe admitted admission stderr pipe admitted admission start admitted start ok cmd held yes stdout-w closed ok release confirmed object held stdout-r closed ok release confirmed object held stderr-w closed ok release confirmed object held stderr-r closed ok release confirmed object held stdout overflow kept 1024 sha256 f48b488a6ec4ad55e943e7a1375b3757dd038a12547df89f5d7fd534fca58d9f stderr eof kept 0 sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 wait signaled SIGPIPE request none none sends 0 panic no expired no late no terminal yes success no] ["wait operation exit-status signaled SIGPIPE"]
+2026-11-16T16:23:59.7730740Z --- PASS: TestRC2Overflow (0.05s)
+2026-11-16T16:23:59.7731180Z === RUN   TestRC3Expiry
+2026-11-16T16:23:59.8197650Z     realcall_test.go:383: [class B state waited admission entry admitted admission stdout pipe admitted admission stderr pipe admitted admission start admitted start ok cmd held yes stdout-w closed ok release confirmed object held stdout-r closed ok release confirmed object held stderr-w closed ok release confirmed object held stderr-r closed ok release confirmed object held stdout eof kept 27998 sha256 269298cfd07f104760932620c0d33ade65502e0cc70a0562927fbf0238d4cf01 stderr eof kept 0 sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 wait exited 0 request none none sends 0 cleanup-unknown no termination request on this platform (darwin: os/wait_unimp.go); the tool may outlive the test process panic no expired yes late yes terminal yes success no] []
+2026-11-16T16:23:59.8201360Z     realcall_test.go:384: RC-3 branch "no request (darwin)" problems []
+2026-11-16T16:23:59.8202030Z --- PASS: TestRC3Expiry (0.05s)
+2026-11-16T16:23:59.8202660Z === RUN   TestRC4JobDryRun
+2026-11-16T16:24:00.6106130Z     realcall_test.go:448: final 4 consistent-with-candidates exit 0 in 788.5495ms
+2026-11-16T16:24:00.6113690Z     realcall_test.go:449: diagnostics:
+2026-11-16T16:24:00.6117350Z         c9evidence: provisional 4 consistent-with-candidates
+2026-11-16T16:24:00.6118860Z         c9evidence: failure-count 0
+2026-11-16T16:24:00.6119940Z         c9evidence: pending-count 0
+2026-11-16T16:24:00.6121590Z         c9evidence: record closeout.jsonl 684 d13c3a981460bd5b39109f0039b7a782c2781cc526f76d1f358eda8df484ea2c
+2026-11-16T16:24:00.6125400Z         c9evidence: record controls.jsonl 392056 58150003e1249ca6498202a2b5f6a28ccadcdc791511c78d457cf1b670670cc3
+2026-11-16T16:24:00.6126810Z         c9evidence: record derived.jsonl 1029743 e8d222658e96ed70c95ec1119da616a484d58efde9e6bcab23d2bf58b2a7c9d8
+2026-11-16T16:24:00.6131730Z         c9evidence: record raw.jsonl 227645 23ef3de47dd7d0d7a1979a150c88e41186f9aa15992420393382648179a19534
+2026-11-16T16:24:00.6134620Z         c9evidence: manifest manifest.txt 340 80ac480d08e005ea6a9b62401a06b5437ebf6c76ff2fb5dfaca07274981b0d6d
+2026-11-16T16:24:00.6136260Z         c9evidence: end manifest-sha256 80ac480d08e005ea6a9b62401a06b5437ebf6c76ff2fb5dfaca07274981b0d6d provisional 4 consistent-with-candidates
+2026-11-16T16:24:00.6137740Z --- PASS: TestRC4JobDryRun (0.79s)
+2026-11-16T16:24:00.6139410Z PASS
+2026-11-16T16:24:00.6142240Z ok  	github.com/XKHoshizora/specmetry/prototype/c9evidence/internal/realcall	1.547s
+2026-11-16T16:24:00.6574890Z ##[group]Run set -uo pipefail
+2026-11-16T16:24:00.6597670Z [36;1mset -uo pipefail[0m
+2026-11-16T16:24:00.6598270Z [36;1mif [ "$RUNNER_OS" = "Windows" ]; then[0m
+2026-11-16T16:24:00.6599130Z [36;1m  tasklist //V | grep -iE '(^| )(go|.*\.test)\.exe' || echo "no go or test process"[0m
+2026-11-16T16:24:00.6599980Z [36;1melse[0m
+2026-11-16T16:24:00.6601050Z [36;1m  ps -eo pid,ppid,etime,comm,args | grep -E '[/ ](go|[a-z]+\.test)( |$)' | grep -v grep || echo "no go or test process"[0m
+2026-11-16T16:24:00.6602180Z [36;1mfi[0m
+2026-11-16T16:24:00.6674970Z shell: /bin/bash --noprofile --norc -e -o pipefail {0}
+2026-11-16T16:24:00.6675250Z env:
+2026-11-16T16:24:00.6675430Z   GOTOOLCHAIN: local
+2026-11-16T16:24:00.6675640Z   GOFLAGS: 
+2026-11-16T16:24:00.6675900Z ##[endgroup]
+2026-11-16T16:24:00.7724760Z no go or test process
+2026-11-16T16:24:00.7809490Z ##[group]Run actions/upload-artifact@v7.0.2
+2026-11-16T16:24:00.7809760Z with:
+2026-11-16T16:24:00.7809940Z   name: c9-tool-test-macos-latest
+2026-11-16T16:24:00.7810190Z   path: /Users/runner/work/_temp/c9-tool-test-out
+2026-11-16T16:24:00.7810440Z   retention-days: 90
+2026-11-16T16:24:00.7810610Z   if-no-files-found: warn
+2026-11-16T16:24:00.7810790Z   compression-level: 6
+2026-11-16T16:24:00.7810960Z   overwrite: false
+2026-11-16T16:24:00.7811130Z   include-hidden-files: false
+2026-11-16T16:24:00.7811770Z   archive: true
+2026-11-16T16:24:00.7811920Z env:
+2026-11-16T16:24:00.7812060Z   GOTOOLCHAIN: local
+2026-11-16T16:24:00.7812220Z   GOFLAGS: 
+2026-11-16T16:24:00.7812420Z ##[endgroup]
+2026-11-16T16:24:01.2576250Z With the provided path, there will be 13 files uploaded
+2026-11-16T16:24:01.2578210Z Artifact name is valid!
+2026-11-16T16:24:01.2578940Z Root directory input is valid!
+2026-11-16T16:24:01.5685630Z Uploading artifact: c9-tool-test-macos-latest.zip
+2026-11-16T16:24:01.5916640Z Beginning upload of artifact content to blob storage
+2026-11-16T16:24:01.8994370Z Uploaded bytes 532489
+2026-11-16T16:24:01.9186140Z Finished uploading artifact content to blob storage!
+2026-11-16T16:24:01.9195590Z SHA256 digest of uploaded artifact is c9fc2b253d22d138f4962ef4fc5885fcce4161fc268a310ee326ab75d265647c
+2026-11-16T16:24:01.9196570Z Finalizing artifact upload
+2026-11-16T16:24:02.3714790Z Artifact c9-tool-test-macos-latest successfully finalized. Artifact ID 14245042864
+2026-11-16T16:24:02.3716830Z Artifact c9-tool-test-macos-latest has been successfully uploaded! Final size is 532489 bytes. Artifact ID is 14245042864
+2026-11-16T16:24:02.3857180Z Artifact download URL: https://github.com/XKHoshizora/specmetry/actions/runs/43906849891/artifacts/14245042864
+2026-11-16T16:24:02.4131270Z Post job cleanup.
+2026-11-16T16:24:02.6946650Z Post job cleanup.
+2026-11-16T16:24:02.8532800Z [command]/opt/homebrew/bin/git version
+2026-11-16T16:24:02.8868730Z git version 2.56.0
+2026-11-16T16:24:02.8892750Z Copying '/Users/runner/.gitconfig' to '/Users/runner/work/_temp/e72c94b4-8291-4fd5-9268-ecf7173bf3b0/.gitconfig'
+2026-11-16T16:24:02.8904130Z Temporarily overriding HOME='/Users/runner/work/_temp/e72c94b4-8291-4fd5-9268-ecf7173bf3b0' before making global git config changes
+2026-11-16T16:24:02.8907020Z Adding repository directory to the temporary git global config as a safe directory
+2026-11-16T16:24:02.8909050Z [command]/opt/homebrew/bin/git config --global --add safe.directory /Users/runner/work/specmetry/specmetry
+2026-11-16T16:24:02.9040670Z Removing SSH command configuration
+2026-11-16T16:24:02.9045710Z [command]/opt/homebrew/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-11-16T16:24:02.9123660Z [command]/opt/homebrew/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-11-16T16:24:03.0489180Z Removing HTTP extra header
+2026-11-16T16:24:03.0495090Z [command]/opt/homebrew/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-11-16T16:24:03.0592320Z [command]/opt/homebrew/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-11-16T16:24:03.1987910Z Removing includeIf entries pointing to credentials config files
+2026-11-16T16:24:03.2090730Z [command]/opt/homebrew/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-11-16T16:24:03.2190160Z includeif.gitdir:/Users/runner/work/specmetry/specmetry/.git.path
+2026-11-16T16:24:03.2291980Z includeif.gitdir:/Users/runner/work/specmetry/specmetry/.git/worktrees/*.path
+2026-11-16T16:24:03.2373960Z includeif.gitdir:/github/workspace/.git.path
+2026-11-16T16:24:03.2469590Z includeif.gitdir:/github/workspace/.git/worktrees/*.path
+2026-11-16T16:24:03.2712470Z [command]/opt/homebrew/bin/git config --local --get-all includeif.gitdir:/Users/runner/work/specmetry/specmetry/.git.path
+2026-11-16T16:24:03.2772360Z /Users/runner/work/_temp/git-credentials-08da9707-e42d-41d7-9d7c-9b7e13979920.config
+2026-11-16T16:24:03.2899450Z [command]/opt/homebrew/bin/git config --local --unset includeif.gitdir:/Users/runner/work/specmetry/specmetry/.git.path \/Users\/runner\/work\/_temp\/git\-credentials\-08da9707\-e42d\-41d7\-9d7c\-9b7e13979920\.config
+2026-11-16T16:24:03.3047710Z [command]/opt/homebrew/bin/git config --local --get-all includeif.gitdir:/Users/runner/work/specmetry/specmetry/.git/worktrees/*.path
+2026-11-16T16:24:03.3149700Z /Users/runner/work/_temp/git-credentials-08da9707-e42d-41d7-9d7c-9b7e13979920.config
+2026-11-16T16:24:03.3253130Z [command]/opt/homebrew/bin/git config --local --unset includeif.gitdir:/Users/runner/work/specmetry/specmetry/.git/worktrees/*.path \/Users\/runner\/work\/_temp\/git\-credentials\-08da9707\-e42d\-41d7\-9d7c\-9b7e13979920\.config
+2026-11-16T16:24:03.3341490Z [command]/opt/homebrew/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git.path
+2026-11-16T16:24:03.3342330Z /github/runner_temp/git-credentials-08da9707-e42d-41d7-9d7c-9b7e13979920.config
+2026-11-16T16:24:03.3343960Z [command]/opt/homebrew/bin/git config --local --unset includeif.gitdir:/github/workspace/.git.path \/github\/runner_temp\/git\-credentials\-08da9707\-e42d\-41d7\-9d7c\-9b7e13979920\.config
+2026-11-16T16:24:03.3345680Z [command]/opt/homebrew/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git/worktrees/*.path
+2026-11-16T16:24:03.3346390Z /github/runner_temp/git-credentials-08da9707-e42d-41d7-9d7c-9b7e13979920.config
+2026-11-16T16:24:03.3354990Z [command]/opt/homebrew/bin/git config --local --unset includeif.gitdir:/github/workspace/.git/worktrees/*.path \/github\/runner_temp\/git\-credentials\-08da9707\-e42d\-41d7\-9d7c\-9b7e13979920\.config
+2026-11-16T16:24:03.3376910Z [command]/opt/homebrew/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-11-16T16:24:03.4562470Z Removing credentials config '/Users/runner/work/_temp/git-credentials-08da9707-e42d-41d7-9d7c-9b7e13979920.config'
+2026-11-16T16:24:03.4707120Z Cleaning up orphan processes
