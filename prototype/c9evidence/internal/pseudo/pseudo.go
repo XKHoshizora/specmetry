@@ -14,6 +14,7 @@ import (
 	"io"
 	"os"
 	"strconv"
+	"time"
 )
 
 // The variables that select the mode and its size.
@@ -39,7 +40,21 @@ const (
 	// inherited), writes one line "ready" to stderr, reads stdin until EOF
 	// and exits 0.
 	Hold = "hold"
+	// FloodTerm writes EnvBytes bytes to stdout in one write and then ends
+	// itself by SIGTERM (Unix; elsewhere it exits 98). It writes nothing
+	// after, so no write of it can meet a closed read end (Review 155
+	// B-154-4-R-S: another signal than the expected SIGPIPE).
+	FloodTerm = "flood-term"
+	// FloodExit writes EnvBytes bytes to stdout in one write and then exits
+	// with FloodExitCode, a normal non-zero exit.
+	FloodExit = "flood-exit"
+	// Term ends itself by SIGTERM at once (Unix; elsewhere it exits 98).
+	Term = "term"
 )
+
+// FloodExitCode is FloodExit's exit code: the code a shell reports for a
+// SIGPIPE end (128 + 13), here a normal exit.
+const FloodExitCode = 141
 
 // StderrLine is what EchoArgs writes to stderr.
 const StderrLine = "c9-pseudo stderr\n"
@@ -94,6 +109,24 @@ func run(mode string, args []string, in io.Reader, out, errw io.Writer) int {
 			n -= k
 		}
 		return 0
+	case FloodTerm, FloodExit:
+		n, err := strconv.Atoi(os.Getenv(EnvBytes))
+		if err != nil || n < 0 {
+			return 4
+		}
+		buf := make([]byte, n)
+		for i := range buf {
+			buf[i] = 'x'
+		}
+		if _, err := out.Write(buf); err != nil {
+			return 3
+		}
+		if mode == FloodExit {
+			return FloodExitCode
+		}
+		return endByTerm()
+	case Term:
+		return endByTerm()
 	case Block:
 		_, _ = io.Copy(io.Discard, in)
 		return 0
@@ -106,4 +139,17 @@ func run(mode string, args []string, in io.Reader, out, errw io.Writer) int {
 	}
 	fmt.Fprintf(errw, "c9-pseudo: unknown mode %q\n", mode)
 	return 97
+}
+
+// endByTerm sends SIGTERM to the pseudo-tool itself; the Go runtime then
+// ends the process by the signal's default action (no handler is
+// installed for it). Until that happens it only sleeps: on Unix it never
+// returns. Elsewhere there is no signal and it returns 98.
+func endByTerm() int {
+	if err := raiseTerm(); err != nil {
+		return 98
+	}
+	for {
+		time.Sleep(time.Second)
+	}
 }
