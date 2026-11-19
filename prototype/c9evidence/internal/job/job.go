@@ -49,9 +49,14 @@ type Config struct {
 	ReadFS     modsnap.FS
 	Stderr     io.Writer
 	Invoker    collect.Invoker
-	Guard      func() collect.GuardValues
-	TypeCheck  collect.TypeChecker
-	Controls   []controls.Variant
+	// Tools is the registry of R's calls when Invoker is the real caller
+	// (phase 2): the closeout waits for it as a terminal source and
+	// consumes its problems (implementation plan §12.14 item 13). Nil with
+	// the fake and stopped callers.
+	Tools     ToolRegistry
+	Guard     func() collect.GuardValues
+	TypeCheck collect.TypeChecker
+	Controls  []controls.Variant
 	// FixtureRoot is where the controls' fixtures go ("" makes a fresh
 	// temporary directory, as an outer operation).
 	FixtureRoot string
@@ -63,6 +68,14 @@ type Config struct {
 	// GITHUB_WORKFLOW_REF, GITHUB_WORKFLOW_SHA (plan §6.3).
 	Identity map[string]string
 	T2       string
+}
+
+// ToolRegistry is what the closeout needs of the tool registry
+// (toolctl.Registry): whether every record is terminal, and the records'
+// failures and pending items.
+type ToolRegistry interface {
+	Terminal() (bool, <-chan struct{})
+	Problems() (failures, pending []string)
 }
 
 // Work states.
@@ -741,6 +754,22 @@ func (j *Job) copyState(mRunCode int) state {
 	if j.rMissing != "" {
 		pending = append(pending, "R: "+j.rMissing)
 	}
+	// The tool registry (§12.14 item 13): a record not terminal at the
+	// snapshot, or any terminal record that does not meet item 11 (a
+	// failure, a C class, a close or request error, a termination not
+	// admitted or abandoned, a cleanup unknown, a late result), keeps the
+	// conclusion from 3 or 4 (plan §7.1 level 2). A failed call is also a
+	// failure of its R check; it is listed here too, never removed.
+	if t := j.cfg.Tools; t != nil {
+		fails, pend := t.Problems()
+		summary["tools"] = map[string]any{"failures": len(fails), "pending": len(pend)}
+		for _, f := range fails {
+			in.ToolProblems = append(in.ToolProblems, "failure: "+f)
+		}
+		for _, p := range pend {
+			in.ToolProblems = append(in.ToolProblems, "pending: "+p)
+		}
+	}
 	for _, r := range j.rRecords {
 		res := r.Result
 		rc := verdict.RConfig{Config: res.Config.String(), Compared: res.Checks.Status("K") == judge.Hold, Consistent: res.Consistent}
@@ -776,12 +805,16 @@ func (j *Job) Finish(mRunCode int) chain.Final {
 	}
 	j.finalized = true
 	j.mu.Unlock()
+	terminal := []chain.TerminalSource{j.terminal}
+	if j.cfg.Tools != nil {
+		terminal = append(terminal, j.cfg.Tools.Terminal)
+	}
 	return chain.Closeout(chain.Config[state]{
 		Outer:    j.outer,
 		Log:      j.log,
 		W:        j.W,
 		MRunCode: mRunCode,
-		Terminal: []chain.TerminalSource{j.terminal},
+		Terminal: terminal,
 		Copy:     func() state { return j.copyState(mRunCode) },
 		Provisional: func(p chain.ProvisionalInput[state]) chain.Snapshot {
 			in := p.Copied.in

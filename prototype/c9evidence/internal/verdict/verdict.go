@@ -95,6 +95,11 @@ type Inputs struct {
 	// terminal at the snapshot, and the record chain's published failures.
 	OFailures []string
 	OPending  []string
+	// ToolProblems are the tool registry's failures and pending records of
+	// R's calls (implementation plan §12.14 item 13; phase 2): each is a
+	// level-2 condition (plan §7.1: a cleanup unknown, a call not meeting
+	// item 11).
+	ToolProblems []string
 }
 
 // Decide returns the conclusion and the reasons, by priority (plan §7.1).
@@ -133,6 +138,9 @@ func Decide(in Inputs) (Conclusion, []string) {
 		if r.ABHold && !r.Compared && len(r.Failures) == 0 {
 			l2 = append(l2, "R "+r.Config+": comparison with the candidates not evaluated")
 		}
+	}
+	for _, p := range in.ToolProblems {
+		l2 = append(l2, "R tool control: "+p)
 	}
 	for _, o := range in.OFailures {
 		l2 = append(l2, "O: "+o)
