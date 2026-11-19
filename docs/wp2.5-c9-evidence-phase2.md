@@ -1,6 +1,6 @@
 # WP2.5 第三批：C-9 限定取证工具第二阶段的实施与测试记录
 
-> 状态：**第二阶段的实施登记（写代码之前写定；2026-11-15，review-resolution §200）**。本文的 §1 ~ §8 在第一行代码之前提交；实现、测试、失败与证据在之后追加的各节中记录，不改写本登记。独立 PR，不合并；Auto-fix、Auto-merge 保持关闭。之后：实施完成，固定代码点 `ed84d09` 的三平台测试 run 43681144176 success，结果、偏离与发现见 §9（review-resolution §201；待独立审查）。Review 154 为技术 NO-GO（B-154-1 ~ 4），修复在 PR #58 内进行，登记见 §10 与 review-resolution §202；修复已实施，固定代码点 `a0ed8dc` 的三平台测试 run 43737429057 success，见 §10.1 ~ §10.9（review-resolution §203；已修复，待独立复审）。Review 155 为技术 NO-GO（B-154-1 关闭；三个残余 B-154-2/3-R-H、B-154-4-R-S、B-154-4-R-C），修复在 PR #58 内进行，登记见 §11 与 review-resolution §204；修复已实施，固定代码点 `5e6c3a4` 的三平台测试 run 43906849891 success，见 §11.1 ~ §11.9（review-resolution §205；已修复，待独立复审）。
+> 状态：**第二阶段的实施登记（写代码之前写定；2026-11-15，review-resolution §200）**。本文的 §1 ~ §8 在第一行代码之前提交；实现、测试、失败与证据在之后追加的各节中记录，不改写本登记。独立 PR，不合并；Auto-fix、Auto-merge 保持关闭。之后：实施完成，固定代码点 `ed84d09` 的三平台测试 run 43681144176 success，结果、偏离与发现见 §9（review-resolution §201；待独立审查）。Review 154 为技术 NO-GO（B-154-1 ~ 4），修复在 PR #58 内进行，登记见 §10 与 review-resolution §202；修复已实施，固定代码点 `a0ed8dc` 的三平台测试 run 43737429057 success，见 §10.1 ~ §10.9（review-resolution §203；已修复，待独立复审）。Review 155 为技术 NO-GO（B-154-1 关闭；三个残余 B-154-2/3-R-H、B-154-4-R-S、B-154-4-R-C），修复在 PR #58 内进行，登记见 §11 与 review-resolution §204；修复已实施，固定代码点 `5e6c3a4` 的三平台测试 run 43906849891 success，见 §11.1 ~ §11.9（review-resolution §205；已修复，待独立复审）。Review 156 为限定技术 GO（三个残余关闭，第二阶段在已授权、已审查的实现范围内技术 GO）；最终常规 CI 只重跑 Windows 作业之后正式成功；N-156-1 的精化与收尾见 §12（review-resolution §206；条件授权以 merge commit 合并 PR #58）。
 >
 > - 依据：负责人 2026-11-15 的决定（§200）；[限定取证计划](wp2.5-c9-limited-evidence-plan.md) §2.3 的 E-10 (ii)、§2.4 的 LE-5、§5.2 的 LC-9；[实施计划](wp2.5-implementation-plan.md) §12.6、§12.12（“工具的控制协议”与“输出不关闭的拒绝路径”）、§12.14 第 1 ~ 13 条；[第一阶段的实现记录](wp2.5-c9-evidence-tool.md)。
 > - 本轮**不**授权：对真实仓库 R 的正式采集；正式运行分支（`evidence/` 之下的任何分支）、N2 的决定与正式运行的 C / T；宣布任何 G 项满足、批准精确例外；第三批的生产实施；WP2.5 / M2 的验收。
@@ -514,3 +514,69 @@ Review 155 对固定代码点 `a0ed8dc` 为技术 NO-GO：B-154-1 关闭；N-154
 
 - 固定代码点 `5e6c3a4` 与本节的证据交独立复审（Review 156，由负责人安排）；B-154-2/3-R-H、B-154-4-R-S、B-154-4-R-C 记为“已修复，待独立复审”，本节不宣布关闭。B-154-1 保持关闭，N-154-1／2 保持完成。
 - PR #58 不合并；Auto-fix、Auto-merge 保持关闭。正式取证、正式运行分支、N2、正式运行的 C / T、G 项、精确例外、第三批的生产实施与 WP2.5 / M2 的验收都未授权。
+
+## 12. Review 156 的收尾（2026-11-19；review-resolution §206）
+
+本节只做文档收尾：登记 Review 156 的限定结论、最终常规 CI 的处置，并按 N-156-1 精化 RC-3 分支标签的读法。工具模块的子树（`755ffc0c2465959fa5528d07b5c079154e8e4feb`）与测试 workflow 的 blob（`4387acdc683a2014c235f3991bf854a30d6c7c2c`）不变；代码中的标签、原始日志、artifact、§9 ~ §11 与 review-resolution §201 ~ §205 的历史记录都不改写。
+
+### 12.1 Review 156 的裁定（登记）
+
+| 项 | 裁定 |
+|---|---|
+| B-154-2/3-R-H | **关闭**：包级的根保存实际的登记表、LC-9 的运行实例与 H；原对象与错误不随局部函数返回而失去持有者 |
+| B-154-2、B-154-3 | **在受审的第二阶段范围内整体关闭** |
+| B-154-4-R-S | **关闭**：退出的种类、退出码与信号身份进入实际的比较与终判 |
+| B-154-4-R-C | **按 Review 156 §5 的受控前提关闭**：不再从暂停父端的 `Wait` 推导子进程存活；五个分支不构成一般性的因果识别器，也不是所有环境的穷尽证明 |
+| B-154-4 | **在受审范围内整体关闭**，保留 Review 155 对来源、站点、次数与完整错误集合的限定 |
+| B-154-1、N-154-1／2 | 保持关闭／完成 |
+| N-156-1 | 非阻塞：RC-3 的分支标签比观测强（§12.2） |
+| 第二阶段 | 在已授权、已审查的实现范围内技术 GO |
+
+Review 156 同时指出：最终 HEAD `a37ef0a` 的常规 CI run 43908188853 的 attempt 1 为 failure（7/8），这一失败单独阻止当时的合并建议。它的处置见 §12.4。
+
+### 12.2 N-156-1：RC-3 的分支标签只是模式名
+
+下列写法中的分支名称都只是 `judgeRC3` 的**模式名**，指“请求的结果与退出身份的哪一种组合落在允许的集合中”，不是对因果或时间顺序的陈述：
+
+- `rc3_test.go` 的常量 `ended by the request`、`exited before the request`、`no request (darwin)` 与同文件注释中的分支说明；
+- §11.2 的 C2 行，§11.5 的 RC-3 行与其后的说明，§11.7 中“RC-3 实际发生的分支”，§11.8 中的同名写法；
+- review-resolution §204、§205 中的分支名称；
+- `docs/evidence/wp2.5-c9-phase2/ci-43906849891/README.md` 的 RC-3 行，以及三个 artifact 中 `realcall/rc3-expiry.json` 的 `facts.branch` 字段。
+
+真实的事实以分开记录的字段为准：请求的准入、发起、次数与结果，子进程的退出身份，唯一 `Wait` 的返回与回收，全部故障，以及时间的记录（父端在假时钟上的到期 `facts.parent.expired_at`、父端记录的事件序列 `facts.events` 与其中晚到的标记）。事件序列只是父端登记的先后，不是子进程实际退出的时刻。
+
+不得由名称推导：
+
+- **“由请求结束”不表示请求造成了退出。** Linux 上请求 nil 加 `signaled SIGKILL` 与该请求相容；Windows 上请求 nil 加 `exited 1` 不能区别 `TerminateProcess` 的退出码 1 与工具自己的 `exit(1)`（§11.8）。
+- **“请求之前已经结束”不表示请求开始之前所有退出步骤都已完成。** Linux 上能够支持的是组退出已经确定、退出状态相容（C2 先观察两个 EOF），以及随后唯一 `Wait` 的结果；Windows 上的 access-denied 只按文档说明调用时进程已经终止。两者都不给出完整的时间线。
+- **“没有请求（darwin）”只表示协议不发终止请求。** 之后的 `exited 0` 与 `Wait` 的返回不追认到期的调用为成功，也不清除到期时登记的清理未知。
+
+模式名与事实组合的对照（共同的事实：父端在 `W` 到期，调用判定不成功，有晚到的结果，唯一的 `Wait` 返回，B 类，两个输出完整、没有错误）：
+
+| 平台与模式名（代码中的标签） | 请求 | 退出身份 | 允许的故障集合 / 清理未知 |
+|---|---|---|---|
+| Linux，`ended by the request` | 准入、经 pidfd 发起 1 次、nil | `signaled SIGKILL` | 恰为 `wait operation exit-status signaled SIGKILL`；没有清理未知 |
+| Linux，`exited before the request` | 准入、经 pidfd 发起 1 次、nil | `exited 0` | 没有故障；没有清理未知 |
+| Windows，`ended by the request` | 准入、`Kill` 1 次、nil | `exited 1` | 恰为 `wait operation exit-status exited 1`；没有清理未知 |
+| Windows，`exited before the request` | 准入、`Kill` 1 次、`TerminateProcess` access-denied | `exited 0` | 恰为 `request operation TerminateProcess access-denied`；没有清理未知 |
+| darwin，`no request (darwin)` | 没有请求 | `exited 0` | 没有故障；清理未知恰为平台的一条 |
+
+据此，§11.5 中“分支‘由请求结束’”应读作：run 43906849891 中，Ubuntu 的事实组合为请求 1 次、nil／`signaled SIGKILL`，Windows 为请求 1 次、nil／`exited 1`；macOS 的“没有请求（darwin）”为没有请求／`exited 0`、清理未知恰为一条。三者的父端都已到期，调用都判定失败。
+
+本精化不改变判定：五个分支的精确比较、到期调用始终被拒绝、晚到资格与故障集合的规则都照旧；不增加允许的错误，不新增实验，不改代码中的标签。
+
+### 12.3 Review 156 的其他限定（登记）
+
+- `keep` 到测试进程结束一直可达，依据是包级强引用与没有删除路径的静态接线，不是 GC 的观测（Review 156 §3.3）；`keep` 不证明子进程已回收，也不证明正式资源预算成立。
+- H3、H4 中 H 就绪读端的关闭错误，是真实 `Close` 返回 nil 之后由接缝代替的错误，不是自然发生的关闭故障。
+- C2 的 Linux 观测：本机 WSL 的内核 `6.18.33.2-microsoft-standard-WSL2` 已记录，ubuntu-latest 的内核版本没有记录。准确口径是“两处 Linux 环境有相同的观测，其中一处的内核版本已知，另有固定主线源码的依据”，不是两个确切内核构建的认证。
+- Windows 的 access-denied 组合没有动态命中，只由 C1 的构造用例覆盖。
+- 步骤 B 的 31 条包含 C1 的 1 个顶层与 23 个构造子测试，不全是真实 `go` 调用。
+- artifact 的核对对象是仓库中重新打包的 `tar.gz` 的成员，不等同于 GitHub 的 ZIP，也不认证 runner 环境。
+
+### 12.4 最终常规 CI 与交接
+
+- 最终 HEAD `a37ef0a` 的常规 CI run 43908188853 的 attempt 1 为 failure（7/8）。唯一失败的是 Windows 的 Go 测试作业：`internal/store/sqlite` 的 `TestSeqIsUniqueAcrossConnections`（`store_test.go:546: database is locked (5) (SQLITE_BUSY)`）。根因未知，不归因于本 PR（本 PR 不改根模块），不关闭 M-15。
+- 负责人授权只重跑这一个作业一次：attempt 2 的 Windows 作业 135539741149 检出同一合并快照 `0ff7c18`，为 success（`TestSeqIsUniqueAcrossConnections` PASS，包与 SKIP 的集合与 attempt 1 相同），run 的正式结论为 success；其余七项沿用 attempt 1 的结果，没有实际重跑。这不表示 `SQLITE_BUSY` 已修复（review-resolution §206）。
+- 本节所在的文档收尾提交之后，最终 HEAD 须另取一次完整的常规 CI；旧 HEAD 的重跑成功不能代替它。负责人条件授权在条件全部满足之后以 merge commit 合并 PR #58（§206）。合并只表示第二阶段的成果入库，不表示完整的取证工作或 WP2.5 已验收。
+- 正式取证、正式入口的运行、`evidence/` 之下的运行分支、N2、正式运行的 C / T、正式 E-10 前提的扩大接受、F-1 在正式 workflow 中的修改、G 项、精确例外、第三批的生产实施与 WP2.5 / M2 的验收都未授权。
