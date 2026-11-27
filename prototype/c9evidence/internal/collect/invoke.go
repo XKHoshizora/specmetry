@@ -39,6 +39,11 @@ type CallResult struct {
 	Injected  []string
 	Start     time.Time
 	End       time.Time
+	// Control is the control protocol's published record of the call (a
+	// copy; phase 2, internal/toolctl): every descriptor, both reads, the
+	// reap, the pidfd and the termination request with their real results.
+	// Nil for the fake and stopped callers.
+	Control any `json:",omitempty"`
 }
 
 // Succeeded is §12.14 item 11: reaped with exit code 0, both outputs at
@@ -77,8 +82,9 @@ func (r CallResult) Problems(w time.Time) []string {
 	return out
 }
 
-// Invoker runs one call. The execution boundary of the tool: phase 1 has
-// only Stopped and the in-process Fake.
+// Invoker runs one call. The execution boundary of the tool: phase 1 had
+// only Stopped and the in-process Fake; phase 2 adds the real caller,
+// toolctl.Registry, the only code of the tool that starts a process.
 type Invoker interface {
 	Invoke(s CallSpec) CallResult
 }

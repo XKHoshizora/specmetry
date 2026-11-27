@@ -53,11 +53,29 @@ func TestControlsWithoutTypeCheck(t *testing.T) {
 	}
 }
 
-func TestLC9IsAMiss(t *testing.T) {
-	env, _ := newEnv(t)
-	js := runVariants(t, LC9(), env)
-	if len(js) != 1 || js[0].Judgement != verdict.Miss {
-		t.Fatalf("%v", js)
+// TestLC9 runs every LC-9 variant (phase 2): each applicable one is a hit,
+// and the Linux-only ones are not applicable elsewhere. The pseudo-tools
+// are real processes; the seams and the fake clocks are seam evidence.
+func TestLC9(t *testing.T) {
+	env, outer := newEnv(t)
+	vs := LC9(runtime.GOOS)
+	js := runVariants(t, vs, env)
+	if len(js) != len(vs) {
+		t.Fatalf("%d judgements for %d variants", len(js), len(vs))
+	}
+	for i, j := range js {
+		want := verdict.Hit
+		if ok, _ := vs[i].Applies(runtime.GOOS); !ok {
+			want = verdict.NotApplicable
+		}
+		if j.Judgement != want {
+			t.Errorf("%s %s: %s, want %s: %v", j.Control, j.Variant, j.Judgement, want, j.Reasons)
+			continue
+		}
+		t.Logf("%s %s: %s", j.Control, j.Variant, j.Judgement)
+	}
+	if _, errs, open := outer.State(); len(errs) > 0 || open != 0 {
+		t.Errorf("outer operations: errors %v open %d", errs, open)
 	}
 }
 

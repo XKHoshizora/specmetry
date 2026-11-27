@@ -24,14 +24,18 @@ import (
 // EvaluatePre's.
 type GuardValues struct {
 	AnalyzerVersion string
-	Candidate       string // absolute, symbolic links resolved
-	Root            string // <root>, the parent of the bin directory
-	ExeName         string // "go" or "go.exe"
-	ExeRegular      bool
-	SrcCmdGo        bool // <root>/src/cmd/go is a directory
-	VersionLine     string
-	ExeSHA256       string
-	Errors          []string // lookup, symbolic link, Lstat, read or close errors
+	// Found is exec.LookPath's result before it is made absolute and its
+	// links resolved (phase 2: recorded so a failed resolution can be
+	// read; empty when the lookup failed or the values are constructed).
+	Found       string `json:",omitempty"`
+	Candidate   string // absolute, symbolic links resolved
+	Root        string // <root>, the parent of the bin directory
+	ExeName     string // "go" or "go.exe"
+	ExeRegular  bool
+	SrcCmdGo    bool // <root>/src/cmd/go is a directory
+	VersionLine string
+	ExeSHA256   string
+	Errors      []string // lookup, symbolic link, Lstat, read or close errors
 }
 
 // GuardSources are the guard's inputs; the real ones are ReadGuard's
@@ -62,12 +66,13 @@ func ReadGuard(src GuardSources) GuardValues {
 		v.Errors = append(v.Errors, "look up go: "+err.Error())
 		return v
 	}
+	v.Found = found
 	abs, err := filepath.Abs(found)
 	if err == nil {
 		abs, err = src.EvalSymlinks(abs)
 	}
 	if err != nil {
-		v.Errors = append(v.Errors, "resolve candidate: "+err.Error())
+		v.Errors = append(v.Errors, "resolve candidate "+found+": "+err.Error())
 		return v
 	}
 	v.Candidate = abs

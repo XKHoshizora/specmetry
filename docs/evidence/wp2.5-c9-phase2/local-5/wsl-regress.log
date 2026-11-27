@@ -1,0 +1,59 @@
+# command: GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go test -c (toolctl, controls); run in WSL with -test.v -test.count=1 -test.run 'TestR155' (pseudo-tools only; no real call)
+# env: GOTOOLCHAIN=local GOPROXY=off GOWORK=off GOFLAGS=
+# toolchain: /c/Users/hoshi/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/bin/go.exe
+# toolchain sha256: 83b7ba66215e696414fa49462d0db2da4f4cf15c7bebd42f0b189fa04866999d
+# go version: go version go1.27.3 windows/amd64
+# HEAD: 991e3292a7ca13bbfcaee2c7786ae27d551e1145
+# tree: f3dbfe8d2edc5722c6cec424370753c1320dc86b
+# tool module subtree: e03046f170cf744102467fc8df39631b4c996742
+# worktree before: 1 changed paths
+# started: 2026-11-16T16:12:22Z
+# wsl kernel: 6.18.33.2-microsoft-standard-WSL2
+# toolctl.test sha256: 595066210f905726cc081944212c286b811bb6e51b728ca5ee90cac1b0ce5b3b
+# controls.test sha256: 82d430fd33e1141127d8c191d8d3071067215f61cf723ce2cc71a8a4c626e870
+=== package toolctl
+=== RUN   TestR155RegistryOutlivesItsCaller
+    regress155_test.go:88: stderr-r reclaimed after its caller returned (pid 32852, reap unknown): it had no owner
+    regress155_test.go:88: registry reclaimed after its caller returned (pid 32852, reap unknown): it had no owner
+    regress155_test.go:88: record reclaimed after its caller returned (pid 32852, reap unknown): it had no owner
+    regress155_test.go:88: cmd reclaimed after its caller returned (pid 32852, reap unknown): it had no owner
+    regress155_test.go:88: process reclaimed after its caller returned (pid 32852, reap unknown): it had no owner
+    regress155_test.go:88: stdout-w reclaimed after its caller returned (pid 32852, reap unknown): it had no owner
+    regress155_test.go:88: stdout-r reclaimed after its caller returned (pid 32852, reap unknown): it had no owner
+    regress155_test.go:88: stderr-w reclaimed after its caller returned (pid 32852, reap unknown): it had no owner
+--- FAIL: TestR155RegistryOutlivesItsCaller (0.01s)
+=== RUN   TestR155ExitedBeforeRequest
+    regress155_test.go:137: ["class B" "state waited" "admission entry admitted" "admission stdout pipe admitted" "admission stderr pipe admitted" "admission start admitted" "start ok" "cmd held yes" "stdout-w closed ok release confirmed object held" "stdout-r closed ok release confirmed object held" "stderr-w closed ok release confirmed object held" "stderr-r closed ok release confirmed object held" "stdout eof kept 0 sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" "stderr eof kept 0 sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" "wait exit 0" "pidfd closed ok closes 1" "request pidfd done sends 1 ok" "panic no" "expired yes" "late yes" "terminal yes" "success no"]
+--- PASS: TestR155ExitedBeforeRequest (0.00s)
+FAIL
+toolctl exit 1:
+=== package controls
+=== RUN   TestR155HolderOutlivesTheVariant
+    regress155_test.go:121: run reclaimed after the run returned (a release unknown): it had no owner
+    regress155_test.go:121: registry reclaimed after the run returned (a release unknown): it had no owner
+    regress155_test.go:121: holder reclaimed after the run returned (a release unknown): it had no owner
+    regress155_test.go:121: holder cmd reclaimed after the run returned (a release unknown): it had no owner
+    regress155_test.go:121: ready-r reclaimed after the run returned (a release unknown): it had no owner
+--- FAIL: TestR155HolderOutlivesTheVariant (0.01s)
+=== RUN   TestR155OverflowOtherSignal
+    regress155_test.go:143: overflow: hit []
+    regress155_test.go:149: a SIGTERM end was taken for the expected SIGPIPE end: hit
+--- FAIL: TestR155OverflowOtherSignal (0.00s)
+=== RUN   TestR155OverflowNormalExit
+    regress155_test.go:160: overflow: miss [results differ from the complete expectation:
+          got  ["admission entry admitted" "admission start admitted" "admission stderr pipe admitted" "admission stdout pipe admitted" "class B" "cmd held yes" "decision fail" "expired no" "fault wait operation exit-status" "late no" "panic no" "pidfd closed ok closes 1" "request pidfd none sends 0" "start ok" "state waited" "stderr eof kept 0 sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" "stderr-r closed ok release confirmed object held" "stderr-w closed ok release confirmed object held" "stdout overflow kept 4096 sha256 a2e659dacb4691e887ac0139f8893d04764ee197d70fb73d3190d56113d18e3e" "stdout-r closed ok release confirmed object held" "stdout-w closed ok release confirmed object held" "success no" "terminal yes" "wait exit 141"]
+          want ["admission entry admitted" "admission start admitted" "admission stderr pipe admitted" "admission stdout pipe admitted" "class B" "cmd held yes" "decision fail" "expired no" "fault wait operation exit-status" "late no" "panic no" "pidfd closed ok closes 1" "request pidfd none sends 0" "start ok" "state waited" "stderr eof kept 0 sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" "stderr-r closed ok release confirmed object held" "stderr-w closed ok release confirmed object held" "stdout overflow kept 4096 sha256 a2e659dacb4691e887ac0139f8893d04764ee197d70fb73d3190d56113d18e3e" "stdout-r closed ok release confirmed object held" "stdout-w closed ok release confirmed object held" "success no" "terminal yes" "wait exit -1"]]
+--- PASS: TestR155OverflowNormalExit (0.00s)
+=== RUN   TestR155OverflowExtraRealError
+    regress155_test.go:184: overflow: miss [results differ from the complete expectation:
+          got  ["admission entry admitted" "admission start admitted" "admission stderr pipe admitted" "admission stdout pipe admitted" "class B" "cmd held yes" "decision fail" "expired no" "fault close stderr-r operation other" "fault wait operation exit-status" "late no" "panic no" "pidfd closed ok closes 1" "request pidfd none sends 0" "start ok" "state waited" "stderr eof kept 0 sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" "stderr-r closed error release unknown object held" "stderr-w closed ok release confirmed object held" "stdout overflow kept 4096 sha256 a2e659dacb4691e887ac0139f8893d04764ee197d70fb73d3190d56113d18e3e" "stdout-r closed ok release confirmed object held" "stdout-w closed ok release confirmed object held" "success no" "terminal yes" "wait exit -1"]
+          want ["admission entry admitted" "admission start admitted" "admission stderr pipe admitted" "admission stdout pipe admitted" "class B" "cmd held yes" "decision fail" "expired no" "fault wait operation exit-status" "late no" "panic no" "pidfd closed ok closes 1" "request pidfd none sends 0" "start ok" "state waited" "stderr eof kept 0 sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" "stderr-r closed ok release confirmed object held" "stderr-w closed ok release confirmed object held" "stdout overflow kept 4096 sha256 a2e659dacb4691e887ac0139f8893d04764ee197d70fb73d3190d56113d18e3e" "stdout-r closed ok release confirmed object held" "stdout-w closed ok release confirmed object held" "success no" "terminal yes" "wait exit -1"]]
+--- PASS: TestR155OverflowExtraRealError (0.00s)
+=== RUN   TestR155ExpiryOtherSignal
+    regress155_test.go:222: expiry: hit []
+    regress155_test.go:228: a SIGTERM end was taken for the request's SIGKILL: hit
+--- FAIL: TestR155ExpiryOtherSignal (0.00s)
+FAIL
+controls exit 1:
+# exit: 1
+# finished: 2026-11-16T16:12:23Z

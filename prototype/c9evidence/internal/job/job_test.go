@@ -138,11 +138,16 @@ func TestJobConsistent(t *testing.T) {
 	}
 }
 
-func TestJobPhase1IsInvalid(t *testing.T) {
-	// With every control, LC-9 is applicable and not implemented: a miss.
-	cfg, _ := newConfig(t, controls.All(runtime.GOOS))
+// TestJobEveryControl replaces phase 1's TestJobPhase1IsInvalid (LC-9 was
+// applicable and not implemented, a miss, so every run was invalid): in
+// phase 2 LC-9 runs its pseudo-tools, so with every control and the fake
+// caller on the fixture R the conclusion is 4 and the exit status 0 (the
+// LC-2 symbolic link variant is left out where this machine cannot create a
+// link, as in the other tests).
+func TestJobEveryControl(t *testing.T) {
+	cfg, _ := newConfig(t, controlsWithout(t))
 	f := run(t, cfg, true, 0)
-	if f.Conclusion != chain.Invalid || f.ExitCode == 0 {
+	if f.Conclusion != chain.Consistent || f.ExitCode != 0 {
 		t.Fatalf("final %v exit %d %v", f.Conclusion, f.ExitCode, f.Reasons)
 	}
 }

@@ -1,0 +1,1 @@
+{"attempt":1,"conclusion":"failure","createdAt":"2026-11-15T05:20:57Z","databaseId":43680692609,"event":"push","headBranch":"c9test/phase2","headSha":"f1b405848127fd7e4cdd2985a5c3a5664dac5f8e","status":"completed","updatedAt":"2026-11-15T05:22:15Z","url":"https://github.com/XKHoshizora/specmetry/actions/runs/43680692609","workflowName":"C-9 tool test (phase 2)"}

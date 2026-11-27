@@ -186,6 +186,6 @@ func All(goos string) []Variant {
 	out = append(out, LC6()...)
 	out = append(out, LC7(goos)...)
 	out = append(out, LC8()...)
-	out = append(out, LC9()...)
+	out = append(out, LC9(goos)...)
 	return out
 }

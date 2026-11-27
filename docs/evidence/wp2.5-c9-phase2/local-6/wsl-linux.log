@@ -1,0 +1,1211 @@
+# command: GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go test -c per package; run in WSL with -test.v -test.count=1 (pseudo-tools only; no real call)
+# env: GOTOOLCHAIN=local GOPROXY=off GOWORK=off GOFLAGS=
+# toolchain: /c/Users/hoshi/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/bin/go.exe
+# toolchain sha256: 83b7ba66215e696414fa49462d0db2da4f4cf15c7bebd42f0b189fa04866999d
+# go version: go version go1.27.3 windows/amd64
+# HEAD: 5e6c3a4b93b5189c807bee4d179494e837a02b30
+# tree: b6ac8721dedcd6d152aaab4facf74cb7f616e2b6
+# tool module subtree: 755ffc0c2465959fa5528d07b5c079154e8e4feb
+# worktree before: 2 changed paths
+# started: 2026-11-16T16:22:24Z
+# wsl kernel: 6.18.33.2-microsoft-standard-WSL2
+# chain.test sha256: 8f25c8c6f184625ae0b12a0388def0173d0012633e1d57eb07c1feb53882209b
+# collect.test sha256: 269bf69465154df7feb04c3ca6406ad3d1830fda2929bae0fe3baa72a72f6dd8
+# cond.test sha256: 745e670a9e3d36091ace3a48bc2e1ebbe842ab6ec75d8c1d03c4a5afebbc9fe2
+# controls.test sha256: b62261677e3b3b10de030480af804d88a6deebcac59337df14fdafbdd8af8a88
+# decode.test sha256: 4d00020f43bbd1a463a6d7adf8396587f28df9d408e3643801cffed7e26de559
+# job.test sha256: 3a515340cd43bbd707653ddad6bd622b1ed89c82c108f6710536112589656b6d
+# judge.test sha256: 4121e9d347a6634bfbb86b2949482992a2e2f8d9e98a03586e2b3bc772cf6351
+# keep.test sha256: d404748d77ac3acf3531d9601cae0a09144acde4b13ba0ba0b5e78f797e6c613
+# modsnap.test sha256: 7c9abe4deef4f3ffa021e50945ea0037f1c426b054235383bd995436533c2ab9
+# realcall.test sha256: 39da9bb6208115369ef460b73c3aa858d66724803c0776f4b8f383729c271420
+# spec.test sha256: 83e69d43f194673381f7aa3d197168b0c50ed2b01cc463bf742934426689135b
+# toolctl.test sha256: a0f677cae422020c2a65ec129fb47ed8d6df3a17d7dfafbfadcd9b0950bac7d1
+# typecheck.test sha256: 52165991542771103c2071f8541deb358bc7b1c45a00d1cfcbc9fe4960791078
+# verdict.test sha256: 08c3e915c5ead10abb45f987ac4faf17fc790f8d0e3367239deb4e158e1483a6
+=== package chain
+=== RUN   TestMRunReturnsAfterD
+=== RUN   TestMRunReturnsAfterD/at-D-incomplete
+=== RUN   TestMRunReturnsAfterD/after-D-incomplete
+=== RUN   TestMRunReturnsAfterD/level1
+=== RUN   TestMRunReturnsAfterD/m.Run-nonzero
+--- PASS: TestMRunReturnsAfterD (0.00s)
+    --- PASS: TestMRunReturnsAfterD/at-D-incomplete (0.00s)
+    --- PASS: TestMRunReturnsAfterD/after-D-incomplete (0.00s)
+    --- PASS: TestMRunReturnsAfterD/level1 (0.00s)
+    --- PASS: TestMRunReturnsAfterD/m.Run-nonzero (0.00s)
+=== RUN   TestSnapshotWaitReachesW
+--- PASS: TestSnapshotWaitReachesW (0.00s)
+=== RUN   TestMRunAfterWDoesNotWait
+--- PASS: TestMRunAfterWDoesNotWait (0.00s)
+=== RUN   TestSnapshotWaitsForTerminalRecords
+--- PASS: TestSnapshotWaitsForTerminalRecords (0.00s)
+=== RUN   TestOuterOperationsCap
+=== RUN   TestOuterOperationsCap/failed
+=== RUN   TestOuterOperationsCap/unknown
+=== RUN   TestOuterOperationsCap/second-result
+--- PASS: TestOuterOperationsCap (0.00s)
+    --- PASS: TestOuterOperationsCap/failed (0.00s)
+    --- PASS: TestOuterOperationsCap/unknown (0.00s)
+    --- PASS: TestOuterOperationsCap/second-result (0.00s)
+=== RUN   TestToolDefectsAreLevelOne
+=== RUN   TestToolDefectsAreLevelOne/log-defect
+=== RUN   TestToolDefectsAreLevelOne/bad-closeout-record
+=== RUN   TestToolDefectsAreLevelOne/caller-out-of-range
+=== RUN   TestToolDefectsAreLevelOne/m.Run-nonzero
+--- PASS: TestToolDefectsAreLevelOne (0.00s)
+    --- PASS: TestToolDefectsAreLevelOne/log-defect (0.00s)
+    --- PASS: TestToolDefectsAreLevelOne/bad-closeout-record (0.00s)
+    --- PASS: TestToolDefectsAreLevelOne/caller-out-of-range (0.00s)
+    --- PASS: TestToolDefectsAreLevelOne/m.Run-nonzero (0.00s)
+=== RUN   TestCloseoutConfigDefects
+=== RUN   TestCloseoutConfigDefects/no-writer
+=== RUN   TestCloseoutConfigDefects/writer-not-started
+=== RUN   TestCloseoutConfigDefects/twice
+=== RUN   TestCloseoutConfigDefects/unknown-closeout-file
+=== RUN   TestCloseoutConfigDefects/second-writer
+--- PASS: TestCloseoutConfigDefects (0.00s)
+    --- PASS: TestCloseoutConfigDefects/no-writer (0.00s)
+    --- PASS: TestCloseoutConfigDefects/writer-not-started (0.00s)
+    --- PASS: TestCloseoutConfigDefects/twice (0.00s)
+    --- PASS: TestCloseoutConfigDefects/unknown-closeout-file (0.00s)
+    --- PASS: TestCloseoutConfigDefects/second-writer (0.00s)
+=== RUN   TestFormats
+--- PASS: TestFormats (0.00s)
+=== RUN   TestRealFileSystemAndClock
+--- PASS: TestRealFileSystemAndClock (0.00s)
+=== RUN   TestLog
+--- PASS: TestLog (0.00s)
+=== RUN   TestFakeClock
+--- PASS: TestFakeClock (0.00s)
+=== RUN   TestRealClockTimer
+--- PASS: TestRealClockTimer (0.00s)
+=== RUN   TestExitCode
+--- PASS: TestExitCode (0.00s)
+=== RUN   TestB1472ManifestCreateThenExpiry
+--- PASS: TestB1472ManifestCreateThenExpiry (0.00s)
+=== RUN   TestB1472ManifestWriteThenExpiry
+--- PASS: TestB1472ManifestWriteThenExpiry (0.00s)
+=== RUN   TestB1472ManifestCloseFails
+--- PASS: TestB1472ManifestCloseFails (0.00s)
+=== RUN   TestB1472RecordCloseFailsKeepsTheHandle
+--- PASS: TestB1472RecordCloseFailsKeepsTheHandle (0.00s)
+=== RUN   TestB1472NormalCloseReleases
+--- PASS: TestB1472NormalCloseReleases (0.00s)
+=== RUN   TestB148AdmitOp
+--- PASS: TestB148AdmitOp (0.00s)
+=== RUN   TestCase1SnapshotWaitHitsWParentResumesAfterD
+--- PASS: TestCase1SnapshotWaitHitsWParentResumesAfterD (0.00s)
+=== RUN   TestCase2aManifestCloseLateParentFirst
+--- PASS: TestCase2aManifestCloseLateParentFirst (0.00s)
+=== RUN   TestCase2bManifestCloseLateWriterFirst
+--- PASS: TestCase2bManifestCloseLateWriterFirst (0.00s)
+=== RUN   TestCase3AllTimelyParentWakesAfterD
+--- PASS: TestCase3AllTimelyParentWakesAfterD (0.00s)
+=== RUN   TestCase4aTerminatorBeforeDParentFirst
+--- PASS: TestCase4aTerminatorBeforeDParentFirst (0.00s)
+=== RUN   TestCase4bTerminatorBeforeDDiagFirst
+--- PASS: TestCase4bTerminatorBeforeDDiagFirst (0.00s)
+=== RUN   TestCase5HashLineReturnsAfterD
+--- PASS: TestCase5HashLineReturnsAfterD (0.00s)
+=== RUN   TestCase6WriterWriteFails
+--- PASS: TestCase6WriterWriteFails (0.00s)
+=== RUN   TestCase6DiagnosticWriteFails
+=== RUN   TestCase6DiagnosticWriteFails/consistent-with-candidates
+=== RUN   TestCase6DiagnosticWriteFails/inconsistent-with-candidates
+=== RUN   TestCase6DiagnosticWriteFails/incomplete
+=== RUN   TestCase6DiagnosticWriteFails/invalid
+--- PASS: TestCase6DiagnosticWriteFails (0.00s)
+    --- PASS: TestCase6DiagnosticWriteFails/consistent-with-candidates (0.00s)
+    --- PASS: TestCase6DiagnosticWriteFails/inconsistent-with-candidates (0.00s)
+    --- PASS: TestCase6DiagnosticWriteFails/incomplete (0.00s)
+    --- PASS: TestCase6DiagnosticWriteFails/invalid (0.00s)
+=== RUN   TestCase7ProvisionalOneOrTwoNeverImproves
+=== RUN   TestCase7ProvisionalOneOrTwoNeverImproves/invalid
+=== RUN   TestCase7ProvisionalOneOrTwoNeverImproves/incomplete
+--- PASS: TestCase7ProvisionalOneOrTwoNeverImproves (0.00s)
+    --- PASS: TestCase7ProvisionalOneOrTwoNeverImproves/invalid (0.00s)
+    --- PASS: TestCase7ProvisionalOneOrTwoNeverImproves/incomplete (0.00s)
+=== RUN   TestFinalConsumptionKeepsWaitingBeforeD
+=== RUN   TestFinalConsumptionKeepsWaitingBeforeD/consistent-with-candidates
+=== RUN   TestFinalConsumptionKeepsWaitingBeforeD/incomplete
+--- PASS: TestFinalConsumptionKeepsWaitingBeforeD (0.00s)
+    --- PASS: TestFinalConsumptionKeepsWaitingBeforeD/consistent-with-candidates (0.00s)
+    --- PASS: TestFinalConsumptionKeepsWaitingBeforeD/incomplete (0.00s)
+=== RUN   TestProvisionalOneExpiresUnchanged
+--- PASS: TestProvisionalOneExpiresUnchanged (0.00s)
+=== RUN   TestDiagnosticBlocksPastD
+--- PASS: TestDiagnosticBlocksPastD (0.00s)
+=== RUN   TestWriterMkdirFails
+--- PASS: TestWriterMkdirFails (0.00s)
+=== RUN   TestWriterKthCreateFails
+=== RUN   TestWriterKthCreateFails/1
+=== RUN   TestWriterKthCreateFails/2
+=== RUN   TestWriterKthCreateFails/3
+=== RUN   TestWriterKthCreateFails/4
+--- PASS: TestWriterKthCreateFails (0.00s)
+    --- PASS: TestWriterKthCreateFails/1 (0.00s)
+    --- PASS: TestWriterKthCreateFails/2 (0.00s)
+    --- PASS: TestWriterKthCreateFails/3 (0.00s)
+    --- PASS: TestWriterKthCreateFails/4 (0.00s)
+=== RUN   TestWriterPartialWriteFails
+--- PASS: TestWriterPartialWriteFails (0.00s)
+=== RUN   TestWriterRecordCloseFails
+--- PASS: TestWriterRecordCloseFails (0.00s)
+=== RUN   TestWriterManifestFailures
+=== RUN   TestWriterManifestFailures/create
+=== RUN   TestWriterManifestFailures/write
+=== RUN   TestWriterManifestFailures/close
+--- PASS: TestWriterManifestFailures (0.00s)
+    --- PASS: TestWriterManifestFailures/create (0.00s)
+    --- PASS: TestWriterManifestFailures/write (0.00s)
+    --- PASS: TestWriterManifestFailures/close (0.00s)
+=== RUN   TestWriterExpiresMidway
+    writer_test.go:208: exit expired-final, last final branch "b"
+--- PASS: TestWriterExpiresMidway (0.00s)
+=== RUN   TestSealNoEndlessAppend
+--- PASS: TestSealNoEndlessAppend (0.00s)
+=== RUN   TestQualificationAtExactlyDIsLate
+--- PASS: TestQualificationAtExactlyDIsLate (0.00s)
+=== RUN   TestLatchNeverResetsAndLateNeverRestores
+--- PASS: TestLatchNeverResetsAndLateNeverRestores (0.00s)
+PASS
+chain exit 0:
+=== package collect
+=== RUN   TestGuard
+--- PASS: TestGuard (0.00s)
+=== RUN   TestVerifyProvenanceHealthy
+--- PASS: TestVerifyProvenanceHealthy (0.00s)
+=== RUN   TestVerifyProvenanceRejects
+--- PASS: TestVerifyProvenanceRejects (0.00s)
+=== RUN   TestVerifyProvenanceRejectsASemanticSwap
+--- PASS: TestVerifyProvenanceRejectsASemanticSwap (0.00s)
+=== RUN   TestB1473ReadAndCloseErrorsBothKeptByA4
+--- PASS: TestB1473ReadAndCloseErrorsBothKeptByA4 (0.00s)
+=== RUN   TestB1473ReadAndCloseErrorsBothKeptByTheGuard
+--- PASS: TestB1473ReadAndCloseErrorsBothKeptByTheGuard (0.00s)
+PASS
+collect exit 0:
+=== package cond
+=== RUN   TestRepoDirs
+--- PASS: TestRepoDirs (0.00s)
+=== RUN   TestRepoSteps
+=== RUN   TestRepoSteps/healthy_with_the_exception
+=== RUN   TestRepoSteps/healthy_without_exceptions_(LC-6_baseline)
+=== RUN   TestRepoSteps/a_!nowebui_file_with_exec_(Review_126_counterexample)
+=== RUN   TestRepoSteps/a_cgo_file
+=== RUN   TestRepoSteps/a_file_importing_C
+=== RUN   TestRepoSteps/exception_changed_one_byte
+=== RUN   TestRepoSteps/exception_with_another_import
+=== RUN   TestRepoSteps/exception_missing
+=== RUN   TestRepoSteps/production-only_file_with_a_non-standard_import
+=== RUN   TestRepoSteps/listed_files_differ
+--- PASS: TestRepoSteps (0.02s)
+    --- PASS: TestRepoSteps/healthy_with_the_exception (0.00s)
+    --- PASS: TestRepoSteps/healthy_without_exceptions_(LC-6_baseline) (0.00s)
+    --- PASS: TestRepoSteps/a_!nowebui_file_with_exec_(Review_126_counterexample) (0.00s)
+    --- PASS: TestRepoSteps/a_cgo_file (0.00s)
+    --- PASS: TestRepoSteps/a_file_importing_C (0.00s)
+    --- PASS: TestRepoSteps/exception_changed_one_byte (0.00s)
+    --- PASS: TestRepoSteps/exception_with_another_import (0.00s)
+    --- PASS: TestRepoSteps/exception_missing (0.00s)
+    --- PASS: TestRepoSteps/production-only_file_with_a_non-standard_import (0.00s)
+    --- PASS: TestRepoSteps/listed_files_differ (0.00s)
+=== RUN   TestThirdPartyAndStd
+--- PASS: TestThirdPartyAndStd (0.00s)
+=== RUN   TestAdmissionAndReadFailures
+--- PASS: TestAdmissionAndReadFailures (0.00s)
+=== RUN   TestConstraint
+--- PASS: TestConstraint (0.00s)
+PASS
+cond exit 0:
+=== package controls
+=== RUN   TestControlsWithoutTypeCheck
+--- PASS: TestControlsWithoutTypeCheck (0.01s)
+=== RUN   TestLC9
+    controls_test.go:75: LC-9 normal-eof: hit
+    controls_test.go:75: LC-9 half-construction: hit
+    controls_test.go:75: LC-9 start-failure: hit
+    controls_test.go:75: LC-9 start-failure-not-executable: hit
+    controls_test.go:75: LC-9 read-error: hit
+    controls_test.go:75: LC-9 overflow: hit
+    controls_test.go:75: LC-9 close-injected: hit
+    controls_test.go:75: LC-9 close-real-error: hit
+    controls_test.go:75: LC-9 expiry: hit
+    controls_test.go:75: LC-9 blocked-close: hit
+    controls_test.go:75: LC-9 output-not-closed: hit
+    controls_test.go:75: LC-9 pidfd-open-failed: hit
+    controls_test.go:75: LC-9 blocked-send: hit
+    controls_test.go:75: LC-9 sealed-before-reserve: hit
+    controls_test.go:75: LC-9 reserved-then-sealed-in-window: hit
+    controls_test.go:75: LC-9 reserved-then-sealed-out-of-window: hit
+    controls_test.go:75: LC-9 wait-first: hit
+    controls_test.go:75: LC-9 pidfd-late-publish: hit
+    controls_test.go:75: LC-9 abandoned-before-wait: hit
+    controls_test.go:75: LC-9 closing-old-snapshot: hit
+--- PASS: TestLC9 (0.04s)
+=== RUN   TestJudgeRules
+--- PASS: TestJudgeRules (0.00s)
+=== RUN   TestLC4
+    lc4_test.go:20: 77 LC-4 variants
+--- PASS: TestLC4 (0.00s)
+=== RUN   TestLC5
+--- PASS: TestLC5 (0.01s)
+=== RUN   TestLC7AllGOOS
+--- PASS: TestLC7AllGOOS (0.00s)
+=== RUN   TestB1474SameClassAtTheWrongSiteIsAMiss
+--- PASS: TestB1474SameClassAtTheWrongSiteIsAMiss (0.00s)
+=== RUN   TestB1474OnlyTheSiteDiffersIsAMiss
+--- PASS: TestB1474OnlyTheSiteDiffersIsAMiss (0.00s)
+=== RUN   TestB1474ExtraRealFailureIsNotFiltered
+--- PASS: TestB1474ExtraRealFailureIsNotFiltered (0.00s)
+=== RUN   TestB1474InstanceKeepsWholeResults
+--- PASS: TestB1474InstanceKeepsWholeResults (0.00s)
+=== RUN   TestN1472TargetTagsReachTheConsumer
+=== RUN   TestN1472TargetTagsReachTheConsumer/tag_carried_and_file_listed
+=== RUN   TestN1472TargetTagsReachTheConsumer/tag_not_carried,_file_listed
+=== RUN   TestN1472TargetTagsReachTheConsumer/tag_not_carried,_file_not_listed
+--- PASS: TestN1472TargetTagsReachTheConsumer (0.01s)
+    --- PASS: TestN1472TargetTagsReachTheConsumer/tag_carried_and_file_listed (0.00s)
+    --- PASS: TestN1472TargetTagsReachTheConsumer/tag_not_carried,_file_listed (0.00s)
+    --- PASS: TestN1472TargetTagsReachTheConsumer/tag_not_carried,_file_not_listed (0.00s)
+=== RUN   TestB148RefusalsInTheOuterJudgement
+--- PASS: TestB148RefusalsInTheOuterJudgement (0.00s)
+=== RUN   TestR154CloseRealErrorOtherSource
+    regress154_test.go:60: close-real-error: miss [results differ from the complete expectation:
+          got  ["admission entry admitted" "admission start admitted" "admission stderr pipe admitted" "admission stdout pipe admitted" "class B" "cmd held yes" "decision fail" "expired no" "fault close stdout-r injected injected" "fault close stdout-r operation other" "fault close stdout-r seam real other returned other" "late no" "panic no" "pidfd closed ok closes 1" "request pidfd none sends 0" "start ok" "state waited" "stderr eof kept 0 sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" "stderr-r closed ok release confirmed object held" "stderr-w closed ok release confirmed object held" "stdout eof kept 0 sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" "stdout-r closed error release unknown object held" "stdout-r injected" "stdout-w closed ok release confirmed object held" "success no" "terminal yes" "wait exited 0"]
+          want ["admission entry admitted" "admission start admitted" "admission stderr pipe admitted" "admission stdout pipe admitted" "class B" "cmd held yes" "decision fail" "expired no" "fault close stdout-r injected injected" "fault close stdout-r operation seam-close" "fault close stdout-r seam real ok returned seam-close" "late no" "panic no" "pidfd closed ok closes 1" "request pidfd none sends 0" "start ok" "state waited" "stderr eof kept 0 sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" "stderr-r closed ok release confirmed object held" "stderr-w closed ok release confirmed object held" "stdout eof kept 0 sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" "stdout-r closed error release unknown object held" "stdout-r injected" "stdout-w closed ok release confirmed object held" "success no" "terminal yes" "wait exited 0"]]
+--- PASS: TestR154CloseRealErrorOtherSource (0.00s)
+=== RUN   TestR154CloseRealErrorElsewhere
+    regress154_test.go:77: close-real-error: miss [results differ from the complete expectation:
+          got  ["admission entry admitted" "admission start admitted" "admission stderr pipe admitted" "admission stdout pipe admitted" "class B" "cmd held yes" "decision fail" "expired no" "fault close stderr-w operation other" "fault close stdout-r injected injected" "fault close stdout-r operation seam-close" "fault close stdout-r seam real ok returned seam-close" "late no" "panic no" "pidfd closed ok closes 1" "request pidfd none sends 0" "start ok" "state waited" "stderr eof kept 0 sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" "stderr-r closed ok release confirmed object held" "stderr-w closed error release unknown object held" "stdout eof kept 0 sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" "stdout-r closed error release unknown object held" "stdout-r injected" "stdout-w closed ok release confirmed object held" "success no" "terminal yes" "wait exited 0"]
+          want ["admission entry admitted" "admission start admitted" "admission stderr pipe admitted" "admission stdout pipe admitted" "class B" "cmd held yes" "decision fail" "expired no" "fault close stdout-r injected injected" "fault close stdout-r operation seam-close" "fault close stdout-r seam real ok returned seam-close" "late no" "panic no" "pidfd closed ok closes 1" "request pidfd none sends 0" "start ok" "state waited" "stderr eof kept 0 sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" "stderr-r closed ok release confirmed object held" "stderr-w closed ok release confirmed object held" "stdout eof kept 0 sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" "stdout-r closed error release unknown object held" "stdout-r injected" "stdout-w closed ok release confirmed object held" "success no" "terminal yes" "wait exited 0"]]
+--- PASS: TestR154CloseRealErrorElsewhere (0.00s)
+=== RUN   TestR154RequestOtherKind
+    regress154_test.go:96: blocked-send: miss [results differ from the complete expectation:
+          got  ["admission entry admitted" "admission start admitted" "admission stderr pipe admitted" "admission stdout pipe admitted" "class B" "cmd held yes" "decision fail" "expired yes" "fault request operation errno 9" "late yes" "panic no" "pidfd closed ok closes 1" "request pidfd done sends 1 error" "returned while the request runs running" "start ok" "state waited" "stderr eof kept 0 sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" "stderr-r closed ok release confirmed object held" "stderr-w closed ok release confirmed object held" "stdout eof kept 0 sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" "stdout-r closed ok release confirmed object held" "stdout-w closed ok release confirmed object held" "success no" "terminal yes" "wait exited 0" "while-blocked pidfd closing request running"]
+          want ["admission entry admitted" "admission start admitted" "admission stderr pipe admitted" "admission stdout pipe admitted" "class B" "cmd held yes" "decision fail" "expired yes" "fault request operation ESRCH" "late yes" "panic no" "pidfd closed ok closes 1" "request pidfd done sends 1 error" "returned while the request runs running" "start ok" "state waited" "stderr eof kept 0 sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" "stderr-r closed ok release confirmed object held" "stderr-w closed ok release confirmed object held" "stdout eof kept 0 sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" "stdout-r closed ok release confirmed object held" "stdout-w closed ok release confirmed object held" "success no" "terminal yes" "wait exited 0" "while-blocked pidfd closing request running"]]
+--- PASS: TestR154RequestOtherKind (0.00s)
+=== RUN   TestR154HolderHalfBuilt
+--- PASS: TestR154HolderHalfBuilt (0.00s)
+=== RUN   TestR154HolderSecondPipeRefused
+--- PASS: TestR154HolderSecondPipeRefused (0.00s)
+=== RUN   TestR154HolderLateStart
+--- PASS: TestR154HolderLateStart (0.00s)
+=== RUN   TestR154HolderReadyCloseNotDone
+--- PASS: TestR154HolderReadyCloseNotDone (0.30s)
+=== RUN   TestR154HolderErrorJudged
+--- PASS: TestR154HolderErrorJudged (0.01s)
+=== RUN   TestR155HolderOutlivesTheVariant
+--- PASS: TestR155HolderOutlivesTheVariant (0.01s)
+=== RUN   TestR155OverflowOtherSignal
+    regress155_test.go:143: overflow: miss [results differ from the complete expectation:
+          got  ["admission entry admitted" "admission start admitted" "admission stderr pipe admitted" "admission stdout pipe admitted" "class B" "cmd held yes" "decision fail" "expired no" "fault wait operation exit-status signaled SIGTERM" "late no" "panic no" "pidfd closed ok closes 1" "request pidfd none sends 0" "start ok" "state waited" "stderr eof kept 0 sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" "stderr-r closed ok release confirmed object held" "stderr-w closed ok release confirmed object held" "stdout overflow kept 4096 sha256 a2e659dacb4691e887ac0139f8893d04764ee197d70fb73d3190d56113d18e3e" "stdout-r closed ok release confirmed object held" "stdout-w closed ok release confirmed object held" "success no" "terminal yes" "wait signaled SIGTERM"]
+          want ["admission entry admitted" "admission start admitted" "admission stderr pipe admitted" "admission stdout pipe admitted" "class B" "cmd held yes" "decision fail" "expired no" "fault wait operation exit-status signaled SIGPIPE" "late no" "panic no" "pidfd closed ok closes 1" "request pidfd none sends 0" "start ok" "state waited" "stderr eof kept 0 sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" "stderr-r closed ok release confirmed object held" "stderr-w closed ok release confirmed object held" "stdout overflow kept 4096 sha256 a2e659dacb4691e887ac0139f8893d04764ee197d70fb73d3190d56113d18e3e" "stdout-r closed ok release confirmed object held" "stdout-w closed ok release confirmed object held" "success no" "terminal yes" "wait signaled SIGPIPE"]]
+--- PASS: TestR155OverflowOtherSignal (0.00s)
+=== RUN   TestR155OverflowNormalExit
+    regress155_test.go:160: overflow: miss [results differ from the complete expectation:
+          got  ["admission entry admitted" "admission start admitted" "admission stderr pipe admitted" "admission stdout pipe admitted" "class B" "cmd held yes" "decision fail" "expired no" "fault wait operation exit-status exited 141" "late no" "panic no" "pidfd closed ok closes 1" "request pidfd none sends 0" "start ok" "state waited" "stderr eof kept 0 sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" "stderr-r closed ok release confirmed object held" "stderr-w closed ok release confirmed object held" "stdout overflow kept 4096 sha256 a2e659dacb4691e887ac0139f8893d04764ee197d70fb73d3190d56113d18e3e" "stdout-r closed ok release confirmed object held" "stdout-w closed ok release confirmed object held" "success no" "terminal yes" "wait exited 141"]
+          want ["admission entry admitted" "admission start admitted" "admission stderr pipe admitted" "admission stdout pipe admitted" "class B" "cmd held yes" "decision fail" "expired no" "fault wait operation exit-status signaled SIGPIPE" "late no" "panic no" "pidfd closed ok closes 1" "request pidfd none sends 0" "start ok" "state waited" "stderr eof kept 0 sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" "stderr-r closed ok release confirmed object held" "stderr-w closed ok release confirmed object held" "stdout overflow kept 4096 sha256 a2e659dacb4691e887ac0139f8893d04764ee197d70fb73d3190d56113d18e3e" "stdout-r closed ok release confirmed object held" "stdout-w closed ok release confirmed object held" "success no" "terminal yes" "wait signaled SIGPIPE"]]
+--- PASS: TestR155OverflowNormalExit (0.00s)
+=== RUN   TestR155OverflowExtraRealError
+    regress155_test.go:184: overflow: miss [results differ from the complete expectation:
+          got  ["admission entry admitted" "admission start admitted" "admission stderr pipe admitted" "admission stdout pipe admitted" "class B" "cmd held yes" "decision fail" "expired no" "fault close stderr-r operation other" "fault wait operation exit-status signaled SIGPIPE" "late no" "panic no" "pidfd closed ok closes 1" "request pidfd none sends 0" "start ok" "state waited" "stderr eof kept 0 sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" "stderr-r closed error release unknown object held" "stderr-w closed ok release confirmed object held" "stdout overflow kept 4096 sha256 a2e659dacb4691e887ac0139f8893d04764ee197d70fb73d3190d56113d18e3e" "stdout-r closed ok release confirmed object held" "stdout-w closed ok release confirmed object held" "success no" "terminal yes" "wait signaled SIGPIPE"]
+          want ["admission entry admitted" "admission start admitted" "admission stderr pipe admitted" "admission stdout pipe admitted" "class B" "cmd held yes" "decision fail" "expired no" "fault wait operation exit-status signaled SIGPIPE" "late no" "panic no" "pidfd closed ok closes 1" "request pidfd none sends 0" "start ok" "state waited" "stderr eof kept 0 sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" "stderr-r closed ok release confirmed object held" "stderr-w closed ok release confirmed object held" "stdout overflow kept 4096 sha256 a2e659dacb4691e887ac0139f8893d04764ee197d70fb73d3190d56113d18e3e" "stdout-r closed ok release confirmed object held" "stdout-w closed ok release confirmed object held" "success no" "terminal yes" "wait signaled SIGPIPE"]]
+--- PASS: TestR155OverflowExtraRealError (0.00s)
+=== RUN   TestR155ExpiryOtherSignal
+    regress155_test.go:222: expiry: miss [results differ from the complete expectation:
+          got  ["admission entry admitted" "admission start admitted" "admission stderr pipe admitted" "admission stdout pipe admitted" "class B" "cmd held yes" "decision fail" "expired yes" "fault wait operation exit-status signaled SIGTERM" "late yes" "panic no" "pidfd closed ok closes 1" "request pidfd done sends 1 ok" "start ok" "state waited" "stderr eof kept 0 sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" "stderr-r closed ok release confirmed object held" "stderr-w closed ok release confirmed object held" "stdout eof kept 0 sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" "stdout-r closed ok release confirmed object held" "stdout-w closed ok release confirmed object held" "success no" "terminal yes" "wait signaled SIGTERM"]
+          want ["admission entry admitted" "admission start admitted" "admission stderr pipe admitted" "admission stdout pipe admitted" "class B" "cmd held yes" "decision fail" "expired yes" "fault wait operation exit-status signaled SIGKILL" "late yes" "panic no" "pidfd closed ok closes 1" "request pidfd done sends 1 ok" "start ok" "state waited" "stderr eof kept 0 sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" "stderr-r closed ok release confirmed object held" "stderr-w closed ok release confirmed object held" "stdout eof kept 0 sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" "stdout-r closed ok release confirmed object held" "stdout-w closed ok release confirmed object held" "success no" "terminal yes" "wait signaled SIGKILL"]]
+--- PASS: TestR155ExpiryOtherSignal (0.00s)
+=== RUN   TestR155OwnerHoldsTheHolder
+--- PASS: TestR155OwnerHoldsTheHolder (0.01s)
+=== RUN   TestR155OverflowSIGPIPEHit
+    regress155b_test.go:78: overflow: hit []
+--- PASS: TestR155OverflowSIGPIPEHit (0.00s)
+=== RUN   TestR155ExitKindLines
+    regress155b_test.go:102: overflow: miss [results differ from the complete expectation:
+          got  ["admission entry admitted" "admission start admitted" "admission stderr pipe admitted" "admission stdout pipe admitted" "class B" "cmd held yes" "decision fail" "expired no" "fault wait operation exit-status exited 141" "late no" "panic no" "pidfd closed ok closes 1" "request pidfd none sends 0" "start ok" "state waited" "stderr eof kept 0 sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" "stderr-r closed ok release confirmed object held" "stderr-w closed ok release confirmed object held" "stdout overflow kept 4096 sha256 a2e659dacb4691e887ac0139f8893d04764ee197d70fb73d3190d56113d18e3e" "stdout-r closed ok release confirmed object held" "stdout-w closed ok release confirmed object held" "success no" "terminal yes" "wait exited 141"]
+          want ["admission entry admitted" "admission start admitted" "admission stderr pipe admitted" "admission stdout pipe admitted" "class B" "cmd held yes" "decision fail" "expired no" "fault wait operation exit-status signaled SIGPIPE" "late no" "panic no" "pidfd closed ok closes 1" "request pidfd none sends 0" "start ok" "state waited" "stderr eof kept 0 sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" "stderr-r closed ok release confirmed object held" "stderr-w closed ok release confirmed object held" "stdout overflow kept 4096 sha256 a2e659dacb4691e887ac0139f8893d04764ee197d70fb73d3190d56113d18e3e" "stdout-r closed ok release confirmed object held" "stdout-w closed ok release confirmed object held" "success no" "terminal yes" "wait signaled SIGPIPE"]]
+    regress155b_test.go:102: overflow: miss [results differ from the complete expectation:
+          got  ["admission entry admitted" "admission start admitted" "admission stderr pipe admitted" "admission stdout pipe admitted" "class B" "cmd held yes" "decision fail" "expired no" "fault wait operation exit-status signaled SIGTERM" "late no" "panic no" "pidfd closed ok closes 1" "request pidfd none sends 0" "start ok" "state waited" "stderr eof kept 0 sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" "stderr-r closed ok release confirmed object held" "stderr-w closed ok release confirmed object held" "stdout overflow kept 4096 sha256 a2e659dacb4691e887ac0139f8893d04764ee197d70fb73d3190d56113d18e3e" "stdout-r closed ok release confirmed object held" "stdout-w closed ok release confirmed object held" "success no" "terminal yes" "wait signaled SIGTERM"]
+          want ["admission entry admitted" "admission start admitted" "admission stderr pipe admitted" "admission stdout pipe admitted" "class B" "cmd held yes" "decision fail" "expired no" "fault wait operation exit-status signaled SIGPIPE" "late no" "panic no" "pidfd closed ok closes 1" "request pidfd none sends 0" "start ok" "state waited" "stderr eof kept 0 sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" "stderr-r closed ok release confirmed object held" "stderr-w closed ok release confirmed object held" "stdout overflow kept 4096 sha256 a2e659dacb4691e887ac0139f8893d04764ee197d70fb73d3190d56113d18e3e" "stdout-r closed ok release confirmed object held" "stdout-w closed ok release confirmed object held" "success no" "terminal yes" "wait signaled SIGPIPE"]]
+    regress155b_test.go:102: overflow: hit []
+--- PASS: TestR155ExitKindLines (0.04s)
+PASS
+controls exit 0:
+=== package decode
+=== RUN   TestContextFixtureIsT2Output
+--- PASS: TestContextFixtureIsT2Output (0.00s)
+=== RUN   TestContextRoundTripThroughT2
+--- PASS: TestContextRoundTripThroughT2 (0.00s)
+=== RUN   TestContextSyntaxErrors
+=== RUN   TestContextSyntaxErrors/header-wrong
+=== RUN   TestContextSyntaxErrors/header-only
+=== RUN   TestContextSyntaxErrors/header-no-lf
+=== RUN   TestContextSyntaxErrors/cr-inside-value
+=== RUN   TestContextSyntaxErrors/trailing-space
+=== RUN   TestContextSyntaxErrors/leading-space
+=== RUN   TestContextSyntaxErrors/tab-separator
+=== RUN   TestContextSyntaxErrors/name-only
+=== RUN   TestContextSyntaxErrors/empty-value
+=== RUN   TestContextSyntaxErrors/lowercase-name
+=== RUN   TestContextSyntaxErrors/order-swapped
+=== RUN   TestContextSyntaxErrors/single-quoted
+=== RUN   TestContextSyntaxErrors/backquoted
+=== RUN   TestContextSyntaxErrors/unterminated
+=== RUN   TestContextSyntaxErrors/trailing-after-quote
+=== RUN   TestContextSyntaxErrors/octal-escape
+=== RUN   TestContextSyntaxErrors/unicode-escape-printable
+=== RUN   TestContextSyntaxErrors/upper-hex
+=== RUN   TestContextSyntaxErrors/raw-tab
+=== RUN   TestContextSyntaxErrors/bool-True
+=== RUN   TestContextSyntaxErrors/bool-quoted
+=== RUN   TestContextSyntaxErrors/count-negative
+=== RUN   TestContextSyntaxErrors/count-plus
+=== RUN   TestContextSyntaxErrors/count-hex
+=== RUN   TestContextSyntaxErrors/count-overflow
+=== RUN   TestContextSyntaxErrors/count-huge-short
+=== RUN   TestContextSyntaxErrors/element-unquoted
+=== RUN   TestContextSyntaxErrors/element-noncanonical
+=== RUN   TestContextSyntaxErrors/element-two-spaces
+=== RUN   TestContextSyntaxErrors/element-dash-only
+=== RUN   TestContextSyntaxErrors/element-dash-space
+=== RUN   TestContextSyntaxErrors/end-wrong
+=== RUN   TestContextSyntaxErrors/end-with-space
+=== RUN   TestContextSyntaxErrors/after-end-blank
+=== RUN   TestContextSyntaxErrors/after-end-header-no-lf
+=== RUN   TestContextSyntaxErrors/truncated-in-list
+=== RUN   TestContextSyntaxErrors/truncated-mid-line
+=== RUN   TestContextSyntaxErrors/bom
+--- PASS: TestContextSyntaxErrors (0.00s)
+    --- PASS: TestContextSyntaxErrors/header-wrong (0.00s)
+    --- PASS: TestContextSyntaxErrors/header-only (0.00s)
+    --- PASS: TestContextSyntaxErrors/header-no-lf (0.00s)
+    --- PASS: TestContextSyntaxErrors/cr-inside-value (0.00s)
+    --- PASS: TestContextSyntaxErrors/trailing-space (0.00s)
+    --- PASS: TestContextSyntaxErrors/leading-space (0.00s)
+    --- PASS: TestContextSyntaxErrors/tab-separator (0.00s)
+    --- PASS: TestContextSyntaxErrors/name-only (0.00s)
+    --- PASS: TestContextSyntaxErrors/empty-value (0.00s)
+    --- PASS: TestContextSyntaxErrors/lowercase-name (0.00s)
+    --- PASS: TestContextSyntaxErrors/order-swapped (0.00s)
+    --- PASS: TestContextSyntaxErrors/single-quoted (0.00s)
+    --- PASS: TestContextSyntaxErrors/backquoted (0.00s)
+    --- PASS: TestContextSyntaxErrors/unterminated (0.00s)
+    --- PASS: TestContextSyntaxErrors/trailing-after-quote (0.00s)
+    --- PASS: TestContextSyntaxErrors/octal-escape (0.00s)
+    --- PASS: TestContextSyntaxErrors/unicode-escape-printable (0.00s)
+    --- PASS: TestContextSyntaxErrors/upper-hex (0.00s)
+    --- PASS: TestContextSyntaxErrors/raw-tab (0.00s)
+    --- PASS: TestContextSyntaxErrors/bool-True (0.00s)
+    --- PASS: TestContextSyntaxErrors/bool-quoted (0.00s)
+    --- PASS: TestContextSyntaxErrors/count-negative (0.00s)
+    --- PASS: TestContextSyntaxErrors/count-plus (0.00s)
+    --- PASS: TestContextSyntaxErrors/count-hex (0.00s)
+    --- PASS: TestContextSyntaxErrors/count-overflow (0.00s)
+    --- PASS: TestContextSyntaxErrors/count-huge-short (0.00s)
+    --- PASS: TestContextSyntaxErrors/element-unquoted (0.00s)
+    --- PASS: TestContextSyntaxErrors/element-noncanonical (0.00s)
+    --- PASS: TestContextSyntaxErrors/element-two-spaces (0.00s)
+    --- PASS: TestContextSyntaxErrors/element-dash-only (0.00s)
+    --- PASS: TestContextSyntaxErrors/element-dash-space (0.00s)
+    --- PASS: TestContextSyntaxErrors/end-wrong (0.00s)
+    --- PASS: TestContextSyntaxErrors/end-with-space (0.00s)
+    --- PASS: TestContextSyntaxErrors/after-end-blank (0.00s)
+    --- PASS: TestContextSyntaxErrors/after-end-header-no-lf (0.00s)
+    --- PASS: TestContextSyntaxErrors/truncated-in-list (0.00s)
+    --- PASS: TestContextSyntaxErrors/truncated-mid-line (0.00s)
+    --- PASS: TestContextSyntaxErrors/bom (0.00s)
+=== RUN   TestContextErrorMessage
+--- PASS: TestContextErrorMessage (0.00s)
+=== RUN   TestEnvEncoderOutput
+--- PASS: TestEnvEncoderOutput (0.00s)
+=== RUN   TestEnvErrors
+=== RUN   TestEnvErrors/no-names
+=== RUN   TestEnvErrors/repeated-name
+=== RUN   TestEnvErrors/empty-object
+=== RUN   TestEnvErrors/missing-in-names-order
+=== RUN   TestEnvErrors/null-before-type
+=== RUN   TestEnvErrors/missing-before-type
+=== RUN   TestEnvErrors/key-before-missing
+=== RUN   TestEnvErrors/case-of-requested
+=== RUN   TestEnvErrors/bool-value
+=== RUN   TestEnvErrors/array-value
+=== RUN   TestEnvErrors/object-value
+=== RUN   TestEnvErrors/odd-key-path
+=== RUN   TestEnvErrors/compact-ok-then-tab
+=== RUN   TestEnvErrors/second-object-after-space
+=== RUN   TestEnvErrors/string-top-level
+=== RUN   TestEnvErrors/unclosed
+=== RUN   TestEnvErrors/trailing-comma
+--- PASS: TestEnvErrors (0.00s)
+    --- PASS: TestEnvErrors/no-names (0.00s)
+    --- PASS: TestEnvErrors/repeated-name (0.00s)
+    --- PASS: TestEnvErrors/empty-object (0.00s)
+    --- PASS: TestEnvErrors/missing-in-names-order (0.00s)
+    --- PASS: TestEnvErrors/null-before-type (0.00s)
+    --- PASS: TestEnvErrors/missing-before-type (0.00s)
+    --- PASS: TestEnvErrors/key-before-missing (0.00s)
+    --- PASS: TestEnvErrors/case-of-requested (0.00s)
+    --- PASS: TestEnvErrors/bool-value (0.00s)
+    --- PASS: TestEnvErrors/array-value (0.00s)
+    --- PASS: TestEnvErrors/object-value (0.00s)
+    --- PASS: TestEnvErrors/odd-key-path (0.00s)
+    --- PASS: TestEnvErrors/compact-ok-then-tab (0.00s)
+    --- PASS: TestEnvErrors/second-object-after-space (0.00s)
+    --- PASS: TestEnvErrors/string-top-level (0.00s)
+    --- PASS: TestEnvErrors/unclosed (0.00s)
+    --- PASS: TestEnvErrors/trailing-comma (0.00s)
+=== RUN   TestEnvEmptyIsObtained
+--- PASS: TestEnvEmptyIsObtained (0.00s)
+=== RUN   TestEnvErrorOffsets
+--- PASS: TestEnvErrorOffsets (0.00s)
+=== RUN   TestGoSumHealthy
+--- PASS: TestGoSumHealthy (0.00s)
+=== RUN   TestEmptyGoModHash
+--- PASS: TestEmptyGoModHash (0.00s)
+=== RUN   TestGoSumEachProblem
+=== RUN   TestGoSumEachProblem/two-fields
+=== RUN   TestGoSumEachProblem/four-fields
+=== RUN   TestGoSumEachProblem/one-field
+=== RUN   TestGoSumEachProblem/other-algorithm
+=== RUN   TestGoSumEachProblem/no-prefix
+=== RUN   TestGoSumEachProblem/uppercase-prefix
+=== RUN   TestGoSumEachProblem/empty-gomod-hash
+=== RUN   TestGoSumEachProblem/conflict
+=== RUN   TestGoSumEachProblem/conflict-gomod
+--- PASS: TestGoSumEachProblem (0.00s)
+    --- PASS: TestGoSumEachProblem/two-fields (0.00s)
+    --- PASS: TestGoSumEachProblem/four-fields (0.00s)
+    --- PASS: TestGoSumEachProblem/one-field (0.00s)
+    --- PASS: TestGoSumEachProblem/other-algorithm (0.00s)
+    --- PASS: TestGoSumEachProblem/no-prefix (0.00s)
+    --- PASS: TestGoSumEachProblem/uppercase-prefix (0.00s)
+    --- PASS: TestGoSumEachProblem/empty-gomod-hash (0.00s)
+    --- PASS: TestGoSumEachProblem/conflict (0.00s)
+    --- PASS: TestGoSumEachProblem/conflict-gomod (0.00s)
+=== RUN   TestGoSumAllProblemsKept
+--- PASS: TestGoSumAllProblemsKept (0.00s)
+=== RUN   TestGoSumDuplicateIsNotConflict
+--- PASS: TestGoSumDuplicateIsNotConflict (0.00s)
+=== RUN   TestGoSumBadLineTaintsKey
+--- PASS: TestGoSumBadLineTaintsKey (0.00s)
+=== RUN   TestGoSumCRLF
+--- PASS: TestGoSumCRLF (0.00s)
+=== RUN   TestGoSumLineCounting
+--- PASS: TestGoSumLineCounting (0.00s)
+=== RUN   TestGoSumZeroValueIsSafe
+--- PASS: TestGoSumZeroValueIsSafe (0.00s)
+=== RUN   TestStringsAgreeWithEncodingJSON
+--- PASS: TestStringsAgreeWithEncodingJSON (0.00s)
+=== RUN   TestSyntaxRejections
+--- PASS: TestSyntaxRejections (0.00s)
+=== RUN   TestNumbersAndLiterals
+--- PASS: TestNumbersAndLiterals (0.00s)
+=== RUN   TestDepthLimit
+--- PASS: TestDepthLimit (0.00s)
+=== RUN   TestMembersKeepOrderRawKeysAndDuplicates
+--- PASS: TestMembersKeepOrderRawKeysAndDuplicates (0.00s)
+=== RUN   TestListEncoderOutput
+--- PASS: TestListEncoderOutput (0.00s)
+=== RUN   TestPackageSchemaIsListFields
+--- PASS: TestPackageSchemaIsListFields (0.00s)
+=== RUN   TestListErrors
+=== RUN   TestListErrors/origin-unknown
+=== RUN   TestListErrors/origin-null
+=== RUN   TestListErrors/replace-unknown
+=== RUN   TestListErrors/replace-null
+=== RUN   TestListErrors/module-error-unknown
+=== RUN   TestListErrors/module-error-case
+=== RUN   TestListErrors/depserrors-null-element
+=== RUN   TestListErrors/depserrors-element-string
+=== RUN   TestListErrors/depserrors-object
+=== RUN   TestListErrors/depserrors-dup
+=== RUN   TestListErrors/importstack-number
+=== RUN   TestListErrors/importstack-null
+=== RUN   TestListErrors/importmap-null-value
+=== RUN   TestListErrors/importmap-array
+=== RUN   TestListErrors/versions-string
+=== RUN   TestListErrors/main-string
+=== RUN   TestListErrors/time-number
+=== RUN   TestListErrors/time-no-zone
+=== RUN   TestListErrors/escaped-field-key
+=== RUN   TestListErrors/unrequested-field
+=== RUN   TestListErrors/unrequested-case
+=== RUN   TestListErrors/dup-after-type-error
+=== RUN   TestListErrors/null-in-second-record
+=== RUN   TestListErrors/number-top-level
+=== RUN   TestListErrors/bad-literal
+=== RUN   TestListErrors/lone-surrogate
+=== RUN   TestListErrors/invalid-utf8
+=== RUN   TestListErrors/control-byte
+=== RUN   TestListErrors/missing-comma
+=== RUN   TestListErrors/garbage-between
+--- PASS: TestListErrors (0.00s)
+    --- PASS: TestListErrors/origin-unknown (0.00s)
+    --- PASS: TestListErrors/origin-null (0.00s)
+    --- PASS: TestListErrors/replace-unknown (0.00s)
+    --- PASS: TestListErrors/replace-null (0.00s)
+    --- PASS: TestListErrors/module-error-unknown (0.00s)
+    --- PASS: TestListErrors/module-error-case (0.00s)
+    --- PASS: TestListErrors/depserrors-null-element (0.00s)
+    --- PASS: TestListErrors/depserrors-element-string (0.00s)
+    --- PASS: TestListErrors/depserrors-object (0.00s)
+    --- PASS: TestListErrors/depserrors-dup (0.00s)
+    --- PASS: TestListErrors/importstack-number (0.00s)
+    --- PASS: TestListErrors/importstack-null (0.00s)
+    --- PASS: TestListErrors/importmap-null-value (0.00s)
+    --- PASS: TestListErrors/importmap-array (0.00s)
+    --- PASS: TestListErrors/versions-string (0.00s)
+    --- PASS: TestListErrors/main-string (0.00s)
+    --- PASS: TestListErrors/time-number (0.00s)
+    --- PASS: TestListErrors/time-no-zone (0.00s)
+    --- PASS: TestListErrors/escaped-field-key (0.00s)
+    --- PASS: TestListErrors/unrequested-field (0.00s)
+    --- PASS: TestListErrors/unrequested-case (0.00s)
+    --- PASS: TestListErrors/dup-after-type-error (0.00s)
+    --- PASS: TestListErrors/null-in-second-record (0.00s)
+    --- PASS: TestListErrors/number-top-level (0.00s)
+    --- PASS: TestListErrors/bad-literal (0.00s)
+    --- PASS: TestListErrors/lone-surrogate (0.00s)
+    --- PASS: TestListErrors/invalid-utf8 (0.00s)
+    --- PASS: TestListErrors/control-byte (0.00s)
+    --- PASS: TestListErrors/missing-comma (0.00s)
+    --- PASS: TestListErrors/garbage-between (0.00s)
+=== RUN   TestNestedOmissionsAreZero
+--- PASS: TestNestedOmissionsAreZero (0.00s)
+=== RUN   TestListAcceptsStreamWhitespace
+--- PASS: TestListAcceptsStreamWhitespace (0.00s)
+=== RUN   TestNoPanicOnTruncationsAndMutations
+--- PASS: TestNoPanicOnTruncationsAndMutations (0.23s)
+=== RUN   TestNoPanicOnRandomBytes
+--- PASS: TestNoPanicOnRandomBytes (0.01s)
+=== RUN   TestTruncatedHealthyOutputsFail
+--- PASS: TestTruncatedHealthyOutputsFail (0.02s)
+=== RUN   TestLC4Variants
+=== RUN   TestLC4Variants/env.healthy
+=== RUN   TestLC4Variants/env.healthy-escapes
+=== RUN   TestLC4Variants/env.missing-key
+=== RUN   TestLC4Variants/env.extra-key
+=== RUN   TestLC4Variants/env.case-key
+=== RUN   TestLC4Variants/env.escaped-key
+=== RUN   TestLC4Variants/env.null
+=== RUN   TestLC4Variants/env.duplicate-key
+=== RUN   TestLC4Variants/env.type-mismatch
+=== RUN   TestLC4Variants/env.trailing
+=== RUN   TestLC4Variants/env.crlf-end
+=== RUN   TestLC4Variants/env.second-object
+=== RUN   TestLC4Variants/env.no-final-lf
+=== RUN   TestLC4Variants/env.leading-space
+=== RUN   TestLC4Variants/env.top-level-array
+=== RUN   TestLC4Variants/env.malformed
+=== RUN   TestLC4Variants/env.zero-bytes
+=== RUN   TestLC4Variants/ctx.healthy
+=== RUN   TestLC4Variants/ctx.healthy-escapes
+=== RUN   TestLC4Variants/ctx.order-and-duplicates
+=== RUN   TestLC4Variants/ctx.syntax-only
+=== RUN   TestLC4Variants/ctx.missing-end
+=== RUN   TestLC4Variants/ctx.count-short
+=== RUN   TestLC4Variants/ctx.count-long
+=== RUN   TestLC4Variants/ctx.noncanonical-x41
+=== RUN   TestLC4Variants/ctx.crlf
+=== RUN   TestLC4Variants/ctx.two-texts
+=== RUN   TestLC4Variants/ctx.extra-line
+=== RUN   TestLC4Variants/ctx.cgo-zero
+=== RUN   TestLC4Variants/ctx.zero-bytes
+=== RUN   TestLC4Variants/ctx.after-end
+=== RUN   TestLC4Variants/ctx.no-final-lf
+=== RUN   TestLC4Variants/ctx.blank-line
+=== RUN   TestLC4Variants/ctx.double-space
+=== RUN   TestLC4Variants/ctx.unquoted
+=== RUN   TestLC4Variants/ctx.invalid-escape
+=== RUN   TestLC4Variants/ctx.leading-zero
+=== RUN   TestLC4Variants/ctx.element-no-space
+=== RUN   TestLC4Variants/ctx.json-shaped
+=== RUN   TestLC4Variants/list.std
+=== RUN   TestLC4Variants/list.main
+=== RUN   TestLC4Variants/list.dep
+=== RUN   TestLC4Variants/list.stream
+=== RUN   TestLC4Variants/list.no-module
+=== RUN   TestLC4Variants/list.dep-omissions
+=== RUN   TestLC4Variants/list.std-with-module
+=== RUN   TestLC4Variants/list.error-fields
+=== RUN   TestLC4Variants/list.module-all-fields
+=== RUN   TestLC4Variants/list.importmap-case
+=== RUN   TestLC4Variants/list.empty-array
+=== RUN   TestLC4Variants/list.extra-key
+=== RUN   TestLC4Variants/list.extra-module-key
+=== RUN   TestLC4Variants/list.extra-packageerror-key
+=== RUN   TestLC4Variants/list.case-key
+=== RUN   TestLC4Variants/list.case-module-key
+=== RUN   TestLC4Variants/list.null-module
+=== RUN   TestLC4Variants/list.null-nested
+=== RUN   TestLC4Variants/list.null-element
+=== RUN   TestLC4Variants/list.duplicate-key
+=== RUN   TestLC4Variants/list.duplicate-module-key
+=== RUN   TestLC4Variants/list.duplicate-importmap-key
+=== RUN   TestLC4Variants/list.type-standard-string
+=== RUN   TestLC4Variants/list.type-gofiles-string
+=== RUN   TestLC4Variants/list.type-imports-element
+=== RUN   TestLC4Variants/list.type-importmap-value
+=== RUN   TestLC4Variants/list.type-module-array
+=== RUN   TestLC4Variants/list.type-module-error-string
+=== RUN   TestLC4Variants/list.type-time
+=== RUN   TestLC4Variants/list.type-number
+=== RUN   TestLC4Variants/list.order-keys-before-types
+=== RUN   TestLC4Variants/list.trailing
+=== RUN   TestLC4Variants/list.trailing-array
+=== RUN   TestLC4Variants/list.malformed
+=== RUN   TestLC4Variants/list.second-malformed
+=== RUN   TestLC4Variants/list.top-level-array
+=== RUN   TestLC4Variants/list.zero-bytes
+=== RUN   TestLC4Variants/list.whitespace-only
+--- PASS: TestLC4Variants (0.00s)
+    --- PASS: TestLC4Variants/env.healthy (0.00s)
+    --- PASS: TestLC4Variants/env.healthy-escapes (0.00s)
+    --- PASS: TestLC4Variants/env.missing-key (0.00s)
+    --- PASS: TestLC4Variants/env.extra-key (0.00s)
+    --- PASS: TestLC4Variants/env.case-key (0.00s)
+    --- PASS: TestLC4Variants/env.escaped-key (0.00s)
+    --- PASS: TestLC4Variants/env.null (0.00s)
+    --- PASS: TestLC4Variants/env.duplicate-key (0.00s)
+    --- PASS: TestLC4Variants/env.type-mismatch (0.00s)
+    --- PASS: TestLC4Variants/env.trailing (0.00s)
+    --- PASS: TestLC4Variants/env.crlf-end (0.00s)
+    --- PASS: TestLC4Variants/env.second-object (0.00s)
+    --- PASS: TestLC4Variants/env.no-final-lf (0.00s)
+    --- PASS: TestLC4Variants/env.leading-space (0.00s)
+    --- PASS: TestLC4Variants/env.top-level-array (0.00s)
+    --- PASS: TestLC4Variants/env.malformed (0.00s)
+    --- PASS: TestLC4Variants/env.zero-bytes (0.00s)
+    --- PASS: TestLC4Variants/ctx.healthy (0.00s)
+    --- PASS: TestLC4Variants/ctx.healthy-escapes (0.00s)
+    --- PASS: TestLC4Variants/ctx.order-and-duplicates (0.00s)
+    --- PASS: TestLC4Variants/ctx.syntax-only (0.00s)
+    --- PASS: TestLC4Variants/ctx.missing-end (0.00s)
+    --- PASS: TestLC4Variants/ctx.count-short (0.00s)
+    --- PASS: TestLC4Variants/ctx.count-long (0.00s)
+    --- PASS: TestLC4Variants/ctx.noncanonical-x41 (0.00s)
+    --- PASS: TestLC4Variants/ctx.crlf (0.00s)
+    --- PASS: TestLC4Variants/ctx.two-texts (0.00s)
+    --- PASS: TestLC4Variants/ctx.extra-line (0.00s)
+    --- PASS: TestLC4Variants/ctx.cgo-zero (0.00s)
+    --- PASS: TestLC4Variants/ctx.zero-bytes (0.00s)
+    --- PASS: TestLC4Variants/ctx.after-end (0.00s)
+    --- PASS: TestLC4Variants/ctx.no-final-lf (0.00s)
+    --- PASS: TestLC4Variants/ctx.blank-line (0.00s)
+    --- PASS: TestLC4Variants/ctx.double-space (0.00s)
+    --- PASS: TestLC4Variants/ctx.unquoted (0.00s)
+    --- PASS: TestLC4Variants/ctx.invalid-escape (0.00s)
+    --- PASS: TestLC4Variants/ctx.leading-zero (0.00s)
+    --- PASS: TestLC4Variants/ctx.element-no-space (0.00s)
+    --- PASS: TestLC4Variants/ctx.json-shaped (0.00s)
+    --- PASS: TestLC4Variants/list.std (0.00s)
+    --- PASS: TestLC4Variants/list.main (0.00s)
+    --- PASS: TestLC4Variants/list.dep (0.00s)
+    --- PASS: TestLC4Variants/list.stream (0.00s)
+    --- PASS: TestLC4Variants/list.no-module (0.00s)
+    --- PASS: TestLC4Variants/list.dep-omissions (0.00s)
+    --- PASS: TestLC4Variants/list.std-with-module (0.00s)
+    --- PASS: TestLC4Variants/list.error-fields (0.00s)
+    --- PASS: TestLC4Variants/list.module-all-fields (0.00s)
+    --- PASS: TestLC4Variants/list.importmap-case (0.00s)
+    --- PASS: TestLC4Variants/list.empty-array (0.00s)
+    --- PASS: TestLC4Variants/list.extra-key (0.00s)
+    --- PASS: TestLC4Variants/list.extra-module-key (0.00s)
+    --- PASS: TestLC4Variants/list.extra-packageerror-key (0.00s)
+    --- PASS: TestLC4Variants/list.case-key (0.00s)
+    --- PASS: TestLC4Variants/list.case-module-key (0.00s)
+    --- PASS: TestLC4Variants/list.null-module (0.00s)
+    --- PASS: TestLC4Variants/list.null-nested (0.00s)
+    --- PASS: TestLC4Variants/list.null-element (0.00s)
+    --- PASS: TestLC4Variants/list.duplicate-key (0.00s)
+    --- PASS: TestLC4Variants/list.duplicate-module-key (0.00s)
+    --- PASS: TestLC4Variants/list.duplicate-importmap-key (0.00s)
+    --- PASS: TestLC4Variants/list.type-standard-string (0.00s)
+    --- PASS: TestLC4Variants/list.type-gofiles-string (0.00s)
+    --- PASS: TestLC4Variants/list.type-imports-element (0.00s)
+    --- PASS: TestLC4Variants/list.type-importmap-value (0.00s)
+    --- PASS: TestLC4Variants/list.type-module-array (0.00s)
+    --- PASS: TestLC4Variants/list.type-module-error-string (0.00s)
+    --- PASS: TestLC4Variants/list.type-time (0.00s)
+    --- PASS: TestLC4Variants/list.type-number (0.00s)
+    --- PASS: TestLC4Variants/list.order-keys-before-types (0.00s)
+    --- PASS: TestLC4Variants/list.trailing (0.00s)
+    --- PASS: TestLC4Variants/list.trailing-array (0.00s)
+    --- PASS: TestLC4Variants/list.malformed (0.00s)
+    --- PASS: TestLC4Variants/list.second-malformed (0.00s)
+    --- PASS: TestLC4Variants/list.top-level-array (0.00s)
+    --- PASS: TestLC4Variants/list.zero-bytes (0.00s)
+    --- PASS: TestLC4Variants/list.whitespace-only (0.00s)
+=== RUN   TestLC4VariantTable
+--- PASS: TestLC4VariantTable (0.00s)
+=== RUN   TestLC4DocListsEveryVariant
+--- PASS: TestLC4DocListsEveryVariant (0.00s)
+=== RUN   TestV34HealthyValues
+--- PASS: TestV34HealthyValues (0.00s)
+=== RUN   TestMatchRejectsWrongOutcomes
+--- PASS: TestMatchRejectsWrongOutcomes (0.00s)
+PASS
+decode exit 0:
+=== package job
+=== RUN   TestJobConsistent
+--- PASS: TestJobConsistent (0.03s)
+=== RUN   TestJobEveryControl
+--- PASS: TestJobEveryControl (0.07s)
+=== RUN   TestJobStoppedInvoker
+--- PASS: TestJobStoppedInvoker (0.03s)
+=== RUN   TestJobWithoutR
+--- PASS: TestJobWithoutR (0.03s)
+=== RUN   TestJobMRunNonzero
+--- PASS: TestJobMRunNonzero (0.03s)
+=== RUN   TestJobDomainsNotRun
+--- PASS: TestJobDomainsNotRun (0.00s)
+=== RUN   TestJobBadT2
+--- PASS: TestJobBadT2 (0.03s)
+=== RUN   TestB1471ParentLeavesAStuckAnalysisAtW
+--- PASS: TestB1471ParentLeavesAStuckAnalysisAtW (0.00s)
+=== RUN   TestB1474DerivedRecordsNameResolvableParents
+--- PASS: TestB1474DerivedRecordsNameResolvableParents (0.03s)
+=== RUN   TestB1474ControlRecordsKeepSites
+--- PASS: TestB1474ControlRecordsKeepSites (0.01s)
+=== RUN   TestB1471HealthyTimely
+--- PASS: TestB1471HealthyTimely (0.03s)
+=== RUN   TestB1471LastUnitCompletesAfterW
+--- PASS: TestB1471LastUnitCompletesAfterW (0.01s)
+=== RUN   TestB1471RealErrorAfterTheParentStopped
+--- PASS: TestB1471RealErrorAfterTheParentStopped (0.00s)
+=== RUN   TestB1471DExitReachable
+--- PASS: TestB1471DExitReachable (0.20s)
+=== RUN   TestB1474FRecordsKeepInstances
+--- PASS: TestB1474FRecordsKeepInstances (0.01s)
+=== RUN   TestB1474BrokenProvenanceIsInvalid
+--- PASS: TestB1474BrokenProvenanceIsInvalid (0.03s)
+=== RUN   TestN1473WRecord
+--- PASS: TestN1473WRecord (0.00s)
+=== RUN   TestN1471LC1UsesTheModulesToCheck
+--- PASS: TestN1471LC1UsesTheModulesToCheck (0.00s)
+=== RUN   TestB148RaStuckVerificationParentStillCloses
+--- PASS: TestB148RaStuckVerificationParentStillCloses (0.01s)
+=== RUN   TestB148RaStuckVerificationExpiredParent
+--- PASS: TestB148RaStuckVerificationExpiredParent (0.01s)
+=== RUN   TestB148RaLateVerificationSuccessDoesNotRestore
+--- PASS: TestB148RaLateVerificationSuccessDoesNotRestore (0.01s)
+=== RUN   TestB148RaLateVerificationErrorIsConsumed
+--- PASS: TestB148RaLateVerificationErrorIsConsumed (0.01s)
+=== RUN   TestB148RaHealthyVerifiedOnceByTheWork
+--- PASS: TestB148RaHealthyVerifiedOnceByTheWork (0.01s)
+=== RUN   TestB148RaExpiredParentDoesNotVerify
+--- PASS: TestB148RaExpiredParentDoesNotVerify (0.01s)
+=== RUN   TestB148RaBrokenRecordBeforeTheVerification
+--- PASS: TestB148RaBrokenRecordBeforeTheVerification (0.01s)
+=== RUN   TestB148RbAbandonedThenCompletedBeforeFinish
+--- PASS: TestB148RbAbandonedThenCompletedBeforeFinish (0.01s)
+=== RUN   TestB148RbTimelyWorkParentLate
+--- PASS: TestB148RbTimelyWorkParentLate (0.06s)
+=== RUN   TestB148RbWorkDoneAtOrAfterW
+--- PASS: TestB148RbWorkDoneAtOrAfterW (0.02s)
+=== RUN   TestB148RcLateWorkCreatesNoRoot
+--- PASS: TestB148RcLateWorkCreatesNoRoot (0.00s)
+=== RUN   TestB148RcAnalysisReturnsAfterD
+--- PASS: TestB148RcAnalysisReturnsAfterD (0.00s)
+=== RUN   TestB148RcCleanupBetweenWAndD
+--- PASS: TestB148RcCleanupBetweenWAndD (0.00s)
+=== RUN   TestB148RcPrepareAndCleanupFailuresAreRecorded
+--- PASS: TestB148RcPrepareAndCleanupFailuresAreRecorded (0.01s)
+=== RUN   TestB148RcHealthyPrepareAndCleanup
+--- PASS: TestB148RcHealthyPrepareAndCleanup (0.01s)
+=== RUN   TestB148RaPublishedVerificationCoversEveryRecord
+--- PASS: TestB148RaPublishedVerificationCoversEveryRecord (0.01s)
+=== RUN   TestB148RaStuckVerificationIsPending
+--- PASS: TestB148RaStuckVerificationIsPending (0.01s)
+=== RUN   TestB148RaLateSuccessIsNotTimely
+--- PASS: TestB148RaLateSuccessIsNotTimely (0.01s)
+=== RUN   TestB148RaLateVerificationErrorHeldAfterFinish
+--- PASS: TestB148RaLateVerificationErrorHeldAfterFinish (0.01s)
+=== RUN   TestB148RaAppendedAfterTheVerificationIsADefect
+--- PASS: TestB148RaAppendedAfterTheVerificationIsADefect (0.01s)
+=== RUN   TestB148RaBrokenRecordFoundByTheWork
+--- PASS: TestB148RaBrokenRecordFoundByTheWork (0.01s)
+=== RUN   TestB148RbLC1AndWorkQualification
+--- PASS: TestB148RbLC1AndWorkQualification (0.01s)
+=== RUN   TestB148RcRefusedPreparationIsRecordedApart
+--- PASS: TestB148RcRefusedPreparationIsRecordedApart (0.00s)
+=== RUN   TestB148RcRefusedCleanupKeepsTheHold
+--- PASS: TestB148RcRefusedCleanupKeepsTheHold (0.00s)
+=== RUN   TestB148RcFailureIsNotARefusal
+--- PASS: TestB148RcFailureIsNotARefusal (0.01s)
+=== RUN   TestB148RcHealthyHoldsReleased
+--- PASS: TestB148RcHealthyHoldsReleased (0.01s)
+=== RUN   TestB149MkdirTempReturnsAfterD
+--- PASS: TestB149MkdirTempReturnsAfterD (0.00s)
+=== RUN   TestB149MkdirAllCrossesW
+--- PASS: TestB149MkdirAllCrossesW (0.00s)
+=== RUN   TestB149WriteCrossesW
+--- PASS: TestB149WriteCrossesW (0.00s)
+=== RUN   TestB149RemoveCrossesW
+--- PASS: TestB149RemoveCrossesW (0.01s)
+=== RUN   TestB149StepAtWIsRefusedCleanupAdmitted
+--- PASS: TestB149StepAtWIsRefusedCleanupAdmitted (0.00s)
+=== RUN   TestB149RealFailureKeptApartFromRefusal
+--- PASS: TestB149RealFailureKeptApartFromRefusal (0.01s)
+=== RUN   TestB149HealthyStepsAllDone
+--- PASS: TestB149HealthyStepsAllDone (0.01s)
+=== RUN   TestB149StepOpsHealthy
+--- PASS: TestB149StepOpsHealthy (0.01s)
+=== RUN   TestB149RefusedStepIsNamed
+--- PASS: TestB149RefusedStepIsNamed (0.00s)
+=== RUN   TestB149RemoveThenMkdirSteps
+--- PASS: TestB149RemoveThenMkdirSteps (0.00s)
+=== RUN   TestB149LC2ChangeSteps
+--- PASS: TestB149LC2ChangeSteps (0.01s)
+=== RUN   TestB151RegisteredNotYetCalled
+--- PASS: TestB151RegisteredNotYetCalled (0.21s)
+=== RUN   TestB151CallEnteredBeforeStarted
+--- PASS: TestB151CallEnteredBeforeStarted (0.27s)
+=== RUN   TestB151StartedButNotReturned
+--- PASS: TestB151StartedButNotReturned (0.26s)
+=== RUN   TestB151LateReturnKeepsTheOriginalFinal
+--- PASS: TestB151LateReturnKeepsTheOriginalFinal (0.26s)
+=== RUN   TestB151NeverIssuedCleanupIssuesOnce
+--- PASS: TestB151NeverIssuedCleanupIssuesOnce (0.06s)
+=== RUN   TestB151ControlsNormalAndExpiryBeforeTheSeal
+=== RUN   TestB151ControlsNormalAndExpiryBeforeTheSeal/normal
+=== RUN   TestB151ControlsNormalAndExpiryBeforeTheSeal/expiry_before_the_seal
+--- PASS: TestB151ControlsNormalAndExpiryBeforeTheSeal (0.01s)
+    --- PASS: TestB151ControlsNormalAndExpiryBeforeTheSeal/normal (0.00s)
+    --- PASS: TestB151ControlsNormalAndExpiryBeforeTheSeal/expiry_before_the_seal (0.01s)
+=== RUN   TestB152HandshakeWaitsForALaggingWriter
+--- PASS: TestB152HandshakeWaitsForALaggingWriter (0.21s)
+=== RUN   TestB152WriterExpiredByItselfNeedsNoWake
+--- PASS: TestB152WriterExpiredByItselfNeedsNoWake (0.01s)
+=== RUN   TestJobToolProblems
+=== RUN   TestJobToolProblems/clean
+=== RUN   TestJobToolProblems/failure
+=== RUN   TestJobToolProblems/pending
+--- PASS: TestJobToolProblems (0.07s)
+    --- PASS: TestJobToolProblems/clean (0.03s)
+    --- PASS: TestJobToolProblems/failure (0.02s)
+    --- PASS: TestJobToolProblems/pending (0.02s)
+PASS
+job exit 0:
+=== package judge
+=== RUN   TestChecksRules
+--- PASS: TestChecksRules (0.00s)
+=== RUN   TestAccAndSetIfUnset
+--- PASS: TestAccAndSetIfUnset (0.00s)
+PASS
+judge exit 0:
+=== package keep
+=== RUN   TestHoldKeepsUntilTheProcessEnds
+--- PASS: TestHoldKeepsUntilTheProcessEnds (0.00s)
+PASS
+keep exit 0:
+=== package modsnap
+=== RUN   TestTakeHealthy
+--- PASS: TestTakeHealthy (0.00s)
+=== RUN   TestTakeNegatives
+=== RUN   TestTakeNegatives/one_byte_changed
+=== RUN   TestTakeNegatives/one_more_file
+=== RUN   TestTakeNegatives/symbolic_link
+--- PASS: TestTakeNegatives (0.00s)
+    --- PASS: TestTakeNegatives/one_byte_changed (0.00s)
+    --- PASS: TestTakeNegatives/one_more_file (0.00s)
+    --- PASS: TestTakeNegatives/symbolic_link (0.00s)
+=== RUN   TestTakeFaults
+=== RUN   TestTakeFaults/open
+=== RUN   TestTakeFaults/read
+=== RUN   TestTakeFaults/close
+=== RUN   TestTakeFaults/handle
+--- PASS: TestTakeFaults (0.00s)
+    --- PASS: TestTakeFaults/open (0.00s)
+    --- PASS: TestTakeFaults/read (0.00s)
+    --- PASS: TestTakeFaults/close (0.00s)
+    --- PASS: TestTakeFaults/handle (0.00s)
+=== RUN   TestControlledRead
+=== RUN   TestControlledRead/healthy_and_same_bytes
+=== RUN   TestControlledRead/name_not_in_M
+=== RUN   TestControlledRead/reread_differs
+=== RUN   TestControlledRead/handle_not_regular
+=== RUN   TestControlledRead/injection_after_a_real_nil_close
+=== RUN   TestControlledRead/real_close_error_is_never_replaced_by_an_injection
+=== RUN   TestControlledRead/view_and_locate
+--- PASS: TestControlledRead (0.01s)
+    --- PASS: TestControlledRead/healthy_and_same_bytes (0.00s)
+    --- PASS: TestControlledRead/name_not_in_M (0.00s)
+    --- PASS: TestControlledRead/reread_differs (0.00s)
+    --- PASS: TestControlledRead/handle_not_regular (0.00s)
+    --- PASS: TestControlledRead/injection_after_a_real_nil_close (0.00s)
+    --- PASS: TestControlledRead/real_close_error_is_never_replaced_by_an_injection (0.00s)
+    --- PASS: TestControlledRead/view_and_locate (0.00s)
+PASS
+modsnap exit 0:
+=== package realcall
+=== RUN   TestRC3Branches
+=== RUN   TestRC3Branches/linux_ended_by_the_request
+=== RUN   TestRC3Branches/linux_exited_before_the_request
+=== RUN   TestRC3Branches/linux_request_error_ESRCH
+=== RUN   TestRC3Branches/linux_another_signal
+=== RUN   TestRC3Branches/linux_a_normal_non-zero_exit
+=== RUN   TestRC3Branches/linux_an_extra_fault
+=== RUN   TestRC3Branches/linux_an_extra_cleanup_unknown
+=== RUN   TestRC3Branches/linux_no_request
+=== RUN   TestRC3Branches/linux_counted_as_a_success
+=== RUN   TestRC3Branches/linux_not_expired
+=== RUN   TestRC3Branches/linux_nothing_late
+=== RUN   TestRC3Branches/linux_reap_not_returned
+=== RUN   TestRC3Branches/windows_ended_by_the_request
+=== RUN   TestRC3Branches/windows_exited_before_the_request
+=== RUN   TestRC3Branches/windows_access_denied_but_exit_1
+=== RUN   TestRC3Branches/windows_Kill_nil_but_exit_0
+=== RUN   TestRC3Branches/windows_another_request_error
+=== RUN   TestRC3Branches/windows_exit_2
+=== RUN   TestRC3Branches/darwin_no_request
+=== RUN   TestRC3Branches/darwin_a_normal_non-zero_exit
+=== RUN   TestRC3Branches/darwin_a_request
+=== RUN   TestRC3Branches/darwin_no_cleanup_unknown
+=== RUN   TestRC3Branches/darwin_a_read_error
+--- PASS: TestRC3Branches (0.00s)
+    --- PASS: TestRC3Branches/linux_ended_by_the_request (0.00s)
+    --- PASS: TestRC3Branches/linux_exited_before_the_request (0.00s)
+    --- PASS: TestRC3Branches/linux_request_error_ESRCH (0.00s)
+    --- PASS: TestRC3Branches/linux_another_signal (0.00s)
+    --- PASS: TestRC3Branches/linux_a_normal_non-zero_exit (0.00s)
+    --- PASS: TestRC3Branches/linux_an_extra_fault (0.00s)
+    --- PASS: TestRC3Branches/linux_an_extra_cleanup_unknown (0.00s)
+    --- PASS: TestRC3Branches/linux_no_request (0.00s)
+    --- PASS: TestRC3Branches/linux_counted_as_a_success (0.00s)
+    --- PASS: TestRC3Branches/linux_not_expired (0.00s)
+    --- PASS: TestRC3Branches/linux_nothing_late (0.00s)
+    --- PASS: TestRC3Branches/linux_reap_not_returned (0.00s)
+    --- PASS: TestRC3Branches/windows_ended_by_the_request (0.00s)
+    --- PASS: TestRC3Branches/windows_exited_before_the_request (0.00s)
+    --- PASS: TestRC3Branches/windows_access_denied_but_exit_1 (0.00s)
+    --- PASS: TestRC3Branches/windows_Kill_nil_but_exit_0 (0.00s)
+    --- PASS: TestRC3Branches/windows_another_request_error (0.00s)
+    --- PASS: TestRC3Branches/windows_exit_2 (0.00s)
+    --- PASS: TestRC3Branches/darwin_no_request (0.00s)
+    --- PASS: TestRC3Branches/darwin_a_normal_non-zero_exit (0.00s)
+    --- PASS: TestRC3Branches/darwin_a_request (0.00s)
+    --- PASS: TestRC3Branches/darwin_no_cleanup_unknown (0.00s)
+    --- PASS: TestRC3Branches/darwin_a_read_error (0.00s)
+PASS
+realcall exit 0:
+=== package spec
+=== RUN   TestT2Binding
+--- PASS: TestT2Binding (0.00s)
+=== RUN   TestT2MatchesDocuments
+--- PASS: TestT2MatchesDocuments (0.01s)
+=== RUN   TestArgs
+--- PASS: TestArgs (0.00s)
+=== RUN   TestCandidateCounts
+--- PASS: TestCandidateCounts (0.00s)
+PASS
+spec exit 0:
+=== package toolctl
+=== RUN   TestR154AdmitEntry
+--- PASS: TestR154AdmitEntry (0.00s)
+=== RUN   TestR154AdmitPipeCrossesD
+--- PASS: TestR154AdmitPipeCrossesD (0.00s)
+=== RUN   TestR154AdmitStartNotInitiated
+--- PASS: TestR154AdmitStartNotInitiated (0.00s)
+=== RUN   TestR154CmdHeldAfterStartFailure
+--- PASS: TestR154CmdHeldAfterStartFailure (0.00s)
+=== RUN   TestR154PanicAfterHandover
+--- PASS: TestR154PanicAfterHandover (0.00s)
+=== RUN   TestR154PanicBetweenPipes
+--- PASS: TestR154PanicBetweenPipes (0.00s)
+=== RUN   TestR154AdmitDelayedStartTask
+--- PASS: TestR154AdmitDelayedStartTask (0.00s)
+=== RUN   TestR154AdmittedStartReturnsLate
+--- PASS: TestR154AdmittedStartReturnsLate (0.00s)
+=== RUN   TestR154ObjectsHeld
+=== RUN   TestR154ObjectsHeld/half-built
+=== RUN   TestR154ObjectsHeld/after-the-read
+--- PASS: TestR154ObjectsHeld (0.00s)
+    --- PASS: TestR154ObjectsHeld/half-built (0.00s)
+    --- PASS: TestR154ObjectsHeld/after-the-read (0.00s)
+=== RUN   TestR154PanicInStart
+--- PASS: TestR154PanicInStart (0.00s)
+=== RUN   TestR154PanicBeforeWait
+--- PASS: TestR154PanicBeforeWait (0.01s)
+=== RUN   TestR155RegistryOutlivesItsCaller
+--- PASS: TestR155RegistryOutlivesItsCaller (0.01s)
+=== RUN   TestR155ExitedBeforeRequest
+    regress155_test.go:137: ["class B" "state waited" "admission entry admitted" "admission stdout pipe admitted" "admission stderr pipe admitted" "admission start admitted" "start ok" "cmd held yes" "stdout-w closed ok release confirmed object held" "stdout-r closed ok release confirmed object held" "stderr-w closed ok release confirmed object held" "stderr-r closed ok release confirmed object held" "stdout eof kept 0 sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" "stderr eof kept 0 sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" "wait exited 0" "pidfd closed ok closes 1" "request pidfd done sends 1 ok" "panic no" "expired yes" "late yes" "terminal yes" "success no"]
+--- PASS: TestR155ExitedBeforeRequest (0.00s)
+=== RUN   TestR155OwnerHoldsR2F
+--- PASS: TestR155OwnerHoldsR2F (0.00s)
+=== RUN   TestConcurrentCalls
+--- PASS: TestConcurrentCalls (0.01s)
+=== RUN   TestExpiredCallStaysHeld
+--- PASS: TestExpiredCallStaysHeld (0.00s)
+=== RUN   TestLinesOfAStartFailure
+--- PASS: TestLinesOfAStartFailure (0.00s)
+PASS
+toolctl exit 0:
+=== package typecheck
+=== RUN   TestAdmissionRefusedAtFile
+--- PASS: TestAdmissionRefusedAtFile (0.00s)
+=== RUN   TestAdmissionRefusedAtPackage
+--- PASS: TestAdmissionRefusedAtPackage (0.00s)
+=== RUN   TestSelfCheck
+--- PASS: TestSelfCheck (0.00s)
+=== RUN   TestLC7
+=== RUN   TestLC7/linux/amd64
+=== RUN   TestLC7/darwin/arm64
+--- PASS: TestLC7 (0.00s)
+    --- PASS: TestLC7/linux/amd64 (0.00s)
+    --- PASS: TestLC7/darwin/arm64 (0.00s)
+=== RUN   TestOtherForms
+--- PASS: TestOtherForms (0.00s)
+=== RUN   TestWindowsX1AndSignals
+--- PASS: TestWindowsX1AndSignals (0.00s)
+=== RUN   TestOffPlatformReference
+--- PASS: TestOffPlatformReference (0.00s)
+=== RUN   TestUnsafe
+=== RUN   TestUnsafe/linux/amd64
+=== RUN   TestUnsafe/linux/arm64
+--- PASS: TestUnsafe (0.00s)
+    --- PASS: TestUnsafe/linux/amd64 (0.00s)
+    --- PASS: TestUnsafe/linux/arm64 (0.00s)
+=== RUN   TestUnsafeAsSourceIsNotUnsafe
+--- PASS: TestUnsafeAsSourceIsNotUnsafe (0.00s)
+=== RUN   TestImportC
+--- PASS: TestImportC (0.00s)
+=== RUN   TestImportNotInImports
+--- PASS: TestImportNotInImports (0.00s)
+=== RUN   TestImportMap
+=== RUN   TestImportMap/mapped
+=== RUN   TestImportMap/no_map
+=== RUN   TestImportMap/map_outside_Imports
+=== RUN   TestImportMap/Imports_outside_table
+--- PASS: TestImportMap (0.00s)
+    --- PASS: TestImportMap/mapped (0.00s)
+    --- PASS: TestImportMap/no_map (0.00s)
+    --- PASS: TestImportMap/map_outside_Imports (0.00s)
+    --- PASS: TestImportMap/Imports_outside_table (0.00s)
+=== RUN   TestCycle
+--- PASS: TestCycle (0.00s)
+=== RUN   TestTypeErrors
+--- PASS: TestTypeErrors (0.00s)
+=== RUN   TestLanguageVersion
+=== RUN   TestLanguageVersion/empty_is_go1.16
+=== RUN   TestLanguageVersion/go1.16_rejects_generics
+=== RUN   TestLanguageVersion/1.27_is_go1.27
+=== RUN   TestLanguageVersion/1.27.3_is_go1.27
+=== RUN   TestLanguageVersion/1.27.4_is_above_go1.27.3
+=== RUN   TestLanguageVersion/1.28_is_above
+=== RUN   TestLanguageVersion/not_a_version
+=== RUN   TestLanguageVersion/nil_module,_not_standard
+=== RUN   TestLanguageVersion/standard_is_the_toolchain's
+--- PASS: TestLanguageVersion (0.00s)
+    --- PASS: TestLanguageVersion/empty_is_go1.16 (0.00s)
+    --- PASS: TestLanguageVersion/go1.16_rejects_generics (0.00s)
+    --- PASS: TestLanguageVersion/1.27_is_go1.27 (0.00s)
+    --- PASS: TestLanguageVersion/1.27.3_is_go1.27 (0.00s)
+    --- PASS: TestLanguageVersion/1.27.4_is_above_go1.27.3 (0.00s)
+    --- PASS: TestLanguageVersion/1.28_is_above (0.00s)
+    --- PASS: TestLanguageVersion/not_a_version (0.00s)
+    --- PASS: TestLanguageVersion/nil_module,_not_standard (0.00s)
+    --- PASS: TestLanguageVersion/standard_is_the_toolchain's (0.00s)
+=== RUN   TestDeclarationsOnly
+--- PASS: TestDeclarationsOnly (0.00s)
+=== RUN   TestByteSourceError
+--- PASS: TestByteSourceError (0.00s)
+=== RUN   TestImportSetMismatch
+--- PASS: TestImportSetMismatch (0.00s)
+=== RUN   TestMainPackagesNotChecked
+--- PASS: TestMainPackagesNotChecked (0.00s)
+=== RUN   TestPackageNameAndFiles
+--- PASS: TestPackageNameAndFiles (0.00s)
+=== RUN   TestSetupFailures
+=== RUN   TestSetupFailures/no_source
+=== RUN   TestSetupFailures/no_admit
+=== RUN   TestSetupFailures/unknown_GOOS
+=== RUN   TestSetupFailures/toolchain
+=== RUN   TestSetupFailures/sizes_nil
+=== RUN   TestSetupFailures/duplicate
+=== RUN   TestSetupFailures/kind
+--- PASS: TestSetupFailures (0.00s)
+    --- PASS: TestSetupFailures/no_source (0.00s)
+    --- PASS: TestSetupFailures/no_admit (0.00s)
+    --- PASS: TestSetupFailures/unknown_GOOS (0.00s)
+    --- PASS: TestSetupFailures/toolchain (0.00s)
+    --- PASS: TestSetupFailures/sizes_nil (0.00s)
+    --- PASS: TestSetupFailures/duplicate (0.00s)
+    --- PASS: TestSetupFailures/kind (0.00s)
+=== RUN   TestDeterministic
+--- PASS: TestDeterministic (0.00s)
+=== RUN   TestUnsafeNotStandard
+--- PASS: TestUnsafeNotStandard (0.00s)
+=== RUN   TestB1473ParseErrorKeptWhenTheNextFileIsRefused
+--- PASS: TestB1473ParseErrorKeptWhenTheNextFileIsRefused (0.00s)
+=== RUN   TestB1473ConstraintErrorKeptWhenTheNextFileIsRefused
+--- PASS: TestB1473ConstraintErrorKeptWhenTheNextFileIsRefused (0.00s)
+=== RUN   TestB1473VersionErrorKeptWhenAFileIsRefused
+--- PASS: TestB1473VersionErrorKeptWhenAFileIsRefused (0.00s)
+=== RUN   TestB1473BudgetOnlyHealthyControl
+--- PASS: TestB1473BudgetOnlyHealthyControl (0.00s)
+=== RUN   TestConstraintLineAfterABlockComment
+--- PASS: TestConstraintLineAfterABlockComment (0.00s)
+=== RUN   TestConstraintLine
+=== RUN   TestConstraintLine/none
+=== RUN   TestConstraintLine/one
+=== RUN   TestConstraintLine/crlf
+=== RUN   TestConstraintLine/two
+=== RUN   TestConstraintLine/two_separated
+=== RUN   TestConstraintLine/after_copyright
+=== RUN   TestConstraintLine/no_blank_line_before_package
+=== RUN   TestConstraintLine/no_final_newline
+=== RUN   TestConstraintLine/tab_separated
+=== RUN   TestConstraintLine/raw_bytes_kept
+=== RUN   TestConstraintLine/not_a_go:build_line
+=== RUN   TestConstraintLine/inside_block_comment
+=== RUN   TestConstraintLine/second_inside_block_comment
+=== RUN   TestConstraintLine/after_closed_block_comment
+=== RUN   TestConstraintLine/after_block_comment_on_the_line
+=== RUN   TestConstraintLine/after_the_header
+=== RUN   TestConstraintLine/second_after_the_header
+=== RUN   TestConstraintLine/text_after_block_comment_ends_header
+=== RUN   TestConstraintLine/plus_build_is_not_go:build
+--- PASS: TestConstraintLine (0.00s)
+    --- PASS: TestConstraintLine/none (0.00s)
+    --- PASS: TestConstraintLine/one (0.00s)
+    --- PASS: TestConstraintLine/crlf (0.00s)
+    --- PASS: TestConstraintLine/two (0.00s)
+    --- PASS: TestConstraintLine/two_separated (0.00s)
+    --- PASS: TestConstraintLine/after_copyright (0.00s)
+    --- PASS: TestConstraintLine/no_blank_line_before_package (0.00s)
+    --- PASS: TestConstraintLine/no_final_newline (0.00s)
+    --- PASS: TestConstraintLine/tab_separated (0.00s)
+    --- PASS: TestConstraintLine/raw_bytes_kept (0.00s)
+    --- PASS: TestConstraintLine/not_a_go:build_line (0.00s)
+    --- PASS: TestConstraintLine/inside_block_comment (0.00s)
+    --- PASS: TestConstraintLine/second_inside_block_comment (0.00s)
+    --- PASS: TestConstraintLine/after_closed_block_comment (0.00s)
+    --- PASS: TestConstraintLine/after_block_comment_on_the_line (0.00s)
+    --- PASS: TestConstraintLine/after_the_header (0.00s)
+    --- PASS: TestConstraintLine/second_after_the_header (0.00s)
+    --- PASS: TestConstraintLine/text_after_block_comment_ends_header (0.00s)
+    --- PASS: TestConstraintLine/plus_build_is_not_go:build (0.00s)
+=== RUN   TestLinePositionsAndConstraint
+--- PASS: TestLinePositionsAndConstraint (0.00s)
+=== RUN   TestPrefilterHit
+--- PASS: TestPrefilterHit (0.00s)
+=== RUN   TestStripBodies
+--- PASS: TestStripBodies (0.00s)
+=== RUN   TestStripBodiesCounterExamples
+The following panic happened checking types near:
+	s2.go:5:5
+--- PASS: TestStripBodiesCounterExamples (0.00s)
+PASS
+typecheck exit 0:
+=== package verdict
+=== RUN   TestDecide
+--- PASS: TestDecide (0.00s)
+PASS
+verdict exit 0:
+# exit: 0
+# finished: 2026-11-16T16:22:30Z

@@ -92,6 +92,15 @@ func manifestCloseLate(t *testing.T, gateParent bool) (*harness, *ctl, <-chan Fi
 	h.clk.Set(at(119.5))
 	mw.free()
 	waitCh(t, mc.entered, "manifest close")
+	// Phase 2 (run 43680692609, -race on Ubuntu): the callers move the
+	// clock past D next and expect the diagnostic task to have written its
+	// three snapshot lines (the provisional line and the two counts) and
+	// to be waiting for the writer. Nothing ordered that before: a slower
+	// diagnostic task still had a line due after D and took the expiry
+	// exit before the writer published its close. Wait for the third
+	// write's result; it is recorded in the same lock in which the task
+	// then waits on the writer.
+	h.waitFor("the diagnostic task's three snapshot lines", func(s OuterSnapshot) bool { return s.Diag != nil && len(s.Diag.Writes) == 3 })
 	s := h.o.Snapshot()
 	if oc := s.Writer.Manifest.Write.Outcome; !oc.OK() || !oc.At.Equal(at(119.5)) {
 		t.Fatalf("manifest write %+v, want timely at 119.5", oc)
