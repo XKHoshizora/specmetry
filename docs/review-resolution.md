@@ -13475,3 +13475,62 @@ macOS 13+、Intel 的支持承诺与已批准的产品决定不变；没有新�
 - 每个用例保存命令、退出状态与原始输出（临时目录与本机路径以占位符替换），连同夹具脚本与 SHA-256 清单一起入库，放在 `docs/evidence/wp2.5-c9-prep-r157/`。这些只是本机脚本验证，不是 runner 上的正式 workflow 执行。
 - **文档**：处理记录只追加；链接、表格与 `git diff --check`；核对工具模块、依赖、`ci.yml`、`c9-tool-test.yml` 不变，正式 workflow 的触发、权限、预算、矩阵、缓存准备命令与 artifact 规则不变。
 - 最终 HEAD 的常规 CI 一次；失败保留并暂停，不重跑。
+
+## 209．Review 157 的定向修订与本机验证（B-157-1 已修订、N-157-1／N-157-2 已精化，待独立复审）
+
+按 §208 登记的范围实施。三项都只是**已修订／已精化，待独立复审**，本节不宣布关闭。
+
+**提交**（都在 PR #59 内，起点 `dcc01bd`）：
+
+| 提交 | 内容 | 性质 |
+|---|---|---|
+| `ea61465` | Review 157 的原样归档 | 文档 |
+| `942f316` | §208：实施登记与对 §207 的更正（写在任何修订之前） | 文档 |
+| `43b9f99` | `c9-evidence.yml`：N-157-2 的读取检查与 N-157-1 的谓词（blob `9ef8b58766200b7ca35aa6757a5f226d1e562b0b`） | **影响运行准备** |
+| 本节所在的提交 | B-157-1 的文字、本机验证的原始材料、本节与状态行 | 文档 |
+
+**B-157-1**（已修订，待独立复审）：[实施计划](wp2.5-implementation-plan.md) §12.12 闸门表下的 F-2 一条重写为六点：
+
+- `lookExtensions` 的成功（只缓存，不设置 `cmd.Err`）与失败（实际的错误写入 `cmd.Err`）；
+- 已知扩展名直接接受，是 Windows 上本行 C 类的唯一输入；
+- 其他情形会尝试追加扩展名的候选，“原名不存在”不能推出查找失败；写出 `probe` → `probe.exe`、`probe.odd` → `probe.odd.exe` 两个反例，它们既不是本行，也不是 A ②；
+- A ② 的条件是实际的错误写入了 `cmd.Err`；
+- 错误的种类：测试保存并比较实际的错误；外层是 `*exec.Error`，内层的 `ErrNotFound`、`fs.ErrNotExist` 或原名的 `os.Stat` 错误分别写明成立的前提（`pathExt()` 是否为空，原名有没有扩展名）；
+- 夹具沿用第二阶段的已知 `.exe` 扩展名；Linux 与 darwin 照旧。
+
+分类的优先级、决策树、工具实现、冻结规则与历史原始证据都没有改；没有新增原生 Go 实验；不重开 Review 156。§207 的原文不改，由 §208 的更正 1 与本节代替；PR #59 描述中的 F-2 一段同步改写。
+
+**N-157-1**（已精化，待独立复审）：PATH 步骤先拒绝 null 与空串，再要求 `[System.IO.Path]::IsPathFullyQualified`；不调用 `GetFullPath`，不按当前目录补全。目标数量、两份 `go.exe` 的哈希比较、`throw` 即失败与非 junction 分支都不变。注释与[取证工具记录](wp2.5-c9-evidence-tool.md) §2.8 写明：哈希相同只说明两次读到的字节相同，不证明安装的来源、GOROOT 的其余内容或文件之后不变。
+
+**N-157-2**（已精化，待独立复审）：
+
+- 身份步骤：HEAD、工作区状态、树、工具模块子树、workflow 的 blob 与 PATH 上的 `go` 逐项在 `echo` 之外取得；取得失败或结果为空即失败（工作区状态以“为空”表示干净，取得失败另行失败）；全部成立之后再打印。
+- LE-4：`go.mod`、`go.sum` 的 blob 与下载之后的工作区状态同样处理；`go mod download` 不变。
+- Collect：PATH 上的 `go` 同样处理；`go version` 与 `go test` 不变。
+- 第 56、77 行的 `[ -n "$(git status --porcelain)" ]` 同形，一并处理（§208）。
+
+**限定取证计划**：§12.7 的失败表补上“身份、路径或 blob 的读取失败或为空”一行，F-1 一行改为“完整的绝对路径”；§12 其余的待决建议不变。
+
+**本机验证**（原始材料在 [`docs/evidence/wp2.5-c9-prep-r157/`](evidence/wp2.5-c9-prep-r157/README.md)，含驱动、夹具、每个用例的命令、原始输出与退出状态，以及 SHA-256 清单）：
+
+- **被测对象**：提交 `43b9f99` 中 workflow 的 blob `9ef8b58`；对照 `dcc01bd` 的 `852c032` 与 `master` 的 `11d7f1f`。
+- **环境**：本机 Windows 11，bash 5.3.15（MSYS2）、git 2.56.1.windows.1、PowerShell 7.6.10、Node 26.10.0、prettier 3.9.10（`web/node_modules`）。**没有运行 Go**、工具模块、正式入口或采集器；没有联网。
+- **YAML**（prettier 的解析器）：三份文件的 `name`、`on`、`permissions`、`concurrency` 与作业的全部设置相同；`dcc01bd` 与本轮都只多出 Windows 的 PATH 步骤；本轮相对 `master`，身份、LE-4 与 Collect 只有 `run` 不同。全部 `run` 块的 `bash -n` 与 PowerShell 解析器都没有错误。
+- **bash 夹具**（15 个用例 × 两个版本）：
+  - 本轮：三个成功用例退出 0；其余 12 个失败用例都退出 1，并停在对应的读取上（子树不存在、`git status` 读取失败、读取返回空串、blob 读取失败、`go.mod` 不存在、`go` 不在 PATH 上等）。
+  - `dcc01bd` 的旧写法：子树不存在、`git status` 读取失败（被当作干净）、树的读取返回空串、blob 读取失败、没有 `go.mod`、`go.sum` 的读取返回空串时都以退出 0 继续，留下不完整的身份回执。这就是 N-157-2 与同形语句的实际表现。
+- **PowerShell 夹具**（13 个用例 × 两个版本）：
+  - 本轮：真实的 junction、普通目录、盘符完整路径与 `\\?\` 设备路径通过；null、空串、`C:relative`（包括当前目录下可以解析的情形）、`\relative`、`relative`、两个目标、字节不同、目标下没有 `go.exe` 都失败，失败时没有写入 `GITHUB_PATH`。
+  - 旧写法：`C:relative` 与 `\relative` 通过了谓词，按当前目录或当前盘解析之后才在哈希一步失败；当前目录下恰有同样字节的 `relative\bin\go.exe` 时，以退出 0 把相对路径 `C:relative\bin` 写入了 `GITHUB_PATH`。本轮版本在谓词处拒绝。
+  - 非完整路径的目标由一个 `Get-Item` 函数替身给出（真实的 junction 只保存完整的目标）；`go.exe` 是 Windows 自带程序的副本，只计算哈希。
+- **本机与 runner 的差别**：本机的 MSYS2 运行时会改写 `HEAD:.github/...` 这类参数，第二阶段 windows-latest 的 Git Bash 原样传递了它（`ci-43906849891/job-windows.log` 第 218 行），所以夹具以 `MSYS_NO_PATHCONV=1` 运行。
+- **文档**：处理记录只追加（本节之前的字节是原文件的完整前缀）；相对链接存在；表格列数一致；`git diff --check` 没有提示。
+- **没有改的**：工具模块（子树 `755ffc0`）、依赖、`ci.yml`（`8ca6093`）、`c9-tool-test.yml`（`4387acd`）；正式 workflow 的触发、权限、并发、矩阵、外层期限、作业环境、setup-go、LE-4 的下载命令与 artifact 的规则。
+
+**保留的限制**：
+
+- 这些都是本机的脚本验证，不是 runner 上的正式 workflow 执行。新的读取检查与 PATH 步骤都没有在 runner 上运行过；如果首次正式运行获得授权，那一次就是它们第一次在 runner 上执行。
+- `go` 与 `go.exe` 都是替身；`Get-Item` 的替身不证明 runner 上的 junction 会返回那些值。
+- 本机的 PowerShell、.NET 与 bash 不一定与 runner 的版本相同。
+- 最终 HEAD 的常规 CI 只测试根模块，不运行 `c9-evidence.yml`；它的结果登记在 PR #59 的描述中。
+- N2、正式运行的 E-10 (ii)、C / T 与正式运行的授权继续待决。没有建立 `evidence/` 分支，没有运行正式入口，没有采集 R。
