@@ -13349,3 +13349,67 @@ macOS 13+、Intel 的支持承诺与已批准的产品决定不变；没有新�
 - 正式入口只编译与 vet；R 没有被分析；正式运行的 120 秒预算没有测量；F-1 在正式 workflow 中的处置与 F-2 的文字同步待决；三个 runner 上没有观测到残留进程，这不是清理的证据。
 - E-10 (ii) 仍只是为本阶段测试接受的限定前提；常规 CI 不运行工具模块，它的 go1.27.4 不能代替工具模块的证据。
 - 此前各轮的 NO-GO、失败日志与证据原样保留。
+
+## 207．PR #58 的合并与 master push CI；首次正式取证的准备：F-1 在正式 workflow 中的接线、F-2 的文字同步、首次正式运行的决定表（PR #59，不合并，正式运行未授权）
+
+**第二阶段的收尾**（§206 第 4、5 项的回执；首次常规 CI 的处置已在 §206 登记，这里不重复）：
+
+- **最终 HEAD 的常规 CI**：`02d82ed` 的 run 44559702212 为 attempt 1，8/8 success，没有重跑。
+  - 八个作业都检出合并快照 `556ad9fedf27bcbb52dba4aa79f04498c1afb6e7`：父提交依次为 `09e81ee`、`02d82ed`，树 `98ada210c1749fd5479e6ca21193c494f43bd555` 与 HEAD 相同。
+  - 三个 Go 测试作业都是 27 个包 ok、7 个包没有测试文件、没有 FAIL，go1.27.4；Windows 上 `TestSeqIsUniqueAcrossConnections` 通过（3.32 s）。
+- **合并**：PR #58 以 merge commit 合并为 `c34baf86bac1524bcfdabf2b6b67f8f2169e79b5`（2026-11-27T20:54:14Z）。
+  - 命令锁定最终 HEAD 的完整 SHA：`gh pr merge 58 --merge --match-head-commit 02d82edfe41722bcb83a5b856c1c92afeef2cc54`；没有用 squash、rebase、admin 或 auto-merge。
+  - 合并提交的父提交依次为 `09e81ee`、`02d82ed`，树 `98ada21` 与最终 HEAD 相同。
+  - 工具模块子树 `755ffc0c2465959fa5528d07b5c079154e8e4feb`、测试 workflow 的 blob `4387acdc683a2014c235f3991bf854a30d6c7c2c` 与 Review 156 的归档 blob `31d78d88552ec09b44c988a183853884de4d433c`（28381 字节，SHA-256 `cc95043d32f24f6310d3e167d168a96529b9638780e4b97470f49d0502c2ec9c`）都不变。
+  - 分支保留；Auto-fix 与 Auto-merge 保持关闭；落后的本地 `master` 没有重置。
+- **master push CI**：run 46066749763 为 attempt 1，8/8 success，没有重跑。八个作业都取得并检出 `c34baf8`；三个 Go 测试作业都是 27 个包 ok、7 个包没有测试文件、没有 FAIL，go1.27.4。
+- 合并与 master CI 的回执已补入 PR #58 的描述，没有另加提交。
+- **保留的事实**：首次常规 CI run 43908188853 的 attempt 1 为 7/8（Windows 的 `TestSeqIsUniqueAcrossConnections` 报 `SQLITE_BUSY`）；只重跑这一个作业一次，attempt 2 正式成功；根因未知，M-15 不关闭（§206）。两次 Windows 日志的原件在 GitHub 的这个 run 中；会话临时目录中的本地副本（没有入库）已随系统清理而不在。
+- 合并只表示第二阶段的成果入库，不表示取证工作、WP2.5 或 M2 已验收。
+
+**负责人的决定**（2026-11-28）：
+
+1. 从已合并的远程 `master` `c34baf8` 另开“首次正式取证准备”PR；保留旧分支，不重置落后的本地 `master`。只授权下面的准备工作，**不授权合并或正式运行**。
+2. 登记第二阶段的收尾（上面），保留首次的 Windows `SQLITE_BUSY` 失败、单次重跑与根因未知的事实；不重复登记已有的内容。
+3. **F-1**：在现有的 `c9-evidence.yml` 中采用已审测试 workflow 的实际安装路径安排：解析本次安装的真实目标，不硬编码盘符；保留路径与可执行文件身份的核对；Go 1.27.3、守卫规则与三种调用不变；同步过时的注释。触发分支、权限、预算与 artifact 的规则不变；不建立或推送 `evidence/` 分支，不触发该 workflow。
+4. **F-2**：准确写明 Windows 上“不存在的绝对路径”的分类所需的扩展名与错误前提；不改变分类的优先级或实现。
+5. 在现有计划上整理一份简短、可以直接决定的正式运行决定表：N2、E-10 (ii)、C / T 与配置、120 秒预算、结论 1 ~ 4 的后续、artifact 的完整性核验、失败的处置。这些都是待决建议，不写成已采纳或已授权。
+6. 验证与交付：做与改动相称的静态、文档与 workflow 检查，取得最终 HEAD 的常规 CI；不为文档改动重复整套已审的专用测试；PR 保持未合并；独立审查由负责人另行交给 Codex。
+7. **边界**：不运行正式入口，不采集 R，不扩大 E-10 的接受范围，不批准 G 项、精确例外、第三批的实施或 WP2.5 / M2 的验收。
+
+**本轮的修改**：
+
+- **`.github/workflows/c9-evidence.yml`**（影响运行的准备）：
+  - **头部注释**：撤回第一阶段的说法（“真实调用者停止”“LC-9 适用而未实现，运行必然无效”），改为第二阶段之后的状态：正式入口使用真实调用者、只编译与 vet 过；运行分支不存在，运行须负责人的运行授权（限定取证计划 §8 第 4 步、§12）；第二阶段对 E-10 (ii) 的接受不延伸到这次运行。
+  - **身份步骤**：另外打印工具模块的子树、本 workflow 的 blob、`GITHUB_REF`，以及 PATH 上的 `go` 与它的 SHA-256（与测试 workflow 相同）。这些只是打印；HEAD 等于 `GITHUB_SHA`、工作区干净的核对不变。
+  - **新增步骤** “Put the real GOROOT's bin first on PATH (Windows; F-1)”，只在 Windows 上，位于 LE-4 之后、Collect 之前。
+    - 沿用测试 workflow 的安排：读出 PATH 上 `go.exe` 的 GOROOT 是否为 junction；是则把 junction 的目标的 `bin` 放到 PATH 最前；不是则 PATH 不变。目标取自这次安装的 junction 本身，不硬编码盘符。
+    - 比测试 workflow 多两项失败关闭的核对：junction 须恰有一个绝对路径的目标；目标的 `bin\go.exe` 与 PATH 上的 `go.exe` 的 SHA-256 须相同。任一不成立，步骤即失败，工具不运行。
+    - 守卫的规则、Go 1.27.3 与三种调用都不变；守卫照常核对 PATH 上找到的那一份 `go.exe`。
+  - **Collect 步骤**：在 `go test` 之前打印 PATH 上的 `go` 与 `go version`（与测试 workflow 的步骤 B 相同）；命令、标签、参数与环境变量不变。
+  - **没有改的**：触发（只有 `evidence/c9-run-1` 的 push）、`permissions`、`concurrency`、矩阵、`fail-fast`、`timeout-minutes: 20`、作业环境（`GOTOOLCHAIN=local`、`GOFLAGS=""`）、setup-go（1.27.3、`cache: false`）、LE-4 的步骤，以及 artifact 的步骤（名字、路径、90 天、`if-no-files-found: warn`）。
+- **F-2**（只是文字）：[实施计划](wp2.5-implementation-plan.md) §12.12 闸门表的“启动失败而未知（C 类）”一行写明 Windows 上的输入前提，表下补一条依据。
+  - 依据（固定 Go 1.27.3 源码，只读；`os/exec/exec.go` 的 SHA-256 `3ec96eee…2498`，`os/exec/lp_windows.go` 的 SHA-256 `b43699d7…a6fd`）：`exec.Command` 对 Windows 上的绝对路径调用 `lookExtensions`（`exec.go:468` ~ `481`）。
+  - 扩展名与 `pathExt()` 中的某一项不区分大小写地相同时，不检查文件是否存在，`cmd.Err` 为 nil，启动失败为 C 类（`lp_windows.go:84` ~ `92`、`112` ~ `129`；`exec.go:675` ~ `680`）。`PATHEXT` 为空时这一列表是 `.com`、`.exe`、`.bat`、`.cmd`。
+  - 没有扩展名，或扩展名不在列表中时，查找先失败，`cmd.Err` 为 `*exec.Error`，是 A ②（`lp_windows.go:37` ~ `57`、`132` ~ `139`；`exec.go:480`）。
+  - 夹具在 Windows 上须是带已知扩展名的绝对路径（第二阶段用 `.exe`）；其他已知扩展名之后的启动路径没有核对。分类的优先级、决策树与实现都不变。
+- **[限定取证计划](wp2.5-c9-limited-evidence-plan.md)**：新增 §12（首次正式运行的决定表 FR-1 ~ FR-8，都是待决建议），并同步状态行与 §0 的摘要表。§1 ~ §11 的技术内容不变。
+- **[取证工具记录](wp2.5-c9-evidence-tool.md)** §2.8 末尾补一条 workflow 之后的变化，并同步状态行；**[第二阶段记录](wp2.5-c9-evidence-phase2.md)**、AGENTS.md、[实施计划](implementation-plan.md) 与 WP2.5 实施计划只同步状态行。
+- **没有改的**：工具模块（子树仍为 `755ffc0`）、测试 workflow（blob 仍为 `4387acd`）、`ci.yml`、根模块的代码、`go.mod`、`go.sum`、Schema、迁移、冻结正文与验收项本体；§206 及之前的处理记录与历史报告都没有改写。影响的 PD / TD：没有修改。
+- 没有建立或推送 `evidence/` 之下的分支，没有触发 `c9-evidence.yml`，没有运行正式入口或采集 R。
+
+**本轮的验证**（提交之前）：
+
+- **workflow**：以 `gopkg.in/yaml.v3` v3.0.1 离线解析 `master` 与本轮的两份 `c9-evidence.yml`，逐项比较：`on`、`permissions`、`concurrency` 与作业的全部设置（名字、runner、`timeout-minutes`、策略、默认 shell、环境）相同；步骤只多出 Windows 的 PATH 步骤，身份步骤与 Collect 的 `run` 变长，其余步骤相同。
+- 抽出的三个 bash 脚本经 `bash -n`，PowerShell 脚本经 PowerShell 7.6 的解析器，都没有语法错误。
+- **本机演练**：在会话的临时目录中建立 junction，把这个 PowerShell 步骤按 Actions 的方式（`$ErrorActionPreference = 'stop'`）运行，只核对目标解析、哈希比较与 `GITHUB_PATH` 的写入，不运行 `go`：有 junction 时读出唯一的绝对目标，两份 `go.exe` 的哈希相同，目标的 `bin` 写入 `GITHUB_PATH`；没有 junction 时 PATH 不变。失败关闭的两个分支（目标不唯一、哈希不同）没有构造。这不是 runner 上的执行证据。
+- 文档：处理记录只追加；相对链接存在；新增表格的列数一致；`git diff --check` 没有提示。
+- 没有重复运行工具模块的专用测试（本轮不改工具模块）。最终 HEAD 的常规 CI 只测试根模块，不运行 `c9-evidence.yml`；它的结果登记在 PR #59 的描述中。
+
+**保留的限制**：
+
+- 新的 Windows 步骤与多出的两项核对没有在 runner 上运行过。如果首次正式运行获得授权，它在 runner 上的第一次执行就是那一次运行。
+- F-1 只适用于第二阶段观测到的安装布局与默认的 `winsymlink`（第二阶段记录 §10.6 的 N-154-1）；未来 runner 的布局须重新核验。没有 junction 时 PATH 不变，守卫照常核对。
+- 工具模块的依赖由根模块的 `go mod download` 一并下载，这只是静态推断（限定取证计划 §12.2）。
+- 正式入口仍只编译与 vet；R 没有被分析；120 秒预算在 R 上没有测量。
+- §12 的决定表都是待决建议：N2、正式运行的 E-10 (ii)、C / T、运行分支与运行本身都没有决定或授权。
