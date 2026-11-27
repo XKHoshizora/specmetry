@@ -46,38 +46,48 @@ jobs:
           go-version: 1.27.3
           cache: false
       - name: Check the checkout and print its identity
+        # Every value is read on its own, outside echo, and checked before it
+        # is printed: a failed or empty read fails the step, so no partial
+        # identity is left behind (Review 157 N-157-2).
         run: |
           set -euo pipefail
-          head=$(git rev-parse HEAD)
-          if [ "$head" != "$GITHUB_SHA" ]; then
-            echo "HEAD $head is not GITHUB_SHA $GITHUB_SHA" >&2
-            exit 1
-          fi
-          if [ -n "$(git status --porcelain)" ]; then
-            echo "the worktree is not clean" >&2
-            exit 1
-          fi
+          fail() { echo "$1" >&2; exit 1; }
+          head=$(git rev-parse HEAD) || fail "cannot read HEAD"
+          [ -n "$head" ] || fail "HEAD is empty"
+          [ "$head" = "$GITHUB_SHA" ] || fail "HEAD $head is not GITHUB_SHA $GITHUB_SHA"
+          status=$(git status --porcelain) || fail "cannot read the worktree status"
+          [ -z "$status" ] || fail "the worktree is not clean"
+          tree=$(git rev-parse 'HEAD^{tree}') || fail "cannot read the tree"
+          [ -n "$tree" ] || fail "the tree is empty"
+          subtree=$(git rev-parse HEAD:prototype/c9evidence) || fail "cannot read the tool module subtree"
+          [ -n "$subtree" ] || fail "the tool module subtree is empty"
+          wfblob=$(git rev-parse HEAD:.github/workflows/c9-evidence.yml) || fail "cannot read the workflow blob"
+          [ -n "$wfblob" ] || fail "the workflow blob is empty"
+          gobin=$(command -v go) || fail "go is not on PATH"
+          [ -n "$gobin" ] || fail "go is not on PATH"
           echo "HEAD $head"
-          echo "tree $(git rev-parse 'HEAD^{tree}')"
-          echo "tool module subtree $(git rev-parse HEAD:prototype/c9evidence)"
-          echo "workflow blob $(git rev-parse HEAD:.github/workflows/c9-evidence.yml)"
+          echo "tree $tree"
+          echo "tool module subtree $subtree"
+          echo "workflow blob $wfblob"
           echo "GITHUB_REF $GITHUB_REF"
           echo "GITHUB_WORKFLOW_REF $GITHUB_WORKFLOW_REF"
           echo "GITHUB_WORKFLOW_SHA $GITHUB_WORKFLOW_SHA"
           go version
-          gobin=$(command -v go)
           echo "go on PATH $gobin"
           if command -v sha256sum >/dev/null; then sha256sum "$gobin"; else shasum -a 256 "$gobin"; fi
       - name: Prepare the module cache (LE-4)
         run: |
           set -euo pipefail
+          fail() { echo "$1" >&2; exit 1; }
           go mod download
-          echo "go.mod blob $(git rev-parse HEAD:go.mod)"
-          echo "go.sum blob $(git rev-parse HEAD:go.sum)"
-          if [ -n "$(git status --porcelain)" ]; then
-            echo "the module download changed the worktree" >&2
-            exit 1
-          fi
+          gomod=$(git rev-parse HEAD:go.mod) || fail "cannot read the go.mod blob"
+          [ -n "$gomod" ] || fail "the go.mod blob is empty"
+          gosum=$(git rev-parse HEAD:go.sum) || fail "cannot read the go.sum blob"
+          [ -n "$gosum" ] || fail "the go.sum blob is empty"
+          echo "go.mod blob $gomod"
+          echo "go.sum blob $gosum"
+          status=$(git status --porcelain) || fail "cannot read the worktree status"
+          [ -z "$status" ] || fail "the module download changed the worktree"
       - name: Put the real GOROOT's bin first on PATH (Windows; F-1)
         # F-1 (docs/wp2.5-c9-evidence-phase2.md §9.5, §10.6): on the
         # windows-latest image of phase 2, setup-go's GOROOT is a junction,
@@ -87,11 +97,16 @@ jobs:
         # the go.exe found through it. As in the reviewed test workflow
         # (c9-tool-test.yml), the junction's target is read from this
         # install, with no drive letter assumed, and its bin is put first on
-        # PATH, so exec.LookPath finds the same go.exe at its real path. The
+        # PATH, so exec.LookPath finds go.exe at the junction's target. The
         # guard, Go 1.27.3 and the three calls are unchanged. The step fails,
         # so the tool does not run, unless the junction has exactly one
-        # absolute target whose bin\go.exe has the SHA-256 of the go.exe
-        # found on PATH. Without a junction, PATH is unchanged.
+        # target that is a non-empty, fully qualified path (Review 157
+        # N-157-1; it is never completed from the current directory), and
+        # that target's bin\go.exe has the SHA-256 of the go.exe found on
+        # PATH. Equal hashes only show that the two reads gave the same
+        # bytes; they do not certify the install's origin, the rest of
+        # GOROOT, or that the file stays the same. Without a junction, PATH
+        # is unchanged.
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
@@ -102,10 +117,17 @@ jobs:
           "GOROOT on PATH: $goroot ($($i.LinkType))"
           if ($i.LinkType -eq 'Junction') {
             $targets = @($i.Target)
-            if ($targets.Count -ne 1 -or -not [System.IO.Path]::IsPathRooted($targets[0])) {
-              throw "the junction's target is not one absolute path: $($targets -join ',')"
+            if ($targets.Count -ne 1) {
+              throw "the junction does not have exactly one target: $($targets -join ',')"
             }
-            $bin = Join-Path $targets[0] 'bin'
+            $target = $targets[0]
+            if ([string]::IsNullOrEmpty($target)) {
+              throw "the junction's target is empty"
+            }
+            if (-not [System.IO.Path]::IsPathFullyQualified($target)) {
+              throw "the junction's target is not a fully qualified path: $target"
+            }
+            $bin = Join-Path $target 'bin'
             $real = Join-Path $bin 'go.exe'
             "the junction's target bin: $bin"
             $onPath = (Get-FileHash -Algorithm SHA256 -LiteralPath $go).Hash
@@ -126,7 +148,10 @@ jobs:
           C9EVIDENCE_RECORDS: ${{ runner.temp }}/c9evidence-records
         run: |
           set -euo pipefail
-          echo "go on PATH $(command -v go)"
+          fail() { echo "$1" >&2; exit 1; }
+          gobin=$(command -v go) || fail "go is not on PATH"
+          [ -n "$gobin" ] || fail "go is not on PATH"
+          echo "go on PATH $gobin"
           go version
           go test -tags c9evidence_run -count=1 -v ./run/
       - name: Upload the records
