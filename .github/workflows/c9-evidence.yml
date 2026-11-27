@@ -1,14 +1,16 @@
 name: C-9 limited evidence
 
 # The C-9 limited evidence run (docs/wp2.5-c9-limited-evidence-plan.md
-# §9.1, §9.2; LE-3). It runs ONLY when a dedicated run branch is pushed.
-# No run branch exists, and creating one needs the owner's run
-# authorization (plan §8 step 4). There is no pull_request,
-# workflow_dispatch or schedule trigger, so the implementation PR, master
-# and any other branch never run it. Phase 1 (review-resolution §190): this
-# file is written for review only; E-10 (ii) is not confirmed, so the tool's
-# real invoker is stopped and a run would conclude "invalid" anyway (LC-9
-# is applicable and not implemented).
+# §9.1, §9.2, §12; LE-3). It runs ONLY when a dedicated run branch is
+# pushed. No run branch exists, and creating one needs the owner's run
+# authorization (plan §8 step 4): it fixes C and T and decides the items of
+# plan §12, among them N2 and E-10 (ii) for a run on R. There is no
+# pull_request, workflow_dispatch or schedule trigger, so a PR, master and
+# any other branch never run it. Since phase 2 (review-resolution §200 ~
+# §206) the formal entry ./run/ uses the real caller (internal/toolctl)
+# and LC-9 is implemented; the entry has only been built and vetted, never
+# run. E-10 (ii) was accepted only for phase 2's tests on fixtures; that
+# acceptance does not extend to this run.
 on:
   push:
     branches:
@@ -57,9 +59,15 @@ jobs:
           fi
           echo "HEAD $head"
           echo "tree $(git rev-parse 'HEAD^{tree}')"
+          echo "tool module subtree $(git rev-parse HEAD:prototype/c9evidence)"
+          echo "workflow blob $(git rev-parse HEAD:.github/workflows/c9-evidence.yml)"
+          echo "GITHUB_REF $GITHUB_REF"
           echo "GITHUB_WORKFLOW_REF $GITHUB_WORKFLOW_REF"
           echo "GITHUB_WORKFLOW_SHA $GITHUB_WORKFLOW_SHA"
           go version
+          gobin=$(command -v go)
+          echo "go on PATH $gobin"
+          if command -v sha256sum >/dev/null; then sha256sum "$gobin"; else shasum -a 256 "$gobin"; fi
       - name: Prepare the module cache (LE-4)
         run: |
           set -euo pipefail
@@ -70,12 +78,57 @@ jobs:
             echo "the module download changed the worktree" >&2
             exit 1
           fi
+      - name: Put the real GOROOT's bin first on PATH (Windows; F-1)
+        # F-1 (docs/wp2.5-c9-evidence-phase2.md §9.5, §10.6): on the
+        # windows-latest image of phase 2, setup-go's GOROOT is a junction,
+        # and Go 1.27.3's filepath.EvalSymlinks fails for every path below a
+        # junction (path/filepath/symlink.go:90-93 returns ENOTDIR, which is
+        # ERROR_PATH_NOT_FOUND on Windows), so the A1-a guard would refuse
+        # the go.exe found through it. As in the reviewed test workflow
+        # (c9-tool-test.yml), the junction's target is read from this
+        # install, with no drive letter assumed, and its bin is put first on
+        # PATH, so exec.LookPath finds the same go.exe at its real path. The
+        # guard, Go 1.27.3 and the three calls are unchanged. The step fails,
+        # so the tool does not run, unless the junction has exactly one
+        # absolute target whose bin\go.exe has the SHA-256 of the go.exe
+        # found on PATH. Without a junction, PATH is unchanged.
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $go = (Get-Command go).Source
+          $goroot = Split-Path -Parent (Split-Path -Parent $go)
+          $i = Get-Item -LiteralPath $goroot -Force
+          "go on PATH: $go"
+          "GOROOT on PATH: $goroot ($($i.LinkType))"
+          if ($i.LinkType -eq 'Junction') {
+            $targets = @($i.Target)
+            if ($targets.Count -ne 1 -or -not [System.IO.Path]::IsPathRooted($targets[0])) {
+              throw "the junction's target is not one absolute path: $($targets -join ',')"
+            }
+            $bin = Join-Path $targets[0] 'bin'
+            $real = Join-Path $bin 'go.exe'
+            "the junction's target bin: $bin"
+            $onPath = (Get-FileHash -Algorithm SHA256 -LiteralPath $go).Hash
+            $atTarget = (Get-FileHash -Algorithm SHA256 -LiteralPath $real).Hash
+            "SHA-256 of go.exe on PATH: $onPath"
+            "SHA-256 of the target's go.exe: $atTarget"
+            if ($onPath -ne $atTarget) {
+              throw "the target's go.exe is not the go.exe on PATH"
+            }
+            Add-Content -Path $env:GITHUB_PATH -Value $bin
+          } else {
+            "no junction: PATH unchanged"
+          }
       - name: Collect
         working-directory: prototype/c9evidence
         env:
           C9EVIDENCE_R: ${{ github.workspace }}
           C9EVIDENCE_RECORDS: ${{ runner.temp }}/c9evidence-records
-        run: go test -tags c9evidence_run -count=1 -v ./run/
+        run: |
+          set -euo pipefail
+          echo "go on PATH $(command -v go)"
+          go version
+          go test -tags c9evidence_run -count=1 -v ./run/
       - name: Upload the records
         if: always()
         uses: actions/upload-artifact@v7.0.2
