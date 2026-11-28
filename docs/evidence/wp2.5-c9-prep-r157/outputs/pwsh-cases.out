@@ -1,0 +1,315 @@
+$ pwsh -NoProfile -File pwsh-cases.ps1 -W <W> -Labels new,dcc01bd
+pwsh: 7.6.10
+
+## new PATH step: real-junction
+$ pwsh -NoProfile -File pcase-new-real-junction.ps1   # PATH head: <W>\pfx\link\x64\bin
+go on PATH: <W>\pfx\link\x64\bin\go.exe
+GOROOT on PATH: <W>\pfx\link\x64 (Junction)
+the junction's target bin: <W>\pfx\real\x64\bin
+SHA-256 of go.exe on PATH: 23240EF9F8B0A9A324110B1C2331DE31DC1B0E08F5359CB707E51A939AF56CD3
+SHA-256 of the target's go.exe: 23240EF9F8B0A9A324110B1C2331DE31DC1B0E08F5359CB707E51A939AF56CD3
+exit 0
+GITHUB_PATH: [<W>\pfx\real\x64\bin
+]
+
+## new PATH step: no-junction
+$ pwsh -NoProfile -File pcase-new-no-junction.ps1   # PATH head: <W>\pfx\plain\x64\bin
+go on PATH: <W>\pfx\plain\x64\bin\go.exe
+GOROOT on PATH: <W>\pfx\plain\x64 ()
+no junction: PATH unchanged
+exit 0
+GITHUB_PATH: []
+
+## new PATH step: target-drive-path
+$ pwsh -NoProfile -File pcase-new-target-drive-path.ps1   # PATH head: <W>\pfx\plain\x64\bin; Get-Item double: Target = '<W>\pfx\real\x64'
+go on PATH: <W>\pfx\plain\x64\bin\go.exe
+GOROOT on PATH: <W>\pfx\plain\x64 (Junction)
+the junction's target bin: <W>\pfx\real\x64\bin
+SHA-256 of go.exe on PATH: 23240EF9F8B0A9A324110B1C2331DE31DC1B0E08F5359CB707E51A939AF56CD3
+SHA-256 of the target's go.exe: 23240EF9F8B0A9A324110B1C2331DE31DC1B0E08F5359CB707E51A939AF56CD3
+exit 0
+GITHUB_PATH: [<W>\pfx\real\x64\bin
+]
+
+## new PATH step: target-device-path
+$ pwsh -NoProfile -File pcase-new-target-device-path.ps1   # PATH head: <W>\pfx\plain\x64\bin; Get-Item double: Target = '\\?\<W>\pfx\real\x64'
+go on PATH: <W>\pfx\plain\x64\bin\go.exe
+GOROOT on PATH: <W>\pfx\plain\x64 (Junction)
+the junction's target bin: \\?\<W>\pfx\real\x64\bin
+SHA-256 of go.exe on PATH: 23240EF9F8B0A9A324110B1C2331DE31DC1B0E08F5359CB707E51A939AF56CD3
+SHA-256 of the target's go.exe: 23240EF9F8B0A9A324110B1C2331DE31DC1B0E08F5359CB707E51A939AF56CD3
+exit 0
+GITHUB_PATH: [\\?\<W>\pfx\real\x64\bin
+]
+
+## new PATH step: target-null
+$ pwsh -NoProfile -File pcase-new-target-null.ps1   # PATH head: <W>\pfx\plain\x64\bin; Get-Item double: Target = $null
+go on PATH: <W>\pfx\plain\x64\bin\go.exe
+GOROOT on PATH: <W>\pfx\plain\x64 (Junction)
+Exception: <W>\pcase-new-target-null.ps1:16
+Line |
+  16 |      throw "the junction's target is empty"
+     |      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+     | the junction's target is empty
+exit 1
+GITHUB_PATH: []
+
+## new PATH step: target-empty
+$ pwsh -NoProfile -File pcase-new-target-empty.ps1   # PATH head: <W>\pfx\plain\x64\bin; Get-Item double: Target = ''
+go on PATH: <W>\pfx\plain\x64\bin\go.exe
+GOROOT on PATH: <W>\pfx\plain\x64 (Junction)
+Exception: <W>\pcase-new-target-empty.ps1:16
+Line |
+  16 |      throw "the junction's target is empty"
+     |      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+     | the junction's target is empty
+exit 1
+GITHUB_PATH: []
+
+## new PATH step: target-drive-relative
+$ pwsh -NoProfile -File pcase-new-target-drive-relative.ps1   # PATH head: <W>\pfx\plain\x64\bin; Get-Item double: Target = 'C:relative'
+go on PATH: <W>\pfx\plain\x64\bin\go.exe
+GOROOT on PATH: <W>\pfx\plain\x64 (Junction)
+Exception: <W>\pcase-new-target-drive-relative.ps1:19
+Line |
+  19 |      throw "the junction's target is not a fully qualified path: $targ …
+     |      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+     | the junction's target is not a fully qualified path: C:relative
+exit 1
+GITHUB_PATH: []
+
+## new PATH step: target-drive-relative-resolvable
+$ pwsh -NoProfile -File pcase-new-target-drive-relative-resolvable.ps1   # PATH head: <W>\pfx\plain\x64\bin; Get-Item double: Target = 'C:relative'; current directory: <W>\pfx
+go on PATH: <W>\pfx\plain\x64\bin\go.exe
+GOROOT on PATH: <W>\pfx\plain\x64 (Junction)
+Exception: <W>\pcase-new-target-drive-relative-resolvable.ps1:19
+Line |
+  19 |      throw "the junction's target is not a fully qualified path: $targ …
+     |      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+     | the junction's target is not a fully qualified path: C:relative
+exit 1
+GITHUB_PATH: []
+
+## new PATH step: target-root-relative
+$ pwsh -NoProfile -File pcase-new-target-root-relative.ps1   # PATH head: <W>\pfx\plain\x64\bin; Get-Item double: Target = '\relative'
+go on PATH: <W>\pfx\plain\x64\bin\go.exe
+GOROOT on PATH: <W>\pfx\plain\x64 (Junction)
+Exception: <W>\pcase-new-target-root-relative.ps1:19
+Line |
+  19 |      throw "the junction's target is not a fully qualified path: $targ …
+     |      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+     | the junction's target is not a fully qualified path: \relative
+exit 1
+GITHUB_PATH: []
+
+## new PATH step: target-relative
+$ pwsh -NoProfile -File pcase-new-target-relative.ps1   # PATH head: <W>\pfx\plain\x64\bin; Get-Item double: Target = 'relative'
+go on PATH: <W>\pfx\plain\x64\bin\go.exe
+GOROOT on PATH: <W>\pfx\plain\x64 (Junction)
+Exception: <W>\pcase-new-target-relative.ps1:19
+Line |
+  19 |      throw "the junction's target is not a fully qualified path: $targ …
+     |      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+     | the junction's target is not a fully qualified path: relative
+exit 1
+GITHUB_PATH: []
+
+## new PATH step: two-targets
+$ pwsh -NoProfile -File pcase-new-two-targets.ps1   # PATH head: <W>\pfx\plain\x64\bin; Get-Item double: Target = @('<W>\pfx\real\x64', '<W>\pfx\real\x64')
+go on PATH: <W>\pfx\plain\x64\bin\go.exe
+GOROOT on PATH: <W>\pfx\plain\x64 (Junction)
+Exception: <W>\pcase-new-two-targets.ps1:12
+Line |
+  12 |      throw "the junction does not have exactly one target: $($targets  …
+     |      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+     | the junction does not have exactly one target:
+     | <W>\pfx\real\x64,<W>\pfx\real\x64
+exit 1
+GITHUB_PATH: []
+
+## new PATH step: target-other-bytes
+$ pwsh -NoProfile -File pcase-new-target-other-bytes.ps1   # PATH head: <W>\pfx\plain\x64\bin; Get-Item double: Target = '<W>\pfx\other\x64'
+go on PATH: <W>\pfx\plain\x64\bin\go.exe
+GOROOT on PATH: <W>\pfx\plain\x64 (Junction)
+the junction's target bin: <W>\pfx\other\x64\bin
+SHA-256 of go.exe on PATH: 23240EF9F8B0A9A324110B1C2331DE31DC1B0E08F5359CB707E51A939AF56CD3
+SHA-256 of the target's go.exe: 7BF6BDD266F2FA3D3634C4F1FB21ECE653642FD1B852ED1CED80D597CCE3ACDB
+Exception: <W>\pcase-new-target-other-bytes.ps1:29
+Line |
+  29 |      throw "the target's go.exe is not the go.exe on PATH"
+     |      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+     | the target's go.exe is not the go.exe on PATH
+exit 1
+GITHUB_PATH: []
+
+## new PATH step: target-without-go
+$ pwsh -NoProfile -File pcase-new-target-without-go.ps1   # PATH head: <W>\pfx\plain\x64\bin; Get-Item double: Target = '<W>\pfx\nobin\x64'
+go on PATH: <W>\pfx\plain\x64\bin\go.exe
+GOROOT on PATH: <W>\pfx\plain\x64 (Junction)
+the junction's target bin: <W>\pfx\nobin\x64\bin
+Get-FileHash: <W>\pcase-new-target-without-go.ps1:25
+Line |
+  25 |  …  $atTarget = (Get-FileHash -Algorithm SHA256 -LiteralPath $real).Hash
+     |                  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+     | Could not find a part of the path
+     | '<W>\pfx\nobin\x64\bin\go.exe'.
+exit 1
+GITHUB_PATH: []
+
+## dcc01bd PATH step: real-junction
+$ pwsh -NoProfile -File pcase-dcc01bd-real-junction.ps1   # PATH head: <W>\pfx\link\x64\bin
+go on PATH: <W>\pfx\link\x64\bin\go.exe
+GOROOT on PATH: <W>\pfx\link\x64 (Junction)
+the junction's target bin: <W>\pfx\real\x64\bin
+SHA-256 of go.exe on PATH: 23240EF9F8B0A9A324110B1C2331DE31DC1B0E08F5359CB707E51A939AF56CD3
+SHA-256 of the target's go.exe: 23240EF9F8B0A9A324110B1C2331DE31DC1B0E08F5359CB707E51A939AF56CD3
+exit 0
+GITHUB_PATH: [<W>\pfx\real\x64\bin
+]
+
+## dcc01bd PATH step: no-junction
+$ pwsh -NoProfile -File pcase-dcc01bd-no-junction.ps1   # PATH head: <W>\pfx\plain\x64\bin
+go on PATH: <W>\pfx\plain\x64\bin\go.exe
+GOROOT on PATH: <W>\pfx\plain\x64 ()
+no junction: PATH unchanged
+exit 0
+GITHUB_PATH: []
+
+## dcc01bd PATH step: target-drive-path
+$ pwsh -NoProfile -File pcase-dcc01bd-target-drive-path.ps1   # PATH head: <W>\pfx\plain\x64\bin; Get-Item double: Target = '<W>\pfx\real\x64'
+go on PATH: <W>\pfx\plain\x64\bin\go.exe
+GOROOT on PATH: <W>\pfx\plain\x64 (Junction)
+the junction's target bin: <W>\pfx\real\x64\bin
+SHA-256 of go.exe on PATH: 23240EF9F8B0A9A324110B1C2331DE31DC1B0E08F5359CB707E51A939AF56CD3
+SHA-256 of the target's go.exe: 23240EF9F8B0A9A324110B1C2331DE31DC1B0E08F5359CB707E51A939AF56CD3
+exit 0
+GITHUB_PATH: [<W>\pfx\real\x64\bin
+]
+
+## dcc01bd PATH step: target-device-path
+$ pwsh -NoProfile -File pcase-dcc01bd-target-device-path.ps1   # PATH head: <W>\pfx\plain\x64\bin; Get-Item double: Target = '\\?\<W>\pfx\real\x64'
+go on PATH: <W>\pfx\plain\x64\bin\go.exe
+GOROOT on PATH: <W>\pfx\plain\x64 (Junction)
+the junction's target bin: \\?\<W>\pfx\real\x64\bin
+SHA-256 of go.exe on PATH: 23240EF9F8B0A9A324110B1C2331DE31DC1B0E08F5359CB707E51A939AF56CD3
+SHA-256 of the target's go.exe: 23240EF9F8B0A9A324110B1C2331DE31DC1B0E08F5359CB707E51A939AF56CD3
+exit 0
+GITHUB_PATH: [\\?\<W>\pfx\real\x64\bin
+]
+
+## dcc01bd PATH step: target-null
+$ pwsh -NoProfile -File pcase-dcc01bd-target-null.ps1   # PATH head: <W>\pfx\plain\x64\bin; Get-Item double: Target = $null
+go on PATH: <W>\pfx\plain\x64\bin\go.exe
+GOROOT on PATH: <W>\pfx\plain\x64 (Junction)
+Exception: <W>\pcase-dcc01bd-target-null.ps1:12
+Line |
+  12 |      throw "the junction's target is not one absolute path: $($targets …
+     |      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+     | the junction's target is not one absolute path:
+exit 1
+GITHUB_PATH: []
+
+## dcc01bd PATH step: target-empty
+$ pwsh -NoProfile -File pcase-dcc01bd-target-empty.ps1   # PATH head: <W>\pfx\plain\x64\bin; Get-Item double: Target = ''
+go on PATH: <W>\pfx\plain\x64\bin\go.exe
+GOROOT on PATH: <W>\pfx\plain\x64 (Junction)
+Exception: <W>\pcase-dcc01bd-target-empty.ps1:12
+Line |
+  12 |      throw "the junction's target is not one absolute path: $($targets …
+     |      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+     | the junction's target is not one absolute path:
+exit 1
+GITHUB_PATH: []
+
+## dcc01bd PATH step: target-drive-relative
+$ pwsh -NoProfile -File pcase-dcc01bd-target-drive-relative.ps1   # PATH head: <W>\pfx\plain\x64\bin; Get-Item double: Target = 'C:relative'
+go on PATH: <W>\pfx\plain\x64\bin\go.exe
+GOROOT on PATH: <W>\pfx\plain\x64 (Junction)
+the junction's target bin: C:relative\bin
+Get-FileHash: <W>\pcase-dcc01bd-target-drive-relative.ps1:18
+Line |
+  18 |  …  $atTarget = (Get-FileHash -Algorithm SHA256 -LiteralPath $real).Hash
+     |                  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+     | Could not find a part of the path '<HOME>\Desktop\specmetry\relative\bin\go.exe'.
+exit 1
+GITHUB_PATH: []
+
+## dcc01bd PATH step: target-drive-relative-resolvable
+$ pwsh -NoProfile -File pcase-dcc01bd-target-drive-relative-resolvable.ps1   # PATH head: <W>\pfx\plain\x64\bin; Get-Item double: Target = 'C:relative'; current directory: <W>\pfx
+go on PATH: <W>\pfx\plain\x64\bin\go.exe
+GOROOT on PATH: <W>\pfx\plain\x64 (Junction)
+the junction's target bin: C:relative\bin
+SHA-256 of go.exe on PATH: 23240EF9F8B0A9A324110B1C2331DE31DC1B0E08F5359CB707E51A939AF56CD3
+SHA-256 of the target's go.exe: 23240EF9F8B0A9A324110B1C2331DE31DC1B0E08F5359CB707E51A939AF56CD3
+exit 0
+GITHUB_PATH: [C:relative\bin
+]
+
+## dcc01bd PATH step: target-root-relative
+$ pwsh -NoProfile -File pcase-dcc01bd-target-root-relative.ps1   # PATH head: <W>\pfx\plain\x64\bin; Get-Item double: Target = '\relative'
+go on PATH: <W>\pfx\plain\x64\bin\go.exe
+GOROOT on PATH: <W>\pfx\plain\x64 (Junction)
+the junction's target bin: \relative\bin
+Get-FileHash: <W>\pcase-dcc01bd-target-root-relative.ps1:18
+Line |
+  18 |  …  $atTarget = (Get-FileHash -Algorithm SHA256 -LiteralPath $real).Hash
+     |                  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+     | Could not find a part of the path 'C:\relative\bin\go.exe'.
+exit 1
+GITHUB_PATH: []
+
+## dcc01bd PATH step: target-relative
+$ pwsh -NoProfile -File pcase-dcc01bd-target-relative.ps1   # PATH head: <W>\pfx\plain\x64\bin; Get-Item double: Target = 'relative'
+go on PATH: <W>\pfx\plain\x64\bin\go.exe
+GOROOT on PATH: <W>\pfx\plain\x64 (Junction)
+Exception: <W>\pcase-dcc01bd-target-relative.ps1:12
+Line |
+  12 |      throw "the junction's target is not one absolute path: $($targets …
+     |      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+     | the junction's target is not one absolute path: relative
+exit 1
+GITHUB_PATH: []
+
+## dcc01bd PATH step: two-targets
+$ pwsh -NoProfile -File pcase-dcc01bd-two-targets.ps1   # PATH head: <W>\pfx\plain\x64\bin; Get-Item double: Target = @('<W>\pfx\real\x64', '<W>\pfx\real\x64')
+go on PATH: <W>\pfx\plain\x64\bin\go.exe
+GOROOT on PATH: <W>\pfx\plain\x64 (Junction)
+Exception: <W>\pcase-dcc01bd-two-targets.ps1:12
+Line |
+  12 |      throw "the junction's target is not one absolute path: $($targets …
+     |      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+     | the junction's target is not one absolute path:
+     | <W>\pfx\real\x64,<W>\pfx\real\x64
+exit 1
+GITHUB_PATH: []
+
+## dcc01bd PATH step: target-other-bytes
+$ pwsh -NoProfile -File pcase-dcc01bd-target-other-bytes.ps1   # PATH head: <W>\pfx\plain\x64\bin; Get-Item double: Target = '<W>\pfx\other\x64'
+go on PATH: <W>\pfx\plain\x64\bin\go.exe
+GOROOT on PATH: <W>\pfx\plain\x64 (Junction)
+the junction's target bin: <W>\pfx\other\x64\bin
+SHA-256 of go.exe on PATH: 23240EF9F8B0A9A324110B1C2331DE31DC1B0E08F5359CB707E51A939AF56CD3
+SHA-256 of the target's go.exe: 7BF6BDD266F2FA3D3634C4F1FB21ECE653642FD1B852ED1CED80D597CCE3ACDB
+Exception: <W>\pcase-dcc01bd-target-other-bytes.ps1:22
+Line |
+  22 |      throw "the target's go.exe is not the go.exe on PATH"
+     |      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+     | the target's go.exe is not the go.exe on PATH
+exit 1
+GITHUB_PATH: []
+
+## dcc01bd PATH step: target-without-go
+$ pwsh -NoProfile -File pcase-dcc01bd-target-without-go.ps1   # PATH head: <W>\pfx\plain\x64\bin; Get-Item double: Target = '<W>\pfx\nobin\x64'
+go on PATH: <W>\pfx\plain\x64\bin\go.exe
+GOROOT on PATH: <W>\pfx\plain\x64 (Junction)
+the junction's target bin: <W>\pfx\nobin\x64\bin
+Get-FileHash: <W>\pcase-dcc01bd-target-without-go.ps1:18
+Line |
+  18 |  …  $atTarget = (Get-FileHash -Algorithm SHA256 -LiteralPath $real).Hash
+     |                  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+     | Could not find a part of the path
+     | '<W>\pfx\nobin\x64\bin\go.exe'.
+exit 1
+GITHUB_PATH: []
+
+exit 0

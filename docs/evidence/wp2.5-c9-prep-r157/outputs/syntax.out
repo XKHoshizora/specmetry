@@ -1,0 +1,25 @@
+bash 5.3.15(2)-release; pwsh 7.6.10
+$ bash -n runs/dcc01bd.step2.sh
+exit 0
+$ bash -n runs/dcc01bd.step3.sh
+exit 0
+$ bash -n runs/dcc01bd.step5.sh
+exit 0
+$ bash -n runs/master.step2.sh
+exit 0
+$ bash -n runs/master.step3.sh
+exit 0
+$ bash -n runs/master.step4.sh
+exit 0
+$ bash -n runs/new.step2.sh
+exit 0
+$ bash -n runs/new.step3.sh
+exit 0
+$ bash -n runs/new.step5.sh
+exit 0
+$ PowerShell Parser.ParseFile runs/dcc01bd.step4.ps1
+no parse errors
+exit 0
+$ PowerShell Parser.ParseFile runs/new.step4.ps1
+no parse errors
+exit 0

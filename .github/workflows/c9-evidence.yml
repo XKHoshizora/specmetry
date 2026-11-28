@@ -1,14 +1,16 @@
 name: C-9 limited evidence
 
 # The C-9 limited evidence run (docs/wp2.5-c9-limited-evidence-plan.md
-# §9.1, §9.2; LE-3). It runs ONLY when a dedicated run branch is pushed.
-# No run branch exists, and creating one needs the owner's run
-# authorization (plan §8 step 4). There is no pull_request,
-# workflow_dispatch or schedule trigger, so the implementation PR, master
-# and any other branch never run it. Phase 1 (review-resolution §190): this
-# file is written for review only; E-10 (ii) is not confirmed, so the tool's
-# real invoker is stopped and a run would conclude "invalid" anyway (LC-9
-# is applicable and not implemented).
+# §9.1, §9.2, §12; LE-3). It runs ONLY when a dedicated run branch is
+# pushed. No run branch exists, and creating one needs the owner's run
+# authorization (plan §8 step 4): it fixes C and T and decides the items of
+# plan §12, among them N2 and E-10 (ii) for a run on R. There is no
+# pull_request, workflow_dispatch or schedule trigger, so a PR, master and
+# any other branch never run it. Since phase 2 (review-resolution §200 ~
+# §206) the formal entry ./run/ uses the real caller (internal/toolctl)
+# and LC-9 is implemented; the entry has only been built and vetted, never
+# run. E-10 (ii) was accepted only for phase 2's tests on fixtures; that
+# acceptance does not extend to this run.
 on:
   push:
     branches:
@@ -44,38 +46,124 @@ jobs:
           go-version: 1.27.3
           cache: false
       - name: Check the checkout and print its identity
+        # Every value is read on its own, outside echo, and checked before it
+        # is printed (Review 157 N-157-2; Review 158 N-158-3): a query that
+        # exits non-zero fails the step; HEAD, the tree, the subtree, the
+        # workflow blob and the go on PATH must also be non-empty; the
+        # worktree is clean only when git status succeeds with empty output.
+        # This orders the checks; it does not make the step's log atomic: a
+        # later failure (go version, the hash) leaves the lines printed
+        # before it.
         run: |
           set -euo pipefail
-          head=$(git rev-parse HEAD)
-          if [ "$head" != "$GITHUB_SHA" ]; then
-            echo "HEAD $head is not GITHUB_SHA $GITHUB_SHA" >&2
-            exit 1
-          fi
-          if [ -n "$(git status --porcelain)" ]; then
-            echo "the worktree is not clean" >&2
-            exit 1
-          fi
+          fail() { echo "$1" >&2; exit 1; }
+          head=$(git rev-parse HEAD) || fail "cannot read HEAD"
+          [ -n "$head" ] || fail "HEAD is empty"
+          [ "$head" = "$GITHUB_SHA" ] || fail "HEAD $head is not GITHUB_SHA $GITHUB_SHA"
+          status=$(git status --porcelain) || fail "cannot read the worktree status"
+          [ -z "$status" ] || fail "the worktree is not clean"
+          tree=$(git rev-parse 'HEAD^{tree}') || fail "cannot read the tree"
+          [ -n "$tree" ] || fail "the tree is empty"
+          subtree=$(git rev-parse HEAD:prototype/c9evidence) || fail "cannot read the tool module subtree"
+          [ -n "$subtree" ] || fail "the tool module subtree is empty"
+          wfblob=$(git rev-parse HEAD:.github/workflows/c9-evidence.yml) || fail "cannot read the workflow blob"
+          [ -n "$wfblob" ] || fail "the workflow blob is empty"
+          gobin=$(command -v go) || fail "go is not on PATH"
+          [ -n "$gobin" ] || fail "go is not on PATH"
           echo "HEAD $head"
-          echo "tree $(git rev-parse 'HEAD^{tree}')"
+          echo "tree $tree"
+          echo "tool module subtree $subtree"
+          echo "workflow blob $wfblob"
+          echo "GITHUB_REF $GITHUB_REF"
           echo "GITHUB_WORKFLOW_REF $GITHUB_WORKFLOW_REF"
           echo "GITHUB_WORKFLOW_SHA $GITHUB_WORKFLOW_SHA"
           go version
+          echo "go on PATH $gobin"
+          if command -v sha256sum >/dev/null; then sha256sum "$gobin"; else shasum -a 256 "$gobin"; fi
       - name: Prepare the module cache (LE-4)
+        # The same rules as the identity step: a query that exits non-zero
+        # fails the step, the go.mod and go.sum blobs must be non-empty, and
+        # the worktree is clean only when git status succeeds with empty
+        # output. The blobs are printed before the last worktree check, so a
+        # failed check can follow printed blobs; the step still fails.
         run: |
           set -euo pipefail
+          fail() { echo "$1" >&2; exit 1; }
           go mod download
-          echo "go.mod blob $(git rev-parse HEAD:go.mod)"
-          echo "go.sum blob $(git rev-parse HEAD:go.sum)"
-          if [ -n "$(git status --porcelain)" ]; then
-            echo "the module download changed the worktree" >&2
-            exit 1
-          fi
+          gomod=$(git rev-parse HEAD:go.mod) || fail "cannot read the go.mod blob"
+          [ -n "$gomod" ] || fail "the go.mod blob is empty"
+          gosum=$(git rev-parse HEAD:go.sum) || fail "cannot read the go.sum blob"
+          [ -n "$gosum" ] || fail "the go.sum blob is empty"
+          echo "go.mod blob $gomod"
+          echo "go.sum blob $gosum"
+          status=$(git status --porcelain) || fail "cannot read the worktree status"
+          [ -z "$status" ] || fail "the module download changed the worktree"
+      - name: Put the real GOROOT's bin first on PATH (Windows; F-1)
+        # F-1 (docs/wp2.5-c9-evidence-phase2.md §9.5, §10.6): on the
+        # windows-latest image of phase 2, setup-go's GOROOT is a junction,
+        # and Go 1.27.3's filepath.EvalSymlinks fails for every path below a
+        # junction (path/filepath/symlink.go:90-93 returns ENOTDIR, which is
+        # ERROR_PATH_NOT_FOUND on Windows), so the A1-a guard would refuse
+        # the go.exe found through it. As in the reviewed test workflow
+        # (c9-tool-test.yml), the junction's target is read from this
+        # install, with no drive letter assumed, and its bin is put first on
+        # PATH, so exec.LookPath finds go.exe at the junction's target. The
+        # guard, Go 1.27.3 and the three calls are unchanged. The step fails,
+        # so the tool does not run, unless the junction has exactly one
+        # target that is a non-empty, fully qualified path (Review 157
+        # N-157-1; it is never completed from the current directory), and
+        # that target's bin\go.exe has the SHA-256 of the go.exe found on
+        # PATH. Equal hashes only show that the two reads gave the same
+        # bytes; they do not certify the install's origin, the rest of
+        # GOROOT, or that the file stays the same. Without a junction, PATH
+        # is unchanged.
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $go = (Get-Command go).Source
+          $goroot = Split-Path -Parent (Split-Path -Parent $go)
+          $i = Get-Item -LiteralPath $goroot -Force
+          "go on PATH: $go"
+          "GOROOT on PATH: $goroot ($($i.LinkType))"
+          if ($i.LinkType -eq 'Junction') {
+            $targets = @($i.Target)
+            if ($targets.Count -ne 1) {
+              throw "the junction does not have exactly one target: $($targets -join ',')"
+            }
+            $target = $targets[0]
+            if ([string]::IsNullOrEmpty($target)) {
+              throw "the junction's target is empty"
+            }
+            if (-not [System.IO.Path]::IsPathFullyQualified($target)) {
+              throw "the junction's target is not a fully qualified path: $target"
+            }
+            $bin = Join-Path $target 'bin'
+            $real = Join-Path $bin 'go.exe'
+            "the junction's target bin: $bin"
+            $onPath = (Get-FileHash -Algorithm SHA256 -LiteralPath $go).Hash
+            $atTarget = (Get-FileHash -Algorithm SHA256 -LiteralPath $real).Hash
+            "SHA-256 of go.exe on PATH: $onPath"
+            "SHA-256 of the target's go.exe: $atTarget"
+            if ($onPath -ne $atTarget) {
+              throw "the target's go.exe is not the go.exe on PATH"
+            }
+            Add-Content -Path $env:GITHUB_PATH -Value $bin
+          } else {
+            "no junction: PATH unchanged"
+          }
       - name: Collect
         working-directory: prototype/c9evidence
         env:
           C9EVIDENCE_R: ${{ github.workspace }}
           C9EVIDENCE_RECORDS: ${{ runner.temp }}/c9evidence-records
-        run: go test -tags c9evidence_run -count=1 -v ./run/
+        run: |
+          set -euo pipefail
+          fail() { echo "$1" >&2; exit 1; }
+          gobin=$(command -v go) || fail "go is not on PATH"
+          [ -n "$gobin" ] || fail "go is not on PATH"
+          echo "go on PATH $gobin"
+          go version
+          go test -tags c9evidence_run -count=1 -v ./run/
       - name: Upload the records
         if: always()
         uses: actions/upload-artifact@v7.0.2

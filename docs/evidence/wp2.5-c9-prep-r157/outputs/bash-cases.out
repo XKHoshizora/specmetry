@@ -1,0 +1,252 @@
+$ bash bash-cases.sh <W> new dcc01bd
+bash: 5.3.15(2)-release
+git: git version 2.56.1.windows.1
+
+## new step 2: ok
+$ (cd <fixture>/. && env GITHUB_SHA=<fixture HEAD>  bash --noprofile --norc -eo pipefail new.step2.sh)  # fixture go on PATH
+HEAD c1bbf27b70d3bb4b0168263d6fe3ecba77fb44ff
+tree e287be31ea4b422fe99509cd1cb888f032008dd7
+tool module subtree f93bbbd19e35cd7f481ff6a65224d0f306f0714e
+workflow blob 908941adcfed7b16f8ef47292e326448f1de1af2
+GITHUB_REF refs/heads/fixture
+GITHUB_WORKFLOW_REF fixture/c9-evidence.yml@refs/heads/fixture
+GITHUB_WORKFLOW_SHA c1bbf27b70d3bb4b0168263d6fe3ecba77fb44ff
+go version go1.27.3 fixture/fake
+go on PATH <W>/fakego/go
+db40d123e25a6da025aefe9ef39c79225ae19e2a2a3fdfcf846deb34e898c5d6 *<W>/fakego/go
+exit 0
+
+## new step 2: sha-mismatch
+$ (cd <fixture>/. && env GITHUB_SHA=0000000000000000000000000000000000000000  bash --noprofile --norc -eo pipefail new.step2.sh)  # fixture go on PATH
+HEAD c1bbf27b70d3bb4b0168263d6fe3ecba77fb44ff is not GITHUB_SHA 0000000000000000000000000000000000000000
+exit 1
+
+## new step 2: dirty
+$ (cd <fixture>/. && env GITHUB_SHA=<fixture HEAD>  bash --noprofile --norc -eo pipefail new.step2.sh)  # fixture go on PATH
+the worktree is not clean
+exit 1
+
+## new step 2: no-subtree
+$ (cd <fixture>/. && env GITHUB_SHA=<fixture HEAD>  bash --noprofile --norc -eo pipefail new.step2.sh)  # fixture go on PATH
+fatal: path 'prototype/c9evidence' does not exist in 'HEAD'
+cannot read the tool module subtree
+exit 1
+
+## new step 2: status-read-fails
+$ (cd <fixture>/. && env GITHUB_SHA=<fixture HEAD> FAKE_GIT_FAIL=status --porcelain bash --noprofile --norc -eo pipefail new.step2.sh)  # fixture go on PATH
+fixture git: failing status --porcelain
+cannot read the worktree status
+exit 1
+
+## new step 2: tree-read-empty
+$ (cd <fixture>/. && env GITHUB_SHA=<fixture HEAD> FAKE_GIT_EMPTY=rev-parse HEAD^{tree} bash --noprofile --norc -eo pipefail new.step2.sh)  # fixture go on PATH
+the tree is empty
+exit 1
+
+## new step 2: blob-read-fails
+$ (cd <fixture>/. && env GITHUB_SHA=<fixture HEAD> FAKE_GIT_FAIL=rev-parse HEAD:.github/workflows/c9-evidence.yml bash --noprofile --norc -eo pipefail new.step2.sh)  # fixture go on PATH
+fixture git: failing rev-parse HEAD:.github/workflows/c9-evidence.yml
+cannot read the workflow blob
+exit 1
+
+## new step 2: no-go
+$ (cd <fixture>/. && env GITHUB_SHA=<fixture HEAD>  bash --noprofile --norc -eo pipefail new.step2.sh)  # no go on PATH
+go is not on PATH
+exit 1
+
+## new step 3: ok
+$ (cd <fixture>/. && env GITHUB_SHA=<fixture HEAD>  bash --noprofile --norc -eo pipefail new.step3.sh)  # fixture go on PATH
+fixture: go mod download
+go.mod blob e31db66eed326b2dd5b4ca7db9dd97035e4e71f1
+go.sum blob 8b137891791fe96927ad78e64b0aad7bded08bdc
+exit 0
+
+## new step 3: no-gomod
+$ (cd <fixture>/. && env GITHUB_SHA=<fixture HEAD>  bash --noprofile --norc -eo pipefail new.step3.sh)  # fixture go on PATH
+fixture: go mod download
+fatal: path 'go.mod' does not exist in 'HEAD'
+cannot read the go.mod blob
+exit 1
+
+## new step 3: gosum-read-empty
+$ (cd <fixture>/. && env GITHUB_SHA=<fixture HEAD> FAKE_GIT_EMPTY=rev-parse HEAD:go.sum bash --noprofile --norc -eo pipefail new.step3.sh)  # fixture go on PATH
+fixture: go mod download
+the go.sum blob is empty
+exit 1
+
+## new step 3: status-read-fails
+$ (cd <fixture>/. && env GITHUB_SHA=<fixture HEAD> FAKE_GIT_FAIL=status --porcelain bash --noprofile --norc -eo pipefail new.step3.sh)  # fixture go on PATH
+fixture: go mod download
+go.mod blob e31db66eed326b2dd5b4ca7db9dd97035e4e71f1
+go.sum blob 8b137891791fe96927ad78e64b0aad7bded08bdc
+fixture git: failing status --porcelain
+cannot read the worktree status
+exit 1
+
+## new step 3: download-dirties
+$ (cd <fixture>/. && env GITHUB_SHA=<fixture HEAD> FAKE_GO_DIRTY=1 bash --noprofile --norc -eo pipefail new.step3.sh)  # fixture go on PATH
+fixture: go mod download
+go.mod blob e31db66eed326b2dd5b4ca7db9dd97035e4e71f1
+go.sum blob 8b137891791fe96927ad78e64b0aad7bded08bdc
+the module download changed the worktree
+exit 1
+
+## new step 5: ok
+$ (cd <fixture>/prototype/c9evidence && env GITHUB_SHA=<fixture HEAD>  bash --noprofile --norc -eo pipefail new.step5.sh)  # fixture go on PATH
+go on PATH <W>/fakego/go
+go version go1.27.3 fixture/fake
+fixture: go test -tags c9evidence_run -count=1 -v ./run/
+exit 0
+
+## new step 5: no-go
+$ (cd <fixture>/prototype/c9evidence && env GITHUB_SHA=<fixture HEAD>  bash --noprofile --norc -eo pipefail new.step5.sh)  # no go on PATH
+go is not on PATH
+exit 1
+
+## dcc01bd step 2: ok
+$ (cd <fixture>/. && env GITHUB_SHA=<fixture HEAD>  bash --noprofile --norc -eo pipefail dcc01bd.step2.sh)  # fixture go on PATH
+HEAD c1bbf27b70d3bb4b0168263d6fe3ecba77fb44ff
+tree e287be31ea4b422fe99509cd1cb888f032008dd7
+tool module subtree f93bbbd19e35cd7f481ff6a65224d0f306f0714e
+workflow blob 908941adcfed7b16f8ef47292e326448f1de1af2
+GITHUB_REF refs/heads/fixture
+GITHUB_WORKFLOW_REF fixture/c9-evidence.yml@refs/heads/fixture
+GITHUB_WORKFLOW_SHA c1bbf27b70d3bb4b0168263d6fe3ecba77fb44ff
+go version go1.27.3 fixture/fake
+go on PATH <W>/fakego/go
+db40d123e25a6da025aefe9ef39c79225ae19e2a2a3fdfcf846deb34e898c5d6 *<W>/fakego/go
+exit 0
+
+## dcc01bd step 2: sha-mismatch
+$ (cd <fixture>/. && env GITHUB_SHA=0000000000000000000000000000000000000000  bash --noprofile --norc -eo pipefail dcc01bd.step2.sh)  # fixture go on PATH
+HEAD c1bbf27b70d3bb4b0168263d6fe3ecba77fb44ff is not GITHUB_SHA 0000000000000000000000000000000000000000
+exit 1
+
+## dcc01bd step 2: dirty
+$ (cd <fixture>/. && env GITHUB_SHA=<fixture HEAD>  bash --noprofile --norc -eo pipefail dcc01bd.step2.sh)  # fixture go on PATH
+the worktree is not clean
+exit 1
+
+## dcc01bd step 2: no-subtree
+$ (cd <fixture>/. && env GITHUB_SHA=<fixture HEAD>  bash --noprofile --norc -eo pipefail dcc01bd.step2.sh)  # fixture go on PATH
+HEAD d428f05fd56e7983614410a28b416ea265036b23
+tree f458bfd6e063ee1d6099adf14a80134982db7c07
+fatal: path 'prototype/c9evidence' does not exist in 'HEAD'
+tool module subtree HEAD:prototype/c9evidence
+workflow blob 908941adcfed7b16f8ef47292e326448f1de1af2
+GITHUB_REF refs/heads/fixture
+GITHUB_WORKFLOW_REF fixture/c9-evidence.yml@refs/heads/fixture
+GITHUB_WORKFLOW_SHA d428f05fd56e7983614410a28b416ea265036b23
+go version go1.27.3 fixture/fake
+go on PATH <W>/fakego/go
+db40d123e25a6da025aefe9ef39c79225ae19e2a2a3fdfcf846deb34e898c5d6 *<W>/fakego/go
+exit 0
+
+## dcc01bd step 2: status-read-fails
+$ (cd <fixture>/. && env GITHUB_SHA=<fixture HEAD> FAKE_GIT_FAIL=status --porcelain bash --noprofile --norc -eo pipefail dcc01bd.step2.sh)  # fixture go on PATH
+fixture git: failing status --porcelain
+HEAD c1bbf27b70d3bb4b0168263d6fe3ecba77fb44ff
+tree e287be31ea4b422fe99509cd1cb888f032008dd7
+tool module subtree f93bbbd19e35cd7f481ff6a65224d0f306f0714e
+workflow blob 908941adcfed7b16f8ef47292e326448f1de1af2
+GITHUB_REF refs/heads/fixture
+GITHUB_WORKFLOW_REF fixture/c9-evidence.yml@refs/heads/fixture
+GITHUB_WORKFLOW_SHA c1bbf27b70d3bb4b0168263d6fe3ecba77fb44ff
+go version go1.27.3 fixture/fake
+go on PATH <W>/fakego/go
+db40d123e25a6da025aefe9ef39c79225ae19e2a2a3fdfcf846deb34e898c5d6 *<W>/fakego/go
+exit 0
+
+## dcc01bd step 2: tree-read-empty
+$ (cd <fixture>/. && env GITHUB_SHA=<fixture HEAD> FAKE_GIT_EMPTY=rev-parse HEAD^{tree} bash --noprofile --norc -eo pipefail dcc01bd.step2.sh)  # fixture go on PATH
+HEAD c1bbf27b70d3bb4b0168263d6fe3ecba77fb44ff
+tree 
+tool module subtree f93bbbd19e35cd7f481ff6a65224d0f306f0714e
+workflow blob 908941adcfed7b16f8ef47292e326448f1de1af2
+GITHUB_REF refs/heads/fixture
+GITHUB_WORKFLOW_REF fixture/c9-evidence.yml@refs/heads/fixture
+GITHUB_WORKFLOW_SHA c1bbf27b70d3bb4b0168263d6fe3ecba77fb44ff
+go version go1.27.3 fixture/fake
+go on PATH <W>/fakego/go
+db40d123e25a6da025aefe9ef39c79225ae19e2a2a3fdfcf846deb34e898c5d6 *<W>/fakego/go
+exit 0
+
+## dcc01bd step 2: blob-read-fails
+$ (cd <fixture>/. && env GITHUB_SHA=<fixture HEAD> FAKE_GIT_FAIL=rev-parse HEAD:.github/workflows/c9-evidence.yml bash --noprofile --norc -eo pipefail dcc01bd.step2.sh)  # fixture go on PATH
+HEAD c1bbf27b70d3bb4b0168263d6fe3ecba77fb44ff
+tree e287be31ea4b422fe99509cd1cb888f032008dd7
+tool module subtree f93bbbd19e35cd7f481ff6a65224d0f306f0714e
+fixture git: failing rev-parse HEAD:.github/workflows/c9-evidence.yml
+workflow blob 
+GITHUB_REF refs/heads/fixture
+GITHUB_WORKFLOW_REF fixture/c9-evidence.yml@refs/heads/fixture
+GITHUB_WORKFLOW_SHA c1bbf27b70d3bb4b0168263d6fe3ecba77fb44ff
+go version go1.27.3 fixture/fake
+go on PATH <W>/fakego/go
+db40d123e25a6da025aefe9ef39c79225ae19e2a2a3fdfcf846deb34e898c5d6 *<W>/fakego/go
+exit 0
+
+## dcc01bd step 2: no-go
+$ (cd <fixture>/. && env GITHUB_SHA=<fixture HEAD>  bash --noprofile --norc -eo pipefail dcc01bd.step2.sh)  # no go on PATH
+HEAD c1bbf27b70d3bb4b0168263d6fe3ecba77fb44ff
+tree e287be31ea4b422fe99509cd1cb888f032008dd7
+tool module subtree f93bbbd19e35cd7f481ff6a65224d0f306f0714e
+workflow blob 908941adcfed7b16f8ef47292e326448f1de1af2
+GITHUB_REF refs/heads/fixture
+GITHUB_WORKFLOW_REF fixture/c9-evidence.yml@refs/heads/fixture
+GITHUB_WORKFLOW_SHA c1bbf27b70d3bb4b0168263d6fe3ecba77fb44ff
+<W>/runs/dcc01bd.step2.sh: line 18: go: command not found
+exit 127
+
+## dcc01bd step 3: ok
+$ (cd <fixture>/. && env GITHUB_SHA=<fixture HEAD>  bash --noprofile --norc -eo pipefail dcc01bd.step3.sh)  # fixture go on PATH
+fixture: go mod download
+go.mod blob e31db66eed326b2dd5b4ca7db9dd97035e4e71f1
+go.sum blob 8b137891791fe96927ad78e64b0aad7bded08bdc
+exit 0
+
+## dcc01bd step 3: no-gomod
+$ (cd <fixture>/. && env GITHUB_SHA=<fixture HEAD>  bash --noprofile --norc -eo pipefail dcc01bd.step3.sh)  # fixture go on PATH
+fixture: go mod download
+fatal: path 'go.mod' does not exist in 'HEAD'
+go.mod blob HEAD:go.mod
+go.sum blob 8b137891791fe96927ad78e64b0aad7bded08bdc
+exit 0
+
+## dcc01bd step 3: gosum-read-empty
+$ (cd <fixture>/. && env GITHUB_SHA=<fixture HEAD> FAKE_GIT_EMPTY=rev-parse HEAD:go.sum bash --noprofile --norc -eo pipefail dcc01bd.step3.sh)  # fixture go on PATH
+fixture: go mod download
+go.mod blob e31db66eed326b2dd5b4ca7db9dd97035e4e71f1
+go.sum blob 
+exit 0
+
+## dcc01bd step 3: status-read-fails
+$ (cd <fixture>/. && env GITHUB_SHA=<fixture HEAD> FAKE_GIT_FAIL=status --porcelain bash --noprofile --norc -eo pipefail dcc01bd.step3.sh)  # fixture go on PATH
+fixture: go mod download
+go.mod blob e31db66eed326b2dd5b4ca7db9dd97035e4e71f1
+go.sum blob 8b137891791fe96927ad78e64b0aad7bded08bdc
+fixture git: failing status --porcelain
+exit 0
+
+## dcc01bd step 3: download-dirties
+$ (cd <fixture>/. && env GITHUB_SHA=<fixture HEAD> FAKE_GO_DIRTY=1 bash --noprofile --norc -eo pipefail dcc01bd.step3.sh)  # fixture go on PATH
+fixture: go mod download
+go.mod blob e31db66eed326b2dd5b4ca7db9dd97035e4e71f1
+go.sum blob 8b137891791fe96927ad78e64b0aad7bded08bdc
+the module download changed the worktree
+exit 1
+
+## dcc01bd step 5: ok
+$ (cd <fixture>/prototype/c9evidence && env GITHUB_SHA=<fixture HEAD>  bash --noprofile --norc -eo pipefail dcc01bd.step5.sh)  # fixture go on PATH
+go on PATH <W>/fakego/go
+go version go1.27.3 fixture/fake
+fixture: go test -tags c9evidence_run -count=1 -v ./run/
+exit 0
+
+## dcc01bd step 5: no-go
+$ (cd <fixture>/prototype/c9evidence && env GITHUB_SHA=<fixture HEAD>  bash --noprofile --norc -eo pipefail dcc01bd.step5.sh)  # no go on PATH
+go on PATH 
+<W>/runs/dcc01bd.step5.sh: line 3: go: command not found
+exit 127
+
+exit 0
