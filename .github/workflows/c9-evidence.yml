@@ -47,8 +47,13 @@ jobs:
           cache: false
       - name: Check the checkout and print its identity
         # Every value is read on its own, outside echo, and checked before it
-        # is printed: a failed or empty read fails the step, so no partial
-        # identity is left behind (Review 157 N-157-2).
+        # is printed (Review 157 N-157-2; Review 158 N-158-3): a query that
+        # exits non-zero fails the step; HEAD, the tree, the subtree, the
+        # workflow blob and the go on PATH must also be non-empty; the
+        # worktree is clean only when git status succeeds with empty output.
+        # This orders the checks; it does not make the step's log atomic: a
+        # later failure (go version, the hash) leaves the lines printed
+        # before it.
         run: |
           set -euo pipefail
           fail() { echo "$1" >&2; exit 1; }
@@ -76,6 +81,11 @@ jobs:
           echo "go on PATH $gobin"
           if command -v sha256sum >/dev/null; then sha256sum "$gobin"; else shasum -a 256 "$gobin"; fi
       - name: Prepare the module cache (LE-4)
+        # The same rules as the identity step: a query that exits non-zero
+        # fails the step, the go.mod and go.sum blobs must be non-empty, and
+        # the worktree is clean only when git status succeeds with empty
+        # output. The blobs are printed before the last worktree check, so a
+        # failed check can follow printed blobs; the step still fails.
         run: |
           set -euo pipefail
           fail() { echo "$1" >&2; exit 1; }
