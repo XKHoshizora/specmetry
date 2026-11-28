@@ -1,0 +1,51 @@
+repo HEAD 43b9f99999d29edd4d7c5f1cb6e4387a77144e73
+c9-evidence.yml blob at c34baf8: 11d7f1f14d1dea6daa85e1d9285d15a77f8b0302
+c9-evidence.yml blob at dcc01bd: 852c032dc4c47c78a0897d13c1f0969ab5869dc6
+c9-evidence.yml blob at HEAD: 9ef8b58766200b7ca35aa6757a5f226d1e562b0b
+node v26.10.0; prettier 3.9.10
+$ node yaml-check.mjs <prettier yaml.mjs> <W>/runs master=master.yml dcc01bd=dcc01bd.yml new=new.yml
+== master: file sha256 b98cbd96d515299384bbfdb2ada92fcb2f57e4eed5c26a716cd7adbaad383b70
+settings {"name":"C-9 limited evidence","on":{"push":{"branches":["evidence/c9-run-1"]}},"permissions":{"contents":"read"},"concurrency":{"group":"c9-evidence-${{ github.ref }}","cancel-in-progress":"false"},"jobs":["evidence"],"job":{"name":"C-9 evidence (${{ matrix.os }})","runs-on":"${{ matrix.os }}","timeout-minutes":"20","strategy":{"fail-fast":"false","matrix":{"os":["ubuntu-latest","macos-latest","windows-latest"]}},"defaults":{"run":{"shell":"bash"}},"env":{"GOTOOLCHAIN":"local","GOFLAGS":""}}}
+step 0 {"uses":"actions/checkout@v7.0.1"}
+step 1 {"uses":"actions/setup-go@v7.0.0","with":{"go-version":"1.27.3","cache":"false"}}
+step 2 {"name":"Check the checkout and print its identity"} run(412 chars, sha256 7ca10803e95a8aa8d3e6081fa29ababb11e70347fe6fdb679c49a90e80582f77)
+step 3 {"name":"Prepare the module cache (LE-4)"} run(240 chars, sha256 925ddccf099ad9537bfb4f7eb0c869d22c9dae3414fbb7d567d8b2a420c226a3)
+step 4 {"name":"Collect","working-directory":"prototype/c9evidence","env":{"C9EVIDENCE_R":"${{ github.workspace }}","C9EVIDENCE_RECORDS":"${{ runner.temp }}/c9evidence-records"}} run(47 chars, sha256 c0da35d0bcee789e1cfa3fa8f93f0012dcdb98057cde970408e3f97380e54e55)
+step 5 {"name":"Upload the records","if":"always()","uses":"actions/upload-artifact@v7.0.2","with":{"name":"c9evidence-records-${{ matrix.os }}","path":"${{ runner.temp }}/c9evidence-records","retention-days":"90","if-no-files-found":"warn"}}
+== dcc01bd: file sha256 4dc921e5281013a19506fb6badbb4c82a7d79fb6d578885a050248d8542381e0
+settings {"name":"C-9 limited evidence","on":{"push":{"branches":["evidence/c9-run-1"]}},"permissions":{"contents":"read"},"concurrency":{"group":"c9-evidence-${{ github.ref }}","cancel-in-progress":"false"},"jobs":["evidence"],"job":{"name":"C-9 evidence (${{ matrix.os }})","runs-on":"${{ matrix.os }}","timeout-minutes":"20","strategy":{"fail-fast":"false","matrix":{"os":["ubuntu-latest","macos-latest","windows-latest"]}},"defaults":{"run":{"shell":"bash"}},"env":{"GOTOOLCHAIN":"local","GOFLAGS":""}}}
+step 0 {"uses":"actions/checkout@v7.0.1"}
+step 1 {"uses":"actions/setup-go@v7.0.0","with":{"go-version":"1.27.3","cache":"false"}}
+step 2 {"name":"Check the checkout and print its identity"} run(730 chars, sha256 7874f95184832bfd3f8382982c2beb346506cdb9cc8ebe3baf5efc2e2aab1753)
+step 3 {"name":"Prepare the module cache (LE-4)"} run(240 chars, sha256 925ddccf099ad9537bfb4f7eb0c869d22c9dae3414fbb7d567d8b2a420c226a3)
+step 4 {"name":"Put the real GOROOT's bin first on PATH (Windows; F-1)","if":"runner.os == 'Windows'","shell":"pwsh"} run(931 chars, sha256 c16d4f1746081218c7317fa7b2435ebd68a0eda0b7bde7a9922d9114ab23a82c)
+step 5 {"name":"Collect","working-directory":"prototype/c9evidence","env":{"C9EVIDENCE_R":"${{ github.workspace }}","C9EVIDENCE_RECORDS":"${{ runner.temp }}/c9evidence-records"}} run(112 chars, sha256 9cfc7b000a01f83a2470ca59986f95475a2070964fe74883b3e3e3cc911a3aee)
+step 6 {"name":"Upload the records","if":"always()","uses":"actions/upload-artifact@v7.0.2","with":{"name":"c9evidence-records-${{ matrix.os }}","path":"${{ runner.temp }}/c9evidence-records","retention-days":"90","if-no-files-found":"warn"}}
+== new: file sha256 8cc9ccec640f6b8661fa9bd326e17fc6fcff4f34c6c4a4ba7ac50bdef5cc98a5
+settings {"name":"C-9 limited evidence","on":{"push":{"branches":["evidence/c9-run-1"]}},"permissions":{"contents":"read"},"concurrency":{"group":"c9-evidence-${{ github.ref }}","cancel-in-progress":"false"},"jobs":["evidence"],"job":{"name":"C-9 evidence (${{ matrix.os }})","runs-on":"${{ matrix.os }}","timeout-minutes":"20","strategy":{"fail-fast":"false","matrix":{"os":["ubuntu-latest","macos-latest","windows-latest"]}},"defaults":{"run":{"shell":"bash"}},"env":{"GOTOOLCHAIN":"local","GOFLAGS":""}}}
+step 0 {"uses":"actions/checkout@v7.0.1"}
+step 1 {"uses":"actions/setup-go@v7.0.0","with":{"go-version":"1.27.3","cache":"false"}}
+step 2 {"name":"Check the checkout and print its identity"} run(1228 chars, sha256 0e510cb79ad3b35d452dd50d2413edbe89f0ba28bd0269dff98604c6cad703b4)
+step 3 {"name":"Prepare the module cache (LE-4)"} run(511 chars, sha256 05382390e7a140d4b368b4a93e46219308f57894d830bb78b56b5b8cb009072a)
+step 4 {"name":"Put the real GOROOT's bin first on PATH (Windows; F-1)","if":"runner.os == 'Windows'","shell":"pwsh"} run(1125 chars, sha256 2019fec0bfd4b0cd4d7877aa630b0625987aaac5b162aa1243aee04f617d350a)
+step 5 {"name":"Collect","working-directory":"prototype/c9evidence","env":{"C9EVIDENCE_R":"${{ github.workspace }}","C9EVIDENCE_RECORDS":"${{ runner.temp }}/c9evidence-records"}} run(231 chars, sha256 86b3ad3b061dea94208db949aadceec32d60e1b7cee337e54b99186c3ec1ed02)
+step 6 {"name":"Upload the records","if":"always()","uses":"actions/upload-artifact@v7.0.2","with":{"name":"c9evidence-records-${{ matrix.os }}","path":"${{ runner.temp }}/c9evidence-records","retention-days":"90","if-no-files-found":"warn"}}
+== dcc01bd vs master
+settings equal: true
+step 0 "actions/checkout@v7.0.1": fields equal, run equal
+step 1 "actions/setup-go@v7.0.0": fields equal, run equal
+step 2 "Check the checkout and print its identity": fields equal, run different
+step 3 "Prepare the module cache (LE-4)": fields equal, run equal
+step 4 "Put the real GOROOT's bin first on PATH (Windows; F-1)": new
+step 5 "Collect": fields equal, run different
+step 6 "Upload the records": fields equal, run equal
+== new vs master
+settings equal: true
+step 0 "actions/checkout@v7.0.1": fields equal, run equal
+step 1 "actions/setup-go@v7.0.0": fields equal, run equal
+step 2 "Check the checkout and print its identity": fields equal, run different
+step 3 "Prepare the module cache (LE-4)": fields equal, run different
+step 4 "Put the real GOROOT's bin first on PATH (Windows; F-1)": new
+step 5 "Collect": fields equal, run different
+step 6 "Upload the records": fields equal, run equal
+exit 0
